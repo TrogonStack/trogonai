@@ -26,6 +26,17 @@ pub enum SessionAgentMethod {
 }
 
 impl GlobalAgentMethod {
+    pub fn wire_method(&self) -> String {
+        match self {
+            Self::Initialize => "initialize".to_string(),
+            Self::Authenticate => "authenticate".to_string(),
+            Self::Logout => "logout".to_string(),
+            Self::SessionNew => "session.new".to_string(),
+            Self::SessionList => "session.list".to_string(),
+            Self::Ext(name) => format!("ext.{}", name.as_str()),
+        }
+    }
+
     fn from_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "initialize" => Some(Self::Initialize),
@@ -42,6 +53,20 @@ impl GlobalAgentMethod {
 }
 
 impl SessionAgentMethod {
+    pub fn wire_method(&self) -> &'static str {
+        match self {
+            Self::Load => "load",
+            Self::Prompt => "prompt",
+            Self::Cancel => "cancel",
+            Self::SetMode => "set_mode",
+            Self::SetConfigOption => "set_config_option",
+            Self::SetModel => "set_model",
+            Self::Fork => "fork",
+            Self::Resume => "resume",
+            Self::Close => "close",
+        }
+    }
+
     fn from_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "load" => Some(Self::Load),
@@ -110,6 +135,22 @@ pub enum ClientMethod {
 }
 
 impl ClientMethod {
+    pub fn wire_method(&self) -> String {
+        match self {
+            Self::FsReadTextFile => "fs/read_text_file".to_string(),
+            Self::FsWriteTextFile => "fs/write_text_file".to_string(),
+            Self::SessionRequestPermission => "session/request_permission".to_string(),
+            Self::SessionUpdate => "session/update".to_string(),
+            Self::TerminalCreate => "terminal/create".to_string(),
+            Self::TerminalKill => "terminal/kill".to_string(),
+            Self::TerminalOutput => "terminal/output".to_string(),
+            Self::TerminalRelease => "terminal/release".to_string(),
+            Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
+            Self::ExtSessionPromptResponse => "ext/session/prompt_response".to_string(),
+            Self::Ext(name) => format!("ext/{name}"),
+        }
+    }
+
     pub fn from_subject_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "fs.read_text_file" => Some(Self::FsReadTextFile),

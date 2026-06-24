@@ -1,7 +1,7 @@
 use super::Bridge;
-use crate::error::map_nats_error;
+use super::rpc_call::jsonrpc_call;
 use crate::ext_method_name::ExtMethodName;
-use crate::nats::{self, RequestClient, global};
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -29,15 +29,16 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     let nats = bridge.nats();
     let subject = global::ExtSubject::new(bridge.config.acp_prefix_ref(), &method_name);
+    let wire_method = format!("ext.{}", method_name.as_str());
 
-    let result = nats::request_with_timeout::<N, ExtRequest, ExtResponse>(
+    let result = jsonrpc_call(
         nats,
         &subject,
+        &wire_method,
         &args,
         bridge.config.operation_timeout(),
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     bridge
         .metrics

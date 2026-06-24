@@ -10,6 +10,7 @@ pub mod nats;
 pub mod server;
 pub(crate) mod telemetry;
 pub mod transport;
+pub mod wire;
 
 pub use config::{Config, apply_timeout_overrides, nats_connect_timeout};
 pub use constants::{DEFAULT_MCP_PREFIX, ENV_MCP_PREFIX};

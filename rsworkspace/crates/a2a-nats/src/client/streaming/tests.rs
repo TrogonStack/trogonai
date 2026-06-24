@@ -1,6 +1,12 @@
+use bytes::Bytes;
+use jsonrpc_nats::{Message, ResponseId, encode, to_json_value};
+use jsonrpc_nats::Direction;
+
 use a2a::types::{SendMessageResponse, Task, TaskState, TaskStatus};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
+
+use a2a_identity_types::MintedUserJwt;
 
 use super::*;
 
@@ -12,7 +18,7 @@ fn test_req_id() -> ReqId {
     ReqId::from_test("req-stream-1")
 }
 
-fn bootstrap_success(task_id: &str) -> Bytes {
+fn bootstrap_success(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = Task {
         id: task_id.to_string(),
         context_id: String::new(),
@@ -26,21 +32,23 @@ fn bootstrap_success(task_id: &str) -> Bytes {
         metadata: None,
     };
     let response = SendMessageResponse::Task(task);
-    let json = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "req-stream-1",
-        "result": response
-    });
-    serde_json::to_vec(&json).unwrap().into()
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("req-stream-1".into()),
+        result: serde_json::to_value(response).unwrap(),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
-fn bootstrap_error(code: i32, msg: &str) -> Bytes {
-    let json = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "req-stream-1",
-        "error": { "code": code, "message": msg }
-    });
-    serde_json::to_vec(&json).unwrap().into()
+fn bootstrap_error(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&Message::Error {
+        id: ResponseId::String("req-stream-1".into()),
+        code,
+        message: msg.to_string(),
+        data: None,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 #[derive(serde::Serialize)]
@@ -70,7 +78,8 @@ fn make_ctx<'a>(
 #[tokio::test]
 async fn bootstrap_success_returns_task_and_stream() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", bootstrap_success("task-abc"));
+    let (headers, body) = bootstrap_success("task-abc");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -91,7 +100,8 @@ async fn bootstrap_success_returns_task_and_stream() {
 #[tokio::test]
 async fn bootstrap_error_propagates_as_client_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", bootstrap_error(-32001, "not found"));
+    let (headers, body) = bootstrap_error(-32001, "not found");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -131,7 +141,8 @@ async fn nats_transport_failure_returns_transport_error() {
 #[tokio::test]
 async fn get_stream_failure_returns_consumer_setup_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", bootstrap_success("t1"));
+    let (headers, body) = bootstrap_success("t1");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
@@ -193,7 +204,8 @@ async fn hang_returns_timeout_error() {
 #[tokio::test]
 async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.gateway.bot.message.stream", bootstrap_success("task-gw"));
+    let (headers, body) = bootstrap_success("task-gw");
+    nats.set_response_wire("a2a.gateway.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -214,4 +226,12 @@ async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     };
     let (envelope, _stream) = send_streaming(ctx, &TestParams { dummy: "hi".into() }).await.unwrap();
     assert!(matches!(envelope, SendMessageResponse::Task(_)));
+}
+
+#[test]
+fn wire_bootstrap_response_decodes_from_headers() {
+    let (headers, body) = bootstrap_success("t");
+    let message = jsonrpc_nats::decode(Direction::Response, None, &headers, &body).unwrap();
+    let value = to_json_value(&message);
+    assert_eq!(value["id"], "req-stream-1");
 }

@@ -1,11 +1,55 @@
 use super::*;
 use crate::constants::MIN_TIMEOUT_SECS;
+use crate::wire;
+use async_nats::header::HeaderMap;
 use rmcp::model::{
     ClientJsonRpcMessage, ClientRequest, ErrorData, ListToolsRequest, PaginatedRequestParams, PingRequest,
     ServerJsonRpcMessage, ServerNotification, ServerResult,
 };
+use rmcp::service::{RoleClient, RoleServer, TxJsonRpcMessage};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::mocks::MockError;
+
+fn wire_payload_client(item: &TxJsonRpcMessage<RoleClient>) -> (HeaderMap, Vec<u8>) {
+    let encoded = wire::encode_tx::<RoleClient>(item).expect("wire encode");
+    (encoded.headers, encoded.body.to_vec())
+}
+
+fn wire_payload_server(item: &TxJsonRpcMessage<RoleServer>) -> (HeaderMap, Vec<u8>) {
+    let encoded = wire::encode_tx::<RoleServer>(item).expect("wire encode");
+    (encoded.headers, encoded.body.to_vec())
+}
+
+fn set_wire_response_server(nats: &AdvancedMockNatsClient, subject: &str, item: &TxJsonRpcMessage<RoleServer>) {
+    let (headers, payload) = wire_payload_server(item);
+    nats.set_response_wire(subject, headers, payload.into());
+}
+
+fn message_wire_client(subject: &str, item: &TxJsonRpcMessage<RoleClient>) -> Message {
+    let (headers, payload) = wire_payload_client(item);
+    Message {
+        subject: subject.to_string().into(),
+        reply: None,
+        payload: payload.into(),
+        headers: Some(headers),
+        length: 0,
+        status: None,
+        description: None,
+    }
+}
+
+fn message_with_reply_wire_client(subject: &str, reply: &str, item: &TxJsonRpcMessage<RoleClient>) -> Message {
+    let (headers, payload) = wire_payload_client(item);
+    Message {
+        subject: subject.to_string().into(),
+        reply: Some(reply.to_string().into()),
+        payload: payload.into(),
+        headers: Some(headers),
+        length: 0,
+        status: None,
+        description: None,
+    }
+}
 
 fn config() -> Config {
     Config::new(
@@ -26,19 +70,7 @@ fn message(subject: &str, payload: Vec<u8>) -> Message {
         subject: subject.to_string().into(),
         reply: None,
         payload: payload.into(),
-        headers: None,
-        length: 0,
-        status: None,
-        description: None,
-    }
-}
-
-fn message_with_reply(subject: &str, reply: &str, payload: Vec<u8>) -> Message {
-    Message {
-        subject: subject.to_string().into(),
-        reply: Some(reply.to_string().into()),
-        payload: payload.into(),
-        headers: None,
+        headers: Some(HeaderMap::new()),
         length: 0,
         status: None,
         description: None,
@@ -59,10 +91,7 @@ async fn client_transport_sends_requests_to_server_method_subject() {
     let nats = AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
     let response = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(7));
-    nats.set_response(
-        "mcp.server.filesystem.tools.list",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_response_server(&nats, "mcp.server.filesystem.tools.list", &response);
     let mut transport: NatsTransport<RoleClient, AdvancedMockNatsClient> = NatsTransport::for_client(
         nats.clone(),
         &config(),
@@ -120,9 +149,9 @@ async fn server_transport_receives_client_request_from_subscription() {
         ClientJsonRpcMessage::request(ClientRequest::PingRequest(PingRequest::default()), RequestId::Number(9));
 
     inbound
-        .unbounded_send(message(
+        .unbounded_send(message_wire_client(
             "mcp.server.filesystem.ping",
-            serde_json::to_vec(&request).unwrap(),
+            &request,
         ))
         .unwrap();
 
@@ -148,10 +177,10 @@ async fn server_transport_publishes_response_to_remembered_reply_subject() {
         ClientJsonRpcMessage::request(ClientRequest::PingRequest(PingRequest::default()), RequestId::Number(9));
 
     inbound
-        .unbounded_send(message_with_reply(
+        .unbounded_send(message_with_reply_wire_client(
             "mcp.server.filesystem.ping",
             "_INBOX.desktop.1",
-            serde_json::to_vec(&request).unwrap(),
+            &request,
         ))
         .unwrap();
 
@@ -188,10 +217,10 @@ async fn server_transport_keeps_reply_subject_until_response_publish_succeeds() 
     );
 
     inbound
-        .unbounded_send(message_with_reply(
+        .unbounded_send(message_with_reply_wire_client(
             "mcp.server.filesystem.ping",
             "_INBOX.desktop.retry",
-            serde_json::to_vec(&request).unwrap(),
+            &request,
         ))
         .unwrap();
 
@@ -228,10 +257,10 @@ async fn server_transport_publishes_error_to_remembered_reply_subject() {
         ClientJsonRpcMessage::request(ClientRequest::PingRequest(PingRequest::default()), RequestId::Number(9));
 
     inbound
-        .unbounded_send(message_with_reply(
+        .unbounded_send(message_with_reply_wire_client(
             "mcp.server.filesystem.ping",
             "_INBOX.desktop.2",
-            serde_json::to_vec(&request).unwrap(),
+            &request,
         ))
         .unwrap();
 
@@ -313,9 +342,9 @@ async fn server_transport_receives_client_notification_without_reply_subject() {
     ));
 
     inbound
-        .unbounded_send(message(
+        .unbounded_send(message_wire_client(
             "mcp.server.filesystem.notifications.initialized",
-            serde_json::to_vec(&notification).unwrap(),
+            &notification,
         ))
         .unwrap();
 
@@ -362,9 +391,9 @@ async fn transport_skips_invalid_subscription_payloads() {
         .unbounded_send(message("mcp.server.filesystem.ping", b"not-json".to_vec()))
         .unwrap();
     inbound
-        .unbounded_send(message(
+        .unbounded_send(message_wire_client(
             "mcp.server.filesystem.ping",
-            serde_json::to_vec(&request).unwrap(),
+            &request,
         ))
         .unwrap();
 

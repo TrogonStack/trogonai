@@ -15,6 +15,7 @@ pub mod nats;
 pub(crate) mod pending_prompt_waiters;
 pub mod req_id;
 pub mod session_id;
+pub mod wire;
 pub(crate) mod telemetry;
 
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};

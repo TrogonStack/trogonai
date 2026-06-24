@@ -1,12 +1,13 @@
 use agent_client_protocol::{Client, SessionNotification};
+use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 
-#[instrument(name = "acp.client.session.update", skip(payload, client))]
-pub async fn handle<C: Client>(payload: &[u8], client: &C, has_reply: bool) {
+#[instrument(name = "acp.client.session.update", skip(headers, payload, client))]
+pub async fn handle<C: Client>(headers: &HeaderMap, payload: &[u8], client: &C, has_reply: bool) {
     if has_reply {
         warn!("Unexpected reply subject on notification request");
     }
-    match serde_json::from_slice::<SessionNotification>(payload) {
+    match crate::wire::decode_notification_params::<SessionNotification>("session/update", headers, payload) {
         Ok(notification) => {
             if let Err(e) = client.session_notification(notification).await {
                 warn!(error = %e, "Failed to send session notification");

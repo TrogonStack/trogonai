@@ -1,17 +1,44 @@
 use super::*;
 use crate::config::Config;
+use jsonrpc_nats::{Message, ResponseId, encode};
+use trogon_nats::jetstream::mocks::*;
 use trogon_nats::AdvancedMockNatsClient;
 
-fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
+fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> async_nats::Message {
     async_nats::Message {
         subject: "test".into(),
         reply: None,
         payload: bytes::Bytes::from(payload.to_vec()),
-        headers: None,
+        headers,
         status: None,
         description: None,
         length: payload.len(),
     }
+}
+
+fn make_wire_success_msg<Res: serde::Serialize>(req_id: &str, result: &Res) -> async_nats::Message {
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String(req_id.to_string()),
+        result: serde_json::to_value(result).unwrap(),
+    })
+    .unwrap();
+    make_nats_msg(&encoded.body, Some(encoded.headers))
+}
+
+fn make_wire_error_msg(req_id: &str, error: &Error) -> async_nats::Message {
+    let encoded = encode(&Message::Error {
+        id: ResponseId::String(req_id.to_string()),
+        code: i32::from(error.code),
+        message: error.message.clone(),
+        data: error.data.clone(),
+    })
+    .unwrap();
+    make_nats_msg(&encoded.body, Some(encoded.headers))
+}
+
+fn make_wire_notification_msg<Req: serde::Serialize>(notification: &Req) -> async_nats::Message {
+    let encoded = crate::wire::encode_notification("session/update", notification).unwrap();
+    make_nats_msg(&encoded.body, Some(encoded.headers))
 }
 
 use crate::agent::test_support::MockJs;
@@ -38,13 +65,9 @@ fn mock_bridge() -> (
 #[tokio::test]
 async fn prompt_rejects_invalid_session_id() {
     let (_mock, _js, bridge) = mock_bridge();
-    let err = handle(
-        &bridge,
-        PromptRequest::new("invalid.session.id", vec![]),
-        &trogon_std::StdJsonSerialize,
-    )
-    .await
-    .unwrap_err();
+    let err = handle(&bridge, PromptRequest::new("invalid.session.id", vec![]))
+        .await
+        .unwrap_err();
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 
@@ -64,10 +87,10 @@ async fn prompt_js_success() {
     js.consumer_factory.add_consumer(resp_consumer);
 
     let response = PromptResponse::new(StopReason::EndTurn);
-    let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&response).unwrap()));
+    let msg = MockJsMessage::new(make_wire_success_msg("req-placeholder", &response));
     resp_tx.unbounded_send(Ok(msg)).unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
 
     drop(notif_tx);
     let response = result.expect("expected Ok prompt response");
@@ -86,9 +109,9 @@ async fn prompt_js_cancel() {
     let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    cancel_tx.unbounded_send(make_nats_msg(b"")).unwrap();
+    cancel_tx.unbounded_send(make_nats_msg(b"", None)).unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_ok());
     assert_eq!(result.unwrap().stop_reason, StopReason::Cancelled);
 }
@@ -115,7 +138,7 @@ async fn prompt_js_timeout() {
     let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("timed out"));
 }
@@ -148,16 +171,15 @@ async fn prompt_js_notification_forwarding() {
             agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
         )),
     );
-    let notif_msg =
-        trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&notification).unwrap()));
+    let notif_msg = MockJsMessage::new(make_wire_notification_msg(&notification));
     notif_tx.unbounded_send(Ok(notif_msg)).unwrap();
 
     let response = PromptResponse::new(StopReason::EndTurn);
-    let resp_msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&response).unwrap()));
+    let resp_msg = MockJsMessage::new(make_wire_success_msg("req-placeholder", &response));
     resp_tx.unbounded_send(Ok(resp_msg)).unwrap();
     let _notif_keeper = notif_tx;
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
 
     let response = result.expect("expected Ok prompt response");
     assert_eq!(response.stop_reason, StopReason::EndTurn);
@@ -175,7 +197,7 @@ async fn prompt_js_publish_failure() {
 
     js.publisher.fail_next_js_publish();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("js publish"));
 }
@@ -191,10 +213,10 @@ async fn prompt_js_bad_response_payload() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(b"not json"));
+    let msg = MockJsMessage::new(make_nats_msg(b"not json", None));
     resp_tx.unbounded_send(Ok(msg)).unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("bad response payload"));
 }
@@ -211,10 +233,10 @@ async fn prompt_js_agent_error_response() {
     js.consumer_factory.add_consumer(resp_consumer);
 
     let agent_err = Error::new(ErrorCode::InternalError.into(), "agent blew up");
-    let msg = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&agent_err).unwrap()));
+    let msg = MockJsMessage::new(make_wire_error_msg("req-placeholder", &agent_err));
     resp_tx.unbounded_send(Ok(msg)).unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.code, ErrorCode::InternalError);
@@ -234,7 +256,7 @@ async fn prompt_js_response_stream_closed() {
 
     drop(resp_tx);
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
 }
 
@@ -243,7 +265,7 @@ async fn prompt_js_get_notif_stream_failure() {
     let (mock, js, bridge) = mock_bridge();
     let _cancel_tx = mock.inject_messages();
     js.consumer_factory.fail_get_stream_at(1);
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("get notifications stream"));
 }
@@ -255,7 +277,7 @@ async fn prompt_js_get_resp_stream_failure() {
     let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(notif_consumer);
     js.consumer_factory.fail_get_stream_at(2);
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("get responses stream"));
 }
@@ -265,7 +287,7 @@ async fn prompt_js_notif_consumer_creation_failure() {
     let (mock, _js, bridge) = mock_bridge();
     let _cancel_tx = mock.inject_messages();
     // Don't add any consumers — first create_consumer call will fail
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("create notification consumer"));
 }
@@ -277,7 +299,7 @@ async fn prompt_js_resp_consumer_creation_failure() {
     // Add notif consumer but not response consumer
     let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(notif_consumer);
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("create response consumer"));
 }
@@ -290,7 +312,7 @@ async fn prompt_js_cancel_subscribe_failure() {
     js.consumer_factory.add_consumer(notif_consumer);
     let (resp_consumer, _resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("subscribe cancelled"));
 }
@@ -303,7 +325,7 @@ async fn prompt_js_notif_messages_failure() {
     let failing_consumer = trogon_nats::jetstream::MockJetStreamConsumer::failing();
     js.consumer_factory.add_consumer(failing_consumer);
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("notification messages"));
 }
@@ -319,7 +341,7 @@ async fn prompt_js_resp_messages_failure() {
     let failing_consumer = trogon_nats::jetstream::MockJetStreamConsumer::failing();
     js.consumer_factory.add_consumer(failing_consumer);
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("response messages"));
 }
@@ -339,7 +361,7 @@ async fn prompt_js_notification_consumer_error() {
         .unbounded_send(Err(trogon_nats::mocks::MockError("consumer error".to_string())))
         .unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("notification consumer"));
 }
@@ -359,7 +381,7 @@ async fn prompt_js_response_consumer_error() {
         .unbounded_send(Err(trogon_nats::mocks::MockError("consumer error".to_string())))
         .unwrap();
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("response consumer"));
 }
@@ -387,11 +409,11 @@ async fn prompt_js_bad_notification_payload_skipped() {
 
     // Send only bad notification, no response. Handler processes bad notif
     // (warn, ack, continue), then times out waiting for response.
-    let bad_notif = trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(b"not json"));
+    let bad_notif = MockJsMessage::new(make_nats_msg(b"not json", None));
     notif_tx.unbounded_send(Ok(bad_notif)).unwrap();
     let _notif_keeper = notif_tx;
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     // Times out after processing bad notification
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("timed out"));
@@ -428,12 +450,11 @@ async fn prompt_js_notification_receiver_dropped() {
             agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
         )),
     );
-    let notif_msg =
-        trogon_nats::jetstream::MockJsMessage::new(make_nats_msg(&serde_json::to_vec(&notification).unwrap()));
+    let notif_msg = MockJsMessage::new(make_wire_notification_msg(&notification));
     notif_tx.unbounded_send(Ok(notif_msg)).unwrap();
     let _notif_keeper = notif_tx;
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("timed out"));
 }
@@ -450,7 +471,7 @@ async fn prompt_js_notification_stream_closed() {
 
     drop(notif_tx);
 
-    let result = handle(&bridge, PromptRequest::new("s1", vec![]), &trogon_std::StdJsonSerialize).await;
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("notification stream closed"));
 }

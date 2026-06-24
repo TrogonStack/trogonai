@@ -1,6 +1,6 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, global};
+use super::rpc_call::jsonrpc_call;
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::{InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -20,17 +20,16 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     info!(client = %client_name, "Initialize request");
 
-    let nats = bridge.nats();
     let subject = global::InitializeSubject::new(bridge.config.acp_prefix_ref());
 
-    let result = nats::request_with_timeout::<N, InitializeRequest, InitializeResponse>(
-        nats,
+    let result = jsonrpc_call(
+        bridge.nats(),
         &subject,
+        "initialize",
         &args,
         bridge.config.operation_timeout,
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     bridge
         .metrics

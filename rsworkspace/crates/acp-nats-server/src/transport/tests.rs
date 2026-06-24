@@ -199,12 +199,16 @@ fn incoming_http_message_parses_and_classifies_shapes() {
 }
 
 #[test]
-fn incoming_http_message_parse_rejects_batch_and_invalid_json() {
-    let batch = IncomingHttpMessage::parse(r#"[{"jsonrpc":"2.0"}]"#.to_string()).unwrap_err();
+fn incoming_http_message_parse_all_unbundles_batch_and_rejects_empty_batch() {
+    let batch = IncomingHttpMessage::parse_all(r#"[{"jsonrpc":"2.0","method":"initialized"}]"#.to_string()).unwrap();
+    assert_eq!(batch.len(), 1);
+    assert!(batch[0].is_notification());
+
+    let empty = IncomingHttpMessage::parse_all("[]".to_string()).unwrap_err();
     assert!(matches!(
-        batch,
-        HttpTransportError::NotImplemented {
-            message: "batch JSON-RPC requests are not supported",
+        empty,
+        HttpTransportError::BadRequest {
+            message: "empty JSON-RPC batch",
             source: None,
         }
     ));

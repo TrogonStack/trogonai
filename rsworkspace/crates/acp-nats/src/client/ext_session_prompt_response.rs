@@ -2,17 +2,20 @@ use super::Bridge;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
+use crate::wire::decode_notification_params;
 use agent_client_protocol::{PromptResponse, SessionId};
+use async_nats::header::HeaderMap;
 use tracing::{error, instrument, warn};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
     name = "acp.client.ext.session.prompt_response",
-    skip(payload, bridge),
+    skip(headers, payload, bridge),
     fields(session_id = %session_id)
 )]
 pub async fn handle<N: RequestClient + PublishClient + FlushClient + SubscribeClient, C: GetElapsed, J>(
     session_id: &str,
+    headers: &HeaderMap,
     payload: &[u8],
     reply: Option<&str>,
     bridge: &Bridge<N, C, J>,
@@ -37,7 +40,11 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient + SubscribeCl
 
     let session_id_typed: SessionId = validated.as_str().to_string().into();
 
-    let (prompt_token_opt, response_result) = match serde_json::from_slice::<PromptResponse>(payload) {
+    let (prompt_token_opt, response_result) = match decode_notification_params::<PromptResponse>(
+        "ext/session/prompt_response",
+        headers,
+        payload,
+    ) {
         Ok(response) => (extract_prompt_token(&response), Ok(response)),
         Err(e) => {
             let token = extract_prompt_token_from_raw(payload);

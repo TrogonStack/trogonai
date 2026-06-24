@@ -6,8 +6,25 @@ use agent_client_protocol::{
 use async_trait::async_trait;
 use std::sync::Arc;
 use trogon_nats::MockNatsClient;
-use trogon_std::{FailNextSerialize, StdJsonSerialize};
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::RequestId;
 
+fn empty_headers() -> HeaderMap {
+    HeaderMap::new()
+}
+
+fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
+    crate::client::test_support::encode_wire_request(
+        "terminal/output",
+        RequestId::Number(1),
+        params,
+    )
+}
+
+
+fn sample_request() -> TerminalOutputRequest {
+    TerminalOutputRequest::new("sess-1", "term-1")
+}
 struct MockClient {
     terminal_output_result: agent_client_protocol::Result<TerminalOutputResponse>,
 }
@@ -58,15 +75,17 @@ fn envelope_payload() -> Vec<u8> {
 async fn success_publishes_response_to_reply_subject() {
     let nats = MockNatsClient::new();
     let client = MockClient::success();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
     let payload = envelope_payload();
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.reply"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -77,9 +96,11 @@ async fn success_publishes_response_to_reply_subject() {
 async fn no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let client = MockClient::success();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
     let payload = envelope_payload();
 
-    handle(&payload, &client, None, &nats, "sess-1", &StdJsonSerialize).await;
+    handle(&headers, &payload, &client, None, &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -90,12 +111,12 @@ async fn malformed_json_publishes_parse_error() {
     let client = MockClient::success();
 
     handle(
+        &empty_headers(),
         b"not json",
         &client,
         Some("_INBOX.err"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -120,7 +141,6 @@ async fn invalid_params_publishes_error() {
         Some("_INBOX.err"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -145,7 +165,6 @@ async fn null_params_publishes_error() {
         Some("_INBOX.err"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -164,15 +183,17 @@ async fn null_params_publishes_error() {
 async fn session_id_mismatch_publishes_error() {
     let nats = MockNatsClient::new();
     let client = MockClient::success();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
     let payload = envelope_payload();
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.err"),
         &nats,
         "different-session",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -191,15 +212,17 @@ async fn session_id_mismatch_publishes_error() {
 async fn client_error_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::failing();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
     let payload = envelope_payload();
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.err"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
@@ -213,10 +236,9 @@ async fn client_error_publishes_error_reply() {
 async fn serialization_failure_sends_fallback_error() {
     let nats = MockNatsClient::new();
     let client = MockClient::success();
-    let serializer = FailNextSerialize::new(1);
     let payload = envelope_payload();
 
-    handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }

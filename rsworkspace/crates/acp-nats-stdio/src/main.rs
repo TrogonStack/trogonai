@@ -106,7 +106,6 @@ where
         nats_client,
         client_connection,
         bridge_for_client,
-        StdJsonSerialize,
     ));
     info!("ACP bridge running on stdio with NATS client proxy");
 

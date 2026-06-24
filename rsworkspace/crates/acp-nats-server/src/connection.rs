@@ -1,4 +1,4 @@
-use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
+use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, SessionNotification};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
@@ -83,7 +83,6 @@ pub async fn handle<N, J>(
         nats_client,
         connection.clone(),
         bridge.clone(),
-        StdJsonSerialize,
     ));
 
     let mut io_task = tokio::task::spawn_local(io_task);

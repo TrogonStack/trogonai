@@ -5,7 +5,10 @@ use rmcp::model::{
     ClientCapabilities, ClientInfo, ClientRequest, Implementation, InitializeRequest, InitializeRequestParams,
     InitializeResult, JsonRpcMessage, NumberOrString, ServerCapabilities, ServerResult,
 };
+use rmcp::service::RoleServer;
 use tower::ServiceExt;
+
+use mcp_nats::wire;
 
 use super::*;
 
@@ -43,10 +46,8 @@ fn initialize_response() -> ServerJsonRpcMessage {
 async fn streamable_http_service_routes_initialize_to_nats_server() {
     let nats = trogon_nats::AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
-    nats.set_response(
-        "mcp.server.default.initialize",
-        serde_json::to_vec(&initialize_response()).unwrap().into(),
-    );
+    let encoded = wire::encode_tx::<RoleServer>(&initialize_response()).unwrap();
+    nats.set_response_wire("mcp.server.default.initialize", encoded.headers, encoded.body);
     let service = streamable_http_service(
         nats.clone(),
         mcp_config(),
@@ -85,18 +86,15 @@ async fn streamable_http_service_routes_initialize_to_nats_server() {
 async fn request_fails_when_nats_response_id_never_matches() {
     let nats = trogon_nats::AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
-    nats.set_response(
-        "mcp.server.default.initialize",
-        serde_json::to_vec(&ServerJsonRpcMessage::response(
-            ServerResult::InitializeResult(
-                InitializeResult::new(ServerCapabilities::default())
-                    .with_server_info(Implementation::new("remote-server", "1.0.0")),
-            ),
-            NumberOrString::Number(99),
-        ))
-        .unwrap()
-        .into(),
+    let mismatched = ServerJsonRpcMessage::response(
+        ServerResult::InitializeResult(
+            InitializeResult::new(ServerCapabilities::default())
+                .with_server_info(Implementation::new("remote-server", "1.0.0")),
+        ),
+        NumberOrString::Number(99),
     );
+    let encoded = wire::encode_tx::<RoleServer>(&mismatched).unwrap();
+    nats.set_response_wire("mcp.server.default.initialize", encoded.headers, encoded.body);
     let service = streamable_http_service(
         nats.clone(),
         mcp_config().with_operation_timeout(std::time::Duration::from_secs(1)),

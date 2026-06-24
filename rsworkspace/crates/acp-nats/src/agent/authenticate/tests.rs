@@ -1,4 +1,4 @@
-use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
+use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_wire_json_response};
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, ErrorCode};
 
@@ -6,7 +6,7 @@ use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, Er
 async fn authenticate_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = AuthenticateResponse::new();
-    set_json_response(&mock, "acp.agent.authenticate", &expected);
+    set_wire_json_response(&mock, "acp.agent.authenticate", &expected);
 
     let request = AuthenticateRequest::new("api-key");
     let result = bridge.authenticate(request).await;
@@ -25,6 +25,26 @@ async fn authenticate_returns_error_when_nats_request_fails() {
 }
 
 #[tokio::test]
+async fn authenticate_surfaces_structured_agent_error_from_header() {
+    use crate::agent::test_support::set_wire_agent_error;
+    let (mock, _js, bridge) = mock_bridge();
+    set_wire_agent_error(
+        &mock,
+        "acp.agent.authenticate",
+        i32::from(ErrorCode::MethodNotFound),
+        "method not found",
+    );
+
+    let err = bridge
+        .authenticate(AuthenticateRequest::new("test"))
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::MethodNotFound);
+    assert_eq!(err.message, "method not found");
+}
+
+#[tokio::test]
 async fn authenticate_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
     mock.set_response("acp.agent.authenticate", "not json".into());
@@ -39,7 +59,7 @@ async fn authenticate_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn authenticate_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_json_response(&mock, "acp.agent.authenticate", &AuthenticateResponse::default());
+    set_wire_json_response(&mock, "acp.agent.authenticate", &AuthenticateResponse::default());
 
     let _ = bridge.authenticate(AuthenticateRequest::new("test")).await;
 

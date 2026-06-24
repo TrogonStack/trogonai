@@ -1,5 +1,11 @@
+use std::time::Duration;
+
+use bytes::Bytes;
+use jsonrpc_nats::{Message, ResponseId, encode};
 use serde::{Deserialize, Serialize};
 use trogon_nats::AdvancedMockNatsClient;
+
+use a2a_identity_types::MintedUserJwt;
 
 use super::*;
 
@@ -17,28 +23,31 @@ fn req_id() -> ReqId {
     ReqId::from_test("test-req-1")
 }
 
-fn success_response(y: &str) -> Bytes {
-    let json = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "test-req-1",
-        "result": { "y": y }
-    });
-    serde_json::to_vec(&json).unwrap().into()
+fn wire_success_response(y: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("test-req-1".into()),
+        result: serde_json::json!({ "y": y }),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
-fn error_response(code: i32, message: &str) -> Bytes {
-    let json = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "test-req-1",
-        "error": { "code": code, "message": message }
-    });
-    serde_json::to_vec(&json).unwrap().into()
+fn wire_error_response(code: i32, message: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&Message::Error {
+        id: ResponseId::String("test-req-1".into()),
+        code,
+        message: message.to_string(),
+        data: None,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 #[tokio::test]
 async fn success_response_deserializes_result() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.agents.bot.tasks.get", success_response("hello"));
+    let (headers, body) = wire_success_response("hello");
+    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
@@ -57,7 +66,8 @@ async fn success_response_deserializes_result() {
 #[tokio::test]
 async fn task_not_found_error_code_maps_to_typed_error() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.agents.bot.tasks.get", error_response(-32001, "Task not found"));
+    let (headers, body) = wire_error_response(-32001, "Task not found");
+    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
@@ -76,7 +86,8 @@ async fn task_not_found_error_code_maps_to_typed_error() {
 #[tokio::test]
 async fn agent_unavailable_code_maps_to_typed_error() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.agents.bot.tasks.get", error_response(-32050, "no responders"));
+    let (headers, body) = wire_error_response(-32050, "no responders");
+    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
@@ -133,7 +144,7 @@ async fn hang_returns_timeout_error() {
 #[tokio::test]
 async fn malformed_response_returns_deserialize_error() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.agents.bot.tasks.get", Bytes::from_static(b"not json at all"));
+    mock.set_response_wire("a2a.agents.bot.tasks.get", async_nats::HeaderMap::new(), Bytes::from_static(b"not json at all"));
 
     let result: Result<Response, _> = send_unary(
         &mock,
@@ -152,7 +163,8 @@ async fn malformed_response_returns_deserialize_error() {
 #[tokio::test]
 async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.agents.bot.tasks.get", error_response(-32099, "custom"));
+    let (headers, body) = wire_error_response(-32099, "custom");
+    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
@@ -171,7 +183,8 @@ async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
 #[tokio::test]
 async fn gateway_jwt_attaches_caller_jwt_header() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response("a2a.gateway.bot.tasks.get", success_response("ok"));
+    let (headers, body) = wire_success_response("ok");
+    mock.set_response_wire("a2a.gateway.bot.tasks.get", headers, body);
 
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
     let result: Result<Response, _> = send_unary(

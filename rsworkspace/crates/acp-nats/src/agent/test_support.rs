@@ -94,8 +94,35 @@ pub fn mock_bridge_with_metrics() -> (
 }
 
 pub fn set_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, subject: &str, resp: &T) {
-    let bytes = serde_json::to_vec(resp).unwrap();
-    mock.set_response(subject, bytes.into());
+    set_wire_json_response(mock, subject, resp);
+}
+
+pub fn set_wire_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, subject: &str, resp: &T) {
+    use jsonrpc_nats::{Message, ResponseId};
+    let result = serde_json::to_value(resp).unwrap();
+    let encoded = jsonrpc_nats::encode(&Message::Success {
+        id: ResponseId::Number(1),
+        result,
+    })
+    .unwrap();
+    mock.set_response_wire(subject, encoded.headers, encoded.body);
+}
+
+pub fn set_wire_agent_error(
+    mock: &AdvancedMockNatsClient,
+    subject: &str,
+    code: i32,
+    message: &str,
+) {
+    use jsonrpc_nats::{Message, ResponseId};
+    let encoded = jsonrpc_nats::encode(&Message::Error {
+        id: ResponseId::Number(1),
+        code,
+        message: message.to_string(),
+        data: None,
+    })
+    .unwrap();
+    mock.set_response_wire(subject, encoded.headers, encoded.body);
 }
 
 pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
@@ -114,12 +141,18 @@ pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
 }
 
 pub fn set_js_response<T: serde::Serialize>(js: &MockJs, resp: &T) {
-    let bytes = serde_json::to_vec(resp).unwrap();
+    use jsonrpc_nats::{Message, ResponseId};
+    let result = serde_json::to_value(resp).unwrap();
+    let encoded = jsonrpc_nats::encode(&Message::Success {
+        id: ResponseId::Number(1),
+        result,
+    })
+    .unwrap();
     let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
         subject: "test".into(),
         reply: None,
-        payload: bytes::Bytes::from(bytes),
-        headers: None,
+        payload: encoded.body,
+        headers: Some(encoded.headers),
         status: None,
         description: None,
         length: 0,

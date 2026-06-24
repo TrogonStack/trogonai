@@ -3,6 +3,7 @@
 use agent_client_protocol::{Request, RequestId};
 
 /// Extract the request ID from a JSON-RPC payload without fully deserializing params.
+#[allow(dead_code)]
 pub fn extract_request_id(payload: &[u8]) -> RequestId {
     serde_json::from_slice::<Request<serde_json::Value>>(payload)
         .ok()

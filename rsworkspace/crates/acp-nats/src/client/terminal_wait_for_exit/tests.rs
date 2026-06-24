@@ -1,30 +1,28 @@
 use super::super::tests::{MockClient, TerminalWaitForExitFailingClient, TerminalWaitForExitTimeoutClient};
 use super::*;
-use agent_client_protocol::{Request, RequestId, WaitForTerminalExitRequest};
+use agent_client_protocol::{WaitForTerminalExitRequest};
 use std::error::Error;
 use std::time::Duration;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
-use trogon_std::{FailNextSerialize, StdJsonSerialize};
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::RequestId;
 
 #[tokio::test]
 async fn handle_success_publishes_response_to_reply_subject() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.reply"),
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -40,21 +38,18 @@ async fn handle_success_publishes_response_to_reply_subject() {
 async fn handle_no_reply_does_not_call_client_or_publish() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         None,
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -74,7 +69,6 @@ async fn handle_malformed_json_publishes_parse_error() {
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -100,7 +94,6 @@ async fn handle_invalid_params_publishes_error_reply() {
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -120,7 +113,6 @@ async fn handle_params_null_publishes_error_reply() {
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -131,21 +123,18 @@ async fn handle_params_null_publishes_error_reply() {
 async fn handle_session_id_mismatch_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-b", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.err"),
         &nats,
         "sess-a",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -157,21 +146,18 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
 async fn handle_client_error_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = TerminalWaitForExitFailingClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.err"),
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -193,12 +179,7 @@ async fn handle_client_error_publishes_error_reply() {
 async fn handle_timeout_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = TerminalWaitForExitTimeoutClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    
 
     handle(
         &payload,
@@ -207,7 +188,6 @@ async fn handle_timeout_publishes_error_reply() {
         &nats,
         "sess-1",
         Duration::from_millis(10),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -217,52 +197,24 @@ async fn handle_timeout_publishes_error_reply() {
     assert!(response.get("error").is_some());
 }
 
-#[tokio::test]
-async fn handle_success_serialization_fallback_sends_error_reply() {
-    let nats = MockNatsClient::new();
-    let client = MockClient::new();
-    let serializer = FailNextSerialize::new(1);
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
-
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-        Duration::from_secs(5),
-        &serializer,
-    )
-    .await;
-
-    assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
-}
 
 #[tokio::test]
 async fn handle_success_publish_failure_exercises_error_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let client = MockClient::new();
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.reply"),
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
@@ -274,33 +226,22 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_flush();
     let client = MockClient::new();
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("terminal/wait_for_exit"),
-        params: Some(WaitForTerminalExitRequest::new("sess-1", "term-001")),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
+    
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.reply"),
         &nats,
         "sess-1",
         Duration::from_secs(5),
-        &StdJsonSerialize,
     )
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
-}
-
-#[test]
-fn error_code_and_message_malformed_json() {
-    let err = TerminalWaitForExitError::MalformedJson(serde_json::from_str::<serde_json::Value>("{").unwrap_err());
-    let (code, msg) = error_code_and_message(&err);
-    assert_eq!(code, ErrorCode::ParseError);
-    assert!(msg.contains("Malformed terminal/wait_for_exit"));
 }
 
 #[test]
@@ -332,11 +273,6 @@ fn terminal_wait_for_exit_error_display() {
     let err = TerminalWaitForExitError::TimedOut;
     assert_eq!(err.to_string(), "Timed out waiting for terminal exit");
 
-    let json_err = serde_json::from_str::<()>("{").unwrap_err();
-    let expected = format!("malformed JSON: {json_err}");
-    let json_err_display = TerminalWaitForExitError::MalformedJson(json_err);
-    assert_eq!(json_err_display.to_string(), expected);
-
     let params_err = TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
     assert_eq!(params_err.to_string(), "invalid params: bad params");
 
@@ -348,10 +284,10 @@ fn terminal_wait_for_exit_error_display() {
 fn terminal_wait_for_exit_error_source() {
     let err = TerminalWaitForExitError::TimedOut;
     assert!(err.source().is_none());
-    let json_err = TerminalWaitForExitError::MalformedJson(serde_json::from_str::<()>("{").unwrap_err());
-    assert!(json_err.source().is_some());
+
     let params_err = TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
     assert!(params_err.source().is_some());
+
     let client_err = TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
     assert!(client_err.source().is_some());
 }

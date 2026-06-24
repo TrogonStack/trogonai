@@ -6,9 +6,13 @@
 //! To target a gateway from code that builds agent-shaped subjects (`{prefix}.agents…`), use
 //! [`gateway_ingress_subject_from_agent_subject`] (swap **`agents` → `gateway`** on the segment after the prefix).
 
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::Encoded;
+
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
-use crate::server::wire::JsonRpcErrorResponse;
+use crate::jsonrpc::{JsonRpcId, extract_request_id, extract_request_id_from_body};
+use crate::wire::{WireError, encode_error, response_id_from_request_headers};
 
 /// Recognized dotted method suffix tokens after `{prefix}.agents.{agent_id}.` /
 /// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
@@ -156,50 +160,98 @@ fn validate_agent_id(segment: &str) -> Result<(), GatewayIngressError> {
     }
 }
 
+fn response_id_for_ingress(request_headers: &HeaderMap, request_payload_hint: &[u8]) -> jsonrpc_nats::ResponseId {
+    if let Some(id) = extract_request_id(request_headers) {
+        return match id {
+            JsonRpcId::Number(n) => jsonrpc_nats::ResponseId::Number(n),
+            JsonRpcId::String(s) => jsonrpc_nats::ResponseId::String(s),
+            JsonRpcId::Null => jsonrpc_nats::ResponseId::Null,
+        };
+    }
+    match extract_request_id_from_body(request_payload_hint) {
+        Some(JsonRpcId::Number(n)) => jsonrpc_nats::ResponseId::Number(n),
+        Some(JsonRpcId::String(s)) => jsonrpc_nats::ResponseId::String(s),
+        Some(JsonRpcId::Null) | None => jsonrpc_nats::ResponseId::Null,
+    }
+}
+
+fn ingress_error_wire(
+    request_headers: &HeaderMap,
+    request_payload_hint: &[u8],
+    code: i32,
+    message: impl Into<String>,
+    data: Option<serde_json::Value>,
+) -> Result<Encoded, WireError> {
+    let id = if request_headers.get(jsonrpc_nats::HEADER_ID).is_some() {
+        response_id_from_request_headers(request_headers)
+    } else {
+        response_id_for_ingress(request_headers, request_payload_hint)
+    };
+    encode_error(id, code, message, data)
+}
+
 /// Serialize a JSON-RPC error for the caller inbox when ingress routing fails (-32600 Invalid Request).
 pub fn ingress_invalid_request_response_bytes(
+    request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, serde_json::Error> {
-    let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::new(id, -32600, message.into()).to_bytes()
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(request_headers, request_payload_hint, -32600, message, None)?.body)
 }
 
 /// Serialize a gateway policy denial reply for the correlating inbox.
 pub fn ingress_gateway_policy_denied_response_bytes(
+    request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, serde_json::Error> {
-    let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::new(id, -32_801, message.into()).to_bytes()
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_801, message, None)?.body)
 }
 
 /// Serialize a Tier-1 declarative policy denial (`-32803`) for the correlating inbox.
 pub fn ingress_gateway_declarative_denied_response_bytes(
+    request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, serde_json::Error> {
-    let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::new(id, -32_803, message.into()).to_bytes()
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_803, message, None)?.body)
 }
 
 /// Serialize a Tier-3 skill refusal reply (`-32802`) for the correlating inbox.
 pub fn ingress_gateway_tier3_refused_response_bytes(
+    request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
     rule: &str,
-) -> Result<bytes::Bytes, serde_json::Error> {
-    let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::with_data(id, -32_802, message.into(), Some(serde_json::json!({ "rule": rule }))).to_bytes()
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(
+        request_headers,
+        request_payload_hint,
+        -32_802,
+        message,
+        Some(serde_json::json!({ "rule": rule })),
+    )?
+    .body)
 }
 
 /// Serialize an upstream-gateway deadline overrun (-32800 — reserved for `{prefix}.gateway>` deadlines).
 pub fn ingress_gateway_deadline_exceeded_response_bytes(
+    request_headers: &HeaderMap,
     request_payload_hint: &[u8],
     message: impl Into<String>,
-) -> Result<bytes::Bytes, serde_json::Error> {
-    let id = crate::extract_request_id(request_payload_hint);
-    JsonRpcErrorResponse::new(id, -32_800, message.into()).to_bytes()
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_800, message, None)?.body)
+}
+
+/// Content-mode wire encoding for ingress error replies (headers + bare error body).
+pub fn ingress_error_response_wire(
+    request_headers: &HeaderMap,
+    request_payload_hint: &[u8],
+    code: i32,
+    message: impl Into<String>,
+    data: Option<serde_json::Value>,
+) -> Result<Encoded, WireError> {
+    ingress_error_wire(request_headers, request_payload_hint, code, message, data)
 }
 
 #[cfg(test)]

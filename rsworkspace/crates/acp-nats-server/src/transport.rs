@@ -4,7 +4,7 @@ use crate::constants::{
     ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, HTTP_CHANNEL_CAPACITY,
     X_ACCEL_BUFFERING_HEADER,
 };
-use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
+use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
 use axum::extract::FromRequestParts;
 use axum::extract::Request;
@@ -295,13 +295,39 @@ pub struct IncomingHttpMessage {
 
 impl IncomingHttpMessage {
     pub fn parse(raw: String) -> Result<Self, HttpTransportError> {
-        let trimmed = raw.trim_start();
-        if trimmed.starts_with('[') {
-            return Err(HttpTransportError::not_implemented(
-                "batch JSON-RPC requests are not supported",
+        let mut messages = Self::parse_all(raw)?;
+        if messages.len() != 1 {
+            return Err(HttpTransportError::bad_request(
+                "expected a single JSON-RPC message; use parse_all for batch arrays",
             ));
         }
+        Ok(messages.remove(0))
+    }
 
+    /// Parse one JSON-RPC message or unbundle a batch array into individual messages.
+    pub fn parse_all(raw: String) -> Result<Vec<Self>, HttpTransportError> {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with('[') {
+            let values = serde_json::from_str::<Vec<Value>>(&raw)
+                .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
+            if values.is_empty() {
+                return Err(HttpTransportError::bad_request("empty JSON-RPC batch"));
+            }
+            values
+                .into_iter()
+                .map(|value| {
+                    let element_raw = serde_json::to_string(&value).map_err(|error| {
+                        HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
+                    })?;
+                    Self::parse_one(element_raw)
+                })
+                .collect()
+        } else {
+            Ok(vec![Self::parse_one(raw)?])
+        }
+    }
+
+    fn parse_one(raw: String) -> Result<Self, HttpTransportError> {
         let value = serde_json::from_str::<Value>(&raw)
             .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
         let (has_result, has_error) = value
@@ -643,40 +669,75 @@ fn websocket_response(ws: WebSocketUpgrade, state: AppState) -> Response {
 async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<Response, HttpTransportError> {
     validate_post_headers(&headers)?;
 
-    let message = IncomingHttpMessage::parse(body)?;
-    if !(message.is_request() || message.is_notification() || message.is_response()) {
-        return Err(HttpTransportError::bad_request("invalid JSON-RPC message shape"));
-    }
-
-    let connection_id = parse_connection_id_header(&headers)?;
-    let protocol_version = parse_protocol_version_header(&headers)?;
+    let messages = IncomingHttpMessage::parse_all(body)?;
+    let mut connection_id = parse_connection_id_header(&headers)?;
+    let mut protocol_version = parse_protocol_version_header(&headers)?;
     let session_id = parse_session_id_header(&headers)?;
 
-    validate_http_context(&message, connection_id.as_ref(), session_id.as_ref())?;
+    let mut json_outcomes = Vec::new();
 
-    let (response_tx, response_rx) = oneshot::channel();
-    state
-        .manager_tx
-        .send(ManagerRequest::HttpPost {
-            connection_id,
-            protocol_version,
-            session_id,
-            message,
-            response: response_tx,
-            shutdown_rx: state.shutdown_tx.subscribe(),
-        })
-        .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
+    for message in messages {
+        if !(message.is_request() || message.is_notification() || message.is_response()) {
+            return Err(HttpTransportError::bad_request("invalid JSON-RPC message shape"));
+        }
 
-    match response_rx
-        .await
-        .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??
-    {
-        HttpPostOutcome::Accepted => Ok(StatusCode::ACCEPTED.into_response()),
-        HttpPostOutcome::Json {
-            connection_id,
+        validate_http_context(&message, connection_id.as_ref(), session_id.as_ref())?;
+
+        let (response_tx, response_rx) = oneshot::channel();
+        state
+            .manager_tx
+            .send(ManagerRequest::HttpPost {
+                connection_id: connection_id.clone(),
+                protocol_version: protocol_version.clone(),
+                session_id: session_id.clone(),
+                message,
+                response: response_tx,
+                shutdown_rx: state.shutdown_tx.subscribe(),
+            })
+            .map_err(|error| HttpTransportError::internal_with("connection manager is unavailable", error))?;
+
+        match response_rx
+            .await
+            .map_err(|error| HttpTransportError::internal_with("connection manager dropped the request", error))??
+        {
+            HttpPostOutcome::Accepted => {}
+            HttpPostOutcome::Json {
+                connection_id: outcome_connection_id,
+                protocol_version: outcome_protocol_version,
+                body,
+            } => {
+                connection_id = Some(outcome_connection_id);
+                protocol_version = outcome_protocol_version;
+                json_outcomes.push(body);
+            }
+        }
+    }
+
+    match json_outcomes.len() {
+        0 => Ok(StatusCode::ACCEPTED.into_response()),
+        1 => Ok(build_json_response(
+            connection_id.unwrap_or_default(),
             protocol_version,
-            body,
-        } => Ok(build_json_response(connection_id, protocol_version, body)),
+            json_outcomes.remove(0),
+        )),
+        _ => {
+            let values: Vec<Value> = json_outcomes
+                .into_iter()
+                .map(|body| {
+                    serde_json::from_str(&body).map_err(|error| {
+                        HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error)
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            let body = serde_json::to_string(&values).map_err(|error| {
+                HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error)
+            })?;
+            Ok(build_json_response(
+                connection_id.unwrap_or_default(),
+                protocol_version,
+                body,
+            ))
+        }
     }
 }
 
@@ -1066,7 +1127,7 @@ pub async fn run_http_connection<N, J>(
     });
 
     let mut client_task =
-        tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge, StdJsonSerialize));
+        tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge));
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;

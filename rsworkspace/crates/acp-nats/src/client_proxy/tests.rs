@@ -3,6 +3,7 @@ use agent_client_protocol::{
     Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
     SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
+use crate::agent::test_support::set_wire_json_response;
 use trogon_nats::AdvancedMockNatsClient;
 
 fn proxy(nats: AdvancedMockNatsClient) -> NatsClientProxy<AdvancedMockNatsClient> {
@@ -18,9 +19,10 @@ fn proxy(nats: AdvancedMockNatsClient) -> NatsClientProxy<AdvancedMockNatsClient
 async fn request_permission_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
-    nats.set_response(
+    set_wire_json_response(
+        &nats,
         "acp.session.s1.client.session.request_permission",
-        serde_json::to_vec(&response).unwrap().into(),
+        &response,
     );
 
     let p = proxy(nats.clone());
@@ -52,10 +54,7 @@ async fn session_notification_publishes_to_correct_subject() {
 async fn read_text_file_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = ReadTextFileResponse::new("file contents");
-    nats.set_response(
-        "acp.session.s1.client.fs.read_text_file",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.fs.read_text_file", &response);
 
     let p = proxy(nats.clone());
     let result = p.read_text_file(ReadTextFileRequest::new("s1", "/test.txt")).await;
@@ -80,10 +79,7 @@ async fn request_returns_error_when_nats_fails() {
 async fn write_text_file_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = agent_client_protocol::WriteTextFileResponse::default();
-    nats.set_response(
-        "acp.session.s1.client.fs.write_text_file",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.fs.write_text_file", &response);
 
     let p = proxy(nats.clone());
     let result = p
@@ -97,10 +93,7 @@ async fn write_text_file_publishes_to_correct_subject() {
 async fn create_terminal_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = CreateTerminalResponse::new("t1");
-    nats.set_response(
-        "acp.session.s1.client.terminal.create",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.terminal.create", &response);
 
     let p = proxy(nats.clone());
     let result = p.create_terminal(CreateTerminalRequest::new("s1", "echo")).await;
@@ -112,10 +105,7 @@ async fn create_terminal_publishes_to_correct_subject() {
 async fn terminal_output_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = TerminalOutputResponse::new("output", false);
-    nats.set_response(
-        "acp.session.s1.client.terminal.output",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.terminal.output", &response);
 
     let p = proxy(nats.clone());
     let result = p.terminal_output(TerminalOutputRequest::new("s1", "t1")).await;
@@ -127,10 +117,7 @@ async fn terminal_output_publishes_to_correct_subject() {
 async fn release_terminal_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = ReleaseTerminalResponse::default();
-    nats.set_response(
-        "acp.session.s1.client.terminal.release",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.terminal.release", &response);
 
     let p = proxy(nats.clone());
     let result = p.release_terminal(ReleaseTerminalRequest::new("s1", "t1")).await;
@@ -142,10 +129,7 @@ async fn release_terminal_publishes_to_correct_subject() {
 async fn kill_terminal_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = KillTerminalResponse::default();
-    nats.set_response(
-        "acp.session.s1.client.terminal.kill",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.terminal.kill", &response);
 
     let p = proxy(nats.clone());
     let result = p.kill_terminal(KillTerminalRequest::new("s1", "t1")).await;
@@ -157,10 +141,7 @@ async fn kill_terminal_publishes_to_correct_subject() {
 async fn wait_for_terminal_exit_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
-    nats.set_response(
-        "acp.session.s1.client.terminal.wait_for_exit",
-        serde_json::to_vec(&response).unwrap().into(),
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.terminal.wait_for_exit", &response);
 
     let p = proxy(nats.clone());
     let result = p

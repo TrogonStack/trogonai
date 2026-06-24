@@ -1,47 +1,33 @@
-use serde::{Deserialize, Serialize};
+//! Client-side JSON-RPC content-mode wire helpers.
+
+pub use crate::wire::{WireError, decode_response, encode_request, merge_jsonrpc_headers};
+
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::{Encoded, RequestId};
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::jsonrpc::JsonRpcId;
 
-#[derive(Debug, Serialize)]
-pub struct JsonRpcRequest<P> {
-    pub jsonrpc: &'static str,
-    pub id: JsonRpcId,
-    pub method: &'static str,
-    pub params: P,
-}
-
-impl<P> JsonRpcRequest<P> {
-    pub fn new(id: JsonRpcId, method: &'static str, params: P) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            method,
-            params,
+pub fn encode_client_request<Req: Serialize>(
+    method: &str,
+    id: JsonRpcId,
+    params: &Req,
+) -> Result<Encoded, WireError> {
+    let request_id = match id {
+        JsonRpcId::Number(n) => RequestId::Number(n),
+        JsonRpcId::String(s) => RequestId::String(s),
+        JsonRpcId::Null => {
+            return Err(WireError::Codec(jsonrpc_nats::CodecError::RequestWithoutId));
         }
-    }
+    };
+    encode_request(method, request_id, params)
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum JsonRpcResponse<R> {
-    Success(JsonRpcSuccess<R>),
-    Error(JsonRpcErrorEnvelope),
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JsonRpcSuccess<R> {
-    pub result: R,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JsonRpcErrorEnvelope {
-    pub error: JsonRpcErrorBody,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JsonRpcErrorBody {
-    pub code: i32,
-    pub message: String,
+pub fn decode_client_response<Res: DeserializeOwned>(
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<Result<Res, (i32, String)>, WireError> {
+    decode_response(headers, body)
 }
 
 #[cfg(test)]

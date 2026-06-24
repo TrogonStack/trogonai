@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
@@ -34,7 +35,12 @@ where
     let subject = commands::LoadSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<LoadSessionRequest, LoadSessionResponse>(&subject, &args, &session_id)
+        .session_request::<LoadSessionRequest, LoadSessionResponse>(
+            &subject,
+            SessionAgentMethod::Load.wire_method(),
+            &args,
+            &session_id,
+        )
         .await;
 
     if result.is_ok() {

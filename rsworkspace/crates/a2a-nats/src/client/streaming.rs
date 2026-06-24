@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use a2a::types::SendMessageResponse;
-use bytes::Bytes;
+use serde::de::Error as _;
 use serde::Serialize;
 use tokio::time::timeout;
 use trogon_nats::RequestClient;
@@ -18,7 +18,7 @@ use crate::req_id::ReqId;
 use super::error::ClientError;
 use super::event_stream::{TypedEventStream, build_event_stream};
 use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
-use super::wire::{JsonRpcRequest, JsonRpcResponse};
+use super::wire::{decode_client_response, encode_client_request, merge_jsonrpc_headers};
 
 pub struct StreamingRequest<'a, N, J> {
     pub nats: &'a N,
@@ -56,8 +56,8 @@ where
         op_timeout,
         gateway_caller_jwt,
     } = ctx;
-    let envelope = JsonRpcRequest::new(JsonRpcId::String(req_id.as_str().to_owned()), method, params);
-    let payload = serde_json::to_vec(&envelope).map_err(ClientError::Serialize)?;
+    let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
+        .map_err(|e| ClientError::Serialize(serde_json::Error::custom(format!("{e}"))))?;
 
     let event_stream = open_task_stream(js, prefix, req_id).await?;
 
@@ -65,10 +65,11 @@ where
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
         None => agent_rpc_headers(req_id),
     };
+    let headers = merge_jsonrpc_headers(headers, encoded.headers);
 
     let msg = timeout(
         op_timeout,
-        nats.request_with_headers(subject.to_string(), headers, Bytes::from(payload)),
+        nats.request_with_headers(subject.to_string(), headers, encoded.body),
     )
     .await
     .map_err(|_| ClientError::Timeout {
@@ -76,12 +77,12 @@ where
     })?
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
-    let response: JsonRpcResponse<SendMessageResponse> =
-        serde_json::from_slice(&msg.payload).map_err(ClientError::Deserialize)?;
-
-    match response {
-        JsonRpcResponse::Success(s) => Ok((s.result, event_stream)),
-        JsonRpcResponse::Error(e) => Err(ClientError::from_jsonrpc_code(e.error.code, e.error.message)),
+    let response_headers = msg.headers.unwrap_or_default();
+    match decode_client_response::<SendMessageResponse>(&response_headers, &msg.payload)
+        .map_err(|e| ClientError::Deserialize(serde_json::Error::custom(format!("{e}"))))?
+    {
+        Ok(result) => Ok((result, event_stream)),
+        Err((code, message)) => Err(ClientError::from_jsonrpc_code(code, message)),
     }
 }
 

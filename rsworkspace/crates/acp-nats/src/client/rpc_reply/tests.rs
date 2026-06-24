@@ -1,31 +1,28 @@
 use super::*;
-use agent_client_protocol::{ErrorCode, RequestId};
-use trogon_std::{FailNextSerialize, StdJsonSerialize};
+use agent_client_protocol::{Error, ErrorCode};
+use jsonrpc_nats::ResponseId;
 
 #[test]
-fn error_response_bytes_first_fallback_uses_null_id() {
-    let mock = FailNextSerialize::new(1);
-    let (bytes, content_type) =
-        error_response_bytes(&mock, RequestId::Number(42), ErrorCode::InvalidParams, "test message");
-    assert_eq!(content_type, "application/json");
-    let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(parsed["id"], serde_json::Value::Null);
-    assert_eq!(parsed["error"]["code"], -32603);
+fn encode_success_sets_jsonrpc_id_header() {
+    let encoded = encode_success_for_test(ResponseId::Number(42), &serde_json::json!({"ok": true})).unwrap();
+    assert_eq!(encoded.headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(), "42");
+    assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
 }
 
 #[test]
-fn error_response_bytes_last_resort_returns_plain_text() {
-    let mock = FailNextSerialize::new(2);
-    let (bytes, content_type) = error_response_bytes(&mock, RequestId::Number(1), ErrorCode::InternalError, "msg");
-    assert_eq!(content_type, "text/plain");
-    assert_eq!(bytes.as_ref(), b"Internal error");
+fn encode_agent_error_sets_error_code_header() {
+    let error = Error::new(ErrorCode::InvalidParams.into(), "test message");
+    let encoded = encode_agent_error_for_test(ResponseId::Number(1), &error).unwrap();
+    assert_eq!(
+        encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
+        "-32602"
+    );
+    assert_eq!(encoded.headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(), "1");
 }
 
 #[test]
-fn error_response_fallback_bytes_std_serializer_returns_json() {
-    let (bytes, content_type) = error_response_fallback_bytes(&StdJsonSerialize);
-    assert_eq!(content_type, "application/json");
-    let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(parsed["id"], serde_json::Value::Null);
-    assert_eq!(parsed["error"]["code"], -32603);
+fn encode_agent_error_null_id() {
+    let error = Error::new(ErrorCode::InternalError.into(), "Internal error");
+    let encoded = encode_agent_error_for_test(ResponseId::Null, &error).unwrap();
+    assert_eq!(encoded.headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(), "null");
 }

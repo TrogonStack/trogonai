@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use mcp_nats::{Config, McpPeerId, McpPrefix, client};
+use mcp_nats::{Config, McpPeerId, McpPrefix, client, wire};
+use rmcp::service::RoleServer;
 use rmcp::model::{
     ClientJsonRpcMessage, ClientRequest, ListToolsRequest, PaginatedRequestParams, RequestId, ServerJsonRpcMessage,
     ServerResult,
@@ -22,14 +23,12 @@ fn config() -> Config {
 async fn public_client_transport_routes_rmcp_request_over_nats() {
     let nats = AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
-    nats.set_response(
+    let response = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
+    let encoded = wire::encode_tx::<RoleServer>(&response).unwrap();
+    nats.set_response_wire(
         "mcp.server.filesystem.tools.list",
-        serde_json::to_vec(&ServerJsonRpcMessage::response(
-            ServerResult::empty(()),
-            RequestId::Number(1),
-        ))
-        .unwrap()
-        .into(),
+        encoded.headers,
+        encoded.body,
     );
 
     let mut transport = client::connect(
