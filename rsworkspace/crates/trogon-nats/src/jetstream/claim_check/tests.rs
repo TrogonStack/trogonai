@@ -106,3 +106,27 @@ fn claim_resolve_error_source_read_failed() {
     let err: ClaimResolveError<std::io::Error> = ClaimResolveError::ReadFailed(inner);
     assert!(err.source().is_some());
 }
+
+#[test]
+fn max_payload_limit_trait_delegates_to_inner() {
+    let limit = MaxPayload::from_server_limit(5_000);
+    assert_eq!(limit.max_payload().threshold(), limit.threshold());
+}
+
+#[test]
+fn claim_check_publisher_debug_formats() {
+    #[derive(Debug)]
+    struct MockPublisher;
+    #[derive(Debug)]
+    struct MockStore;
+
+    let publisher = ClaimCheckPublisher::new(
+        MockPublisher,
+        MockStore,
+        "claims".into(),
+        MaxPayload::from_server_limit(1_024),
+    );
+    let debug = format!("{publisher:?}");
+    assert!(debug.contains("ClaimCheckPublisher"));
+    assert!(debug.contains("claims"));
+}

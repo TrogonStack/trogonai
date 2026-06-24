@@ -105,3 +105,32 @@ fn malformed_envelope_digest_hex() {
     let err = verify_signed_bundle(&pubkey, manifest, wasm, &envelope).expect_err("bad hex");
     assert!(matches!(err, SignatureVerificationError::MalformedSignatureFile { .. }));
 }
+
+#[test]
+fn malformed_envelope_skill_id() {
+    let (pubkey, signing_key) = fixture_keypair();
+    let manifest = br#"{"skill_id":"demo","json_path":"$.x"}"#;
+    let wasm = b"\0asm";
+    let mut envelope = signed_envelope("demo", manifest, wasm, &signing_key);
+    envelope.skill_id = "../bad".into();
+    let err = verify_signed_bundle(&pubkey, manifest, wasm, &envelope).expect_err("bad skill id");
+    assert!(matches!(
+        err,
+        SignatureVerificationError::MalformedSignatureFile { detail, .. }
+            if detail.contains("invalid skill_id")
+    ));
+}
+
+#[test]
+fn invalid_public_key_fails_verification() {
+    let pubkey = Ed25519PublicKey::from_bytes([0u8; 32]);
+    let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+    let manifest = br#"{"skill_id":"demo","json_path":"$.x"}"#;
+    let wasm = b"\0asm";
+    let envelope = signed_envelope("demo", manifest, wasm, &signing_key);
+    let err = verify_signed_bundle(&pubkey, manifest, wasm, &envelope).expect_err("invalid pubkey");
+    assert!(matches!(
+        err,
+        SignatureVerificationError::SignatureVerificationFailed { .. }
+    ));
+}

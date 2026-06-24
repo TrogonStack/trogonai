@@ -52,6 +52,31 @@ fn env_source_current_previous_missing_and_warn_once() {
 }
 
 #[test]
+fn env_source_current_returns_current_handle() {
+    let account = KeyPair::new_account();
+    unsafe {
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+        std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS");
+    }
+
+    let source = EnvSigningKeySource::from_env().expect("env source");
+    assert_eq!(source.current().version().as_str(), "current");
+}
+
+#[test]
+fn env_source_ignores_empty_previous_secret() {
+    let account = KeyPair::new_account();
+    unsafe {
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS", "");
+    }
+
+    let source = EnvSigningKeySource::from_env().expect("env source");
+    assert_eq!(source.accepted().len(), 1);
+    assert_eq!(source.accepted()[0].version().as_str(), "current");
+}
+
+#[test]
 fn file_reads_current_and_optional_previous() {
     let current_kp = KeyPair::new_account();
     let mut current = NamedTempFile::new().expect("current temp");
