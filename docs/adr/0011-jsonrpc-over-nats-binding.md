@@ -22,7 +22,7 @@ within one protocol:
 
 - The ACP command path (client to agent) strips the JSON-RPC envelope. The NATS
   body is the bare params struct, the method is the subject, and correlation rides
-  in the `X-Req-Id` header. The reply is a bare result struct.
+  in a transport header. The reply is a bare result struct.
 - The ACP callback path (agent to client) keeps the full JSON-RPC envelope in the
   body.
 - MCP over NATS keeps the full JSON-RPC envelope in the body end to end.
@@ -36,8 +36,8 @@ fails to deserialize and collapses into a generic internal error, discarding the
 originating code and message. Authentication rejection is the clearest casualty:
 the failure is indistinguishable from an unavailable agent.
 
-NATS provides correlation (the reply subject for core request/reply, the
-`X-Req-Id` header plus a dedicated response consumer for JetStream) and routing
+NATS provides correlation (the reply subject for core request/reply, a transport
+correlation header plus a dedicated response consumer for JetStream) and routing
 (the subject). It does not provide success-versus-error semantics, and it routes
 on subjects and acts on headers without ever reading the body. A useful binding
 should let infrastructure route and make decisions from the subject and headers
@@ -67,35 +67,29 @@ of the message, not a different message.
 | `error.code` | header `Jsonrpc-Error-Code` | Integer. Present iff `Jsonrpc-Status: error`. |
 | `error.message`, `error.data` | body | Human-readable and structured error detail. |
 
-Transport correlation and routing metadata are separate, protocol-agnostic
-headers owned by the transport, not part of this table: `X-Req-Id`,
-`X-Session-Id`, `X-Causation-Id`, and trace context.
+Correlation and routing metadata are a separate, protocol-agnostic transport
+concern under [ADR 0004](./0004-protocol-and-transport-layering.md), not part of
+this mapping.
 
 Requests and notifications are addressed by the method subject. A response carries
 no method; it is addressed to the requester's reply subject for core request/reply
-or to the response stream for JetStream, correlated by `X-Req-Id`.
+or to the response stream for JetStream, correlated by the transport.
 
-### 2. Headers are authoritative; namespaced by owning layer
+### 2. The codec's headers are authoritative
 
-For fields in the table above, the header (or subject) is the authoritative
+For the fields in the table above, the header (or subject) is the authoritative
 value, not a denormalized copy of something in the body. Infrastructure routes on
 the subject and acts on headers — an error counter on `Jsonrpc-Error-Code`, an
 index on `Jsonrpc-Id`, a dead-letter router or metrics sidecar on
-`Jsonrpc-Status` — without ever unmarshalling the body.
+`Jsonrpc-Status` — without unmarshalling the body.
 
-Headers are namespaced by the layer that owns them:
-
-- `Jsonrpc-*` are faithful projections of JSON-RPC fields, owned by the codec.
-- `X-*` are transport correlation and routing, owned by `trogon-nats` and shared
-  across all backbone traffic, including non-JSON-RPC services.
-
-`X-Req-Id` is therefore not named `Jsonrpc-Req-Id`: it is a transport-generated,
-globally unique, subject-safe correlation token, not the JSON-RPC `id`. The two
-are distinct and are not merged. The JSON-RPC `id` is client-chosen, typed,
-echoed back to the client, and unique only per connection; it cannot serve as the
-backbone correlation key (collisions across clients, including before a session
-exists at `initialize`; arbitrary string ids are not subject-safe; notifications
-and null-id responses have no usable id).
+The codec's headers are named `Jsonrpc-*` to mark them as projections of JSON-RPC
+fields. The JSON-RPC `id` is one such field, and it is not the transport's
+correlation key: it is client-chosen and unique only per connection (so it
+collides across clients before a session exists at `initialize`), arbitrary string
+ids are not subject-safe, and notifications and null-id responses have no usable
+id. Correlation is a separate transport concern
+([ADR 0004](./0004-protocol-and-transport-layering.md)) and is out of scope here.
 
 ### 3. Preserve `id` type with a JSON-literal header
 
@@ -128,8 +122,8 @@ errors, notifications).
 Canonical JSON-RPC is reconstructed only at protocol edges — the remote
 HTTP/WebSocket/SSE listeners and the stdio bridges. The on-NATS encoding is an
 internal wire format; nothing external consumes the raw stream as JSON-RPC. The
-edge holds the original typed `id` while awaiting the reply (correlated by
-`X-Req-Id`), so live request/reply type fidelity holds independent of the header
+edge holds the original typed `id` while awaiting the reply (correlated by the
+transport), so live request/reply type fidelity holds independent of the header
 encoding.
 
 ### 5. Signing covers the authoritative headers and the body
@@ -172,14 +166,15 @@ protocol.
 - `Jsonrpc-Id` is the id's JSON literal; absent means a notification (no
   `Jsonrpc-Status`) or `id: null` (response). Requests use a non-null id.
 - The method is carried by the subject.
-- `X-Req-Id` is the transport correlation token and is independent of `Jsonrpc-Id`.
+- The JSON-RPC `id` is not the transport correlation key; correlation is a
+  transport concern outside this codec.
 
 ## Design Rules
 
 - The success/error discriminator is the `Jsonrpc-Status` header. Never infer it
   by structural deserialization of the body.
-- Name protocol-field projections `Jsonrpc-*` and transport metadata `X-*`. Do not
-  put a transport field under `Jsonrpc-*` or a JSON-RPC field under `X-*`.
+- Name the codec's headers `Jsonrpc-*` to mark JSON-RPC field projections. Do not
+  place a transport or correlation field under `Jsonrpc-*`.
 - Reconstruction to and from canonical JSON-RPC happens only at protocol edges,
   centralized in the shared codec, never ad hoc in domain code.
 - Signing spans the authoritative `Jsonrpc-*` headers as well as the body.
