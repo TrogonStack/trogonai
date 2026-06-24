@@ -30,6 +30,15 @@ fn system_time_source_returns_a_recent_unix_timestamp() {
 }
 
 #[test]
+fn arc_wrapped_time_source_delegates() {
+    use std::sync::Arc;
+    let inner = Arc::new(SystemTimeSource);
+    // Force the Arc<T> blanket impl path.
+    let ts: Arc<dyn TimeSource> = inner;
+    assert!(ts.now() > 0);
+}
+
+#[test]
 fn re_exports_link_to_inner_modules() {
     // Smoke: re-exported types are usable through the crate root.
     let _: StaticJwks = StaticJwks::new();

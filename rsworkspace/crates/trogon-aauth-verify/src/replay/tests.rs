@@ -1,5 +1,10 @@
 use super::*;
 
+#[test]
+fn default_constructor_matches_new() {
+    let _: InMemoryReplayStore = InMemoryReplayStore::default();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn first_insert_then_replay_fails() {
     let store = InMemoryReplayStore::new();

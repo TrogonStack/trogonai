@@ -212,6 +212,138 @@ async fn verify_agent_happy_path() {
     assert!(!verified.jkt.is_empty());
 }
 
+async fn verify_agent_with_cnf_jwk(cnf_jwk: serde_json::Value) -> TokenError {
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AGENT.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-agent",
+        "cnf": { "jwk": cnf_jwk },
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_agent(&jwt).await.unwrap_err()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_maps_missing_field_to_invalid_claim() {
+    // EC kty present but missing required `x` — triggers MissingField arm.
+    let err = verify_agent_with_cnf_jwk(serde_json::json!({"kty": "EC", "crv": "P-256", "y": "zzz"})).await;
+    assert!(matches!(err, TokenError::InvalidClaim("x")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_maps_unsupported_kty_to_invalid_claim() {
+    let err = verify_agent_with_cnf_jwk(serde_json::json!({"kty": "BOGUS"})).await;
+    assert!(matches!(err, TokenError::InvalidClaim("cnf.jwk.kty")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_agent_maps_missing_cnf_to_invalid_claim() {
+    // Drives the JktError mapping arms in verify_agent: a present-but-malformed
+    // cnf.jwk (missing kty) returns InvalidClaim, not MissingClaim.
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AGENT.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-agent",
+        "cnf": { "jwk": { "crv": "P-256" } }, // missing kty
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let err = v.verify_agent(&jwt).await.unwrap_err();
+    assert!(matches!(err, TokenError::InvalidClaim(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pick_jwk_falls_back_to_sole_compatible_key_when_kid_absent() {
+    // Drives the single-key fallback in pick_jwk: JWT header carries no kid
+    // and the JwkSet has exactly one compatible key.
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_RESOURCE.into());
+    // No `kid` on the header forces pick_jwk into the single-key branch.
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_resource(&jwt, "ps.example")
+        .await
+        .expect("single-key fallback");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resource_signature_path_when_jwt_corrupted() {
+    // Crafted JWT with a valid header + payload but a garbage signature drives
+    // the non-InvalidAudience Signature arm in decode_with_jwks.
+    let signing = jsonwebtoken::EncodingKey::from_ec_pem(P256_PEM).expect("signing key");
+    let jwks = StaticJwks::new().with(
+        "iss.example",
+        jsonwebtoken::jwk::JwkSet {
+            keys: vec![p256_jwk_for_test()],
+        },
+    );
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_RESOURCE.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &signing).expect("encode");
+    // Truncate to invalidate the signature segment.
+    let bad = format!("{}AA", &jwt[..jwt.len() - 4]);
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let err = v.verify_resource(&bad, "ps.example").await.unwrap_err();
+    assert!(matches!(err, TokenError::Signature(_)));
+}
+
 #[test]
 fn token_error_display_messages_are_distinct() {
     let cases = [
