@@ -19,6 +19,54 @@ fn ec_p256_thumbprint_matches_rfc7638_example_shape() {
 }
 
 #[test]
+fn okp_ed25519_thumbprint() {
+    let jwk = serde_json::json!({
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    });
+    let digest = jwk_thumbprint(&jwk).expect("okp thumbprint");
+    assert!(!digest.is_empty() && !digest.contains('='));
+}
+
+#[test]
+fn rsa_thumbprint() {
+    let jwk = serde_json::json!({
+        "kty": "RSA",
+        "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+        "e": "AQAB",
+    });
+    let digest = jwk_thumbprint(&jwk).expect("rsa thumbprint");
+    assert!(!digest.is_empty() && !digest.contains('='));
+}
+
+#[test]
+fn oct_thumbprint() {
+    let jwk = serde_json::json!({
+        "kty": "oct",
+        "k": "GawgguFyGrWKav7AX4VKUg",
+    });
+    let digest = jwk_thumbprint(&jwk).expect("oct thumbprint");
+    assert!(!digest.is_empty() && !digest.contains('='));
+}
+
+#[test]
+fn missing_required_field_per_kty_reported() {
+    // EC without "x"
+    let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "y": "abc"});
+    assert!(matches!(jwk_thumbprint(&jwk), Err(JktError::MissingField("x"))));
+    // RSA without "n"
+    let jwk = serde_json::json!({"kty": "RSA", "e": "AQAB"});
+    assert!(matches!(jwk_thumbprint(&jwk), Err(JktError::MissingField("n"))));
+}
+
+#[test]
+fn missing_kty_is_reported() {
+    let jwk = serde_json::json!({"crv": "P-256"});
+    assert!(matches!(jwk_thumbprint(&jwk), Err(JktError::MissingKty)));
+}
+
+#[test]
 fn rejects_unknown_kty() {
     let jwk = serde_json::json!({"kty": "WAT"});
     let err = jwk_thumbprint(&jwk).unwrap_err();

@@ -318,6 +318,27 @@ async fn entry_expiry_anchors_to_clock_after_inner_resolve_not_before() {
 }
 
 #[tokio::test]
+async fn invalidate_all_drops_every_entry() {
+    let inner = CountingResolver::new(StaticJwks::new().with("iss.a", empty_set()).with("iss.b", empty_set()));
+    let cache = CachedJwksResolver::new(inner, MockTime::at(0));
+    cache.resolve("iss.a").await.expect("a");
+    cache.resolve("iss.b").await.expect("b");
+    cache.invalidate_all().await;
+    cache.resolve("iss.a").await.expect("a refetched");
+    cache.resolve("iss.b").await.expect("b refetched");
+    assert_eq!(cache.inner.calls(), 4);
+}
+
+#[tokio::test]
+async fn with_max_entries_zero_is_clamped_to_one() {
+    let inner = CountingResolver::new(StaticJwks::new().with("iss", empty_set()));
+    let cache = CachedJwksResolver::new(inner, MockTime::at(0)).with_max_entries(0);
+    cache.resolve("iss").await.expect("hit");
+    // max_entries was 0; constructor clamps to 1 so the entry still lives.
+    assert!(!cache.entries.read().await.is_empty());
+}
+
+#[tokio::test]
 async fn invalidate_clears_entry() {
     let inner = CountingResolver::new(StaticJwks::new().with("iss.example", empty_set()));
     let cache = CachedJwksResolver::new(inner, MockTime::at(0));
