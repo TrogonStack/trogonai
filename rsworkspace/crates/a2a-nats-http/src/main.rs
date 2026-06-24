@@ -18,10 +18,4 @@ async fn main() {
 fn main() {}
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    #[cfg(coverage)]
-    fn coverage_main_stub_is_callable() {
-        super::main();
-    }
-}
+mod main_tests;

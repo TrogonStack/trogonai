@@ -1,0 +1,14 @@
+use super::*;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
+
+#[test]
+fn init_provider_returns_valid_provider() {
+    let resource = Resource::builder()
+        .with_service_name("test-trace")
+        .with_attributes(vec![KeyValue::new("test", "true")])
+        .build();
+
+    let provider = init_provider(&resource);
+    assert!(provider.is_ok());
+}
