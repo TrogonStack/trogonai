@@ -45,5 +45,5 @@ fn display_includes_code_and_message() {
 #[test]
 fn implements_std_error() {
     let e: Box<dyn std::error::Error> = Box::new(A2aError::internal("oops"));
-    assert!(e.to_string().contains("oops"));
+    assert_eq!(e.to_string(), "[-32603] oops");
 }

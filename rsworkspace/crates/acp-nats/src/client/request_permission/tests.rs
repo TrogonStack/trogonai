@@ -165,12 +165,13 @@ fn error_code_and_message_client_error_preserves_client_code() {
 #[test]
 fn request_permission_error_display() {
     let err = serde_json::from_slice::<RequestPermissionRequest>(b"not json").unwrap_err();
+    let expected = format!("invalid request: {err}");
     let rp_err = RequestPermissionError::InvalidRequest(err);
-    assert!(rp_err.to_string().contains("invalid request"));
+    assert_eq!(rp_err.to_string(), expected);
 
     let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "permission denied");
     let rp_err = RequestPermissionError::ClientError(client_err);
-    assert!(rp_err.to_string().contains("client error"));
+    assert_eq!(rp_err.to_string(), "client error: permission denied");
 }
 
 #[test]

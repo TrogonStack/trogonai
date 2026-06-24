@@ -369,7 +369,10 @@ async fn push_set_not_supported_maps_to_correct_error_code() {
 #[test]
 fn runtime_error_display_shows_env_var_name() {
     use crate::runtime::RuntimeError;
-    assert!(RuntimeError::MissingAgentId.to_string().contains("A2A_AGENT_ID"));
+    assert_eq!(
+        RuntimeError::MissingAgentId.to_string(),
+        "A2A_AGENT_ID environment variable is required"
+    );
 }
 
 #[tokio::test]

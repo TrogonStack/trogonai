@@ -64,7 +64,6 @@ async fn jetstream_message(delivered: u64) -> (NatsServer, jetstream::Message) {
     };
     (server, message)
 }
-
 #[test]
 fn retry_delay_backs_off_exponentially_and_caps() {
     assert_eq!(retry_delay(0), Duration::from_secs(1));
@@ -127,7 +126,10 @@ fn scheduling_support_requires_allow_message_schedules_on_the_stream() {
         error,
         SchedulingSupportError::SchedulesNotAllowed { ref stream } if stream == SCHEDULE_EXECUTION_STREAM
     ));
-    assert!(error.to_string().contains("allow_message_schedules"));
+    assert_eq!(
+        error.to_string(),
+        "stream 'SCHEDULER_SCHEDULE_EXECUTION' is not provisioned with allow_message_schedules; scheduled publishes would never fire"
+    );
 }
 
 #[test]

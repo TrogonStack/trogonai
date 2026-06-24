@@ -49,7 +49,7 @@ async fn ext_method_validates_method_name() {
     let request = ExtRequest::new("method.*", params.into());
     let err = bridge.ext_method(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid method name"));
+    assert!(err.message.contains("Invalid method name"));
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 

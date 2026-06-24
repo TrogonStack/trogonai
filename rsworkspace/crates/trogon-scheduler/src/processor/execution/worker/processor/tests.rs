@@ -1148,7 +1148,10 @@ async fn transient_load_failure_is_retried() {
         .await
         .unwrap_err();
     assert!(matches!(error, RetrySignal::Checkpoint { .. }));
-    assert!(error.to_string().starts_with("transient checkpoint failure:"));
+    assert_eq!(
+        error.to_string(),
+        "transient checkpoint failure: scheduler checkpoint backend failed: failed getting entry"
+    );
 }
 
 #[tokio::test]
@@ -1166,7 +1169,10 @@ async fn transient_purge_failure_is_retried() {
         .await
         .unwrap_err();
     assert!(matches!(error, RetrySignal::ExecutionSchedule { .. }));
-    assert!(error.to_string().starts_with("transient execution schedule failure:"));
+    assert_eq!(
+        error.to_string(),
+        "transient execution schedule failure: execution subject purge failed: simulated purge failure"
+    );
 }
 
 #[tokio::test]

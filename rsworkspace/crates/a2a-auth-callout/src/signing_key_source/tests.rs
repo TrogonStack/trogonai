@@ -45,7 +45,10 @@ fn env_source_current_previous_missing_and_warn_once() {
         std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET");
     }
     let err = EnvSigningKeySource::from_env().unwrap_err();
-    assert!(err.to_string().contains("AUTH_CALLOUT_SIGNING_SECRET"));
+    assert!(matches!(
+        err,
+        AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
+    ));
 }
 
 #[test]
@@ -70,7 +73,7 @@ fn file_reads_current_and_optional_previous() {
 #[test]
 fn file_missing_current_errors() {
     let err = FileSigningKeySource::new("/no/such/signing-key-path", None::<&str>).unwrap_err();
-    assert!(err.to_string().contains("failed to read signing key"));
+    assert!(matches!(err, AuthCalloutError::KeyLoadIo { .. }));
 }
 
 #[test]

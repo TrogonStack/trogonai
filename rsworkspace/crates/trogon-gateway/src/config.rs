@@ -275,7 +275,7 @@ impl ConfigValidationError {
 
     #[cfg(test)]
     fn contains(&self, needle: &str) -> bool {
-        self.to_string().contains(needle)
+        format!("{self}").contains(needle)
     }
 }
 

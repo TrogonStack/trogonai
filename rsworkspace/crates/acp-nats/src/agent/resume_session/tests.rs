@@ -42,7 +42,7 @@ async fn resume_session_validates_session_id() {
     let request = ResumeSessionRequest::new("invalid.session.id", ".");
     let err = bridge.resume_session(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid session ID"));
+    assert!(err.message.contains("Invalid session ID"));
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 

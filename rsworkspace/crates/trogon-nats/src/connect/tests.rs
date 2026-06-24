@@ -58,9 +58,7 @@ fn test_max_reconnect_delay_constant() {
 #[test]
 fn connect_error_display_invalid_credentials() {
     let err = ConnectError::InvalidCredentials(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
-    let msg = err.to_string();
-    assert!(msg.contains("Failed to load credentials file"));
-    assert!(msg.contains("file not found"));
+    assert_eq!(err.to_string(), "Failed to load credentials file: file not found");
 }
 
 #[test]

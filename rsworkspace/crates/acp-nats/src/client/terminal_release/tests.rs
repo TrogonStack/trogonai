@@ -311,21 +311,22 @@ fn error_code_and_message_client_error_preserves_client_code() {
 
 #[test]
 fn terminal_release_error_display() {
-    let malformed =
-        TerminalReleaseError::MalformedJson(serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err());
-    assert!(malformed.to_string().contains("malformed JSON"));
+    let json_err = serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err();
+    let expected = format!("malformed JSON: {json_err}");
+    let malformed = TerminalReleaseError::MalformedJson(json_err);
+    assert_eq!(malformed.to_string(), expected);
 
     let invalid_params = TerminalReleaseError::InvalidParams(agent_client_protocol::Error::new(
         ErrorCode::InvalidParams.into(),
         "bad params",
     ));
-    assert!(invalid_params.to_string().contains("invalid params"));
+    assert_eq!(invalid_params.to_string(), "invalid params: bad params");
 
     let client_err = TerminalReleaseError::ClientError(agent_client_protocol::Error::new(
         ErrorCode::InvalidParams.into(),
         "client fail",
     ));
-    assert!(client_err.to_string().contains("client error"));
+    assert_eq!(client_err.to_string(), "client error: client fail");
 }
 
 #[test]

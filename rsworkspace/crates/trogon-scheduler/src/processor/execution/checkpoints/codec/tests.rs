@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use std::error::Error;
 use trogonai_proto::scheduler::schedules::checkpoints_v1;
 
 use super::*;
@@ -185,9 +186,9 @@ fn zero_stream_position_is_rejected() {
 #[test]
 fn codec_errors_display_and_expose_sources() {
     let wire = decode_checkpoint_record(b"not proto").unwrap_err();
-    assert!(
-        wire.to_string()
-            .starts_with("checkpoint record wire format is invalid:")
+    assert_eq!(
+        wire.to_string(),
+        format!("checkpoint record wire format is invalid: {}", wire.source().unwrap())
     );
     assert!(std::error::Error::source(&wire).is_some());
 
@@ -205,10 +206,12 @@ fn codec_errors_display_and_expose_sources() {
         .encode_to_vec(),
     )
     .unwrap_err();
-    assert!(
-        domain
-            .to_string()
-            .starts_with("checkpoint record snapshot could not be rebuilt:")
+    assert_eq!(
+        domain.to_string(),
+        format!(
+            "checkpoint record snapshot could not be rebuilt: {}",
+            domain.source().unwrap()
+        )
     );
     assert!(std::error::Error::source(&domain).is_some());
 

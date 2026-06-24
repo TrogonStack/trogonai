@@ -35,7 +35,10 @@ async fn provision_returns_error_on_failure() {
     ctx.fail_next();
     let result = provision_streams(&ctx, &p("a2a")).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("A2A_EVENTS"));
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "stream provisioning failed: A2A_EVENTS: simulated stream creation failure"
+    );
 }
 
 #[tokio::test]

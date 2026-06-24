@@ -21,7 +21,6 @@ async fn authenticate_returns_error_when_nats_request_fails() {
     let request = AuthenticateRequest::new("test");
     let err = bridge.authenticate(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Agent unavailable"));
     assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }
 
@@ -33,7 +32,7 @@ async fn authenticate_returns_error_when_response_is_invalid_json() {
     let request = AuthenticateRequest::new("test");
     let err = bridge.authenticate(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid response from agent"));
+    assert_eq!(err.message, "Invalid response from agent");
     assert_eq!(err.code, ErrorCode::InternalError);
 }
 

@@ -22,7 +22,10 @@ fn try_from_rejects_invalid_token() {
 #[test]
 fn error_display_describes_invalid_token() {
     let err = IdempotencyKeyHeaderError::InvalidToken;
-    assert!(err.to_string().contains("invalid HTTP header name"));
+    assert_eq!(
+        err.to_string(),
+        "invalid HTTP header name token for idempotency key carrier"
+    );
     assert!(format!("{err:?}").contains("InvalidToken"));
 }
 

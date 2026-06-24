@@ -22,7 +22,10 @@ fn dispatch_prep_error_display_and_source() {
 fn dispatch_error_invalid_target_routes_through_from() {
     let err: DispatchError = target_err().into();
     assert!(matches!(err, DispatchError::InvalidTarget(_)));
-    assert!(err.to_string().contains("invalid push notification URL"));
+    assert_eq!(
+        err.to_string(),
+        "invalid push notification URL: push notification URL must start with http://, https://, subject:, or jetstream:: ftp://x"
+    );
 }
 
 #[test]
@@ -49,9 +52,10 @@ fn dispatch_error_unexpected_status_display_contains_url_and_code() {
         status: 503,
         url: url(),
     };
-    let s = err.to_string();
-    assert!(s.contains("503"));
-    assert!(s.contains("https://example.com/hook"));
+    assert_eq!(
+        err.to_string(),
+        "push notification to https://example.com/hook returned status 503"
+    );
 }
 
 #[test]
@@ -60,11 +64,10 @@ fn nats_publish_dispatch_error_round_trips_subject_and_source() {
     let inner = std::io::Error::other("nats down");
     let err = NatsPublishDispatchError::new(subject(), inner);
     assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
-    assert!(
-        err.to_string()
-            .contains("NATS publish to a2a.push.t.caller.task failed")
+    assert_eq!(
+        err.to_string(),
+        "NATS publish to a2a.push.t.caller.task failed: nats down"
     );
-    assert!(err.to_string().contains("nats down"));
     assert!(err.source().is_some());
 }
 
@@ -74,7 +77,10 @@ fn jetstream_publish_dispatch_error_round_trips_subject_and_source() {
     let inner = std::io::Error::other("jetstream down");
     let err = JetStreamPublishDispatchError::new(subject(), inner);
     assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
-    assert!(err.to_string().contains("jetstream down"));
+    assert_eq!(
+        err.to_string(),
+        "JetStream publish to a2a.push.t.caller.task failed: jetstream down"
+    );
     assert!(err.source().is_some());
 }
 
@@ -86,23 +92,32 @@ fn dispatch_error_display_and_source_cover_every_variant() {
     assert!(prep.source().is_some());
 
     let auth = DispatchError::InvalidAuthorization(AuthenticationHeaderBuildError::MissingScheme);
-    assert!(auth.to_string().contains("invalid push notification authorization"));
+    assert_eq!(
+        auth.to_string(),
+        "invalid push notification authorization: push authentication.scheme must not be empty"
+    );
     assert!(auth.source().is_some());
 
     let header_err: Box<dyn std::error::Error + Send + Sync> = "header bad".into();
     let header = DispatchError::InvalidHeader(header_err);
-    assert!(header.to_string().contains("invalid push notification outbound header"));
+    assert_eq!(
+        header.to_string(),
+        "invalid push notification outbound header value: header bad"
+    );
     assert!(header.source().is_some());
 
     let nats = DispatchError::NatsPublish(NatsPublishDispatchError::new(subject(), std::io::Error::other("oops")));
-    assert!(nats.to_string().contains("NATS publish to a2a.push.t.caller.task"));
+    assert_eq!(nats.to_string(), "NATS publish to a2a.push.t.caller.task failed: oops");
     assert!(nats.source().is_some());
 
     let js = DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(
         subject(),
         std::io::Error::other("oops"),
     ));
-    assert!(js.to_string().contains("JetStream publish to a2a.push.t.caller.task"));
+    assert_eq!(
+        js.to_string(),
+        "JetStream publish to a2a.push.t.caller.task failed: oops"
+    );
     assert!(js.source().is_some());
 
     let status = DispatchError::UnexpectedStatus {
@@ -116,7 +131,6 @@ fn dispatch_error_display_and_source_cover_every_variant() {
 
     let http_err: Box<dyn std::error::Error + Send + Sync> = Box::new(std::io::Error::other("connect refused"));
     let http = DispatchError::Http(http_err);
-    assert!(http.to_string().contains("HTTP push request failed"));
-    assert!(http.to_string().contains("connect refused"));
+    assert_eq!(http.to_string(), "HTTP push request failed: connect refused");
     assert!(http.source().is_some());
 }

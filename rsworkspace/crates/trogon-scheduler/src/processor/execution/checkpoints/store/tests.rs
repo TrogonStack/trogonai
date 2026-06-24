@@ -25,7 +25,6 @@ fn record(id: &str) -> ScheduleCheckpointRecord {
         last_outcome: ReconcileOutcome::Published,
     }
 }
-
 #[tokio::test]
 async fn save_creates_when_no_revision_and_updates_when_present() {
     let kv = MockJetStreamKvStore::new();
@@ -246,7 +245,7 @@ async fn record_failure_backend_error_is_transient() {
     let error = store.record_failure(&failure).await.unwrap_err();
 
     assert!(error.is_transient());
-    assert!(error.to_string().starts_with("scheduler checkpoint backend failed:"));
+    assert_eq!(error.to_string(), "scheduler checkpoint backend failed: other error");
     assert!(std::error::Error::source(&error).is_some());
 }
 

@@ -58,7 +58,7 @@ async fn cancel_validates_session_id() {
         .cancel(CancelNotification::new("invalid.session.id"))
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("Invalid session ID"));
+    assert!(err.message.contains("Invalid session ID"));
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 

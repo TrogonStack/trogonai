@@ -314,7 +314,10 @@ fn test_nats_error_display_timeout() {
     let err = NatsError::Timeout {
         subject: "test.subject".to_string(),
     };
-    assert!(err.to_string().contains("Request to 'test.subject' timed out"));
+    assert_eq!(
+        err.to_string(),
+        "Request to 'test.subject' timed out. The backend may be overloaded or unresponsive."
+    );
 }
 
 #[test]
@@ -325,29 +328,38 @@ fn test_default_timeout_constant() {
 #[test]
 fn nats_error_display_all_variants() {
     let serialize_err = NatsError::Serialize(serde_json::from_str::<String>("bad").unwrap_err());
-    assert!(serialize_err.to_string().contains("serialize request"));
+    assert_eq!(
+        serialize_err.to_string(),
+        "Failed to serialize request: expected value at line 1 column 1"
+    );
 
     let deserialize_err = NatsError::Deserialize(serde_json::from_str::<String>("bad").unwrap_err());
-    assert!(deserialize_err.to_string().contains("deserialize response"));
+    assert_eq!(
+        deserialize_err.to_string(),
+        "Failed to deserialize response: expected value at line 1 column 1"
+    );
 
     let request_err = NatsError::Request {
         subject: "s".into(),
         error: "boom".into(),
     };
-    assert!(request_err.to_string().contains("'s' failed: boom"));
+    assert_eq!(request_err.to_string(), "Request to 's' failed: boom");
 
     let pub_err = NatsError::PublishOperation(PublishOperationError("fail".into()));
-    assert!(pub_err.to_string().contains("Publish operation failed"));
+    assert_eq!(pub_err.to_string(), "Publish operation failed: fail");
 
     let exhausted = NatsError::PublishOperationExhausted {
         error: PublishOperationError("fail".into()),
         subject: "s".into(),
         attempts: 4,
     };
-    assert!(exhausted.to_string().contains("4 attempts"));
+    assert_eq!(
+        exhausted.to_string(),
+        "Publish operation failed after 4 attempts on 's': fail"
+    );
 
     let other = NatsError::Other("misc".into());
-    assert!(other.to_string().contains("misc"));
+    assert_eq!(other.to_string(), "NATS error: misc");
 }
 
 #[test]

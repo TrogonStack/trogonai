@@ -279,7 +279,7 @@ async fn dispatch_drops_unknown_subject_suffix() {
 fn bridge_error_display_and_source() {
     let inner = std::io::Error::other("denied");
     let e = BridgeError::Subscribe(Box::new(inner));
-    assert!(e.to_string().contains("subscribe failed"));
+    assert_eq!(e.to_string(), "subscribe failed");
     let source = std::error::Error::source(&e).expect("source must be set");
-    assert!(source.to_string().contains("denied"));
+    assert_eq!(source.to_string(), "denied");
 }

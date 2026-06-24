@@ -17,7 +17,8 @@ fn headers_preserve_ordered_pairs() {
 #[test]
 fn invalid_header_name_is_rejected() {
     let error = MessageHeaders::new([("bad name", "value")]).unwrap_err();
-    assert!(error.to_string().contains("invalid"));
+    assert!(matches!(error, MessageHeadersError::InvalidName { .. }));
+    assert_eq!(error.to_string(), "header name 'bad name' is invalid");
 }
 
 #[test]

@@ -41,7 +41,7 @@ async fn provision_returns_error_on_failure() {
     ctx.fail_next();
     let result = provision_streams(&ctx, &p("acp")).await;
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("ACP_COMMANDS"));
+    assert_eq!(error.to_string(), "stream provisioning failed for ACP_COMMANDS");
     assert!(error.source().is_some());
 }
 

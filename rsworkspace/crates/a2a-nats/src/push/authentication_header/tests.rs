@@ -83,21 +83,19 @@ fn custom_scheme_without_credentials_is_rejected() {
 
 #[test]
 fn error_display_covers_every_variant() {
-    assert!(
-        AuthenticationHeaderBuildError::MissingScheme
-            .to_string()
-            .contains("must not be empty")
+    assert_eq!(
+        AuthenticationHeaderBuildError::MissingScheme.to_string(),
+        "push authentication.scheme must not be empty"
     );
-    assert!(
-        AuthenticationHeaderBuildError::EmptyCredentials
-            .to_string()
-            .contains("credentials required")
+    assert_eq!(
+        AuthenticationHeaderBuildError::EmptyCredentials.to_string(),
+        "push authentication.credentials required for scheme"
     );
-    assert!(
+    assert_eq!(
         AuthenticationHeaderBuildError::UnsupportedScheme {
             scheme: "Digest".into()
         }
-        .to_string()
-        .contains("not supported yet")
+        .to_string(),
+        "push authentication scheme \"Digest\" not supported yet"
     );
 }

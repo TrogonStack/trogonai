@@ -201,8 +201,7 @@ async fn put_returns_schema_error_when_card_missing_required_publishable_fields(
 fn error_display_kv() {
     let inner: BoxedKvError = Box::new(std::io::Error::other("conn failed"));
     let e = CatalogStoreError::Kv(inner);
-    assert!(e.to_string().contains("KV store error"));
-    assert!(e.to_string().contains("conn failed"));
+    assert_eq!(e.to_string(), "KV store error: conn failed");
 }
 
 #[test]
@@ -211,22 +210,23 @@ fn error_kv_preserves_source_chain() {
     let inner: BoxedKvError = Box::new(std::io::Error::other("nats down"));
     let e = CatalogStoreError::Kv(inner);
     let src = e.source().expect("Kv error must expose its source");
-    assert!(src.to_string().contains("nats down"));
+    assert_eq!(src.to_string(), "nats down");
 }
 
 #[test]
 fn error_invalid_key_has_no_source() {
     use std::error::Error;
     let e = CatalogStoreError::InvalidKey("bad.segment".into());
-    assert!(e.to_string().contains("invalid catalog KV key"));
+    assert_eq!(e.to_string(), "invalid catalog KV key: bad.segment");
     assert!(e.source().is_none());
 }
 
 #[test]
 fn error_display_serialize() {
     let inner = serde_json::from_str::<String>("x").unwrap_err();
+    let expected = format!("failed to serialize agent card: {inner}");
     let e = CatalogStoreError::Serialize(inner);
-    assert!(e.to_string().contains("serialize agent card"));
+    assert_eq!(e.to_string(), expected);
 }
 
 #[test]
@@ -241,15 +241,19 @@ fn error_source_serialize() {
 fn error_display_and_source_covers_every_variant() {
     use std::error::Error;
     let bad = serde_json::from_str::<String>("x").unwrap_err();
-    let ser = CatalogStoreError::Serialize(serde_json::from_str::<String>("x").unwrap_err());
+    let ser_inner = serde_json::from_str::<String>("x").unwrap_err();
+    let ser_expected = format!("failed to serialize agent card: {ser_inner}");
+    let de_expected = format!("failed to deserialize agent card: {bad}");
+    let ser = CatalogStoreError::Serialize(ser_inner);
     let de = CatalogStoreError::Deserialize(bad);
     let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
+    let schema_expected = format!("AgentCard rejected by JSON Schema: {schema}");
     let schema_err = CatalogStoreError::AgentCardSchema(schema);
     let gate = CatalogStoreError::ImportGate(ImportGateError::Gateway("x".into()));
 
-    assert!(ser.to_string().contains("serialize"));
-    assert!(de.to_string().contains("deserialize"));
-    assert!(schema_err.to_string().contains("JSON Schema"));
+    assert_eq!(ser.to_string(), ser_expected);
+    assert_eq!(de.to_string(), de_expected);
+    assert_eq!(schema_err.to_string(), schema_expected);
     assert!(!gate.to_string().is_empty());
 
     assert!(de.source().is_some());

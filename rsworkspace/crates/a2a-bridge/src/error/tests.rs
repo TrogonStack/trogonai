@@ -4,10 +4,9 @@ use super::*;
 
 #[test]
 fn display_mint() {
-    assert!(
-        BridgeError::Mint("unavailable".into())
-            .to_string()
-            .contains("auth callout mint")
+    assert_eq!(
+        BridgeError::Mint("unavailable".into()).to_string(),
+        "auth callout mint failed: unavailable"
     );
 }
 

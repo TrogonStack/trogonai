@@ -224,7 +224,11 @@ fn optional_credentials_rejects_partial_configuration() {
     let env = InMemoryEnv::new();
     env.set(ENV_SPICEDB_ENDPOINT, "https://spicedb.example.com:443");
     let err = optional_spicedb_credentials(&env).unwrap_err();
-    assert!(err.to_string().contains(ENV_SPICEDB_TOKEN));
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidToken(_)));
+    assert_eq!(
+        err.to_string(),
+        format!("invalid SpiceDB token: {ENV_SPICEDB_TOKEN} is required when {ENV_SPICEDB_ENDPOINT} is set")
+    );
 }
 
 #[test]
@@ -233,7 +237,11 @@ fn optional_credentials_rejects_partial_configuration_token_only() {
     let env = InMemoryEnv::new();
     env.set(ENV_SPICEDB_TOKEN, "tk");
     let err = optional_spicedb_credentials(&env).unwrap_err();
-    assert!(err.to_string().contains(ENV_SPICEDB_ENDPOINT));
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidEndpoint(_)));
+    assert_eq!(
+        err.to_string(),
+        format!("invalid SpiceDB endpoint: {ENV_SPICEDB_ENDPOINT} is required when {ENV_SPICEDB_TOKEN} is set")
+    );
 }
 
 #[test]
@@ -291,7 +299,8 @@ fn zed_token_ttl_from_env_rejects_non_numeric_value() {
     let env = InMemoryEnv::new();
     env.set(ENV_SPICEDB_ZEDTOKEN_TTL_SECS, "abc");
     let err = zed_token_ttl_from_env(&env).unwrap_err();
-    assert!(err.to_string().contains("invalid SpiceDB ZedToken TTL"));
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidZedTokenTtl(_)));
+    assert_eq!(err.to_string(), "invalid SpiceDB ZedToken TTL: abc");
 }
 
 #[test]
@@ -316,25 +325,21 @@ fn token_debug_redacts_secret() {
 
 #[test]
 fn build_error_display_covers_every_variant() {
-    assert!(
-        SpiceDbImportGateBuildError::InvalidEndpoint("e".into())
-            .to_string()
-            .contains("endpoint")
+    assert_eq!(
+        SpiceDbImportGateBuildError::InvalidEndpoint("e".into()).to_string(),
+        "invalid SpiceDB endpoint: e"
     );
-    assert!(
-        SpiceDbImportGateBuildError::InvalidToken("t".into())
-            .to_string()
-            .contains("token")
+    assert_eq!(
+        SpiceDbImportGateBuildError::InvalidToken("t".into()).to_string(),
+        "invalid SpiceDB token: t"
     );
-    assert!(
-        SpiceDbImportGateBuildError::InvalidZedTokenTtl("ttl".into())
-            .to_string()
-            .contains("TTL")
+    assert_eq!(
+        SpiceDbImportGateBuildError::InvalidZedTokenTtl("ttl".into()).to_string(),
+        "invalid SpiceDB ZedToken TTL: ttl"
     );
-    assert!(
-        SpiceDbImportGateBuildError::Connect("down".into())
-            .to_string()
-            .contains("connect failed")
+    assert_eq!(
+        SpiceDbImportGateBuildError::Connect("down".into()).to_string(),
+        "SpiceDB connect failed: down"
     );
 }
 

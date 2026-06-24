@@ -44,22 +44,35 @@ fn errors_are_scoped_to_the_value_that_failed_to_construct() {
             actual: PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
         }
     );
-    assert!(
-        every_too_large
-            .to_string()
-            .starts_with("every duration must be at most")
+    assert_eq!(
+        every_too_large.to_string(),
+        format!(
+            "every duration must be at most {max:?}, got {actual:?}",
+            max = PROTOBUF_DURATION_MAX,
+            actual = PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
+        )
     );
     assert!(every_too_large.source().is_none());
 
     let cron = CronExpression::new("not a cron").unwrap_err();
-    assert!(cron.to_string().starts_with("cron expression 'not a cron' is invalid:"));
+    assert!(matches!(cron, CronExpressionError::Invalid { ref expr, .. } if expr == "not a cron"));
+    assert_eq!(
+        cron.to_string(),
+        format!("cron expression 'not a cron' is invalid: {}", cron.source().unwrap())
+    );
     assert!(cron.source().is_some());
 
     let rrule_date = RRuleDateTime::new("dtstart", "tomorrow").unwrap_err();
     assert!(
-        rrule_date
-            .to_string()
-            .starts_with("dtstart datetime 'tomorrow' is invalid:")
+        matches!(rrule_date, RRuleDateTimeError::Invalid { field, ref value, .. }
+            if field == "dtstart" && value == "tomorrow")
+    );
+    assert_eq!(
+        rrule_date.to_string(),
+        format!(
+            "dtstart datetime 'tomorrow' is invalid: {}",
+            rrule_date.source().unwrap()
+        )
     );
     assert!(rrule_date.source().is_some());
 
@@ -105,14 +118,21 @@ fn errors_are_scoped_to_the_value_that_failed_to_construct() {
     assert!(reserved_header.source().is_none());
 
     let route = DeliveryRoute::new("bad*route").unwrap_err();
-    assert!(route.to_string().starts_with("delivery route 'bad*route' is invalid:"));
+    assert!(matches!(route, DeliveryRouteError::Invalid { ref route, .. } if route == "bad*route"));
+    assert_eq!(
+        route.to_string(),
+        format!("delivery route 'bad*route' is invalid: {}", route.source().unwrap())
+    );
     assert!(route.source().is_some());
 
     let subject = SamplingSubject::new("bad>subject").unwrap_err();
-    assert!(
-        subject
-            .to_string()
-            .starts_with("sampling subject 'bad>subject' is invalid:")
+    assert!(matches!(subject, SamplingSubjectError::Invalid { ref subject, .. } if subject == "bad>subject"));
+    assert_eq!(
+        subject.to_string(),
+        format!(
+            "sampling subject 'bad>subject' is invalid: {}",
+            subject.source().unwrap()
+        )
     );
     assert!(subject.source().is_some());
 
@@ -129,7 +149,14 @@ fn errors_are_scoped_to_the_value_that_failed_to_construct() {
             actual: PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
         }
     );
-    assert!(ttl_too_large.to_string().starts_with("ttl duration must be at most"));
+    assert_eq!(
+        ttl_too_large.to_string(),
+        format!(
+            "ttl duration must be at most {max:?}, got {actual:?}",
+            max = PROTOBUF_DURATION_MAX,
+            actual = PROTOBUF_DURATION_MAX + Duration::from_nanos(1),
+        )
+    );
     assert!(ttl_too_large.source().is_none());
 }
 
@@ -137,7 +164,10 @@ fn errors_are_scoped_to_the_value_that_failed_to_construct() {
 fn schedule_convenience_errors_only_wrap_schedule_value_failures() {
     let cron = Schedule::cron("not a cron", None).unwrap_err();
     assert!(matches!(cron, ScheduleError::CronExpression(_)));
-    assert!(cron.to_string().starts_with("cron expression 'not a cron' is invalid:"));
+    assert_eq!(
+        cron.to_string(),
+        CronExpression::new("not a cron").unwrap_err().to_string()
+    );
     assert!(cron.source().is_some());
 
     let cron_timezone = Schedule::cron("0 0 * * * *", Some("Nope/Zone".to_string())).unwrap_err();
@@ -147,10 +177,9 @@ fn schedule_convenience_errors_only_wrap_schedule_value_failures() {
 
     let rrule_dtstart = Schedule::rrule("tomorrow", "FREQ=DAILY;COUNT=2", None).unwrap_err();
     assert!(matches!(rrule_dtstart, ScheduleError::RRuleDateTime(_)));
-    assert!(
-        rrule_dtstart
-            .to_string()
-            .starts_with("dtstart datetime 'tomorrow' is invalid:")
+    assert_eq!(
+        rrule_dtstart.to_string(),
+        RRuleDateTime::new("dtstart", "tomorrow").unwrap_err().to_string()
     );
     assert!(rrule_dtstart.source().is_some());
 

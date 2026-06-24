@@ -330,13 +330,18 @@ fn error_code_and_message_client_error() {
 #[test]
 fn terminal_wait_for_exit_error_display() {
     let err = TerminalWaitForExitError::TimedOut;
-    assert!(err.to_string().contains("Timed out"));
-    let json_err = TerminalWaitForExitError::MalformedJson(serde_json::from_str::<()>("{").unwrap_err());
-    assert!(json_err.to_string().contains("malformed JSON"));
+    assert_eq!(err.to_string(), "Timed out waiting for terminal exit");
+
+    let json_err = serde_json::from_str::<()>("{").unwrap_err();
+    let expected = format!("malformed JSON: {json_err}");
+    let json_err_display = TerminalWaitForExitError::MalformedJson(json_err);
+    assert_eq!(json_err_display.to_string(), expected);
+
     let params_err = TerminalWaitForExitError::InvalidParams(agent_client_protocol::Error::new(-32602, "bad params"));
-    assert!(params_err.to_string().contains("invalid params"));
+    assert_eq!(params_err.to_string(), "invalid params: bad params");
+
     let client_err = TerminalWaitForExitError::ClientError(agent_client_protocol::Error::new(-32603, "client failed"));
-    assert!(client_err.to_string().contains("client error"));
+    assert_eq!(client_err.to_string(), "client error: client failed");
 }
 
 #[test]

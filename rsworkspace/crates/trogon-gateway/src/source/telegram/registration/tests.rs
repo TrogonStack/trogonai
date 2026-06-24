@@ -313,7 +313,17 @@ async fn http_response_json_error_propagates() {
         .await
         .unwrap_err();
 
-    assert!(err.to_string().contains("missing field `ok`"));
+    assert!(matches!(
+        err,
+        RegistrationError::Rejected {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            ..
+        }
+    ));
+    assert_eq!(
+        err.to_string(),
+        "Telegram webhook registration rejected with 500 Internal Server Error: missing field `ok`"
+    );
 }
 
 #[cfg(coverage)]
@@ -348,11 +358,9 @@ async fn request_build_failure_is_sanitized_by_registration_error() {
     .unwrap_err();
 
     assert!(matches!(err, RegistrationError::Request(_)));
-    assert!(
-        err.to_string()
-            .starts_with("Telegram webhook registration request failed:")
+    assert_eq!(
+        err.to_string(),
+        "Telegram webhook registration request failed: builder error"
     );
-    assert!(!err.to_string().contains(TEST_BOT_TOKEN));
-    assert!(!err.to_string().contains("/bot"));
     assert!(err.source().is_some());
 }

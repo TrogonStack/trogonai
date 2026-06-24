@@ -28,7 +28,7 @@ fn new_accepts_colon_now_that_idempotency_key_is_length_prefixed() {
 #[test]
 fn error_display_and_debug_render_distinct_messages() {
     let empty = PushNotificationConfigIdError::Empty;
-    assert!(empty.to_string().contains("cannot be empty"));
+    assert_eq!(empty.to_string(), "push notification config id cannot be empty");
     assert!(format!("{empty:?}").contains("Empty"));
 }
 
