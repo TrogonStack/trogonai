@@ -305,14 +305,15 @@ fn error_code_and_message_client_error() {
 
 #[test]
 fn ext_error_display() {
-    let malformed = ExtError::MalformedJson(serde_json::from_slice::<()>(b"bad").unwrap_err());
-    assert!(malformed.to_string().contains("malformed JSON"));
+    let json_err = serde_json::from_slice::<()>(b"bad").unwrap_err();
+    let malformed = ExtError::MalformedJson(json_err);
+    assert_eq!(malformed.to_string(), "malformed JSON: expected value at line 1 column 1");
 
     let missing = ExtError::MissingParams;
-    assert!(missing.to_string().contains("params is null or missing"));
+    assert_eq!(missing.to_string(), "params is null or missing");
 
     let client = ExtError::ClientError(agent_client_protocol::Error::new(-1, "fail"));
-    assert!(client.to_string().contains("client error"));
+    assert_eq!(client.to_string(), "client error: fail");
 }
 
 #[test]
@@ -341,3 +342,4 @@ async fn forward_request_missing_params_returns_error() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), ExtError::MissingParams));
 }
+

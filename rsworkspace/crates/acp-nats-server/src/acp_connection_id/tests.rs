@@ -27,7 +27,7 @@ fn default_generates_non_empty_id() {
 #[test]
 fn parse_error_displays_context() {
     let error = AcpConnectionId::parse("not-a-uuid").unwrap_err();
-    assert!(error.to_string().contains("invalid ACP connection id"));
+    assert!(matches!(error, AcpConnectionIdError::InvalidUuid(_)));
 }
 
 #[test]

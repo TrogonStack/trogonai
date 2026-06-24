@@ -41,11 +41,10 @@ fn telemetry_shutdown_error_formats_all_errors() {
         ],
     };
 
-    let message = error.to_string();
-
-    assert!(message.contains("failed to shutdown OpenTelemetry providers"));
-    assert!(message.contains("trace failed"));
-    assert!(message.contains("metric failed"));
+    assert_eq!(
+        error.to_string(),
+        "failed to shutdown OpenTelemetry providers:\n  - failed to shutdown tracer provider: trace failed\n  - failed to shutdown meter provider: metric failed\n"
+    );
 }
 
 #[test]

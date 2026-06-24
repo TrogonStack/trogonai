@@ -252,11 +252,17 @@ fn upsert_exactly_once_writes_custom_header() {
 fn parse_error_display_covers_every_variant() {
     use std::error::Error as _;
     let unknown = DeliverySemanticsParseError::UnknownShape;
-    assert!(unknown.to_string().contains("atLeastOnce"));
+    assert_eq!(
+        unknown.to_string(),
+        r#"expected "atLeastOnce", "exactlyOnce", { "atLeastOnce": ... }, or { "exactlyOnce": ... }"#
+    );
     assert!(unknown.source().is_none());
 
     let conflicting = DeliverySemanticsParseError::ConflictingShape;
-    assert!(conflicting.to_string().contains("both"));
+    assert_eq!(
+        conflicting.to_string(),
+        r#"deliverySemantics object carries both "atLeastOnce" and "exactlyOnce" keys"#
+    );
     assert!(conflicting.source().is_none());
 
     let invalid = DeliverySemanticsParseError::InvalidIdempotencyHeaderName(

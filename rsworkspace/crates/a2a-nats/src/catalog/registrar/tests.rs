@@ -92,19 +92,20 @@ fn agent_id_from_subject_rejects_invalid_agent_id_segment() {
 #[test]
 fn agent_suffix_error_display_and_source() {
     use std::error::Error;
-    assert!(
-        AgentSuffixError::NotARegisterSubject
-            .to_string()
-            .contains("register subject")
+    assert_eq!(
+        AgentSuffixError::NotARegisterSubject.to_string(),
+        "subject is not a `{prefix}.catalog.register.` register subject"
     );
-    assert!(
-        AgentSuffixError::MissingAgentId
-            .to_string()
-            .contains("missing the `{agent_id}`")
+    assert_eq!(
+        AgentSuffixError::MissingAgentId.to_string(),
+        "register subject is missing the `{agent_id}` segment"
     );
     let id_err = A2aAgentId::new("bad*agent").unwrap_err();
     let wrap = AgentSuffixError::InvalidAgentId(id_err);
-    assert!(wrap.to_string().contains("agent_id is invalid"));
+    assert_eq!(
+        wrap.to_string(),
+        "register subject agent_id is invalid: agent_id contains invalid character: '*'"
+    );
     assert!(wrap.source().is_some());
     assert!(AgentSuffixError::MissingAgentId.source().is_none());
 }
@@ -169,12 +170,15 @@ fn register_payload_error_display_and_source_covers_every_variant() {
     let json = serde_json::from_str::<String>("x").unwrap_err();
     let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
     let value = serde_json::from_str::<String>("x").unwrap_err();
+    let json_expected = format!("JSON parse error: {json}");
+    let schema_expected = format!("AgentCard schema validation failed: {schema}");
+    let value_expected = format!("AgentCard parse error: {value}");
     let json_err = RegisterPayloadError::JsonParse(json);
     let schema_err = RegisterPayloadError::Schema(schema);
     let value_err = RegisterPayloadError::ValueParse(value);
-    assert!(json_err.to_string().contains("JSON parse"));
-    assert!(schema_err.to_string().contains("schema validation"));
-    assert!(value_err.to_string().contains("AgentCard parse"));
+    assert_eq!(json_err.to_string(), json_expected);
+    assert_eq!(schema_err.to_string(), schema_expected);
+    assert_eq!(value_err.to_string(), value_expected);
     assert!(json_err.source().is_some());
     assert!(schema_err.source().is_some());
     assert!(value_err.source().is_some());

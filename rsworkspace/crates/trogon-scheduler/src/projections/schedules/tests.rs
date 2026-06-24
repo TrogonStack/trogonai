@@ -353,7 +353,7 @@
         apply_event_to_read_model_state(&mut states, &id, &added_event("alpha")).unwrap();
         apply_event_to_read_model_state(&mut states, &id, &removed_event("alpha")).unwrap();
         let error = apply_event_to_read_model_state(&mut states, &id, &added_event("alpha")).unwrap_err();
-        assert!(error.to_string().contains("deleted"));
+        assert_eq!(error.to_string(), "job 'alpha' was deleted and cannot be added again");
         assert_eq!(states.get("alpha"), Some(&ScheduleStreamState::Deleted(id)));
     }
 

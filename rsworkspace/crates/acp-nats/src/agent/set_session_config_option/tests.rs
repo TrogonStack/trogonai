@@ -39,7 +39,7 @@ async fn set_session_config_option_validates_session_id() {
     let request = SetSessionConfigOptionRequest::new("invalid.session.id", "theme", "dark");
     let err = bridge.set_session_config_option(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid session ID"));
+    assert!(err.message.contains("Invalid session ID"));
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 

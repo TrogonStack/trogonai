@@ -39,7 +39,7 @@ async fn set_session_model_validates_session_id() {
     let request = SetSessionModelRequest::new("invalid.session.id", "claude-sonnet-4-6");
     let err = bridge.set_session_model(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid session ID"));
+    assert!(err.message.contains("Invalid session ID"));
     assert_eq!(err.code, ErrorCode::InvalidParams);
 }
 

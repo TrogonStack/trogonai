@@ -79,12 +79,17 @@ fn socket_mode_error_sources_are_exposed() {
     assert!(error.source().is_none());
 
     let json_error = serde_json::from_str::<serde_json::Value>("not-json").unwrap_err();
+    let expected_json_error = format!("Slack Socket Mode JSON parsing failed: {json_error}");
     let error = SocketModeError::from(json_error);
-    assert!(error.to_string().contains("JSON parsing failed"));
+    assert!(matches!(error, SocketModeError::Json(_)));
+    assert_eq!(error.to_string(), expected_json_error);
     assert!(error.source().is_some());
 
     let error = SocketModeError::WebSocket(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
-    assert!(error.to_string().contains("WebSocket failed"));
+    assert_eq!(
+        error.to_string(),
+        "Slack Socket Mode WebSocket failed: Connection closed normally"
+    );
     assert!(error.source().is_some());
 
     let error = SocketModeError::Api("invalid_auth".to_string());
@@ -582,8 +587,13 @@ async fn apps_connections_open_http_error_exposes_source() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, SocketModeError::Http(_)));
-    assert!(error.to_string().contains("HTTP request failed"));
+    let SocketModeError::Http(http_err) = &error else {
+        panic!("expected Http error, got {error:?}");
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("Slack Socket Mode HTTP request failed: {http_err}")
+    );
     assert!(error.source().is_some());
 }
 
@@ -613,8 +623,13 @@ async fn connect_once_websocket_error_exposes_source() {
     .unwrap()
     .unwrap_err();
 
-    assert!(matches!(error, SocketModeError::WebSocket(_)));
-    assert!(error.to_string().contains("WebSocket failed"));
+    let SocketModeError::WebSocket(ws_err) = &error else {
+        panic!("expected WebSocket error, got {error:?}");
+    };
+    assert_eq!(
+        error.to_string(),
+        format!("Slack Socket Mode WebSocket failed: {ws_err}")
+    );
     assert!(error.source().is_some());
 }
 

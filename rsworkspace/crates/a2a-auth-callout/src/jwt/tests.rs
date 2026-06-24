@@ -69,17 +69,18 @@ fn mint_rejects_wrong_verification_key() {
 
 #[test]
 fn caller_id_rejects_dots() {
-    assert!(CallerId::new("a.b").unwrap_err().to_string().contains("caller_id"));
+    assert!(matches!(
+        CallerId::new("a.b").unwrap_err(),
+        JwtError::InvalidCallerId
+    ));
 }
 
 #[test]
 fn external_subject_requires_non_empty() {
-    assert!(
-        ExternalSubject::new("")
-            .unwrap_err()
-            .to_string()
-            .contains("external subject")
-    );
+    assert!(matches!(
+        ExternalSubject::new("").unwrap_err(),
+        JwtError::InvalidExternalSubject
+    ));
 }
 
 #[test]

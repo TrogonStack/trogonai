@@ -221,7 +221,16 @@ async fn discover_rejects_jwks_uri_outside_issuer_origin() {
     let Err(err) = res else {
         panic!("expected origin mismatch error");
     };
-    assert!(err.to_string().contains("outside issuer origin"));
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
+        panic!("expected jwks_uri origin mismatch");
+    };
+    assert_eq!(
+        msg,
+        format!(
+            "OIDC jwks_uri \"https://attacker.example.com/jwks\" is outside issuer origin {:?}",
+            mock_srv.uri()
+        )
+    );
 }
 
 #[tokio::test]
@@ -240,7 +249,17 @@ async fn discover_rejects_mismatched_issuer_claim() {
     let Err(err) = res else {
         panic!("expected issuer mismatch error");
     };
-    assert!(err.to_string().contains("issuer mismatch"));
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
+        panic!("expected issuer mismatch");
+    };
+    assert_eq!(
+        msg,
+        format!(
+            "OIDC discovery issuer mismatch: configured={:?} discovered={:?}",
+            mock_srv.uri(),
+            "https://other.example.com"
+        )
+    );
 }
 
 #[test]

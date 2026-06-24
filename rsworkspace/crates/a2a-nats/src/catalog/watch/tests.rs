@@ -36,21 +36,23 @@ fn entry(key: &str, op: Operation, value: Bytes, revision: u64) -> kv::Entry {
 fn watch_error_display_covers_every_variant() {
     let bad = serde_json::from_str::<String>("x").unwrap_err();
     let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
-    assert!(AgentCardWatchError::Kv("down".into()).to_string().contains("KV watch"));
-    assert!(
-        AgentCardWatchError::InvalidKey("bad".into())
-            .to_string()
-            .contains("invalid catalog key")
+    let deserialize_expected = format!("failed to deserialize AgentCard: {bad}");
+    let schema_expected = format!("AgentCard schema validation failed: {schema}");
+    assert_eq!(
+        AgentCardWatchError::Kv("down".into()).to_string(),
+        "KV watch error: down"
     );
-    assert!(
-        AgentCardWatchError::Deserialize(bad)
-            .to_string()
-            .contains("deserialize AgentCard")
+    assert_eq!(
+        AgentCardWatchError::InvalidKey("bad".into()).to_string(),
+        "invalid catalog key: bad"
     );
-    assert!(
-        AgentCardWatchError::Schema(schema)
-            .to_string()
-            .contains("schema validation failed")
+    assert_eq!(
+        AgentCardWatchError::Deserialize(bad).to_string(),
+        deserialize_expected
+    );
+    assert_eq!(
+        AgentCardWatchError::Schema(schema).to_string(),
+        schema_expected
     );
 }
 

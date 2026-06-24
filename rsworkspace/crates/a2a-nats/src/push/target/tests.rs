@@ -37,11 +37,22 @@ fn display_roundtrips_url() {
 #[test]
 fn error_display_covers_every_variant() {
     let parse_err = WebhookUrl::new("not a url").unwrap_err();
-    assert!(parse_err.to_string().contains("not a valid URL"));
+    let WebhookUrlError::Parse { ref raw, ref reason } = parse_err else {
+        panic!("expected Parse variant, got {parse_err:?}");
+    };
+    assert_eq!(
+        parse_err.to_string(),
+        format!("webhook URL is not a valid URL ({reason}): {raw}")
+    );
 
     let scheme_err = WebhookUrl::new("ftp://bad").unwrap_err();
-    assert!(scheme_err.to_string().contains("ftp://"));
-    assert!(scheme_err.to_string().contains("must use http"));
+    let WebhookUrlError::UnsupportedScheme { ref raw, ref scheme } = scheme_err else {
+        panic!("expected UnsupportedScheme variant, got {scheme_err:?}");
+    };
+    assert_eq!(
+        scheme_err.to_string(),
+        format!("webhook URL must use http:// or https://, got {scheme}://: {raw}")
+    );
 }
 
 #[test]

@@ -84,7 +84,10 @@ async fn provision_store_surfaces_get_errors_after_already_exists() {
     let error = provision_store::<_, MockJetStreamKvStore>(&client, &config)
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("failed to open existing lease bucket"));
+    assert_eq!(
+        error.to_string(),
+        "lease provision error: failed to open existing lease bucket after create reported already exists: failed to get the bucket"
+    );
 }
 
 #[tokio::test]
@@ -96,7 +99,10 @@ async fn provision_store_surfaces_create_errors() {
     let error = provision_store::<_, MockJetStreamKvStore>(&client, &config)
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("failed to create lease bucket"));
+    assert_eq!(
+        error.to_string(),
+        "lease provision error: failed to create lease bucket: timed out"
+    );
 }
 
 #[tokio::test]
@@ -111,10 +117,9 @@ async fn provision_store_surfaces_status_errors() {
     let error = provision_store::<_, MockJetStreamKvStore>(&client, &config)
         .await
         .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("failed to inspect lease bucket configuration")
+    assert_eq!(
+        error.to_string(),
+        "lease provision error: failed to inspect lease bucket configuration: timed out"
     );
 }
 

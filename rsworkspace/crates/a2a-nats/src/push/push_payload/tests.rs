@@ -83,15 +83,22 @@ fn invalid_json_base_surfaces_serde_error() {
 fn augment_error_display_and_source_covers_every_variant() {
     use std::error::Error as _;
     let non_object = PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey;
-    assert!(non_object.to_string().contains("JSON object payload"));
+    assert_eq!(
+        non_object.to_string(),
+        "exactly-once idempotency key requires a JSON object payload to attach the key field"
+    );
     assert!(non_object.source().is_none());
 
     let missing = PushPayloadAugmentError::MissingIdempotencyKey;
-    assert!(missing.to_string().contains("require an idempotency key"));
+    assert_eq!(
+        missing.to_string(),
+        "exactly-once delivery semantics require an idempotency key but none was supplied"
+    );
     assert!(missing.source().is_none());
 
     let json_err = serde_json::from_slice::<Value>(b"not json").unwrap_err();
+    let json_expected = format!("push payload is not valid JSON: {json_err}");
     let wrapped = PushPayloadAugmentError::Json(json_err);
-    assert!(wrapped.to_string().contains("not valid JSON"));
+    assert_eq!(wrapped.to_string(), json_expected);
     assert!(wrapped.source().is_some());
 }

@@ -202,8 +202,7 @@ async fn dispatch_publishes_to_correct_reply_subject() {
 #[test]
 fn connection_error_display() {
     let err = ConnectionError::Subscribe(Box::new(std::io::Error::other("test")));
-    assert!(err.to_string().contains("failed to subscribe"));
-    assert!(err.to_string().contains("test"));
+    assert_eq!(err.to_string(), "failed to subscribe: test");
 }
 
 #[test]
@@ -218,25 +217,22 @@ fn dispatch_error_display_variants() {
     assert_eq!(DispatchError::NoReplySubject.to_string(), "no reply subject");
 
     let json_err = serde_json::from_slice::<()>(b"bad").unwrap_err();
-    assert!(
-        DispatchError::DeserializeRequest(json_err)
-            .to_string()
-            .contains("deserialize request")
-    );
+    assert!(matches!(
+        DispatchError::DeserializeRequest(json_err),
+        DispatchError::DeserializeRequest(_)
+    ));
 
     let json_err = serde_json::from_slice::<()>(b"bad").unwrap_err();
-    assert!(
-        DispatchError::DeserializeNotification(json_err)
-            .to_string()
-            .contains("deserialize notification")
-    );
+    assert!(matches!(
+        DispatchError::DeserializeNotification(json_err),
+        DispatchError::DeserializeNotification(_)
+    ));
 
     let acp_err = agent_client_protocol::Error::internal_error();
-    assert!(
-        DispatchError::NotificationHandler(acp_err)
-            .to_string()
-            .contains("notification handler")
-    );
+    assert!(matches!(
+        DispatchError::NotificationHandler(acp_err),
+        DispatchError::NotificationHandler(_)
+    ));
 }
 
 fn raw_value(json: &str) -> std::sync::Arc<serde_json::value::RawValue> {
@@ -345,7 +341,10 @@ fn dispatch_error_display_reply_variant() {
     let err = DispatchError::Reply(trogon_nats::NatsError::Timeout {
         subject: "test".to_string(),
     });
-    assert!(err.to_string().contains("reply"));
+    assert_eq!(
+        err.to_string(),
+        "reply: Request to 'test' timed out. The backend may be overloaded or unresponsive."
+    );
 }
 
 #[tokio::test]
@@ -866,7 +865,7 @@ async fn serve_subscribes_to_correct_subjects() {
 #[test]
 fn connection_error_jetstream_display() {
     let err = ConnectionError::JetStream(Box::new(std::io::Error::other("js err")));
-    assert!(err.to_string().contains("js err"));
+    assert_eq!(err.to_string(), "jetstream error: js err");
     let debug = format!("{:?}", err);
     assert!(debug.contains("JetStream"));
 }

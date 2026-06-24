@@ -23,5 +23,8 @@ fn rejects_durations_larger_than_the_go_maximum() {
 
     let error = format_go_duration(too_large).unwrap_err();
     assert!(matches!(error, GoDurationError::TooLarge { .. }));
-    assert!(error.to_string().contains("exceeds the maximum Go duration"));
+    assert_eq!(
+        error.to_string(),
+        "duration of 10000000000000000000ns exceeds the maximum Go duration of 9223372036854775807ns"
+    );
 }

@@ -67,6 +67,9 @@ fn telegram_public_webhook_url_preserves_parse_error_source() {
     let err = TelegramPublicWebhookUrl::new("not a url").unwrap_err();
 
     assert!(matches!(err, TelegramPublicWebhookUrlError::Parse(_)));
-    assert!(err.to_string().starts_with("invalid public webhook URL:"));
+    assert_eq!(
+        err.to_string(),
+        "invalid public webhook URL: relative URL without a base"
+    );
     assert!(std::error::Error::source(&err).is_some());
 }

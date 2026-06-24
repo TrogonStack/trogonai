@@ -254,12 +254,13 @@ async fn handle_success_serialization_fallback_sends_error_reply() {
 #[test]
 fn terminal_create_error_display() {
     let err = serde_json::from_slice::<CreateTerminalRequest>(b"not json").unwrap_err();
+    let expected = format!("invalid request: {err}");
     let tc_err = TerminalCreateError::InvalidRequest(err);
-    assert!(tc_err.to_string().contains("invalid request"));
+    assert_eq!(tc_err.to_string(), expected);
 
     let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "create failed");
     let tc_err = TerminalCreateError::ClientError(client_err);
-    assert!(tc_err.to_string().contains("client error"));
+    assert_eq!(tc_err.to_string(), "client error: create failed");
 }
 
 #[test]

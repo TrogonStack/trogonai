@@ -163,27 +163,29 @@ fn compose_rejects_unknown_method_suffix() {
 
 #[test]
 fn ingress_error_display_covers_every_variant() {
-    assert!(
-        GatewayIngressError::NotGatewayIngress
-            .to_string()
-            .contains("does not start")
+    assert_eq!(
+        GatewayIngressError::NotGatewayIngress.to_string(),
+        "subject does not start with '{prefix}.gateway.' for the configured prefix"
     );
-    assert!(GatewayIngressError::BadSubjectShape.to_string().contains("expected"));
-    assert!(
-        GatewayIngressError::UnknownMethodSuffix
-            .to_string()
-            .contains("unknown method")
+    assert_eq!(
+        GatewayIngressError::BadSubjectShape.to_string(),
+        "expected '{prefix}.gateway.{agent_id}.{method…}'"
     );
-    assert!(GatewayIngressError::InvalidAgentId.to_string().contains("agent id"));
-    assert!(
-        GatewayComposeError::EmptyMethodTail
-            .to_string()
-            .contains("method suffix is empty")
+    assert_eq!(
+        GatewayIngressError::UnknownMethodSuffix.to_string(),
+        "unknown method suffix after gateway segment"
     );
-    assert!(
-        GatewayComposeError::UnknownMethodSuffix
-            .to_string()
-            .contains("not a recognised")
+    assert_eq!(
+        GatewayIngressError::InvalidAgentId.to_string(),
+        "agent id segment fails NATS token validation"
+    );
+    assert_eq!(
+        GatewayComposeError::EmptyMethodTail.to_string(),
+        "gateway ingress method suffix is empty"
+    );
+    assert_eq!(
+        GatewayComposeError::UnknownMethodSuffix.to_string(),
+        "gateway ingress method suffix is not a recognised A2A operation"
     );
 }
 

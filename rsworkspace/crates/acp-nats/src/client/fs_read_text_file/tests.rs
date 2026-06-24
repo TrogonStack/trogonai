@@ -385,12 +385,13 @@ async fn forward_to_client_params_none_returns_invalid_request() {
 #[test]
 fn fs_read_text_file_error_display() {
     let err = serde_json::from_slice::<ReadTextFileRequest>(b"not json").unwrap_err();
+    let expected = format!("invalid request: {err}");
     let fs_err = FsReadTextFileError::InvalidRequest(err);
-    assert!(fs_err.to_string().contains("invalid request"));
+    assert_eq!(fs_err.to_string(), expected);
 
     let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
     let fs_err = FsReadTextFileError::ClientError(client_err);
-    assert!(fs_err.to_string().contains("client error"));
+    assert_eq!(fs_err.to_string(), "client error: file not found");
 }
 
 #[test]

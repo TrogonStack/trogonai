@@ -480,31 +480,40 @@ fn build_update_headers_sets_expected_revision_and_integer_seconds_ttl() {
 #[test]
 fn lease_config_error_display_messages_are_actionable() {
     let empty_bucket = LeaseConfigError::EmptyBucket;
-    assert!(empty_bucket.to_string().contains("must not be empty"));
+    assert_eq!(empty_bucket.to_string(), "lease bucket must not be empty");
     let empty_key = LeaseConfigError::EmptyKey;
-    assert!(empty_key.to_string().contains("must not be empty"));
+    assert_eq!(empty_key.to_string(), "lease key must not be empty");
 
     let invalid_bucket = LeaseConfigError::InvalidBucketName("bad.bucket".to_string());
-    assert!(invalid_bucket.to_string().contains("must contain only ASCII letters"));
+    assert_eq!(
+        invalid_bucket.to_string(),
+        "lease bucket 'bad.bucket' must contain only ASCII letters, digits, '-' or '_'"
+    );
 
     let invalid_key = LeaseConfigError::InvalidKeyName("bad key".to_string());
-    assert!(invalid_key.to_string().contains("must contain only ASCII letters"));
+    assert_eq!(
+        invalid_key.to_string(),
+        "lease key 'bad key' must contain only ASCII letters, digits, '-', '_', '/', '=' or '.'"
+    );
 
     let invalid_timing = LeaseConfigError::RenewIntervalNotLessThanTtl {
         renew_interval: Duration::from_secs(5),
         ttl: Duration::from_secs(5),
     };
-    assert!(invalid_timing.to_string().contains("must be less than ttl"));
+    assert_eq!(
+        invalid_timing.to_string(),
+        "lease renew interval 5s must be less than ttl 5s"
+    );
 }
 
 #[test]
 fn ensure_leader_error_exposes_display_and_source() {
     let acquire = EnsureLeaderError::Acquire(kv::CreateError::new(kv::CreateErrorKind::Other));
-    assert!(acquire.to_string().contains("failed to acquire lease"));
+    assert_eq!(acquire.to_string(), "failed to acquire lease: other error");
     assert!(std::error::Error::source(&acquire).is_some());
 
     let renew = EnsureLeaderError::Renew(kv::UpdateError::new(kv::UpdateErrorKind::Other));
-    assert!(renew.to_string().contains("failed to renew lease"));
+    assert_eq!(renew.to_string(), "failed to renew lease: failed getting entry");
     assert!(std::error::Error::source(&renew).is_some());
 }
 
@@ -523,7 +532,10 @@ fn incompatible_bucket_config_error_has_message_and_source() {
     .unwrap_err();
 
     assert!(matches!(error, LeaseError::IncompatibleBucketConfig { .. }));
-    assert!(error.to_string().contains("incompatible bucket config"));
+    assert_eq!(
+        error.to_string(),
+        "lease provision error: incompatible bucket config: expected history=1, max_age=0ns, allow_message_ttl=true, subject_delete_marker_ttl=Some(10s), got history=1, max_age=0ns, allow_message_ttl=true, subject_delete_marker_ttl=Some(1s)"
+    );
     assert!(std::error::Error::source(&error).is_some());
 }
 
@@ -589,24 +601,32 @@ fn lease_error_display_mentions_context_for_provision_failures() {
         "failed to create lease bucket",
         LeaseProvisionError::CreateBucket(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut)),
     );
-    assert!(error.to_string().contains("failed to create lease bucket"));
+    assert_eq!(
+        error.to_string(),
+        "lease provision error: failed to create lease bucket: timed out"
+    );
 }
 
 #[test]
 fn nats_kv_lease_provision_error_helpers_set_expected_context() {
     let create = create_bucket_error(CreateKeyValueError::new(CreateKeyValueErrorKind::TimedOut));
-    assert!(create.to_string().contains("failed to create lease bucket"));
+    assert_eq!(
+        create.to_string(),
+        "lease provision error: failed to create lease bucket: timed out"
+    );
 
     let open = open_existing_bucket_error(KeyValueError::new(
         async_nats::jetstream::context::KeyValueErrorKind::GetBucket,
     ));
-    assert!(open.to_string().contains("failed to open existing lease bucket"));
+    assert_eq!(
+        open.to_string(),
+        "lease provision error: failed to open existing lease bucket after create reported already exists: failed to get the bucket"
+    );
 
     let inspect = inspect_bucket_error(kv::StatusError::new(kv::StatusErrorKind::TimedOut));
-    assert!(
-        inspect
-            .to_string()
-            .contains("failed to inspect lease bucket configuration")
+    assert_eq!(
+        inspect.to_string(),
+        "lease provision error: failed to inspect lease bucket configuration: timed out"
     );
 }
 

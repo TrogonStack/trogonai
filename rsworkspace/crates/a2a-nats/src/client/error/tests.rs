@@ -76,20 +76,24 @@ fn unknown_code_maps_to_generic_jsonrpc() {
 
 #[test]
 fn display_serialize() {
-    let err = ClientError::Serialize(serde_json::from_str::<String>("x").unwrap_err());
-    assert!(err.to_string().contains("serialize request"));
+    let inner = serde_json::from_str::<String>("x").unwrap_err();
+    let expected = format!("failed to serialize request: {inner}");
+    let err = ClientError::Serialize(inner);
+    assert_eq!(err.to_string(), expected);
 }
 
 #[test]
 fn display_deserialize() {
-    let err = ClientError::Deserialize(serde_json::from_str::<String>("x").unwrap_err());
-    assert!(err.to_string().contains("deserialize response"));
+    let inner = serde_json::from_str::<String>("x").unwrap_err();
+    let expected = format!("failed to deserialize response: {inner}");
+    let err = ClientError::Deserialize(inner);
+    assert_eq!(err.to_string(), expected);
 }
 
 #[test]
 fn display_transport() {
     let err = ClientError::Transport("conn reset".into());
-    assert!(err.to_string().contains("transport error: conn reset"));
+    assert_eq!(err.to_string(), "transport error: conn reset");
 }
 
 #[test]
@@ -97,75 +101,74 @@ fn display_timeout() {
     let err = ClientError::Timeout {
         subject: "a.b.c".into(),
     };
-    assert!(err.to_string().contains("'a.b.c' timed out"));
+    assert_eq!(err.to_string(), "request to 'a.b.c' timed out");
 }
 
 #[test]
 fn display_jetstream() {
     let err = ClientError::JetStream("no stream".into());
-    assert!(err.to_string().contains("JetStream error"));
+    assert_eq!(err.to_string(), "JetStream error: no stream");
 }
 
 #[test]
 fn display_task_not_found() {
-    assert!(ClientError::TaskNotFound.to_string().contains("task not found"));
+    assert_eq!(ClientError::TaskNotFound.to_string(), "task not found");
 }
 
 #[test]
 fn display_task_not_cancelable() {
-    assert!(ClientError::TaskNotCancelable.to_string().contains("not cancelable"));
+    assert_eq!(ClientError::TaskNotCancelable.to_string(), "task is not cancelable");
 }
 
 #[test]
 fn display_push_not_supported() {
-    assert!(ClientError::PushNotificationNotSupported.to_string().contains("push"));
+    assert_eq!(
+        ClientError::PushNotificationNotSupported.to_string(),
+        "push notifications not supported"
+    );
 }
 
 #[test]
 fn display_unsupported_op() {
-    assert!(ClientError::UnsupportedOperation.to_string().contains("not supported"));
+    assert_eq!(ClientError::UnsupportedOperation.to_string(), "operation not supported");
 }
 
 #[test]
 fn display_content_type() {
-    assert!(
-        ClientError::ContentTypeNotSupported
-            .to_string()
-            .contains("content type")
+    assert_eq!(
+        ClientError::ContentTypeNotSupported.to_string(),
+        "content type not supported"
     );
 }
 
 #[test]
 fn display_invalid_agent_response() {
-    assert!(ClientError::InvalidAgentResponse.to_string().contains("invalid agent"));
+    assert_eq!(ClientError::InvalidAgentResponse.to_string(), "invalid agent response");
 }
 
 #[test]
 fn display_agent_unavailable() {
-    assert!(ClientError::AgentUnavailable.to_string().contains("unavailable"));
+    assert_eq!(ClientError::AgentUnavailable.to_string(), "agent unavailable");
 }
 
 #[test]
 fn display_extended_card_not_configured() {
-    assert!(
-        ClientError::ExtendedAgentCardNotConfigured
-            .to_string()
-            .contains("extended agent card")
+    assert_eq!(
+        ClientError::ExtendedAgentCardNotConfigured.to_string(),
+        "extended agent card not configured"
     );
 }
 
 #[test]
 fn display_extension_support_required() {
     let err = ClientError::ExtensionSupportRequired("foo".into());
-    assert!(err.to_string().contains("extension support required"));
-    assert!(err.to_string().contains("foo"));
+    assert_eq!(err.to_string(), "extension support required: foo");
 }
 
 #[test]
 fn display_version_not_supported() {
     let err = ClientError::VersionNotSupported("0.4".into());
-    assert!(err.to_string().contains("version not supported"));
-    assert!(err.to_string().contains("0.4"));
+    assert_eq!(err.to_string(), "A2A protocol version not supported: 0.4");
 }
 
 #[test]
@@ -174,40 +177,44 @@ fn display_jsonrpc_generic() {
         code: -32001,
         message: "oops".into(),
     };
-    assert!(err.to_string().contains("-32001"));
-    assert!(err.to_string().contains("oops"));
+    assert_eq!(err.to_string(), "JSON-RPC error -32001: oops");
 }
 
 #[test]
 fn display_consumer_setup() {
     let err = ClientError::ConsumerSetup("no stream".into());
-    assert!(err.to_string().contains("consumer"));
+    assert_eq!(err.to_string(), "failed to set up event consumer: no stream");
 }
 
 #[test]
 fn display_stream_closed() {
-    assert!(ClientError::StreamClosed.to_string().contains("closed"));
+    assert_eq!(
+        ClientError::StreamClosed.to_string(),
+        "event stream closed unexpectedly"
+    );
 }
 
 #[test]
 fn display_invalid_rpc_subject_overlay() {
-    assert!(
-        ClientError::InvalidRpcSubjectOverlay
-            .to_string()
-            .contains("gateway ingress")
+    assert_eq!(
+        ClientError::InvalidRpcSubjectOverlay.to_string(),
+        "internal error deriving gateway ingress subject"
     );
 }
 
 #[test]
 fn display_gateway_caller_jwt_expired() {
     let err = ClientError::GatewayCallerJwtExpired("user JWT expired".into());
-    assert!(err.to_string().contains("expired"));
+    assert_eq!(err.to_string(), "gateway caller JWT expired: user JWT expired");
 }
 
 #[test]
 fn display_gateway_caller_jwt_invalid() {
     let err = ClientError::GatewayCallerJwtInvalid("user JWT missing exp".into());
-    assert!(err.to_string().contains("failed freshness check"));
+    assert_eq!(
+        err.to_string(),
+        "gateway caller JWT failed freshness check: user JWT missing exp"
+    );
 }
 
 #[test]

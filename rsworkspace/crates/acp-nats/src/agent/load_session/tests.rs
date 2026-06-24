@@ -74,7 +74,7 @@ async fn load_session_validates_session_id() {
     let (_mock, _js, bridge) = mock_bridge();
     let request = LoadSessionRequest::new("invalid.session.id", ".");
     let err = bridge.load_session(request).await.unwrap_err();
-    assert!(err.to_string().contains("Invalid session ID"));
+    assert!(err.message.contains("Invalid session ID"));
 }
 
 #[tokio::test]

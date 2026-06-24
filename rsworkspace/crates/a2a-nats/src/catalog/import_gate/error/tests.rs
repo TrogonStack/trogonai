@@ -4,10 +4,9 @@ use super::*;
 
 #[test]
 fn display_gateway() {
-    assert!(
-        ImportGateError::Gateway("spicedb down".into())
-            .to_string()
-            .contains("import gate")
+    assert_eq!(
+        ImportGateError::Gateway("spicedb down".into()).to_string(),
+        "federated discovery import gate: spicedb down"
     );
 }
 

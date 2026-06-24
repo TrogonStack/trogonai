@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::CredentialError;
 
 fn make_registry() -> ApiKeyRegistry {
     ApiKeyRegistry::new(b"test-hmac-secret".to_vec())
@@ -51,15 +52,20 @@ async fn verify_rejects_audience_mismatch() {
     let other = AudienceAccount::new("nats-acct-evil");
     #[allow(deprecated)]
     let err = verifier.verify("my-secret-key", &other).await.unwrap_err();
-    assert!(matches!(err, AuthCalloutError::CredentialVerification(_)));
-    assert!(err.to_string().contains("audience mismatch"));
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidRequest(msg)) = err else {
+        panic!("expected audience mismatch InvalidRequest");
+    };
+    assert_eq!(
+        msg,
+        "API key audience mismatch: requested=\"nats-acct-evil\" registered=\"nats-acct-1\""
+    );
 }
 
 #[test]
 fn apikey_rejects_empty() {
     let err = ApiKey::new("").unwrap_err();
     assert!(matches!(err, ApiKeyError::Empty));
-    assert!(err.to_string().contains("empty"));
+    assert_eq!(err.to_string(), "API key must not be empty");
 }
 
 #[test]

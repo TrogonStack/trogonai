@@ -25,7 +25,10 @@ fn wire_form_prefixes_subject() {
 #[test]
 fn error_display_includes_violation() {
     let err = NatsPushSubject::new("").unwrap_err();
-    assert!(err.to_string().contains("invalid NATS push subject"));
+    assert_eq!(
+        err.to_string(),
+        "invalid NATS push subject: subject token is empty"
+    );
 }
 
 #[test]

@@ -20,5 +20,8 @@ fn accepts_category_string() {
 #[test]
 fn display_renders_both_error_variants() {
     assert_eq!(DenialReasonError::Empty.to_string(), "denial reason must be non-empty");
-    assert!(DenialReasonError::TooLong.to_string().contains("must be at most"));
+    assert_eq!(
+        DenialReasonError::TooLong.to_string(),
+        format!("denial reason must be at most {MAX_LEN} characters")
+    );
 }

@@ -217,9 +217,10 @@ fn tier3_refusal_error_display_renders_reason_tag() {
     // Tier-3 skills' integration tests exercise once their fixtures
     // land.
     let err = RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into()));
-    let rendered = err.to_string();
-    assert!(rendered.contains("tier-3 skill refused"));
-    assert!(rendered.contains("UnauthorizedDataCategory"));
+    assert_eq!(
+        err.to_string(),
+        "tier-3 skill refused redaction: UnauthorizedDataCategory"
+    );
 }
 
 #[test]

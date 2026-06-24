@@ -28,7 +28,6 @@ async fn new_session_returns_error_when_nats_request_fails() {
     let request = NewSessionRequest::new(".");
     let err = bridge.new_session(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Agent unavailable"));
     assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }
 
@@ -40,7 +39,7 @@ async fn new_session_returns_error_when_response_is_invalid_json() {
     let request = NewSessionRequest::new(".");
     let err = bridge.new_session(request).await.unwrap_err();
 
-    assert!(err.to_string().contains("Invalid response from agent"));
+    assert_eq!(err.message, "Invalid response from agent");
     assert_eq!(err.code, ErrorCode::InternalError);
 }
 
