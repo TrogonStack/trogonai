@@ -105,7 +105,6 @@ fn round_trips_every_schedule_kind_and_status() {
     }
 }
 
-
 #[test]
 fn corrupt_bytes_are_rejected() {
     assert!(matches!(
@@ -189,10 +188,7 @@ fn codec_errors_display_and_expose_sources() {
     let wire = decode_checkpoint_record(b"not proto").unwrap_err();
     assert_eq!(
         wire.to_string(),
-        format!(
-            "checkpoint record wire format is invalid: {}",
-            wire.source().unwrap()
-        )
+        format!("checkpoint record wire format is invalid: {}", wire.source().unwrap())
     );
     assert!(std::error::Error::source(&wire).is_some());
 

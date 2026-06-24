@@ -107,10 +107,7 @@ fn dispatch_error_display_and_source_cover_every_variant() {
     assert!(header.source().is_some());
 
     let nats = DispatchError::NatsPublish(NatsPublishDispatchError::new(subject(), std::io::Error::other("oops")));
-    assert_eq!(
-        nats.to_string(),
-        "NATS publish to a2a.push.t.caller.task failed: oops"
-    );
+    assert_eq!(nats.to_string(), "NATS publish to a2a.push.t.caller.task failed: oops");
     assert!(nats.source().is_some());
 
     let js = DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(

@@ -91,10 +91,7 @@ fn display_roundtrips_http_target() {
 fn error_display_covers_every_variant() {
     use std::error::Error as _;
     let empty = PushNotificationTargetError::Empty;
-    assert_eq!(
-        empty.to_string(),
-        "push notification URL must not be empty"
-    );
+    assert_eq!(empty.to_string(), "push notification URL must not be empty");
     assert!(empty.source().is_none());
 
     let unknown = PushNotificationTarget::parse("ftp://example.com").unwrap_err();

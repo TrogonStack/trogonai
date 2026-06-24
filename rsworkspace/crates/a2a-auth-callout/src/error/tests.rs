@@ -96,8 +96,5 @@ fn display_covers_remaining_variants() {
         AuthCalloutError::WireFormat("x".into()).to_string(),
         "auth callout wire format error: x"
     );
-    assert_eq!(
-        AuthCalloutError::Internal("x".into()).to_string(),
-        "internal error: x"
-    );
+    assert_eq!(AuthCalloutError::Internal("x".into()).to_string(), "internal error: x");
 }

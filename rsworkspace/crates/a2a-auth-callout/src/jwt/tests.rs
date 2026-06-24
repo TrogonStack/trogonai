@@ -69,10 +69,7 @@ fn mint_rejects_wrong_verification_key() {
 
 #[test]
 fn caller_id_rejects_dots() {
-    assert!(matches!(
-        CallerId::new("a.b").unwrap_err(),
-        JwtError::InvalidCallerId
-    ));
+    assert!(matches!(CallerId::new("a.b").unwrap_err(), JwtError::InvalidCallerId));
 }
 
 #[test]

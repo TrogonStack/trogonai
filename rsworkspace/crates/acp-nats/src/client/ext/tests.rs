@@ -307,7 +307,10 @@ fn error_code_and_message_client_error() {
 fn ext_error_display() {
     let json_err = serde_json::from_slice::<()>(b"bad").unwrap_err();
     let malformed = ExtError::MalformedJson(json_err);
-    assert_eq!(malformed.to_string(), "malformed JSON: expected value at line 1 column 1");
+    assert_eq!(
+        malformed.to_string(),
+        "malformed JSON: expected value at line 1 column 1"
+    );
 
     let missing = ExtError::MissingParams;
     assert_eq!(missing.to_string(), "params is null or missing");
@@ -342,4 +345,3 @@ async fn forward_request_missing_params_returns_error() {
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), ExtError::MissingParams));
 }
-

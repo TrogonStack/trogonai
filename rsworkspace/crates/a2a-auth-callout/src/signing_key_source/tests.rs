@@ -45,7 +45,10 @@ fn env_source_current_previous_missing_and_warn_once() {
         std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET");
     }
     let err = EnvSigningKeySource::from_env().unwrap_err();
-    assert!(matches!(err, AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")));
+    assert!(matches!(
+        err,
+        AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
+    ));
 }
 
 #[test]

@@ -7,10 +7,7 @@ fn timeout_returns_agent_unavailable() {
     let err = map_nats_error(NatsError::Timeout {
         subject: "test.subject".into(),
     });
-    assert_eq!(
-        err.message,
-        "Request timed out; agent may be overloaded or unavailable"
-    );
+    assert_eq!(err.message, "Request timed out; agent may be overloaded or unavailable");
     assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
 }
 

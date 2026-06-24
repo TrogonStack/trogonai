@@ -227,9 +227,7 @@ fn optional_credentials_rejects_partial_configuration() {
     assert!(matches!(err, SpiceDbImportGateBuildError::InvalidToken(_)));
     assert_eq!(
         err.to_string(),
-        format!(
-            "invalid SpiceDB token: {ENV_SPICEDB_TOKEN} is required when {ENV_SPICEDB_ENDPOINT} is set"
-        )
+        format!("invalid SpiceDB token: {ENV_SPICEDB_TOKEN} is required when {ENV_SPICEDB_ENDPOINT} is set")
     );
 }
 
@@ -242,9 +240,7 @@ fn optional_credentials_rejects_partial_configuration_token_only() {
     assert!(matches!(err, SpiceDbImportGateBuildError::InvalidEndpoint(_)));
     assert_eq!(
         err.to_string(),
-        format!(
-            "invalid SpiceDB endpoint: {ENV_SPICEDB_ENDPOINT} is required when {ENV_SPICEDB_TOKEN} is set"
-        )
+        format!("invalid SpiceDB endpoint: {ENV_SPICEDB_ENDPOINT} is required when {ENV_SPICEDB_TOKEN} is set")
     );
 }
 

@@ -46,14 +46,8 @@ fn watch_error_display_covers_every_variant() {
         AgentCardWatchError::InvalidKey("bad".into()).to_string(),
         "invalid catalog key: bad"
     );
-    assert_eq!(
-        AgentCardWatchError::Deserialize(bad).to_string(),
-        deserialize_expected
-    );
-    assert_eq!(
-        AgentCardWatchError::Schema(schema).to_string(),
-        schema_expected
-    );
+    assert_eq!(AgentCardWatchError::Deserialize(bad).to_string(), deserialize_expected);
+    assert_eq!(AgentCardWatchError::Schema(schema).to_string(), schema_expected);
 }
 
 #[test]

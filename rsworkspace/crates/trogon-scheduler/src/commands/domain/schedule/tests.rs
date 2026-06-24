@@ -121,17 +121,12 @@ fn errors_are_scoped_to_the_value_that_failed_to_construct() {
     assert!(matches!(route, DeliveryRouteError::Invalid { ref route, .. } if route == "bad*route"));
     assert_eq!(
         route.to_string(),
-        format!(
-            "delivery route 'bad*route' is invalid: {}",
-            route.source().unwrap()
-        )
+        format!("delivery route 'bad*route' is invalid: {}", route.source().unwrap())
     );
     assert!(route.source().is_some());
 
     let subject = SamplingSubject::new("bad>subject").unwrap_err();
-    assert!(
-        matches!(subject, SamplingSubjectError::Invalid { ref subject, .. } if subject == "bad>subject")
-    );
+    assert!(matches!(subject, SamplingSubjectError::Invalid { ref subject, .. } if subject == "bad>subject"));
     assert_eq!(
         subject.to_string(),
         format!(
