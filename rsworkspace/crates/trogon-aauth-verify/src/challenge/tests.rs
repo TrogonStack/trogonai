@@ -48,13 +48,7 @@ fn mint_resource_jwt_one_shot_helper() {
 
 #[test]
 fn challenge_error_ttl_overflow_display_mentions_inputs() {
-    let msg = format!(
-        "{}",
-        ChallengeError::TtlOverflow {
-            iat: 100,
-            ttl_secs: 5
-        }
-    );
+    let msg = format!("{}", ChallengeError::TtlOverflow { iat: 100, ttl_secs: 5 });
     assert!(msg.contains("100"));
     assert!(msg.contains('5'));
 }
