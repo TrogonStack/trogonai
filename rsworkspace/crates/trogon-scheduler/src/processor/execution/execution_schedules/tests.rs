@@ -284,3 +284,20 @@ async fn repeated_upsert_converges_to_exactly_one_scheduled_message() {
 
     assert_eq!(stream.count(&subject), 1);
 }
+
+#[test]
+fn execution_schedule_write_error_is_always_transient() {
+    let publish = ExecutionScheduleWriteError::Publish {
+        source: Box::new(std::io::Error::other("publish")),
+    };
+    let ack = ExecutionScheduleWriteError::Ack {
+        source: Box::new(std::io::Error::other("ack")),
+    };
+    let purge = ExecutionScheduleWriteError::Purge {
+        source: Box::new(std::io::Error::other("purge")),
+    };
+
+    assert!(publish.is_transient());
+    assert!(ack.is_transient());
+    assert!(purge.is_transient());
+}

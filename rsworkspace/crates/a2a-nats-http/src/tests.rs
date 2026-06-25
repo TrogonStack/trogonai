@@ -19,11 +19,11 @@ use crate::runtime::RuntimeError;
 use crate::sse::client_error_to_jsonrpc_code;
 use a2a_nats::client::ClientError;
 
-fn test_config() -> A2aPrefix {
+pub(super) fn test_config() -> A2aPrefix {
     A2aPrefix::new("a2a".to_string()).unwrap()
 }
 
-fn test_agent_id() -> A2aAgentId {
+pub(super) fn test_agent_id() -> A2aAgentId {
     A2aAgentId::new("test-agent").unwrap()
 }
 
@@ -43,7 +43,7 @@ fn gateway_test_caller_jwt() -> MintedUserJwt {
     mint_test_user_jwt("test-agent", "a2a", Duration::from_secs(3600))
 }
 
-fn build_app(nats: AdvancedMockNatsClient) -> axum::Router {
+pub(super) fn build_app(nats: AdvancedMockNatsClient) -> axum::Router {
     let js = MockJetStreamConsumerFactory::new();
     let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
     router::build(client)
@@ -58,12 +58,12 @@ fn jsonrpc_request(body: &str) -> Request<Body> {
         .unwrap()
 }
 
-async fn response_json(response: axum::response::Response) -> Value {
+pub(super) async fn response_json(response: axum::response::Response) -> Value {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 
-fn task_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
+pub(super) fn task_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_COMPLETED" } });
     let encoded = encode(&Message::Success {
         id: ResponseId::String("any".into()),
@@ -73,7 +73,7 @@ fn task_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     (encoded.headers, encoded.body)
 }
 
-fn send_message_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
+pub(super) fn send_message_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_SUBMITTED" } });
     let resp = json!({ "task": task });
     let encoded = encode(&Message::Success {
@@ -84,7 +84,7 @@ fn send_message_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) 
     (encoded.headers, encoded.body)
 }
 
-fn error_response_bytes(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
+pub(super) fn error_response_bytes(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
     let encoded = encode(&Message::Error {
         id: ResponseId::String("any".into()),
         code,
@@ -451,4 +451,5 @@ fn client_error_to_jsonrpc_code_maps_known_errors() {
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::StreamClosed).0, -32603);
 }
 
+mod rest;
 mod spec_negotiation;

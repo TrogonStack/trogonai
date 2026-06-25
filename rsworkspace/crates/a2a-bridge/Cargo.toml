@@ -38,3 +38,4 @@ nkeys = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }

@@ -539,5 +539,4 @@ fn is_semver_shaped(version: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "skill_manifest/tests.rs"]
 mod tests;

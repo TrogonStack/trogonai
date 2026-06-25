@@ -12,3 +12,8 @@ fn init_provider_returns_valid_provider() {
     let provider = init_provider(&resource);
     assert!(provider.is_ok());
 }
+
+#[test]
+fn shutdown_succeeds_when_provider_not_initialized() {
+    assert!(shutdown().is_ok());
+}

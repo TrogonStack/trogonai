@@ -98,3 +98,6 @@ pub fn decode_request_params<Req: DeserializeOwned>(
         _ => Err(WireError::UnexpectedMessage),
     }
 }
+
+#[cfg(test)]
+mod tests;

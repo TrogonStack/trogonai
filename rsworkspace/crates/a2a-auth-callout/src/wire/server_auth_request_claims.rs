@@ -145,3 +145,6 @@ impl fmt::Debug for ServerAuthRequestClaims {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests;

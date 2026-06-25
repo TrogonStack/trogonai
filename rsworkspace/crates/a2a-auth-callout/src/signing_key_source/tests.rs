@@ -5,17 +5,19 @@ use tempfile::NamedTempFile;
 
 use super::env::test_env_dev_warn_count;
 use super::{
-    EnvSigningKeySource, FileSigningKeySource, KeyVersion, SigningKeySource, StaticSigningKeySource,
-    VaultSigningKeySource,
+    EnvSigningKeySource, FileSigningKeySource, KeyVersion, KeyVersionError, MintingMaterial, SigningKeyHandle,
+    SigningKeySource, StaticSigningKeySource, VaultSigningKeySource,
 };
 use crate::error::AuthCalloutError;
-use crate::jwt::{CallerId, ExternalSubject, UserJwtClaims, UserJwtSubject};
+use crate::jwt::{CallerId, ExternalSubject, SigningKey, UserJwtClaims, UserJwtSubject};
 use crate::permissions::IssuedPermissions;
+use crate::signing_key_source::env_test_lock;
 use crate::{AccountName, SpiceDbPrincipal};
 use nkeys::KeyPair;
 
 #[test]
 fn env_source_current_previous_missing_and_warn_once() {
+    let _guard = env_test_lock();
     let account = KeyPair::new_account();
     let previous = KeyPair::new_account();
     unsafe {
@@ -49,6 +51,33 @@ fn env_source_current_previous_missing_and_warn_once() {
         err,
         AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
     ));
+}
+
+#[test]
+fn env_source_current_returns_current_handle() {
+    let _guard = env_test_lock();
+    let account = KeyPair::new_account();
+    unsafe {
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+        std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS");
+    }
+
+    let source = EnvSigningKeySource::from_env().expect("env source");
+    assert_eq!(source.current().version().as_str(), "current");
+}
+
+#[test]
+fn env_source_ignores_empty_previous_secret() {
+    let _guard = env_test_lock();
+    let account = KeyPair::new_account();
+    unsafe {
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS", "");
+    }
+
+    let source = EnvSigningKeySource::from_env().expect("env source");
+    assert_eq!(source.accepted().len(), 1);
+    assert_eq!(source.accepted()[0].version().as_str(), "current");
 }
 
 #[test]
@@ -137,4 +166,35 @@ fn rotation_mint_verify_round_trip() {
 
     let verified_current = UserJwtClaims::verify_with_source(current_token.as_str(), &source).expect("verify current");
     assert_eq!(verified_current.kid.as_str(), "current");
+}
+
+#[test]
+fn key_version_rejects_empty_and_formats() {
+    assert!(matches!(KeyVersion::new("").unwrap_err(), KeyVersionError::Empty));
+    let version = KeyVersion::new("v1").unwrap();
+    assert_eq!(version.as_str(), "v1");
+    assert_eq!(version.to_string(), "v1");
+}
+
+#[test]
+fn minting_material_exposes_issuer_public_and_debug() {
+    let issuer = KeyPair::new_account();
+    let version = KeyVersion::new("current").unwrap();
+    let material = MintingMaterial::new(issuer.clone(), version);
+    assert_eq!(material.issuer_public(), issuer.public_key());
+    let debug = format!("{material:?}");
+    assert!(debug.contains("MintingMaterial"));
+    assert!(debug.contains("current"));
+}
+
+#[test]
+fn signing_key_handle_minting_material_roundtrip() {
+    let issuer = KeyPair::new_account();
+    let version = KeyVersion::new("current").unwrap();
+    let handle = SigningKeyHandle::new(version.clone(), SigningKey::from_seed(issuer.seed().unwrap()).unwrap());
+    let material = handle.minting_material();
+    assert_eq!(material.version(), &version);
+    assert_eq!(material.issuer_public(), issuer.public_key());
+    let debug = format!("{handle:?}");
+    assert!(debug.contains("SigningKeyHandle"));
 }

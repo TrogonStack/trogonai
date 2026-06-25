@@ -33,3 +33,6 @@ pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>
         other => Err(AuthCalloutError::UnknownSigningKeySource(other.to_string())),
     }
 }
+
+#[cfg(test)]
+mod tests;

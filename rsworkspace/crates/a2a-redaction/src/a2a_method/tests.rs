@@ -9,6 +9,13 @@ fn roundtrip_display_parse() {
 }
 
 #[test]
+fn display_matches_as_str_for_all_variants() {
+    for method in A2aMethod::all() {
+        assert_eq!(method.to_string(), method.as_str());
+    }
+}
+
+#[test]
 fn serde_uses_canonical_wire_strings() {
     let method = A2aMethod::MessageSend;
     let wire = serde_json::to_string(&method).expect("serialize");

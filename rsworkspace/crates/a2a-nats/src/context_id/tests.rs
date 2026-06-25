@@ -44,3 +44,10 @@ fn context_id_error_display() {
         "context_id is too long: 200 characters (max 128)"
     );
 }
+
+#[test]
+fn a2a_context_id_rejects_too_long() {
+    let long = "a".repeat(129);
+    let err = A2aContextId::new(&long).unwrap_err();
+    assert!(matches!(err, ContextIdError::TooLong(129)));
+}

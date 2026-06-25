@@ -109,3 +109,29 @@ fn template_rejects_wildcard_and_dotted_placeholder_values() {
         );
     }
 }
+
+#[test]
+fn subject_pattern_deserializes_valid_pattern() {
+    let p: SubjectPattern = serde_json::from_str(r#""a2a.foo.>""#).unwrap();
+    assert_eq!(p.as_str(), "a2a.foo.>");
+}
+
+#[test]
+fn subject_pattern_deserialize_rejects_empty() {
+    assert!(serde_json::from_str::<SubjectPattern>(r#""""#).is_err());
+}
+
+#[test]
+fn subject_pattern_deserialize_rejects_whitespace() {
+    assert!(serde_json::from_str::<SubjectPattern>(r#""a b""#).is_err());
+}
+
+#[test]
+fn issued_permissions_round_trips_via_json() {
+    let caller = crate::jwt::CallerId::new("usr1").unwrap();
+    let perms = IssuedPermissions::default_for_caller(&caller);
+    let json = serde_json::to_string(&perms).unwrap();
+    let back: IssuedPermissions = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.publish_allow.len(), perms.publish_allow.len());
+    assert_eq!(back.subscribe_allow.len(), perms.subscribe_allow.len());
+}

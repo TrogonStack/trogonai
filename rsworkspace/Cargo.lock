@@ -57,6 +57,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "wiremock",
 ]
 
 [[package]]

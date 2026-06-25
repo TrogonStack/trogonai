@@ -84,3 +84,6 @@ impl SignedBundleManifest {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

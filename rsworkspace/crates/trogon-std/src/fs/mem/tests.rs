@@ -185,6 +185,40 @@ fn test_memfs_create_dir_all_idempotent() {
 }
 
 #[test]
+fn test_memfs_create_dir_all_relative_path_stops_at_empty_ancestor() {
+    // A relative path's ancestor chain eventually reaches an empty component;
+    // create_dir_all must break out of the loop cleanly.
+    let fs = MemFs::new();
+    fs.create_dir_all(Path::new("relative/nested")).unwrap();
+    assert!(fs.dir_exists(Path::new("relative/nested")));
+}
+
+#[test]
+fn test_memfs_paths_returns_inserted_paths() {
+    let fs = MemFs::new();
+    fs.insert("/a.txt", "aaa");
+    fs.insert("/b.txt", "bbb");
+
+    let mut paths = fs.paths();
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec![Path::new("/a.txt").to_path_buf(), Path::new("/b.txt").to_path_buf()]
+    );
+}
+
+#[test]
+fn test_memfs_was_opened_tracks_append_opens() {
+    let fs = MemFs::new();
+    let path = Path::new("/log.txt");
+
+    assert!(!fs.was_opened(path));
+    let mut writer = fs.open_append(path).unwrap();
+    writer.flush().unwrap();
+    assert!(fs.was_opened(path));
+}
+
+#[test]
 fn test_generic_function_with_memfs() {
     fn read_config<F: ReadFile>(fs: &F, path: &Path) -> String {
         fs.read_to_string(path).unwrap_or_else(|_| "{}".to_string())

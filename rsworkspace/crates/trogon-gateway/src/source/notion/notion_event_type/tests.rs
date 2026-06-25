@@ -26,6 +26,12 @@ fn accepts_dotted_event_types() {
 }
 
 #[test]
+fn deref_coerces_to_str() {
+    let event_type = NotionEventType::new("page.created").unwrap();
+    assert_eq!(&*event_type, "page.created");
+}
+
+#[test]
 fn rejects_wildcards() {
     assert!(NotionEventType::new("page.*").is_err());
     assert!(NotionEventType::new("page.>").is_err());

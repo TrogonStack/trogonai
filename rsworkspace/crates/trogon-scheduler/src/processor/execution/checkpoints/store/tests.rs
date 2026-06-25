@@ -43,6 +43,16 @@ async fn save_creates_when_no_revision_and_updates_when_present() {
 }
 
 #[tokio::test]
+async fn save_rejects_revision_zero() {
+    let kv = MockJetStreamKvStore::new();
+    let store = ScheduleCheckpointStore::new(kv);
+
+    let error = store.save(&record("orders"), Some(0)).await.unwrap_err();
+    assert!(matches!(error, CheckpointStoreError::InvalidRevision));
+    assert!(!error.is_transient());
+}
+
+#[tokio::test]
 async fn save_update_cas_loss_is_a_conflict() {
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
