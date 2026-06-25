@@ -174,12 +174,39 @@ fn verified_caller_identity_accessors_round_trip() {
     assert_eq!(aud.as_str(), "tenant-acme");
 
     let principal = SpiceDbPrincipal::new("user-1");
-    let identity = VerifiedCallerIdentity::new(principal, Some(aud));
+    let identity = VerifiedCallerIdentity::new(principal, Some(aud)).expect("subject present");
     assert_eq!(identity.principal().spicedb_subject().unwrap().as_str(), "user-1");
     assert_eq!(
         identity.audience().map(AudienceFromPrincipal::as_str),
         Some("tenant-acme")
     );
+}
+
+#[test]
+fn verified_caller_identity_new_rejects_principal_without_subject() {
+    let principal = SpiceDbPrincipal(serde_json::json!({"not_subject": "x"}));
+    assert!(VerifiedCallerIdentity::new(principal, None).is_none());
+}
+
+#[test]
+fn principal_from_headers_rejects_missing_spicedb_subject() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        GATEWAY_PRINCIPAL_HEADER,
+        r#"{"aud":"tenant-acme"}"#, // no spicedb_subject
+    );
+    let message_identity = TestMessageIdentity { verified: None };
+    let msg = empty_message();
+    assert!(resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on()).is_none());
+}
+
+#[test]
+fn principal_from_headers_rejects_empty_spicedb_subject() {
+    let mut headers = HeaderMap::new();
+    headers.insert(GATEWAY_PRINCIPAL_HEADER, r#"{"spicedb_subject":"  "}"#);
+    let message_identity = TestMessageIdentity { verified: None };
+    let msg = empty_message();
+    assert!(resolve_gateway_caller_identity(&message_identity, &msg, &headers, trust_headers_on()).is_none());
 }
 
 #[test]

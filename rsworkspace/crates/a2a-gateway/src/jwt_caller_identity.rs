@@ -76,6 +76,12 @@ pub fn gateway_jwt_audience<E: ReadEnv>(env: &E, prefix_fallback: &str) -> Audie
         .unwrap_or_else(|| AccountName::new(prefix_fallback))
 }
 
+/// Outcome of verifying a caller's identity.
+///
+/// Construction enforces an invariant: the wrapped `SpiceDbPrincipal` MUST
+/// resolve to a `spicedb_subject` (i.e. callers cannot fabricate a "verified"
+/// identity with a missing subject). Downstream `identity_from_verified` can
+/// rely on that without re-checking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedCallerIdentity {
     principal: SpiceDbPrincipal,
@@ -83,8 +89,12 @@ pub struct VerifiedCallerIdentity {
 }
 
 impl VerifiedCallerIdentity {
-    pub fn new(principal: SpiceDbPrincipal, audience: Option<AudienceFromPrincipal>) -> Self {
-        Self { principal, audience }
+    /// Build a `VerifiedCallerIdentity`. Returns `None` if the principal
+    /// does not resolve to a `spicedb_subject` — that's the invariant
+    /// downstream code depends on.
+    pub fn new(principal: SpiceDbPrincipal, audience: Option<AudienceFromPrincipal>) -> Option<Self> {
+        principal.spicedb_subject()?;
+        Some(Self { principal, audience })
     }
 
     pub fn principal(&self) -> &SpiceDbPrincipal {
@@ -95,10 +105,23 @@ impl VerifiedCallerIdentity {
         self.audience.as_ref()
     }
 
+    /// Build from a principal alone, deriving the audience from its
+    /// `aud`/`audience` field. Returns `None` if `spicedb_subject` is missing.
     pub fn from_principal(principal: SpiceDbPrincipal) -> Option<Self> {
-        principal.spicedb_subject()?;
         let audience = audience_from_principal(&principal);
-        Some(Self { principal, audience })
+        Self::new(principal, audience)
+    }
+
+    /// Build from a principal plus an explicitly-verified audience (typically
+    /// the JWT `aud` claim that signature verification already validated).
+    /// Falls back to `audience_from_principal` if the explicit audience is
+    /// `None` so callers don't lose the principal-derived value.
+    pub fn from_principal_and_verified_audience(
+        principal: SpiceDbPrincipal,
+        verified_audience: Option<AudienceFromPrincipal>,
+    ) -> Option<Self> {
+        let audience = verified_audience.or_else(|| audience_from_principal(&principal));
+        Self::new(principal, audience)
     }
 }
 
@@ -133,11 +156,41 @@ impl MessageCallerIdentitySource for JwtHeaderCallerIdentitySource {
     fn verified_caller_identity(&self, message: &async_nats::Message) -> Option<VerifiedCallerIdentity> {
         let headers = message.headers.as_ref()?;
         let raw = header_value(headers, CALLER_JWT_HEADER_NAME)?;
-        let token = CallerJwtHeaderValue::parse(raw).ok()?;
-        let claims =
-            UserJwtClaims::verify_minted_user_jwt(token.as_str(), self.signing_key_source.as_ref(), &self.audience)
-                .ok()?;
-        VerifiedCallerIdentity::from_principal(claims.data)
+        let token = match CallerJwtHeaderValue::parse(raw) {
+            Ok(token) => token,
+            Err(_) => {
+                // The header was present but didn't match the wire format; an
+                // attacker passing garbage shouldn't look the same as the
+                // header simply being absent.
+                warn!(
+                    header = CALLER_JWT_HEADER_NAME,
+                    "gateway caller identity: failed to parse caller JWT header"
+                );
+                return None;
+            }
+        };
+        let claims = match UserJwtClaims::verify_minted_user_jwt(
+            token.as_str(),
+            self.signing_key_source.as_ref(),
+            &self.audience,
+        ) {
+            Ok(claims) => claims,
+            Err(_) => {
+                // Verification failed (signature / aud / expiry). Surface
+                // it to the operator so an invalid token isn't silently
+                // indistinguishable from a missing one.
+                warn!(
+                    header = CALLER_JWT_HEADER_NAME,
+                    "gateway caller identity: caller JWT failed verification"
+                );
+                return None;
+            }
+        };
+        // The JWT's `aud` claim was authenticated by `verify_minted_user_jwt`;
+        // surface it as the verified audience rather than relying on
+        // optional fields inside the `data` principal JSON.
+        let verified_audience = Some(AudienceFromPrincipal(claims.aud.as_str().to_owned()));
+        VerifiedCallerIdentity::from_principal_and_verified_audience(claims.data, verified_audience)
     }
 }
 
@@ -217,10 +270,34 @@ pub fn gateway_audit_caller_attribution(identity: Option<JwtCallerIdentity>) -> 
     }
 }
 
+/// Wire shape for the labs-only `X-A2a-Spicedb-Principal` header. Validates
+/// the minimum structure (`spicedb_subject` present and non-empty) at the
+/// boundary before any of it becomes a `SpiceDbPrincipal` value-object —
+/// otherwise arbitrary header JSON would be promoted into a domain type
+/// without per-type validation.
+#[derive(Debug, serde::Deserialize)]
+struct PrincipalHeaderWire {
+    spicedb_subject: String,
+    #[serde(default)]
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
 fn principal_from_headers(headers: &HeaderMap) -> Option<SpiceDbPrincipal> {
     let raw = header_value(headers, GATEWAY_PRINCIPAL_HEADER)?;
-    let value = serde_json::from_str(&raw).ok()?;
-    Some(SpiceDbPrincipal(value))
+    let wire: PrincipalHeaderWire = serde_json::from_str(&raw).ok()?;
+    if wire.spicedb_subject.trim().is_empty() {
+        return None;
+    }
+    // Re-assemble the validated JSON. Domain code reads
+    // `principal.spicedb_subject()` and the audience helpers; keep `extra`
+    // around so the labs path still surfaces fields like `aud`/`audience`.
+    let mut object = wire.extra;
+    object.insert(
+        "spicedb_subject".to_owned(),
+        serde_json::Value::String(wire.spicedb_subject),
+    );
+    Some(SpiceDbPrincipal(serde_json::Value::Object(object)))
 }
 
 fn audience_from_principal(principal: &SpiceDbPrincipal) -> Option<AudienceFromPrincipal> {

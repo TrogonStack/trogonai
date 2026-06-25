@@ -17,6 +17,7 @@ workspace = true
 a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 async-nats = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 trogon-std = { workspace = true }
