@@ -187,6 +187,15 @@ fn test_memfs_create_dir_all_idempotent() {
 }
 
 #[test]
+fn test_memfs_create_dir_all_relative_path_stops_at_empty_ancestor() {
+    // A relative path's ancestor chain eventually reaches an empty component;
+    // create_dir_all must break out of the loop cleanly.
+    let fs = MemFs::new();
+    fs.create_dir_all(Path::new("relative/nested")).unwrap();
+    assert!(fs.dir_exists(Path::new("relative/nested")));
+}
+
+#[test]
 fn test_memfs_paths_returns_inserted_paths() {
     let fs = MemFs::new();
     fs.insert("/a.txt", "aaa");

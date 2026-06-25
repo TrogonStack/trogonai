@@ -282,3 +282,88 @@ fn register_skill_wasm_rejects_invalid_wasm_bytes() {
         .unwrap_err();
     assert!(matches!(err, RedactionError::WasmModule(_)));
 }
+
+#[test]
+fn preload_skill_bundle_fails_when_manifest_missing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill = "fixture";
+    let wasm = fs::read(fixture_path()).expect("read fixture");
+    fs::write(temp.path().join(format!("{skill}.wasm")), &wasm).expect("write wasm");
+    // Intentionally omit the manifest file.
+
+    let host = WasmRedactorHost::new(WasmBundlePath::new(temp.path())).expect("host");
+    let err = host
+        .preload_skill_bundle(SkillId::new(skill).expect("valid"))
+        .expect_err("missing manifest must fail");
+    assert!(matches!(err, RedactionError::WasmModule(_)));
+}
+
+#[test]
+fn tier3_refusal_is_surfaced_from_redact_part_bytes() {
+    let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
+    let wasm = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tier3_refuse.wasm"
+    ));
+    let skill = SkillId::new("tier3").expect("valid");
+    host.register_skill_wasm(skill.clone(), wasm).unwrap();
+
+    let err = host.redact_part_bytes(&skill, br#"{"x":1}"#).unwrap_err();
+    assert!(matches!(err, RedactionError::Tier3Refusal(Some(_))));
+}
+
+#[test]
+fn tier3_refusal_is_surfaced_from_redact_message() {
+    let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
+    let wasm = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tier3_refuse.wasm"
+    ));
+    let skill = SkillId::new("tier3-msg").expect("valid");
+    host.register_skill_wasm(skill.clone(), wasm).unwrap();
+
+    let msg = Message {
+        message_id: "m".into(),
+        context_id: None,
+        task_id: None,
+        role: Role::Agent,
+        parts: vec![a2a::types::Part {
+            content: PartContent::Text("x".into()),
+            filename: None,
+            media_type: None,
+            metadata: None,
+        }],
+        metadata: None,
+        extensions: None,
+        reference_task_ids: None,
+    };
+    let err = host.redact_message(msg, &skill).unwrap_err();
+    assert!(matches!(err, RedactionError::Tier3Refusal(_)));
+}
+
+#[test]
+fn tier3_refusal_is_surfaced_from_redact_artifact() {
+    let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
+    let wasm = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tier3_refuse.wasm"
+    ));
+    let skill = SkillId::new("tier3-art").expect("valid");
+    host.register_skill_wasm(skill.clone(), wasm).unwrap();
+
+    let art = Artifact {
+        artifact_id: "a".into(),
+        name: None,
+        description: None,
+        parts: vec![a2a::types::Part {
+            content: PartContent::Text("blob".into()),
+            filename: None,
+            media_type: None,
+            metadata: None,
+        }],
+        metadata: None,
+        extensions: None,
+    };
+    let err = host.redact_artifact(art, &skill).unwrap_err();
+    assert!(matches!(err, RedactionError::Tier3Refusal(_)));
+}

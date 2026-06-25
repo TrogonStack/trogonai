@@ -1,6 +1,21 @@
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use super::*;
+use super::super::EpochClock;
+
+#[test]
+fn fixed_epoch_clock_from_secs_returns_unix_epoch_offset() {
+    let clock = FixedEpochClock::from_secs(1_000);
+    let expected = UNIX_EPOCH + Duration::from_secs(1_000);
+    assert_eq!(clock.system_time(), expected);
+}
+
+#[test]
+fn fixed_epoch_clock_system_time_matches_inner() {
+    let t = UNIX_EPOCH + Duration::from_secs(42);
+    let clock = FixedEpochClock(t);
+    assert_eq!(clock.system_time(), t);
+}
 
 #[test]
 fn test_mock_clock_starts_at_zero() {
