@@ -1,4 +1,7 @@
 use super::*;
+use crate::jwks::StaticJwks;
+use crate::replay::InMemoryReplayStore;
+use crate::time_source::SystemTimeSource;
 
 #[test]
 fn content_digest_is_stable() {
@@ -49,10 +52,6 @@ fn nats_headers_clone_preserves_view() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_returns_skew_when_clock_outside_window() {
-    use crate::jwks::StaticJwks;
-    use crate::replay::InMemoryReplayStore;
-    use crate::time_source::SystemTimeSource;
-
     let headers_vec: Vec<(String, String)> = vec![
         (headers::NATS_TOKEN.to_string(), "tok".into()),
         (headers::NATS_SIG_INPUT.to_string(), "".into()),
@@ -74,9 +73,6 @@ async fn verify_returns_skew_when_clock_outside_window() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn verify_returns_invalid_header_value_for_unparseable_created() {
-    use crate::jwks::StaticJwks;
-    use crate::replay::InMemoryReplayStore;
-    use crate::time_source::SystemTimeSource;
     let headers_vec: Vec<(String, String)> = vec![
         (headers::NATS_TOKEN.to_string(), "tok".into()),
         (headers::NATS_SIG_INPUT.to_string(), "".into()),
