@@ -451,4 +451,4 @@ fn client_error_to_jsonrpc_code_maps_known_errors() {
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::StreamClosed).0, -32603);
 }
 
-mod spec_negotiation;
+mod spec_negotiation_tests;

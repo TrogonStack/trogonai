@@ -252,4 +252,4 @@ fn snapshot_id_from_snapshot_key_rejects_empty_suffix() {
     );
 }
 
-mod kv_operations;
+mod kv_operations_tests;

@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(feature = "test-support")]
-mod with_mocks;
+mod with_mocks_tests;
 
 #[test]
 fn log_on_error_does_nothing_for_published() {

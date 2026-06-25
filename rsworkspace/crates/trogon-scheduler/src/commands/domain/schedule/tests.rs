@@ -381,4 +381,4 @@ fn schedule_and_message_conversions_cover_all_variants() {
     );
 }
 
-mod proptests;
+mod prop_tests;
