@@ -37,17 +37,24 @@ stays in the body, and success-versus-error is decided by the presence of the
   over those shared primitives because rmcp fixes its transport shape and its
   server-initiated streaming + JetStream keepalive ack are domain concerns that
   do not belong in the shared core.
+- **Edges**: canonical JSON-RPC is reconstructed at the protocol edges and the
+  `jsonrpc == "2.0"` invariant is enforced there. Batch unbundling is not
+  applicable to our edges — the A2A HTTP edge is one envelope per call and the
+  MCP HTTP edge's batching is handled by the rmcp SDK — so no backbone message
+  ever carries a JSON-RPC array.
 
-## Remaining Work
+The JSON-RPC over NATS binding (ADR 0011) is complete: ACP, MCP, and A2A all run
+on the shared content-mode codec and transport, with the invariants enforced and
+the round-trip property test gating the codec.
 
-### Phase 7 — Edges and batch
-- Audit every protocol edge (HTTP/WebSocket/SSE listeners, stdio bridges) so
-  canonical JSON-RPC is reconstructed **only** there, centralized in the codec,
-  never ad hoc in domain code. `acp-nats-server` already reconstructs + unbundles
-  via `IncomingHttpMessage::parse_all`; confirm/extend the same discipline for
-  the A2A (`a2a-nats-http`, `a2a-nats-stdio`) and MCP edges.
-- Unbundle batch JSON-RPC arrays at the edge into individual messages so the
-  backbone carries one JSON-RPC message per NATS message (Design Rules).
+## Deferred (later, non-blocking)
+
+- **Centralize edge reconstruction through the codec.** Edges today rebuild
+  canonical JSON-RPC with local `serde_json` builders rather than the codec's
+  `to_json_value`/`from_json_value` (currently exercised only in tests). Behavior
+  is already correct and the invariant holds; routing every edge through the
+  shared reconstruction is a consistency cleanup to fold into the broader
+  refactor, not part of closing out this binding.
 
 ## Out of Scope (not JSON-RPC binding work)
 
