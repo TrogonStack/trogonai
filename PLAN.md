@@ -40,15 +40,6 @@ stays in the body, and success-versus-error is decided by the presence of the
 
 ## Remaining Work
 
-### Phase 6 (signing only) — Extend per-message signing to cover the headers
-⚠️ **Blocked.** ADR §5 says to extend A2A signing so it spans `Jsonrpc-Id` and
-`Jsonrpc-Error-Code` in addition to the body. But there is **no per-message A2A
-request/response signing scheme in the repo today** — only the offline Ed25519
-*bundle* signer (`a2a-redaction/src/signed_bundle/`). Until that scheme is
-located or defined, signed A2A paths must stay disabled (see the note in
-`a2a-nats/src/wire.rs`). First step is a decision: is per-message signing in
-design, out of repo, or to be specified here?
-
 ### Phase 7 — Edges and batch
 - Audit every protocol edge (HTTP/WebSocket/SSE listeners, stdio bridges) so
   canonical JSON-RPC is reconstructed **only** there, centralized in the codec,
@@ -57,6 +48,19 @@ design, out of repo, or to be specified here?
   the A2A (`a2a-nats-http`, `a2a-nats-stdio`) and MCP edges.
 - Unbundle batch JSON-RPC arrays at the edge into individual messages so the
   backbone carries one JSON-RPC message per NATS message (Design Rules).
+
+## Out of Scope (not JSON-RPC binding work)
+
+- **Per-message A2A signing.** JSON-RPC defines no signing; message signing is an
+  A2A *security* concern that belongs to A2A's own design, not this binding. It
+  is also not implemented today — A2A does not sign request/response traffic
+  (the only signing in the repo is the offline skill-*bundle* signer in
+  `a2a-redaction/src/signed_bundle/`). The only carryover this binding owes that
+  future work is a one-line constraint: because content mode moved `id` and
+  `error.code` into the `Jsonrpc-Id`/`Jsonrpc-Error-Code` headers, any future
+  per-message signing must cover those headers, not just the body. The guardrail
+  for that already lives in code — `a2a-nats/src/wire.rs` keeps signed A2A paths
+  disabled until such a scheme exists — so nothing here is blocked on it.
 
 ## Invariants to Enforce (ADR "Invariants")
 - `decode(encode(m)) == m` for every valid message, id type included.
@@ -74,15 +78,11 @@ design, out of repo, or to be specified here?
   concern outside the codec.
 
 ## Risks & Open Questions
-1. **A2A per-message signing may not exist yet** (gates Phase 6 signing). Only
-   offline bundle signing was found; confirm whether a per-message scheme is in
-   design or out of repo, and keep the encoding off signed paths until it covers
-   the headers.
-2. **Header-dependent interpretation.** The body alone is no longer
+1. **Header-dependent interpretation.** The body alone is no longer
    interpretable; consumers must read headers. Verify every consumer (error
    counters, dead-letter routers, id indexes) reads headers and that nothing
    replays raw bodies.
-3. **Per-subject cutover discipline.** A subject must never carry both encodings
+2. **Per-subject cutover discipline.** A subject must never carry both encodings
    simultaneously. Sequence any remaining migrations and gate each on tests.
 
 ## Validation
