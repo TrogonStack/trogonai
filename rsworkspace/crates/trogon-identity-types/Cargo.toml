@@ -2,12 +2,14 @@
 name = "trogon-identity-types"
 version = "0.1.0"
 edition = "2024"
-license.workspace = true
-publish.workspace = true
+license = "Apache-2.0"
+description = "Shared mesh identity wire types (act_chain, depth limits, AAuth claims)"
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }

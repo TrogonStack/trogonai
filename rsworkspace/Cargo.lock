@@ -96,6 +96,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-identity-types"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "a2a-lf"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -311,6 +321,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "serde",
  "serde_json",
  "tokio",
@@ -3922,6 +3933,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc-nats"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "trogon-nats",
+]
+
+[[package]]
 name = "jsonschema"
 version = "0.46.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4259,6 +4284,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "rmcp",
  "serde",
  "serde_json",
@@ -7798,6 +7824,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -7932,6 +7959,7 @@ dependencies = [
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-std",
  "trogonai-proto",
  "uuid",
 ]
