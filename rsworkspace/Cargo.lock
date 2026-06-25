@@ -61,6 +61,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-gateway"
+version = "0.1.0"
+dependencies = [
+ "a2a-auth-callout",
+ "a2a-nats",
+ "async-nats",
+ "nkeys",
+ "serde_json",
+ "tracing",
+ "trogon-std",
+]
+
+[[package]]
 name = "a2a-identity-types"
 version = "0.1.0"
 dependencies = [
