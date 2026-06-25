@@ -6,6 +6,27 @@
 use a2a_identity_types::JwtError;
 use a2a_nats::{A2aPrefixError, AgentIdError};
 
+#[cfg(not(coverage))]
+use std::net::SocketAddr;
+
+#[cfg(not(coverage))]
+use a2a_identity_types::MintedUserJwt;
+#[cfg(not(coverage))]
+use a2a_nats::client::A2aClient;
+#[cfg(not(coverage))]
+use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
+#[cfg(not(coverage))]
+use tracing::info;
+#[cfg(not(coverage))]
+use trogon_nats::jetstream::NatsJetStreamClient;
+#[cfg(not(coverage))]
+use trogon_std::env::SystemEnv;
+#[cfg(not(coverage))]
+use trogon_std::signal::shutdown_signal;
+
+#[cfg(not(coverage))]
+use crate::router;
+
 #[cfg_attr(coverage, allow(dead_code))]
 const DEFAULT_BIND: &str = "0.0.0.0:8080";
 #[cfg_attr(coverage, allow(dead_code))]
@@ -45,18 +66,6 @@ fn env_flag<E: trogon_std::env::ReadEnv>(env: &E, key: &str) -> bool {
 
 #[cfg(not(coverage))]
 pub async fn run() -> Result<(), RuntimeError> {
-    use std::net::SocketAddr;
-
-    use a2a_identity_types::MintedUserJwt;
-    use a2a_nats::client::A2aClient;
-    use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
-    use tracing::info;
-    use trogon_nats::jetstream::NatsJetStreamClient;
-    use trogon_std::env::SystemEnv;
-    use trogon_std::signal::shutdown_signal;
-
-    use crate::router;
-
     let env = SystemEnv;
 
     let raw_prefix = trogon_std::env::ReadEnv::var(&env, a2a_nats::ENV_A2A_PREFIX)

@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use super::*;
 
 #[test]
@@ -86,14 +88,12 @@ fn claim_resolve_error_display_read_failed() {
 
 #[test]
 fn claim_resolve_error_source_missing_key() {
-    use std::error::Error;
     let err: ClaimResolveError<std::io::Error> = ClaimResolveError::MissingKey;
     assert!(err.source().is_none());
 }
 
 #[test]
 fn claim_resolve_error_source_store_failed() {
-    use std::error::Error;
     let inner = std::io::Error::other("boom");
     let err: ClaimResolveError<std::io::Error> = ClaimResolveError::StoreFailed(inner);
     assert!(err.source().is_some());
@@ -101,7 +101,6 @@ fn claim_resolve_error_source_store_failed() {
 
 #[test]
 fn claim_resolve_error_source_read_failed() {
-    use std::error::Error;
     let inner = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broke");
     let err: ClaimResolveError<std::io::Error> = ClaimResolveError::ReadFailed(inner);
     assert!(err.source().is_some());

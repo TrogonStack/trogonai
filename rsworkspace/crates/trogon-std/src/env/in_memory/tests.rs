@@ -1,3 +1,4 @@
+use super::super::ReadEnv;
 use super::*;
 
 #[test]
@@ -63,8 +64,6 @@ fn test_in_memory_env_overwrite() {
 
 #[test]
 fn test_generic_function_with_in_memory_env() {
-    use super::super::ReadEnv;
-
     fn get_value_or_default<E: ReadEnv>(env: &E, key: &str, default: &str) -> String {
         env.var(key).unwrap_or_else(|_| default.to_string())
     }

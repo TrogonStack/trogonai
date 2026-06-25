@@ -1,6 +1,6 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, global};
+use super::rpc_call::jsonrpc_call;
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::{LogoutRequest, LogoutResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -13,16 +13,15 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     let start = bridge.clock.now();
 
     info!("Logout request");
-    let nats = bridge.nats();
 
-    let result = nats::request_with_timeout::<N, LogoutRequest, LogoutResponse>(
-        nats,
+    let result = jsonrpc_call(
+        bridge.nats(),
         &global::LogoutSubject::new(bridge.config.acp_prefix_ref()),
+        "logout",
         &args,
         bridge.config.operation_timeout,
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     bridge
         .metrics

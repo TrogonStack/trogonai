@@ -70,8 +70,6 @@ fn into_wire_bytes_returns_plain_jwt_without_server_xkey() {
 
 #[test]
 fn into_wire_bytes_encrypts_when_server_requests_xkey() {
-    use crate::wire::test_encode::signed_auth_request;
-
     let server = KeyPair::new_account();
     let callout = KeyPair::new_account();
     let account_xkey = XKey::new();
@@ -98,8 +96,6 @@ fn into_wire_bytes_encrypts_when_server_requests_xkey() {
 
 #[test]
 fn into_wire_bytes_errors_when_server_xkey_but_no_account_xkey() {
-    use crate::wire::test_encode::signed_auth_request;
-
     let server = KeyPair::new_account();
     let callout = KeyPair::new_account();
     let server_xkey = XKey::new();

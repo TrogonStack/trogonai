@@ -1,6 +1,6 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, global};
+use super::rpc_call::jsonrpc_call;
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Result};
 use tracing::{info, instrument};
 use trogon_std::time::GetElapsed;
@@ -17,16 +17,15 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     let start = bridge.clock.now();
 
     info!(method_id = %args.method_id, "Authenticate request");
-    let nats = bridge.nats();
 
-    let result = nats::request_with_timeout::<N, AuthenticateRequest, AuthenticateResponse>(
-        nats,
+    let result = jsonrpc_call(
+        bridge.nats(),
         &global::AuthenticateSubject::new(bridge.config.acp_prefix_ref()),
+        "authenticate",
         &args,
         bridge.config.operation_timeout,
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     bridge.metrics.record_request(
         "authenticate",

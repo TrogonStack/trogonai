@@ -110,6 +110,7 @@ async fn dispatch_message<H, N, J>(
 {
     let subject = msg.subject.to_string();
     let reply = msg.reply.map(|s| s.to_string());
+    let headers = msg.headers.clone().unwrap_or_default();
     let payload = msg.payload;
 
     let Some(method) = A2aMethod::from_subject(&subject, prefix_len) else {
@@ -118,19 +119,23 @@ async fn dispatch_message<H, N, J>(
     };
 
     match method {
-        A2aMethod::MessageSend => message_send::handle(handler.as_ref(), &payload, reply, nats).await,
+        A2aMethod::MessageSend => message_send::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
         A2aMethod::MessageStream => {
-            message_stream::handle(handler.as_ref(), &payload, reply, nats, js, prefix).await;
+            message_stream::handle(handler.as_ref(), &headers, &payload, reply, nats, js, prefix).await;
         }
-        A2aMethod::TasksGet => tasks_get::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::TasksList => tasks_list::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::TasksCancel => tasks_cancel::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::TasksResubscribe => tasks_resubscribe::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::PushNotificationSet => push_set::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::PushNotificationGet => push_get::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::PushNotificationList => push_list::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::PushNotificationDelete => push_delete::handle(handler.as_ref(), &payload, reply, nats).await,
-        A2aMethod::AgentCard => agent_card::handle(handler.as_ref(), &payload, reply, nats).await,
+        A2aMethod::TasksGet => tasks_get::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::TasksList => tasks_list::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::TasksCancel => tasks_cancel::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::TasksResubscribe => {
+            tasks_resubscribe::handle(handler.as_ref(), &headers, &payload, reply, nats).await;
+        }
+        A2aMethod::PushNotificationSet => push_set::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::PushNotificationGet => push_get::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::PushNotificationList => push_list::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
+        A2aMethod::PushNotificationDelete => {
+            push_delete::handle(handler.as_ref(), &headers, &payload, reply, nats).await;
+        }
+        A2aMethod::AgentCard => agent_card::handle(handler.as_ref(), &headers, &payload, reply, nats).await,
     }
 }
 

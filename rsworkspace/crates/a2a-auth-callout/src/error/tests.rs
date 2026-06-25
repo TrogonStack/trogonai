@@ -12,7 +12,6 @@ fn display_connect() {
 
 #[test]
 fn display_subscribe() {
-    use std::error::Error;
     let e = AuthCalloutError::Subscribe(async_nats::SubscribeError::new(
         async_nats::SubscribeErrorKind::InvalidSubject,
     ));

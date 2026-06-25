@@ -2,6 +2,8 @@ use super::*;
 use crate::push::status_transition_id::StatusTransitionId;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::task_id::A2aTaskId;
+use std::sync::Arc;
+use trogon_std::env::InMemoryEnv;
 
 fn dlq_key(task: &str, transition: &str, url: &str) -> PushIdempotencyKey {
     let task_id = A2aTaskId::new(task).unwrap();
@@ -62,7 +64,6 @@ fn desynced_set_and_order_recover_without_growing_past_capacity() {
 
 #[test]
 fn from_env_reads_configured_capacity() {
-    use trogon_std::env::InMemoryEnv;
     let env = InMemoryEnv::new();
     env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "1");
     let gate = PushDlqDedupGate::from_env(&env);
@@ -75,7 +76,6 @@ fn from_env_reads_configured_capacity() {
 
 #[test]
 fn from_env_falls_back_to_default_when_unset_or_invalid() {
-    use trogon_std::env::InMemoryEnv;
     let env = InMemoryEnv::new();
     let _gate = PushDlqDedupGate::from_env(&env);
     env.set(ENV_PUSH_DLQ_DEDUP_LRU_SIZE, "not-a-number");
@@ -84,7 +84,6 @@ fn from_env_falls_back_to_default_when_unset_or_invalid() {
 
 #[test]
 fn try_acquire_recovers_from_a_poisoned_lock() {
-    use std::sync::Arc;
     let gate = Arc::new(PushDlqDedupGate::with_capacity(8));
     let poison = Arc::clone(&gate);
     let _ = std::thread::spawn(move || {

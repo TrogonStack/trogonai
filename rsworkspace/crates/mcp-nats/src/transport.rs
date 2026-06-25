@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::Message;
-use bytes::Bytes;
 use futures::StreamExt;
+use jsonrpc_nats::{Direction, TransportError, jsonrpc_publish_with_timeout, jsonrpc_request_raw};
 use rmcp::model::{JsonRpcMessage, RequestId};
 use rmcp::service::{RoleClient, RoleServer, RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
 use rmcp::transport::Transport;
@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{Instrument, Span, instrument};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, headers_with_trace_context};
 
-use crate::{Config, McpPeerId, McpPrefix, nats};
+use crate::{Config, McpPeerId, McpPrefix, nats, wire};
 
 type PendingReplies = Arc<Mutex<HashMap<RequestId, String>>>;
 
@@ -138,22 +138,15 @@ where
                 JsonRpcMessage::Request(_) => {
                     let subject = subject_for_message::<R>(&prefix, &remote_peer_id, &item)?;
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
-                    let payload = serialize_message(&item)?;
-                    let response = tokio::time::timeout(
-                        timeout,
-                        nats.request_with_headers(subject.clone(), headers_with_trace_context(), payload),
-                    )
-                    .await
-                    .map_err(|_| NatsTransportError::RequestTimedOut {
-                        subject: subject.clone(),
-                    })?
-                    .map_err(|source| NatsTransportError::Request {
-                        subject: subject.clone(),
-                        source: Box::new(source),
-                    })?;
-                    let response = deserialize_message::<RxJsonRpcMessage<R>>(&response.payload)?;
+                    let encoded = wire::encode_tx::<R>(&item)?;
+                    let headers = wire::merge_headers(headers_with_trace_context(), encoded.headers);
+                    let (response_headers, response_body) =
+                        jsonrpc_request_raw(&nats, &subject, headers, encoded.body, timeout)
+                            .await
+                            .map_err(map_transport_error)?;
+                    let parsed = wire::decode_rx::<R>(Direction::Response, None, &response_headers, &response_body)?;
                     inbound_tx
-                        .send(response)
+                        .send(parsed)
                         .await
                         .map_err(|_| NatsTransportError::InboundClosed)?;
                     Ok(())
@@ -161,7 +154,10 @@ where
                 JsonRpcMessage::Notification(_) => {
                     let subject = subject_for_message::<R>(&prefix, &remote_peer_id, &item)?;
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
-                    publish_raw_with_timeout(&nats, &subject, serialize_message(&item)?, timeout).await
+                    let encoded = wire::encode_tx::<R>(&item)?;
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)
                 }
                 JsonRpcMessage::Response(response) => {
                     let request_id = response.id.clone();
@@ -170,7 +166,10 @@ where
                         .ok_or(NatsTransportError::MissingReplySubject)?;
                     let item: TxJsonRpcMessage<R> = JsonRpcMessage::Response(response);
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
-                    publish_raw_with_timeout(&nats, &subject, serialize_message(&item)?, timeout).await?;
+                    let encoded = wire::encode_tx::<R>(&item)?;
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)?;
                     forget_reply_subject(&request_id, &pending_replies).await;
                     Ok(())
                 }
@@ -181,7 +180,10 @@ where
                         .ok_or(NatsTransportError::MissingReplySubject)?;
                     let item: TxJsonRpcMessage<R> = JsonRpcMessage::Error(error);
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
-                    publish_raw_with_timeout(&nats, &subject, serialize_message(&item)?, timeout).await?;
+                    let encoded = wire::encode_tx::<R>(&item)?;
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)?;
                     forget_reply_subject(&request_id, &pending_replies).await;
                     Ok(())
                 }
@@ -203,13 +205,26 @@ where
                     let message = message?;
                     crate::telemetry::transport::record_subject(&Span::current(), message.subject.as_str());
                     crate::telemetry::transport::record_direction(&Span::current(), "receive");
-                    match deserialize_message::<RxJsonRpcMessage<R>>(&message.payload) {
-                        Ok(parsed) => {
-                            remember_reply_subject::<R>(&parsed, &message, &self.pending_replies).await;
-                            return Some(parsed);
+                    match method_from_subject::<R>(message.subject.as_str()) {
+                        Ok(method) => {
+                            let headers = message.headers.clone().unwrap_or_default();
+                            match wire::decode_rx::<R>(
+                                Direction::Request,
+                                Some(&method),
+                                &headers,
+                                &message.payload,
+                            ) {
+                                Ok(parsed) => {
+                                    remember_reply_subject::<R>(&parsed, &message, &self.pending_replies).await;
+                                    return Some(parsed);
+                                }
+                                Err(error) => {
+                                    tracing::warn!(error = %error, subject = %message.subject, "Failed to decode MCP NATS message");
+                                }
+                            }
                         }
                         Err(error) => {
-                            tracing::warn!(error = %error, subject = %message.subject, "Failed to decode MCP NATS message");
+                            tracing::warn!(error = %error, subject = %message.subject, "Failed to resolve MCP method from subject");
                         }
                     }
                 }
@@ -222,49 +237,24 @@ where
     }
 }
 
-async fn publish_raw<N>(nats: &N, subject: &str, payload: Bytes) -> Result<(), NatsTransportError>
-where
-    N: PublishClient + FlushClient,
-    N::PublishError: 'static,
-    N::FlushError: 'static,
-{
-    nats.publish_with_headers(subject.to_string(), headers_with_trace_context(), payload)
-        .await
-        .map_err(|source| NatsTransportError::Publish {
-            subject: subject.to_string(),
-            source: Box::new(source),
-        })?;
-    nats.flush().await.map_err(|source| NatsTransportError::Flush {
-        source: Box::new(source),
-    })
-}
-
-async fn publish_raw_with_timeout<N>(
-    nats: &N,
-    subject: &str,
-    payload: Bytes,
-    timeout: Duration,
-) -> Result<(), NatsTransportError>
-where
-    N: PublishClient + FlushClient,
-    N::PublishError: 'static,
-    N::FlushError: 'static,
-{
-    tokio::time::timeout(timeout, publish_raw(nats, subject, payload))
-        .await
-        .map_err(|_| NatsTransportError::PublishTimedOut {
-            subject: subject.to_string(),
-        })?
-}
-
-fn serialize_message<T: serde::Serialize>(message: &T) -> Result<Bytes, NatsTransportError> {
-    serde_json::to_vec(message)
-        .map(Bytes::from)
-        .map_err(NatsTransportError::Serialize)
-}
-
-fn deserialize_message<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Result<T, NatsTransportError> {
-    serde_json::from_slice(payload).map_err(NatsTransportError::Deserialize)
+fn map_transport_error(err: TransportError) -> NatsTransportError {
+    match err {
+        TransportError::Codec(source) => NatsTransportError::Codec(source),
+        TransportError::Timeout { subject } => NatsTransportError::RequestTimedOut { subject },
+        TransportError::Request { subject, error } => NatsTransportError::Request {
+            subject,
+            source: error.into(),
+        },
+        TransportError::Publish { subject, error } => NatsTransportError::Publish {
+            subject,
+            source: error.into(),
+        },
+        TransportError::PublishTimeout { subject } => NatsTransportError::PublishTimedOut { subject },
+        TransportError::Flush { error } => NatsTransportError::Flush { source: error.into() },
+        TransportError::UnexpectedResponse => NatsTransportError::Deserialize(
+            <serde_json::Error as serde::de::Error>::custom("unexpected JSON-RPC response variant"),
+        ),
+    }
 }
 
 async fn reply_subject_for_response(request_id: &RequestId, pending_replies: &PendingReplies) -> Option<String> {
@@ -350,8 +340,63 @@ fn method_suffix(method: &str) -> Result<&'static str, NatsTransportError> {
     }
 }
 
+fn method_from_suffix(suffix: &str) -> Result<&'static str, NatsTransportError> {
+    match suffix {
+        "initialize" => Ok("initialize"),
+        "ping" => Ok("ping"),
+        "completion.complete" => Ok("completion/complete"),
+        "logging.set_level" => Ok("logging/setLevel"),
+        "prompts.list" => Ok("prompts/list"),
+        "prompts.get" => Ok("prompts/get"),
+        "resources.list" => Ok("resources/list"),
+        "resources.templates.list" => Ok("resources/templates/list"),
+        "resources.read" => Ok("resources/read"),
+        "resources.subscribe" => Ok("resources/subscribe"),
+        "resources.unsubscribe" => Ok("resources/unsubscribe"),
+        "tools.list" => Ok("tools/list"),
+        "tools.call" => Ok("tools/call"),
+        "tasks.get" => Ok("tasks/get"),
+        "tasks.list" => Ok("tasks/list"),
+        "tasks.result" => Ok("tasks/result"),
+        "tasks.cancel" => Ok("tasks/cancel"),
+        "notifications.cancelled" => Ok("notifications/cancelled"),
+        "notifications.progress" => Ok("notifications/progress"),
+        "notifications.message" => Ok("notifications/message"),
+        "notifications.resources.updated" => Ok("notifications/resources/updated"),
+        "notifications.resources.list_changed" => Ok("notifications/resources/list_changed"),
+        "notifications.tools.list_changed" => Ok("notifications/tools/list_changed"),
+        "notifications.prompts.list_changed" => Ok("notifications/prompts/list_changed"),
+        "notifications.elicitation.complete" => Ok("notifications/elicitation/complete"),
+        "sampling.create_message" => Ok("sampling/createMessage"),
+        "roots.list" => Ok("roots/list"),
+        "elicitation.create" => Ok("elicitation/create"),
+        "notifications.initialized" => Ok("notifications/initialized"),
+        "notifications.roots.list_changed" => Ok("notifications/roots/list_changed"),
+        _ => Err(NatsTransportError::UnsupportedMethod {
+            method: suffix.to_string(),
+        }),
+    }
+}
+
+fn method_from_subject<R: ServiceRole>(subject: &str) -> Result<String, NatsTransportError> {
+    let role_marker = if R::IS_CLIENT { ".client." } else { ".server." };
+    let role_pos = subject
+        .find(role_marker)
+        .ok_or_else(|| NatsTransportError::UnsupportedMethod {
+            method: subject.to_string(),
+        })?;
+    let suffix = &subject[role_pos + role_marker.len()..];
+    let suffix = suffix
+        .split_once('.')
+        .map(|(_, method_suffix)| method_suffix)
+        .unwrap_or(suffix);
+    Ok(method_from_suffix(suffix)?.to_string())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum NatsTransportError {
+    #[error("JSON-RPC over NATS codec error")]
+    Codec(#[from] jsonrpc_nats::CodecError),
     #[error("failed to subscribe to MCP NATS subject")]
     Subscribe { source: Box<dyn Error + Send + Sync> },
     #[error("failed to request MCP NATS subject {subject}")]

@@ -4,7 +4,7 @@ use super::Bridge;
 use crate::agent::test_support::MockJs;
 use crate::config::Config;
 use agent_client_protocol::{
-    Agent, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
+    Agent, ErrorCode, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
 };
 use tokio::sync::mpsc;
 use trogon_nats::AdvancedMockNatsClient;
@@ -74,8 +74,6 @@ async fn prompt_via_agent_trait_returns_done() {
 
 #[tokio::test]
 async fn ext_method_returns_agent_unavailable_when_nats_fails() {
-    use agent_client_protocol::ErrorCode;
-
     let (_mock, _js, bridge) = mock_bridge();
     let err = bridge
         .ext_method(ExtRequest::new("ext", empty_raw_value()))

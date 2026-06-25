@@ -1,4 +1,5 @@
 use super::*;
+use crate::wire::test_encode::signed_auth_request;
 
 fn fresh_account_public() -> String {
     KeyPair::new_account().public_key()
@@ -34,8 +35,6 @@ fn parse_rejects_garbage() {
 
 #[test]
 fn verify_jwt_issuer_accepts_valid_token() {
-    use crate::wire::test_encode::signed_auth_request;
-
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let user = KeyPair::new_user();
@@ -46,8 +45,6 @@ fn verify_jwt_issuer_accepts_valid_token() {
 
 #[test]
 fn verify_jwt_issuer_rejects_mismatched_server_issuer() {
-    use crate::wire::test_encode::signed_auth_request;
-
     let server = KeyPair::new_account();
     let other_pub = NkeyPublic::parse(KeyPair::new_account().public_key()).unwrap();
     let user = KeyPair::new_user();
@@ -66,8 +63,6 @@ fn verify_jwt_issuer_rejects_invalid_segment_count() {
 
 #[test]
 fn verify_jwt_issuer_rejects_wrong_audience() {
-    use crate::wire::test_encode::signed_auth_request;
-
     let server = KeyPair::new_account();
     let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
     let user = KeyPair::new_user();

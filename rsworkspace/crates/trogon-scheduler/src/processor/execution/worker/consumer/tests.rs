@@ -6,6 +6,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 
 use super::*;
+use crate::processor::execution::reconciliation::EVENT_SUBJECT_PREFIX;
 use crate::processor::execution::worker::dispatcher::DeliveredMessage;
 
 struct NatsServer {
@@ -134,8 +135,6 @@ fn scheduling_support_requires_allow_message_schedules_on_the_stream() {
 
 #[test]
 fn event_filter_is_derived_from_the_event_subject_prefix() {
-    use crate::processor::execution::reconciliation::EVENT_SUBJECT_PREFIX;
-
     assert_eq!(SCHEDULE_EVENT_FILTER, format!("{EVENT_SUBJECT_PREFIX}.>"));
 }
 

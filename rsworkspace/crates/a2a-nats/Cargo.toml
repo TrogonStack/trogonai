@@ -27,6 +27,7 @@ authzed = { workspace = true, optional = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
+jsonrpc-nats = { workspace = true }
 moka = { workspace = true, optional = true }
 reqwest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

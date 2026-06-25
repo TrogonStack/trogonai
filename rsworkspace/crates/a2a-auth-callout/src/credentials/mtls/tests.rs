@@ -1,4 +1,6 @@
+use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
 use time::OffsetDateTime;
+use x509_parser::pem::Pem;
 
 use super::*;
 
@@ -15,8 +17,6 @@ fn rejects_empty_trust_bundle() {
 
 #[tokio::test]
 async fn verifies_rcgen_chain() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_dn = DistinguishedName::new();
     ca_dn.push(DnType::CommonName, "test-ca");
@@ -46,8 +46,6 @@ async fn verifies_rcgen_chain() {
 
 #[tokio::test]
 async fn rejects_wrong_anchor() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let unrelated_key = KeyPair::generate().expect("k");
     let mut unrelated_dn = DistinguishedName::new();
     unrelated_dn.push(DnType::CommonName, "other-ca");
@@ -94,7 +92,6 @@ fn rejects_pem_with_no_certificate_block() {
 
 #[test]
 fn parse_cas_skips_non_certificate_pem_labels() {
-    use x509_parser::pem::Pem;
     // A bundle where all entries are not CERTIFICATE labels: parse_cas must
     // skip them all and then return an empty-bundle error.
     let bundle = "-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----\n";
@@ -110,8 +107,6 @@ fn parse_cas_skips_non_certificate_pem_labels() {
 
 #[tokio::test]
 async fn rejects_expired_certificate() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_dn = DistinguishedName::new();
     ca_dn.push(DnType::CommonName, "test-ca");
@@ -141,8 +136,6 @@ async fn rejects_expired_certificate() {
 
 #[tokio::test]
 async fn rejects_ca_cert_presented_as_leaf() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_dn = DistinguishedName::new();
     ca_dn.push(DnType::CommonName, "test-ca");
@@ -165,8 +158,6 @@ async fn rejects_ca_cert_presented_as_leaf() {
 
 #[tokio::test]
 async fn verifies_cert_that_is_itself_a_trust_anchor() {
-    use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
-
     // A self-signed end-entity cert. When the same cert is placed in both the
     // client PEM and the trust anchor bundle it should short-circuit to
     // trusted = true via the "current cert is itself a configured trust anchor"

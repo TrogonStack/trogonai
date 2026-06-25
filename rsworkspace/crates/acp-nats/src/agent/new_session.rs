@@ -1,6 +1,6 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, FlushClient, PublishClient, RequestClient, global};
+use super::rpc_call::jsonrpc_call;
+use crate::nats::{FlushClient, PublishClient, RequestClient, global};
 use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
 use tracing::{Span, info, instrument};
 use trogon_std::time::GetElapsed;
@@ -18,17 +18,16 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
 
     info!(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), "New session request");
 
-    let nats = bridge.nats();
     let subject = global::SessionNewSubject::new(bridge.config.acp_prefix_ref());
 
-    let result = nats::request_with_timeout::<N, NewSessionRequest, NewSessionResponse>(
-        nats,
+    let result: Result<NewSessionResponse> = jsonrpc_call(
+        bridge.nats(),
         &subject,
+        "session.new",
         &args,
         bridge.config.operation_timeout,
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     if let Ok(ref response) = result {
         Span::current().record("session_id", response.session_id.to_string().as_str());

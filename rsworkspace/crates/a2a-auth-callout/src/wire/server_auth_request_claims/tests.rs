@@ -3,6 +3,7 @@ use nats_jwt_rs::authorization::AuthRequest;
 use nkeys::KeyPair;
 
 use super::*;
+use crate::bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest};
 use crate::error::CredentialError;
 use crate::wire::test_encode::signed_auth_request;
 use crate::wire::{NkeyPublic, ServerAuthRequestEnvelope};
@@ -93,8 +94,6 @@ fn connect_opts_opaque_pass_ignores_empty_values() {
 
 #[test]
 fn client_tls_pem_certs_reads_from_bridge_mint_payload() {
-    use crate::bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest};
-
     let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {
         user_nkey: None,
         user_jwt: None,

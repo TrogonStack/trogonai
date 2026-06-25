@@ -1,22 +1,21 @@
+use jsonrpc_nats::RequestId;
 use trogon_nats::AdvancedMockNatsClient;
 
 use super::*;
-use crate::server::test_support::{parse_response, rpc_payload, stub};
+use crate::server::test_support::{parse_published_response, rpc_payload, stub, wire_notification, wire_request};
 
-fn send_message_request_payload(id: i64) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "message/send",
-        "params": {
+fn send_message_request_payload(id: i64) -> (async_nats::HeaderMap, Vec<u8>) {
+    wire_request(
+        "message/send",
+        RequestId::Number(id),
+        serde_json::json!({
             "message": {
                 "messageId": "m-1",
                 "role": "ROLE_USER",
                 "parts": []
             }
-        }
-    }))
-    .unwrap()
+        }),
+    )
 }
 
 fn task_response(task_id: &str) -> a2a::types::SendMessageResponse {
@@ -39,8 +38,9 @@ async fn success_publishes_task_response() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
     handler.lock().unwrap().message_send_result = Some(Ok(task_response("t-1")));
-    handle(&handler, &send_message_request_payload(1), Some("r".into()), &nats).await;
-    let body = parse_response(&nats.published_payloads()[0]);
+    let (headers, payload) = send_message_request_payload(1);
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
+    let body = parse_published_response(&nats, 0);
     assert_eq!(body["result"]["task"]["id"].as_str(), Some("t-1"));
 }
 
@@ -49,8 +49,9 @@ async fn handler_error_response_uses_typed_code() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
     handler.lock().unwrap().message_send_result = Some(Err(A2aError::agent_unavailable("down")));
-    handle(&handler, &send_message_request_payload(2), Some("r".into()), &nats).await;
-    let body = parse_response(&nats.published_payloads()[0]);
+    let (headers, payload) = send_message_request_payload(2);
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
+    let body = parse_published_response(&nats, 0);
     assert_eq!(
         body["error"]["code"].as_i64(),
         Some(i64::from(crate::error::AGENT_UNAVAILABLE))
@@ -61,7 +62,8 @@ async fn handler_error_response_uses_typed_code() {
 async fn no_reply_drops_request() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    handle(&handler, &send_message_request_payload(3), None, &nats).await;
+    let (headers, payload) = send_message_request_payload(3);
+    handle(&handler, &headers, &payload, None, &nats).await;
     assert!(nats.published_messages().is_empty());
 }
 
@@ -69,18 +71,13 @@ async fn no_reply_drops_request() {
 async fn missing_params_returns_invalid_params_error() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    handle(&handler, &rpc_payload("message/send", 4), Some("r".into()), &nats).await;
-    // `rpc_payload` sends an empty `{}` for params, which parses but as an empty SendMessageRequest;
-    // verify that completely-absent params (no key at all) returns -32602 below.
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 5,
-        "method": "message/send"
-    }))
-    .unwrap();
+    let (headers, payload) = rpc_payload("message/send", 4);
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
+
+    let (headers, payload) = wire_request("message/send", RequestId::Number(5), serde_json::Value::Null);
     let nats = AdvancedMockNatsClient::new();
-    handle(&handler, &payload, Some("r".into()), &nats).await;
-    let body = parse_response(&nats.published_payloads()[0]);
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
+    let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
 }
 
@@ -88,15 +85,9 @@ async fn missing_params_returns_invalid_params_error() {
 async fn invalid_params_shape_returns_invalid_params_code() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 6,
-        "method": "message/send",
-        "params": {"message": 42}
-    }))
-    .unwrap();
-    handle(&handler, &payload, Some("r".into()), &nats).await;
-    let body = parse_response(&nats.published_payloads()[0]);
+    let (headers, payload) = wire_request("message/send", RequestId::Number(6), serde_json::json!({"message": 42}));
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
+    let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
     assert_eq!(body["id"], 6);
 }
@@ -105,8 +96,10 @@ async fn invalid_params_shape_returns_invalid_params_code() {
 async fn malformed_json_still_publishes_parse_error_with_null_id() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    handle(&handler, b"not json", Some("r".into()), &nats).await;
-    let body = parse_response(&nats.published_payloads()[0]);
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "null");
+    handle(&handler, &headers, b"not json", Some("r".into()), &nats).await;
+    let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32700);
     assert!(body["id"].is_null());
 }
@@ -115,12 +108,10 @@ async fn malformed_json_still_publishes_parse_error_with_null_id() {
 async fn notification_without_id_is_dropped() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "message/send",
-        "params": {"message": {"messageId":"m","role":"user","parts":[]}}
-    }))
-    .unwrap();
-    handle(&handler, &payload, Some("r".into()), &nats).await;
+    let (headers, payload) = wire_notification(
+        "message/send",
+        serde_json::json!({"message": {"messageId":"m","role":"user","parts":[]}}),
+    );
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     assert!(nats.published_messages().is_empty());
 }

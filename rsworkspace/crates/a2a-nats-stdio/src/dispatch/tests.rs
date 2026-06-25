@@ -2,6 +2,7 @@ use super::*;
 use a2a_nats::client::A2aClient;
 use a2a_nats::{A2aAgentId, A2aPrefix};
 use bytes::Bytes;
+use jsonrpc_nats::{Message as JrpcMessage, ResponseId, encode};
 use serde_json::json;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
@@ -17,7 +18,7 @@ fn make_client(
     A2aClient::new(prefix, agent_id, nats, js)
 }
 
-fn task_response(task_id: &str) -> Bytes {
+fn task_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = a2a::types::Task {
         id: task_id.to_string(),
         context_id: String::new(),
@@ -30,16 +31,15 @@ fn task_response(task_id: &str) -> Bytes {
         history: None,
         metadata: None,
     };
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "x",
-        "result": task
-    }))
-    .unwrap()
-    .into()
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(task),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
-fn send_message_response_bytes(task_id: &str) -> Bytes {
+fn send_message_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = a2a::types::Task {
         id: task_id.to_string(),
         context_id: String::new(),
@@ -53,13 +53,12 @@ fn send_message_response_bytes(task_id: &str) -> Bytes {
         metadata: None,
     };
     let response = a2a::types::SendMessageResponse::Task(task);
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "x",
-        "result": response
-    }))
-    .unwrap()
-    .into()
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(response),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 async fn dispatch(
@@ -77,7 +76,8 @@ async fn dispatch(
 #[tokio::test]
 async fn tasks_get_success() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.get", task_response("t1"));
+    let (headers, body) = task_response("t1");
+    nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -107,7 +107,8 @@ async fn tasks_get_error_maps_to_rpc_error() {
 #[tokio::test]
 async fn tasks_cancel_success() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.cancel", task_response("tc"));
+    let (headers, body) = task_response("tc");
+    nats.set_response_wire("a2a.agents.bot.tasks.cancel", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -122,7 +123,8 @@ async fn tasks_cancel_success() {
 #[tokio::test]
 async fn message_send_success() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.send", send_message_response_bytes("ms"));
+    let (headers, body) = send_message_response("ms");
+    nats.set_response_wire("a2a.agents.bot.message.send", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -144,7 +146,8 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
     // closed-channel branch — the handler must return without consuming
     // the JetStream loop (which would ack events the caller never saw).
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms-drop"));
+    let (headers, body) = send_message_response("ms-drop");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -173,7 +176,8 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
 #[tokio::test]
 async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.resubscribe", task_response("rsub-drop"));
+    let (headers, body) = task_response("rsub-drop");
+    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -200,7 +204,8 @@ async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
 #[tokio::test]
 async fn message_stream_emits_bootstrap_then_events() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms2"));
+    let (headers, body) = send_message_response("ms2");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -226,7 +231,8 @@ async fn message_stream_emits_bootstrap_then_events() {
 #[tokio::test]
 async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.resubscribe", task_response("task1"));
+    let (headers, body) = task_response("task1");
+    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -269,14 +275,12 @@ async fn agent_card_success() {
         security_requirements: None,
         signatures: None,
     };
-    nats.set_response(
-        "a2a.agents.bot.card",
-        serde_json::to_vec(&serde_json::json!({
-            "jsonrpc": "2.0", "id": "x", "result": card
-        }))
-        .unwrap()
-        .into(),
-    );
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(card),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.card", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -316,9 +320,15 @@ async fn invalid_params_returns_error() {
     ));
 }
 
-fn err_response(code: i32, msg: &str) -> Bytes {
-    let json = serde_json::json!({"jsonrpc": "2.0", "id": "x", "error": {"code": code, "message": msg}});
-    serde_json::to_vec(&json).unwrap().into()
+fn err_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&JrpcMessage::Error {
+        id: ResponseId::String("any".into()),
+        code,
+        message: msg.to_string(),
+        data: None,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 #[track_caller]
@@ -342,8 +352,12 @@ async fn tasks_list_success() {
         page_size: 0,
         total_size: 0,
     };
-    let body = serde_json::json!({"jsonrpc":"2.0","id":"x","result":list});
-    nats.set_response("a2a.agents.bot.tasks.list", serde_json::to_vec(&body).unwrap().into());
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(list),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.tasks.list", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(&client, RpcId::Number(1), "tasks/list", json!({})).await;
     assert!(matches!(frame, OutboundFrame::Response(_)));
@@ -360,8 +374,12 @@ async fn push_set_success() {
         authentication: None,
         tenant: None,
     };
-    let body = serde_json::json!({"jsonrpc":"2.0","id":"x","result":cfg});
-    nats.set_response("a2a.agents.bot.push.set", serde_json::to_vec(&body).unwrap().into());
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(cfg),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.push.set", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -384,8 +402,12 @@ async fn push_get_success() {
         authentication: None,
         tenant: None,
     };
-    let body = serde_json::json!({"jsonrpc":"2.0","id":"x","result":cfg});
-    nats.set_response("a2a.agents.bot.push.get", serde_json::to_vec(&body).unwrap().into());
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(cfg),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.push.get", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -404,8 +426,12 @@ async fn push_list_success() {
         configs: vec![],
         next_page_token: None,
     };
-    let body = serde_json::json!({"jsonrpc":"2.0","id":"x","result":resp});
-    nats.set_response("a2a.agents.bot.push.list", serde_json::to_vec(&body).unwrap().into());
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(resp),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.push.list", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -420,8 +446,12 @@ async fn push_list_success() {
 #[tokio::test]
 async fn push_delete_success() {
     let nats = AdvancedMockNatsClient::new();
-    let body = serde_json::json!({"jsonrpc":"2.0","id":"x","result":null});
-    nats.set_response("a2a.agents.bot.push.delete", serde_json::to_vec(&body).unwrap().into());
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(null),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.bot.push.delete", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -476,7 +506,8 @@ async fn client_err_to_frame_maps_every_typed_variant() {
     ];
     for (input, expected) in cases {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response("a2a.agents.bot.tasks.get", err_response(input, "x"));
+        let (headers, body) = err_response(input, "x");
+        nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -539,7 +570,8 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
     ];
     for (subject, method, params) in cases {
         let nats = AdvancedMockNatsClient::new();
-        nats.set_response(subject, err_response(a2a_nats::error::TASK_NOT_FOUND, "missing"));
+        let (headers, body) = err_response(a2a_nats::error::TASK_NOT_FOUND, "missing");
+        nats.set_response_wire(subject, headers, body);
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(&client, RpcId::Number(1), method, params).await;
         assert_err_code(frame, a2a_nats::error::TASK_NOT_FOUND);
@@ -549,10 +581,8 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
 #[tokio::test]
 async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.bot.message.stream",
-        err_response(a2a_nats::error::AGENT_UNAVAILABLE, "down"),
-    );
+    let (headers, body) = err_response(a2a_nats::error::AGENT_UNAVAILABLE, "down");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -570,10 +600,8 @@ async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
 #[tokio::test]
 async fn tasks_resubscribe_error_at_snapshot_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.bot.tasks.resubscribe",
-        err_response(a2a_nats::error::TASK_NOT_FOUND, "gone"),
-    );
+    let (headers, body) = err_response(a2a_nats::error::TASK_NOT_FOUND, "gone");
+    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -639,7 +667,8 @@ fn status_event(task_id: &str) -> a2a::event::StreamResponse {
 #[tokio::test]
 async fn message_stream_forwards_status_events_as_notifications() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.message.stream", send_message_response_bytes("ms3"));
+    let (headers, body) = send_message_response("ms3");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -669,7 +698,8 @@ async fn message_stream_forwards_status_events_as_notifications() {
 #[tokio::test]
 async fn tasks_resubscribe_forwards_status_events_under_resubscribe_method() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.resubscribe", task_response("rsub"));
+    let (headers, body) = task_response("rsub");
+    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);

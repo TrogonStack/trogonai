@@ -1,6 +1,8 @@
 use std::io;
+use std::io::Write;
 use std::path::Path;
 
+use super::super::ReadFile;
 use super::*;
 
 #[test]
@@ -120,8 +122,6 @@ fn test_memfs_nested_paths() {
 
 #[test]
 fn test_memfs_open_append_persists_writes() {
-    use std::io::Write;
-
     let fs = MemFs::new();
     let path = Path::new("/log.txt");
 
@@ -135,8 +135,6 @@ fn test_memfs_open_append_persists_writes() {
 
 #[test]
 fn test_memfs_open_append_to_existing_file() {
-    use std::io::Write;
-
     let fs = MemFs::new();
     let path = Path::new("/log.txt");
     fs.insert(path, "existing\n");
@@ -211,8 +209,6 @@ fn test_memfs_paths_returns_inserted_paths() {
 
 #[test]
 fn test_memfs_was_opened_tracks_append_opens() {
-    use std::io::Write;
-
     let fs = MemFs::new();
     let path = Path::new("/log.txt");
 
@@ -224,8 +220,6 @@ fn test_memfs_was_opened_tracks_append_opens() {
 
 #[test]
 fn test_generic_function_with_memfs() {
-    use super::super::ReadFile;
-
     fn read_config<F: ReadFile>(fs: &F, path: &Path) -> String {
         fs.read_to_string(path).unwrap_or_else(|_| "{}".to_string())
     }

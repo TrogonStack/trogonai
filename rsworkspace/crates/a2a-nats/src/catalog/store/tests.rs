@@ -1,3 +1,9 @@
+use std::error::Error;
+
+use async_nats::jetstream::kv;
+use async_nats::jetstream::kv::Operation;
+use async_trait::async_trait;
+
 use super::*;
 use crate::catalog::import_gate::AllowAllImportGate;
 use trogon_nats::jetstream::mocks::MockJetStreamKvStore;
@@ -42,7 +48,6 @@ async fn put_creates_when_entry_absent() {
 
 #[tokio::test]
 async fn put_updates_when_entry_present() {
-    use async_nats::jetstream::kv::Operation;
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 3, Operation::Put);
     let store = KvCatalogStore::new(kv.clone());
@@ -55,7 +60,6 @@ async fn put_updates_when_entry_present() {
 
 #[tokio::test]
 async fn put_creates_when_latest_entry_is_a_delete_tombstone() {
-    use async_nats::jetstream::kv::Operation;
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry(bytes::Bytes::new(), 7, Operation::Delete);
     let store = KvCatalogStore::new(kv.clone());
@@ -68,7 +72,6 @@ async fn put_creates_when_latest_entry_is_a_delete_tombstone() {
 
 #[tokio::test]
 async fn put_creates_when_latest_entry_is_a_purge_tombstone() {
-    use async_nats::jetstream::kv::Operation;
     let kv = MockJetStreamKvStore::new();
     kv.enqueue_entry(bytes::Bytes::new(), 9, Operation::Purge);
     let store = KvCatalogStore::new(kv.clone());
@@ -79,8 +82,6 @@ async fn put_creates_when_latest_entry_is_a_purge_tombstone() {
 
 #[tokio::test]
 async fn put_retries_when_concurrent_writer_races_create() {
-    use async_nats::jetstream::kv;
-
     let kv_store = MockJetStreamKvStore::new();
     // Two attempts: first sees no entry → create races and loses (AlreadyExists);
     // second sees a Put entry at revision 5 → update succeeds.
@@ -97,8 +98,6 @@ async fn put_retries_when_concurrent_writer_races_create() {
 
 #[tokio::test]
 async fn put_retries_when_concurrent_writer_races_update() {
-    use async_nats::jetstream::kv;
-
     let kv_store = MockJetStreamKvStore::new();
     kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 3, kv::Operation::Put);
     kv_store.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
@@ -113,7 +112,6 @@ async fn put_retries_when_concurrent_writer_races_update() {
 
 #[tokio::test]
 async fn put_propagates_non_conflict_update_error_without_retry() {
-    use async_nats::jetstream::kv;
     let kv_store = MockJetStreamKvStore::new();
     kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 3, kv::Operation::Put);
     kv_store.enqueue_update_result(Err(kv::UpdateErrorKind::TimedOut));
@@ -125,7 +123,6 @@ async fn put_propagates_non_conflict_update_error_without_retry() {
 
 #[tokio::test]
 async fn put_propagates_non_conflict_create_error_without_retry() {
-    use async_nats::jetstream::kv;
     let kv_store = MockJetStreamKvStore::new();
     kv_store.enqueue_create_result(Err(kv::CreateErrorKind::InvalidKey));
     let store = KvCatalogStore::new(kv_store.clone());
@@ -136,8 +133,6 @@ async fn put_propagates_non_conflict_create_error_without_retry() {
 
 #[tokio::test]
 async fn put_gives_up_when_revision_race_persists_past_retry_budget() {
-    use async_nats::jetstream::kv;
-
     let kv_store = MockJetStreamKvStore::new();
     for _ in 0..3 {
         kv_store.enqueue_entry(bytes::Bytes::from(b"{}".to_vec()), 1, kv::Operation::Put);
@@ -206,7 +201,6 @@ fn error_display_kv() {
 
 #[test]
 fn error_kv_preserves_source_chain() {
-    use std::error::Error;
     let inner: BoxedKvError = Box::new(std::io::Error::other("nats down"));
     let e = CatalogStoreError::Kv(inner);
     let src = e.source().expect("Kv error must expose its source");
@@ -215,7 +209,6 @@ fn error_kv_preserves_source_chain() {
 
 #[test]
 fn error_invalid_key_has_no_source() {
-    use std::error::Error;
     let e = CatalogStoreError::InvalidKey("bad.segment".into());
     assert_eq!(e.to_string(), "invalid catalog KV key: bad.segment");
     assert!(e.source().is_none());
@@ -231,7 +224,6 @@ fn error_display_serialize() {
 
 #[test]
 fn error_source_serialize() {
-    use std::error::Error;
     let inner = serde_json::from_str::<String>("x").unwrap_err();
     let e = CatalogStoreError::Serialize(inner);
     assert!(e.source().is_some());
@@ -239,7 +231,6 @@ fn error_source_serialize() {
 
 #[test]
 fn error_display_and_source_covers_every_variant() {
-    use std::error::Error;
     let bad = serde_json::from_str::<String>("x").unwrap_err();
     let ser_inner = serde_json::from_str::<String>("x").unwrap_err();
     let ser_expected = format!("failed to serialize agent card: {ser_inner}");
@@ -325,8 +316,6 @@ async fn list_cards_gated_allow_keeps_imported_when_card_accepts_federated_sourc
 
 #[tokio::test]
 async fn list_cards_gated_deny_drops_imports_keeps_local() {
-    use async_trait::async_trait;
-
     struct DenyAll;
     #[async_trait]
     impl ImportGate for DenyAll {

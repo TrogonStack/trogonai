@@ -1,4 +1,7 @@
-use buffa::MessageField;
+use buffa::{MessageField, MessageName};
+use trogon_decider_runtime::{Event, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition};
+use trogonai_proto::scheduler::schedules::v1::schedule;
+use uuid::Uuid;
 
 use super::*;
 use crate::commands::domain::MessageEnvelope;
@@ -116,7 +119,6 @@ fn created_event_missing_schedule_field_is_rejected() {
 
 #[test]
 fn schedule_at_missing_timestamp_is_rejected() {
-    use trogonai_proto::scheduler::schedules::v1::schedule;
     let schedule = v1::Schedule {
         kind: Some(v1::schedule::Kind::At(Box::new(schedule::At {
             at: MessageField::none(),
@@ -181,7 +183,6 @@ fn created_event_missing_message_field_is_rejected() {
 
 #[test]
 fn schedule_every_missing_duration_is_rejected() {
-    use trogonai_proto::scheduler::schedules::v1::schedule;
     let schedule = v1::Schedule {
         kind: Some(v1::schedule::Kind::Every(Box::new(schedule::Every {
             every: MessageField::none(),
@@ -196,7 +197,6 @@ fn schedule_every_missing_duration_is_rejected() {
 
 #[test]
 fn schedule_rrule_missing_dtstart_is_rejected() {
-    use trogonai_proto::scheduler::schedules::v1::schedule;
     let schedule = v1::Schedule {
         kind: Some(v1::schedule::Kind::Rrule(Box::new(schedule::RRule {
             dtstart: MessageField::none(),
@@ -395,9 +395,6 @@ fn missing_event_case_is_an_error() {
 
 #[test]
 fn occurrence_lifecycle_events_decode_into_schedule_changes() {
-    use trogon_decider_runtime::{Event, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition};
-    use uuid::Uuid;
-
     let occurrence_at = at_instant();
     let event = v1::ScheduleEvent {
         event: Some(
@@ -517,9 +514,6 @@ fn out_of_range_duration_nanos_is_rejected() {
 
 #[test]
 fn lane_key_routes_decodable_events_by_payload_schedule_id() {
-    use trogon_decider_runtime::{Event, EventEncode, EventId, EventType, Headers, StreamEvent, StreamPosition};
-    use uuid::Uuid;
-
     let created = v1::ScheduleCreated {
         schedule_id: "orders/created".to_string(),
         status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
@@ -559,9 +553,6 @@ fn lane_key_routes_decodable_events_by_payload_schedule_id() {
 
 #[test]
 fn lane_key_falls_back_to_stream_id_for_foreign_events() {
-    use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
-    use uuid::Uuid;
-
     let stream_event = StreamEvent {
         stream_id: "orders/created".to_string(),
         event: Event {
@@ -604,10 +595,6 @@ fn schedule_completed_decodes_into_completed_change() {
 
 #[test]
 fn lane_route_from_stream_event_routes_undecoded_on_decode_error() {
-    use buffa::MessageName;
-    use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent, StreamPosition};
-    use uuid::Uuid;
-
     let stream_event = StreamEvent {
         stream_id: "orders/created".to_string(),
         event: Event {

@@ -3,6 +3,9 @@ use std::future::Future;
 
 use tokio::io::AsyncRead;
 
+#[cfg(not(coverage))]
+use async_nats::jetstream::context::CreateKeyValueErrorKind;
+
 pub trait ObjectStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
     type Info: Send;
@@ -42,8 +45,6 @@ impl NatsObjectStore {
         js: &async_nats::jetstream::Context,
         config: async_nats::jetstream::object_store::Config,
     ) -> Result<Self, ProvisionObjectStoreError> {
-        use async_nats::jetstream::context::CreateKeyValueErrorKind;
-
         let bucket = config.bucket.clone();
         match js.create_object_store(config).await {
             Ok(store) => Ok(Self { store }),

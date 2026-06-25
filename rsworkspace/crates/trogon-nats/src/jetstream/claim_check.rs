@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_nats::HeaderMap;
 use bytes::Bytes;
+use tokio::io::AsyncReadExt;
 use tracing::{debug, error};
 
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
@@ -58,8 +59,6 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
     payload: Bytes,
     store: &S,
 ) -> Result<Bytes, ClaimResolveError<S::Error>> {
-    use tokio::io::AsyncReadExt;
-
     if !is_claim(headers) {
         return Ok(payload);
     }

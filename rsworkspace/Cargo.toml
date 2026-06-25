@@ -25,7 +25,9 @@ trogon-telemetry = { path = "crates/trogon-telemetry" }
 mcp-nats = { path = "crates/mcp-nats" }
 mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
+jsonrpc-nats = { path = "crates/jsonrpc-nats" }
 trogon-nats = { path = "crates/trogon-nats" }
+trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-service-config = { path = "crates/trogon-service-config" }

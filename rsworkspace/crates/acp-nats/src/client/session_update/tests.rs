@@ -1,8 +1,9 @@
 use super::*;
 use agent_client_protocol::{
     ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionUpdate,
+    SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
+use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use std::cell::RefCell;
 
@@ -51,6 +52,10 @@ impl Client for MockClient {
     }
 }
 
+fn empty_headers() -> HeaderMap {
+    HeaderMap::new()
+}
+
 #[tokio::test]
 async fn forwards_notification_to_client() {
     let client = MockClient::new();
@@ -58,9 +63,9 @@ async fn forwards_notification_to_client() {
         "session-001",
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hello"))),
     );
-    let payload = serde_json::to_vec(&notification).unwrap();
+    let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&payload, &client, false).await;
+    handle(&headers, &payload, &client, false).await;
 
     assert_eq!(client.notification_count(), 1);
 }
@@ -68,7 +73,7 @@ async fn forwards_notification_to_client() {
 #[tokio::test]
 async fn invalid_payload_does_not_panic() {
     let client = MockClient::new();
-    handle(b"not json", &client, false).await;
+    handle(&empty_headers(), b"not json", &client, false).await;
     assert_eq!(client.notification_count(), 0);
 }
 
@@ -79,9 +84,9 @@ async fn client_error_does_not_panic() {
         "session-001",
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hello"))),
     );
-    let payload = serde_json::to_vec(&notification).unwrap();
+    let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&payload, &client, false).await;
+    handle(&headers, &payload, &client, false).await;
 }
 
 #[tokio::test]
@@ -91,17 +96,15 @@ async fn has_reply_logs_warning_but_still_forwards() {
         "session-001",
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hello"))),
     );
-    let payload = serde_json::to_vec(&notification).unwrap();
+    let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&payload, &client, true).await;
+    handle(&headers, &payload, &client, true).await;
 
     assert_eq!(client.notification_count(), 1);
 }
 
 #[tokio::test]
 async fn mock_client_trait_coverage() {
-    use agent_client_protocol::{ToolCallUpdate, ToolCallUpdateFields};
-
     let client = MockClient::new();
     let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
     let req = RequestPermissionRequest::new("sess-1", tool_call, vec![]);

@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, Jwk, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType,
+    AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, KeyOperations,
+    PublicKeyUse, RSAKeyParameters, RSAKeyType,
 };
 use rand::rngs::OsRng;
 use rsa::RsaPrivateKey;
@@ -336,9 +337,6 @@ fn same_origin_returns_false_for_empty_host() {
 
 #[tokio::test]
 async fn verify_fails_with_non_rsa_jwk() {
-    use jsonwebtoken::jwk::{
-        AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
-    };
     let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
     let ec_jwk = Jwk {
         common: CommonParameters {
@@ -377,13 +375,11 @@ async fn verify_fails_with_non_rsa_jwk() {
 #[tokio::test]
 async fn oidc_verifier_trait_delegates_to_verify_internal() {
     // Exercise the OidcVerifier::verify blanket impl on JwksOidcVerifier.
-    use rand::rngs::OsRng;
     let rng = &mut OsRng;
     let (jwks, enc) = test_jwks_and_encoding_key(rng);
     let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
     let verifier: &dyn OidcVerifier =
         &JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
-    use serde::Serialize;
     #[derive(Serialize)]
     struct IdClaims {
         sub: String,

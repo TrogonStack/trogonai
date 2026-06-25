@@ -2,6 +2,7 @@ use super::*;
 use crate::push::push_notification_config_id::PushNotificationConfigId;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::task_id::A2aTaskId;
+use std::error::Error as _;
 
 fn key() -> PushIdempotencyKey {
     PushIdempotencyKey::derive_terminal(
@@ -81,7 +82,6 @@ fn invalid_json_base_surfaces_serde_error() {
 
 #[test]
 fn augment_error_display_and_source_covers_every_variant() {
-    use std::error::Error as _;
     let non_object = PushPayloadAugmentError::NonObjectPayloadForIdempotencyKey;
     assert_eq!(
         non_object.to_string(),

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use serde::Deserialize;
@@ -426,7 +426,6 @@ fn parse_manifest_file(path: &Path) -> Result<SkillManifest, SkillManifestError>
 /// manifest can't point the host at arbitrary files outside the configured
 /// bundle directory.
 fn validate_wasm_path(manifest_path: &Path, raw: String) -> Result<WasmBundlePath, SkillManifestError> {
-    use std::path::Component;
     let candidate = PathBuf::from(&raw);
     if candidate.is_absolute() {
         return Err(SkillManifestError::WasmPathEscapesBundle {

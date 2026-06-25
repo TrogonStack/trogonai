@@ -4,6 +4,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::Request as HttpRequest;
 use axum::http::header::{HOST, ORIGIN};
 use serde_json::{Value, json};
+use std::error::Error as _;
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::{mpsc, oneshot, watch};
 use trogon_nats::AdvancedMockNatsClient;
@@ -112,10 +113,6 @@ fn http_transport_error_into_response_maps_status_codes() {
             StatusCode::NOT_ACCEPTABLE,
         ),
         (
-            HttpTransportError::not_implemented("not-implemented"),
-            StatusCode::NOT_IMPLEMENTED,
-        ),
-        (
             HttpTransportError::internal("internal"),
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
@@ -131,8 +128,6 @@ fn http_transport_error_into_response_maps_status_codes() {
 
 #[test]
 fn http_transport_error_display_and_source_chain_return_expected_values() {
-    use std::error::Error as _;
-
     assert_eq!(HttpTransportError::bad_request("bad").to_string(), "bad");
     assert!(HttpTransportError::bad_request("bad").source().is_none());
     assert!(HttpTransportError::not_found("missing").source().is_none());
@@ -146,11 +141,6 @@ fn http_transport_error_display_and_source_chain_return_expected_values() {
             .is_none()
     );
     assert!(HttpTransportError::not_acceptable("not-acceptable").source().is_none());
-    assert!(
-        HttpTransportError::not_implemented("not-implemented")
-            .source()
-            .is_none()
-    );
     assert_eq!(HttpTransportError::internal("internal").to_string(), "internal");
     assert!(HttpTransportError::internal("internal").source().is_none());
 
@@ -199,12 +189,16 @@ fn incoming_http_message_parses_and_classifies_shapes() {
 }
 
 #[test]
-fn incoming_http_message_parse_rejects_batch_and_invalid_json() {
-    let batch = IncomingHttpMessage::parse(r#"[{"jsonrpc":"2.0"}]"#.to_string()).unwrap_err();
+fn incoming_http_message_parse_all_unbundles_batch_and_rejects_empty_batch() {
+    let batch = IncomingHttpMessage::parse_all(r#"[{"jsonrpc":"2.0","method":"initialized"}]"#.to_string()).unwrap();
+    assert_eq!(batch.len(), 1);
+    assert!(batch[0].is_notification());
+
+    let empty = IncomingHttpMessage::parse_all("[]".to_string()).unwrap_err();
     assert!(matches!(
-        batch,
-        HttpTransportError::NotImplemented {
-            message: "batch JSON-RPC requests are not supported",
+        empty,
+        HttpTransportError::BadRequest {
+            message: "empty JSON-RPC batch",
             source: None,
         }
     ));

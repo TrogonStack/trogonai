@@ -3,6 +3,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::ext_method_name::ExtMethodName;
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
+use async_nats::subject::ToSubject;
 
 fn p(s: &str) -> AcpPrefix {
     AcpPrefix::new(s).expect("test prefix")
@@ -525,8 +526,6 @@ fn session_scoped_client_subjects_share_layout() {
 
 #[test]
 fn to_subject_produces_correct_nats_subject() {
-    use async_nats::subject::ToSubject;
-
     let prefix = p("acp");
     let sid = sid("s1");
 

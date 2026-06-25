@@ -9,6 +9,7 @@
 //! would let this harness move back behind the abstraction.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,6 +34,7 @@ use jsonwebtoken::jwk::{
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rand::rngs::OsRng;
+use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType};
 use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePrivateKey;
 use rsa::traits::PublicKeyParts;
@@ -571,10 +573,6 @@ struct TlsFixture {
 }
 
 fn write_tls_fixture() -> TlsFixture {
-    use std::net::{IpAddr, Ipv4Addr};
-
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType};
-
     let dir = tempfile::tempdir().expect("tls tempdir");
     let cert_dir = dir.path().join("certs");
     std::fs::create_dir_all(&cert_dir).expect("certs dir");

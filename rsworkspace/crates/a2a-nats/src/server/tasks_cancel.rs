@@ -1,51 +1,48 @@
 use tracing::{instrument, warn};
 
-use crate::jsonrpc::extract_request_id;
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{JsonRpcErrorResponse, JsonRpcResponse, is_notification, parse_request};
+use crate::server::wire::{
+    encode_error_reply, encode_success_reply, is_notification, parse_request_params, publish_reply,
+};
 
-#[instrument(name = "a2a.server.tasks_cancel", skip(handler, payload, reply_subject, nats))]
-pub async fn handle<H, N>(handler: &H, payload: &[u8], reply_subject: Option<String>, nats: &N)
-where
+const METHOD: &str = "tasks/cancel";
+
+#[instrument(
+    name = "a2a.server.tasks_cancel",
+    skip(handler, headers, payload, reply_subject, nats)
+)]
+pub async fn handle<H, N>(
+    handler: &H,
+    headers: &async_nats::header::HeaderMap,
+    payload: &[u8],
+    reply_subject: Option<String>,
+    nats: &N,
+) where
     H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
+    if is_notification(headers) {
+        return;
+    }
+
     let Some(reply) = reply_subject else {
         warn!("tasks/cancel received without reply subject; dropping");
         return;
     };
 
-    let id = extract_request_id(payload);
-    if id.is_none() && is_notification(payload) {
-        return;
-    }
-
-    let result = match parse_request::<serde_json::Value>(payload) {
+    let result = match parse_request_params::<serde_json::Value>(METHOD, headers, payload) {
         Err(_) => Err(A2aError::new(-32700, "Parse error")),
-        Ok(envelope) => match envelope.params {
-            None => Err(A2aError::new(-32602, "Invalid params: missing params")),
-            Some(raw) => match serde_json::from_value::<a2a::types::CancelTaskRequest>(raw) {
-                Err(e) => Err(A2aError::new(-32602, format!("Invalid params: {e}"))),
-                Ok(params) => handler.tasks_cancel(params).await,
-            },
+        Ok(raw) if raw.is_null() => Err(A2aError::new(-32602, "Invalid params: missing params")),
+        Ok(raw) => match serde_json::from_value::<a2a::types::CancelTaskRequest>(raw) {
+            Err(e) => Err(A2aError::new(-32602, format!("Invalid params: {e}"))),
+            Ok(params) => handler.tasks_cancel(params).await,
         },
     };
-    let bytes = match result {
-        Ok(resp) => JsonRpcResponse::new(id, resp).to_bytes(),
-        Err(e) => JsonRpcErrorResponse::new(id, e.code, e.message).to_bytes(),
+    let encoded = match result {
+        Ok(resp) => encode_success_reply(headers, &resp),
+        Err(e) => encode_error_reply(headers, e.code, e.message, None),
     };
-    match bytes {
-        Ok(b) => {
-            let headers = async_nats::HeaderMap::new();
-            if let Err(e) = nats
-                .publish_with_headers(async_nats::Subject::from(reply.as_str()), headers, b)
-                .await
-            {
-                warn!(error = %e, "failed to publish tasks/cancel reply");
-            }
-        }
-        Err(e) => warn!(error = %e, "failed to serialize tasks/cancel response"),
-    }
+    publish_reply(nats, &reply, encoded, "tasks/cancel reply").await;
 }
 
 #[cfg(test)]
