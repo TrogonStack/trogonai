@@ -1,3 +1,5 @@
+use async_nats::{ClientError, ServerError};
+
 use super::*;
 
 #[test]
@@ -38,8 +40,6 @@ async fn test_handle_event_disconnected() {
 
 #[tokio::test]
 async fn test_handle_event_all_variants() {
-    use async_nats::{ClientError, ServerError};
-
     handle_event(Event::Connected).await;
     handle_event(Event::Disconnected).await;
     handle_event(Event::ServerError(ServerError::Other("test".to_string()))).await;

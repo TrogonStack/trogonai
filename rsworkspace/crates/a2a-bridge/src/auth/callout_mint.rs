@@ -9,6 +9,23 @@ use async_trait::async_trait;
 use super::{AuthMintWire, BytesPayload};
 use crate::error::BridgeError;
 
+#[cfg(test)]
+use a2a_auth_callout::StaticAccountResolver;
+#[cfg(test)]
+use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
+#[cfg(test)]
+use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
+#[cfg(test)]
+use a2a_auth_callout::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
+#[cfg(test)]
+use a2a_auth_callout::permissions::IssuedPermissions;
+#[cfg(test)]
+use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+#[cfg(test)]
+use serde_json::json;
+#[cfg(test)]
+use std::time::Duration;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BridgeTenantAccount(String);
 
@@ -80,17 +97,6 @@ impl AuthMintWire for InProcessCalloutDispatcherMintWire {
 
 #[cfg(test)]
 pub(crate) fn harness_callout_dispatcher(caller_id: &str) -> a2a_auth_callout::dispatcher::CalloutDispatcher {
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use a2a_auth_callout::StaticAccountResolver;
-    use a2a_auth_callout::credentials::oidc::{BearerToken, OidcVerifier};
-    use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-    use a2a_auth_callout::jwt::{AudienceAccount, CallerId, ExternalSubject, SpiceDbPrincipal, UserJwtClaims};
-    use a2a_auth_callout::permissions::IssuedPermissions;
-    use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
-    use serde_json::json;
-
     struct HarnessOidcVerifier {
         caller_id: CallerId,
     }

@@ -15,6 +15,9 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamConsumerFactory;
 
 use crate::router;
+use crate::runtime::RuntimeError;
+use crate::sse::client_error_to_jsonrpc_code;
+use a2a_nats::client::ClientError;
 
 fn test_config() -> A2aPrefix {
     A2aPrefix::new("a2a".to_string()).unwrap()
@@ -373,7 +376,6 @@ async fn push_set_not_supported_maps_to_correct_error_code() {
 
 #[test]
 fn runtime_error_display_shows_env_var_name() {
-    use crate::runtime::RuntimeError;
     assert_eq!(
         RuntimeError::MissingAgentId.to_string(),
         "A2A_AGENT_ID environment variable is required"
@@ -431,9 +433,6 @@ async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
 
 #[test]
 fn client_error_to_jsonrpc_code_maps_known_errors() {
-    use crate::sse::client_error_to_jsonrpc_code;
-    use a2a_nats::client::ClientError;
-
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotFound).0, -32001);
     assert_eq!(client_error_to_jsonrpc_code(&ClientError::TaskNotCancelable).0, -32002);
     assert_eq!(

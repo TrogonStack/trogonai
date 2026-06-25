@@ -1,4 +1,5 @@
 use super::*;
+use async_nats::subject::ToSubject;
 
 #[test]
 fn formats_prefix_tasks_events_subject_with_req_id_suffix() {
@@ -12,7 +13,6 @@ fn formats_prefix_tasks_events_subject_with_req_id_suffix() {
 
 #[test]
 fn to_subject_round_trips_display_form() {
-    use async_nats::subject::ToSubject;
     let s = TaskEventsSubject::new(
         &A2aPrefix::new("a2a").unwrap(),
         &A2aTaskId::new("task-1").unwrap(),

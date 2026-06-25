@@ -9,6 +9,20 @@ use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, DEFAULT_A2A_
 use trogon_nats::connect::ConnectError;
 use trogon_std::env::ReadEnv;
 
+#[cfg(not(coverage))]
+use a2a_nats::client::A2aClient;
+#[cfg(not(coverage))]
+use a2a_nats::{Config, apply_timeout_overrides, nats_connect_timeout};
+#[cfg(not(coverage))]
+use trogon_nats::jetstream::NatsJetStreamClient;
+#[cfg(not(coverage))]
+use trogon_std::env::SystemEnv;
+#[cfg(not(coverage))]
+use trogon_std::signal::shutdown_signal;
+
+#[cfg(not(coverage))]
+use crate::io_loop::run_io_loop;
+
 pub(crate) const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
 
 #[derive(Debug, thiserror::Error)]
@@ -63,14 +77,6 @@ pub fn parse_env<E: ReadEnv>(env: &E) -> Result<ValidatedStdioConfig, RuntimeErr
 /// `RuntimeError` on env validation failure; connect-and-pump is in main.rs.
 #[cfg(not(coverage))]
 pub async fn run() -> Result<(), RuntimeError> {
-    use a2a_nats::client::A2aClient;
-    use a2a_nats::{Config, apply_timeout_overrides, nats_connect_timeout};
-    use trogon_nats::jetstream::NatsJetStreamClient;
-    use trogon_std::env::SystemEnv;
-    use trogon_std::signal::shutdown_signal;
-
-    use crate::io_loop::run_io_loop;
-
     let env = SystemEnv;
     let validated = parse_env(&env)?;
 

@@ -13,6 +13,7 @@ use std::time::Duration;
 use async_nats::HeaderMap;
 use chrono::{DateTime, Utc};
 use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use trogon_decider_runtime::{CommandError, CommandExecution, StreamAppend, StreamEvent, StreamRead};
 
 use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleId, ScheduleMessage};
@@ -248,7 +249,6 @@ where
         );
         // Link this span to the trace recorded when the command produced the
         // event, instead of starting an orphaned trace.
-        use tracing_opentelemetry::OpenTelemetrySpanExt;
         let _ = span.set_parent(extract_context(&stream_event.event.headers));
 
         let result = self

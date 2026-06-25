@@ -1,3 +1,5 @@
+use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
+
 use super::*;
 
 #[test]
@@ -13,8 +15,6 @@ fn rejects_empty_trust_bundle() {
 
 #[tokio::test]
 async fn verifies_rcgen_chain() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_dn = DistinguishedName::new();
     ca_dn.push(DnType::CommonName, "test-ca");
@@ -44,8 +44,6 @@ async fn verifies_rcgen_chain() {
 
 #[tokio::test]
 async fn rejects_wrong_anchor() {
-    use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
-
     let unrelated_key = KeyPair::generate().expect("k");
     let mut unrelated_dn = DistinguishedName::new();
     unrelated_dn.push(DnType::CommonName, "other-ca");

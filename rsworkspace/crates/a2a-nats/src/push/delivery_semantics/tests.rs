@@ -1,4 +1,5 @@
 use super::*;
+use std::error::Error as _;
 
 #[test]
 fn default_is_at_least_once() {
@@ -250,7 +251,6 @@ fn upsert_exactly_once_writes_custom_header() {
 
 #[test]
 fn parse_error_display_covers_every_variant() {
-    use std::error::Error as _;
     let unknown = DeliverySemanticsParseError::UnknownShape;
     assert_eq!(
         unknown.to_string(),

@@ -19,8 +19,9 @@ use futures::stream::{Iter, iter};
 use std::vec::IntoIter;
 use time::OffsetDateTime;
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, Event, EventId, Headers, ReadFrom, ReadStreamRequest,
-    ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
+    ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead,
+    StreamWritePrecondition,
 };
 use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamPublisher,
@@ -357,8 +358,6 @@ pub fn stream_event_with_headers(
     position: u64,
     headers: Headers,
 ) -> StreamEvent {
-    use trogon_decider_runtime::{EventEncode, EventType};
-
     let content = event.encode().expect("schedule event encodes");
     let r#type = event.event_type().expect("schedule event has a type").to_string();
     StreamEvent {

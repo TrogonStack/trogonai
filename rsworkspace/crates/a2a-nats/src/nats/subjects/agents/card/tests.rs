@@ -1,4 +1,5 @@
 use super::*;
+use async_nats::subject::ToSubject;
 
 #[test]
 fn formats_prefix_agent_card_subject() {
@@ -8,7 +9,6 @@ fn formats_prefix_agent_card_subject() {
 
 #[test]
 fn to_subject_round_trips_display_form() {
-    use async_nats::subject::ToSubject;
     let s = AgentCardSubject::new(&A2aPrefix::new("a2a").unwrap(), &A2aAgentId::new("planner").unwrap());
     assert_eq!(s.to_subject().as_str(), "a2a.agents.planner.card");
 }

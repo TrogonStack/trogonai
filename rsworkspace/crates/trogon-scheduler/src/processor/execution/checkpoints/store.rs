@@ -4,6 +4,7 @@
 //! read-model component. Lookups by original id, by execution subject, and by
 //! listing all read over the same `v1.<uuid-simple>` key space.
 
+use async_nats::jetstream::context::PublishErrorKind;
 use async_nats::jetstream::kv;
 use bytes::Bytes;
 use futures::StreamExt;
@@ -124,7 +125,6 @@ fn backend_error_is_permanent(error: &(dyn std::error::Error + 'static)) -> bool
                 return true;
             }
         } else if let Some(publish) = err.downcast_ref::<async_nats::jetstream::context::PublishError>() {
-            use async_nats::jetstream::context::PublishErrorKind;
             return matches!(
                 publish.kind(),
                 PublishErrorKind::StreamNotFound | PublishErrorKind::MaxPayloadExceeded

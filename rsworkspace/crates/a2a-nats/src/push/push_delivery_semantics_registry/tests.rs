@@ -1,5 +1,6 @@
 use super::*;
 use crate::push::idempotency_key_header::IdempotencyKeyHeader;
+use std::sync::Mutex;
 
 fn task() -> A2aTaskId {
     A2aTaskId::new("task-1").unwrap()
@@ -41,7 +42,6 @@ fn remove_drops_stored_semantics_back_to_default() {
 
 #[test]
 fn through_poison_recovers_lock_after_panic() {
-    use std::sync::Mutex;
     let lock: Mutex<Vec<i32>> = Mutex::new(Vec::new());
     let lock_ref = std::sync::Arc::new(lock);
     let poisoner = std::sync::Arc::clone(&lock_ref);

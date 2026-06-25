@@ -1,4 +1,5 @@
 use super::*;
+use std::error::Error as _;
 
 fn target_err() -> PushNotificationTargetError {
     PushNotificationTargetError::UnknownScheme { raw: "ftp://x".into() }
@@ -12,7 +13,6 @@ use crate::push::push_notification_config_id::PushNotificationConfigId;
 
 #[test]
 fn dispatch_prep_error_display_and_source() {
-    use std::error::Error as _;
     let err = DispatchPrepError::PushConfigId(config_id_err());
     assert!(!err.to_string().is_empty());
     assert!(err.source().is_some());
@@ -60,7 +60,6 @@ fn dispatch_error_unexpected_status_display_contains_url_and_code() {
 
 #[test]
 fn nats_publish_dispatch_error_round_trips_subject_and_source() {
-    use std::error::Error as _;
     let inner = std::io::Error::other("nats down");
     let err = NatsPublishDispatchError::new(subject(), inner);
     assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
@@ -73,7 +72,6 @@ fn nats_publish_dispatch_error_round_trips_subject_and_source() {
 
 #[test]
 fn jetstream_publish_dispatch_error_round_trips_subject_and_source() {
-    use std::error::Error as _;
     let inner = std::io::Error::other("jetstream down");
     let err = JetStreamPublishDispatchError::new(subject(), inner);
     assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
@@ -86,7 +84,6 @@ fn jetstream_publish_dispatch_error_round_trips_subject_and_source() {
 
 #[test]
 fn dispatch_error_display_and_source_cover_every_variant() {
-    use std::error::Error as _;
     let prep = DispatchError::Prep(DispatchPrepError::PushConfigId(config_id_err()));
     assert!(!prep.to_string().is_empty());
     assert!(prep.source().is_some());
