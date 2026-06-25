@@ -50,6 +50,39 @@ fn nats_headers_clone_preserves_view() {
     assert_eq!(h2.get("a"), Some("1"));
 }
 
+#[test]
+fn new_checked_rejects_duplicate_security_headers() {
+    let items = vec![
+        (headers::NATS_TOKEN.to_string(), "a".into()),
+        (headers::NATS_TOKEN.to_string(), "b".into()),
+    ];
+    let err = NatsHeaders::new_checked(&items).unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::DuplicateHeader(name) if name == headers::NATS_TOKEN
+    ));
+}
+
+#[test]
+fn new_checked_accepts_unique_security_headers() {
+    let items = vec![(headers::NATS_TOKEN.to_string(), "a".into())];
+    NatsHeaders::new_checked(&items).expect("unique passes");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_returns_negative_max_skew_when_misconfigured() {
+    let req = NatsRequest {
+        subject: "s",
+        reply: None,
+        payload: b"",
+        headers: NatsHeaders::new(&[]),
+    };
+    let mut verifier = NatsPopVerifier::new(StaticJwks::new(), SystemTimeSource, InMemoryReplayStore::new());
+    verifier.max_skew_secs = -1;
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, NatsPopError::NegativeMaxSkew(-1)));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn verify_returns_skew_when_clock_outside_window() {
     let headers_vec: Vec<(String, String)> = vec![

@@ -129,7 +129,7 @@ async fn end_to_end_nats_pop_verifies() {
         subject,
         reply: Some(reply),
         payload: payload.as_slice(),
-        headers: NatsHeaders::new(&headers_vec),
+        headers: NatsHeaders::new_checked(&headers_vec).expect("unique security headers"),
     };
 
     let resolver = StaticJwks::new().with(ap_iss.clone(), ap_set);
