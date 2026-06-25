@@ -45,3 +45,6 @@ impl fmt::Display for Ed25519Signature {
         f.write_str(&hex::encode(self.0))
     }
 }
+
+#[cfg(test)]
+mod tests;
