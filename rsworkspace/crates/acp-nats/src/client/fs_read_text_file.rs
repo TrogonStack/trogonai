@@ -53,8 +53,15 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
                 session_id = %session_id,
                 "Failed to handle fs_read_text_file"
             );
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "fs_read_text_file error reply")
-                .await;
+            rpc_reply::publish_error_reply(
+                nats,
+                reply_to,
+                response_id,
+                code,
+                &message,
+                "fs_read_text_file error reply",
+            )
+            .await;
         }
     }
 }

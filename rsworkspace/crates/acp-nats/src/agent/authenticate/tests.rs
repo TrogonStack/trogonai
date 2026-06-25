@@ -35,10 +35,7 @@ async fn authenticate_surfaces_structured_agent_error_from_header() {
         "method not found",
     );
 
-    let err = bridge
-        .authenticate(AuthenticateRequest::new("test"))
-        .await
-        .unwrap_err();
+    let err = bridge.authenticate(AuthenticateRequest::new("test")).await.unwrap_err();
 
     assert_eq!(err.code, ErrorCode::MethodNotFound);
     assert_eq!(err.message, "method not found");

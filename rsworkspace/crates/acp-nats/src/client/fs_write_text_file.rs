@@ -81,7 +81,6 @@ async fn forward_to_client<C: Client>(
             "Invalid write_text_file request: {e}"
         )))
     })?;
-    let request = request;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
         return Err(FsWriteTextFileError::InvalidRequest(serde_json::Error::custom(

@@ -144,7 +144,11 @@ async fn hang_returns_timeout_error() {
 #[tokio::test]
 async fn malformed_response_returns_deserialize_error() {
     let mock = AdvancedMockNatsClient::new();
-    mock.set_response_wire("a2a.agents.bot.tasks.get", async_nats::HeaderMap::new(), Bytes::from_static(b"not json at all"));
+    mock.set_response_wire(
+        "a2a.agents.bot.tasks.get",
+        async_nats::HeaderMap::new(),
+        Bytes::from_static(b"not json at all"),
+    );
 
     let result: Result<Response, _> = send_unary(
         &mock,

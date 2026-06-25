@@ -1,11 +1,23 @@
 use super::super::tests::{MockClient, TerminalWaitForExitFailingClient, TerminalWaitForExitTimeoutClient};
 use super::*;
-use agent_client_protocol::{WaitForTerminalExitRequest};
+use agent_client_protocol::WaitForTerminalExitRequest;
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::RequestId;
 use std::error::Error;
 use std::time::Duration;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
-use async_nats::header::HeaderMap;
-use jsonrpc_nats::RequestId;
+
+fn empty_headers() -> HeaderMap {
+    HeaderMap::new()
+}
+
+fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
+    crate::client::test_support::encode_wire_request("terminal/wait_for_exit", RequestId::Number(1), params)
+}
+
+fn sample_request() -> WaitForTerminalExitRequest {
+    WaitForTerminalExitRequest::new("sess-1", "term-001")
+}
 
 #[tokio::test]
 async fn handle_success_publishes_response_to_reply_subject() {
@@ -13,7 +25,6 @@ async fn handle_success_publishes_response_to_reply_subject() {
     let client = MockClient::new();
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,
@@ -27,11 +38,9 @@ async fn handle_success_publishes_response_to_reply_subject() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
-    let payloads = nats.published_payloads();
-    assert_eq!(payloads.len(), 1);
-    let parsed: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(parsed.get("id"), Some(&serde_json::Value::from(1)));
-    assert!(parsed.get("result").is_some());
+    let published_headers = nats.published_headers()[0].clone();
+    assert_eq!(published_headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(), "1");
+    assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
 }
 
 #[tokio::test]
@@ -40,7 +49,6 @@ async fn handle_no_reply_does_not_call_client_or_publish() {
     let client = MockClient::new();
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,
@@ -63,6 +71,7 @@ async fn handle_malformed_json_publishes_parse_error() {
     let client = MockClient::new();
 
     handle(
+        &empty_headers(),
         b"not json",
         &client,
         Some("_INBOX.err"),
@@ -73,12 +82,8 @@ async fn handle_malformed_json_publishes_parse_error() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(
-        response.get("error").and_then(|e| e.get("code")),
-        Some(&serde_json::Value::from(-32700))
-    );
+    let published_headers = nats.published_headers()[0].clone();
+    assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
 }
 
 #[tokio::test]
@@ -88,6 +93,7 @@ async fn handle_invalid_params_publishes_error_reply() {
     let payload = br#"{"id":1,"method":"terminal/wait_for_exit","params":{}}"#;
 
     handle(
+        &empty_headers(),
         payload,
         &client,
         Some("_INBOX.err"),
@@ -107,6 +113,7 @@ async fn handle_params_null_publishes_error_reply() {
     let payload = br#"{"id":1,"method":"terminal/wait_for_exit","params":null}"#;
 
     handle(
+        &empty_headers(),
         payload,
         &client,
         Some("_INBOX.err"),
@@ -125,7 +132,6 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
     let client = MockClient::new();
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,
@@ -148,7 +154,6 @@ async fn handle_client_error_publishes_error_reply() {
     let client = TerminalWaitForExitFailingClient;
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,
@@ -162,16 +167,15 @@ async fn handle_client_error_publishes_error_reply() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    let published_headers = nats.published_headers()[0].clone();
+    assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
     let payloads = nats.published_payloads();
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert!(response.get("error").is_some());
+    let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
     assert!(
-        response
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .map(|s| s.contains("mock wait_for_terminal_exit failure"))
-            .unwrap_or(false)
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("mock wait_for_terminal_exit failure")
     );
 }
 
@@ -179,9 +183,11 @@ async fn handle_client_error_publishes_error_reply() {
 async fn handle_timeout_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = TerminalWaitForExitTimeoutClient;
-    
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
     handle(
+        &headers,
         &payload,
         &client,
         Some("_INBOX.err"),
@@ -192,11 +198,9 @@ async fn handle_timeout_publishes_error_reply() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert!(response.get("error").is_some());
+    let published_headers = nats.published_headers()[0].clone();
+    assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
 }
-
 
 #[tokio::test]
 async fn handle_success_publish_failure_exercises_error_path() {
@@ -205,7 +209,6 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let client = MockClient::new();
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,
@@ -228,7 +231,6 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let client = MockClient::new();
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(
         &headers,

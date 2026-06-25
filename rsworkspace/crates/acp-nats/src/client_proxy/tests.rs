@@ -1,9 +1,9 @@
 use super::*;
+use crate::agent::test_support::set_wire_json_response;
 use agent_client_protocol::{
     Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
     SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
-use crate::agent::test_support::set_wire_json_response;
 use trogon_nats::AdvancedMockNatsClient;
 
 fn proxy(nats: AdvancedMockNatsClient) -> NatsClientProxy<AdvancedMockNatsClient> {
@@ -19,11 +19,7 @@ fn proxy(nats: AdvancedMockNatsClient) -> NatsClientProxy<AdvancedMockNatsClient
 async fn request_permission_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
     let response = RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
-    set_wire_json_response(
-        &nats,
-        "acp.session.s1.client.session.request_permission",
-        &response,
-    );
+    set_wire_json_response(&nats, "acp.session.s1.client.session.request_permission", &response);
 
     let p = proxy(nats.clone());
     let tool_call = ToolCallUpdate::new("tc-1", ToolCallUpdateFields::new());

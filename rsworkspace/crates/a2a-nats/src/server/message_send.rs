@@ -7,7 +7,10 @@ use crate::server::wire::{
 
 const METHOD: &str = "message/send";
 
-#[instrument(name = "a2a.server.message_send", skip(handler, headers, payload, reply_subject, nats))]
+#[instrument(
+    name = "a2a.server.message_send",
+    skip(handler, headers, payload, reply_subject, nats)
+)]
 pub async fn handle<H, N>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,

@@ -52,11 +52,7 @@ impl Client for FailingClient {
 }
 
 fn make_wire_request(request: RequestPermissionRequest) -> (HeaderMap, Vec<u8>) {
-    crate::client::test_support::encode_wire_request(
-        "session/request_permission",
-        RequestId::Number(1),
-        &request,
-    )
+    crate::client::test_support::encode_wire_request("session/request_permission", RequestId::Number(1), &request)
 }
 
 fn empty_headers() -> HeaderMap {
@@ -190,15 +186,7 @@ async fn handle_success_publishes_response_to_reply_subject() {
     let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
     let (headers, payload) = make_wire_request(request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "session-001",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "session-001").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -224,15 +212,7 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
     let request = RequestPermissionRequest::new("session-other", tool_call, vec![]);
     let (headers, payload) = make_wire_request(request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "session-001",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "session-001").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
@@ -263,15 +243,7 @@ async fn handle_client_error_publishes_error_reply() {
     let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
     let (headers, payload) = make_wire_request(request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "session-001",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "session-001").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
@@ -285,15 +257,7 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
     let (headers, payload) = make_wire_request(request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "session-001",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "session-001").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -307,15 +271,7 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let request = RequestPermissionRequest::new("session-001", tool_call, vec![]);
     let (headers, payload) = make_wire_request(request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "session-001",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "session-001").await;
 
     assert!(nats.published_messages().is_empty());
 }

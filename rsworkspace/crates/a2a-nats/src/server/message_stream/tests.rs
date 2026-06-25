@@ -66,20 +66,14 @@ async fn bootstrap_publishes_task_and_then_events() {
     handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
 
     let (headers, payload) = stream_payload("call-1");
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
 
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["result"]["task"]["id"].as_str(), Some("task-1"));
-    assert_eq!(js.published_subjects(), vec!["a2a.tasks.task-1.events.call-1".to_string()]);
+    assert_eq!(
+        js.published_subjects(),
+        vec!["a2a.tasks.task-1.events.call-1".to_string()]
+    );
 }
 
 #[tokio::test]
@@ -88,16 +82,7 @@ async fn numeric_jsonrpc_id_rejected_with_invalid_params() {
     let js = MockJetStreamPublisher::new();
     let handler = stub();
     let (headers, payload) = stream_payload_numeric_id(42);
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
     assert_eq!(body["id"], 42);
@@ -112,16 +97,7 @@ async fn handler_error_published_as_bootstrap_error() {
     handler.lock().unwrap().message_stream_result = Some(Err(A2aError::agent_unavailable("down")));
 
     let (headers, payload) = stream_payload("call-2");
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
 
     let body = parse_published_response(&nats, 0);
     assert_eq!(
@@ -146,17 +122,12 @@ async fn missing_params_returns_invalid_params_error() {
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = stub();
-    let (headers, payload) = wire_request("message/stream", RequestId::String("call-4".into()), serde_json::Value::Null);
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    let (headers, payload) = wire_request(
+        "message/stream",
+        RequestId::String("call-4".into()),
+        serde_json::Value::Null,
+    );
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
 }
@@ -171,16 +142,7 @@ async fn invalid_params_shape_returns_invalid_params_code() {
         RequestId::String("call-5".into()),
         serde_json::json!({"message": 42}),
     );
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
     assert_eq!(body["id"], "call-5");
@@ -191,16 +153,9 @@ async fn malformed_json_still_publishes_parse_error_with_null_id() {
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = stub();
-    handle(
-        &handler,
-        &async_nats::HeaderMap::new(),
-        b"not json",
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "null");
+    handle(&handler, &headers, b"not json", Some("r".into()), &nats, &js, &prefix()).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32700);
     assert!(body["id"].is_null());
@@ -212,16 +167,7 @@ async fn notification_without_id_is_dropped() {
     let js = MockJetStreamPublisher::new();
     let handler = stub();
     let (headers, payload) = wire_notification("message/stream", stream_params());
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
     assert!(nats.published_messages().is_empty());
 }
 
@@ -234,16 +180,7 @@ async fn invalid_task_id_from_handler_returns_invalid_agent_response() {
     handler.lock().unwrap().message_stream_result = Some(Ok((task(""), events)));
 
     let (headers, payload) = stream_payload("call-8");
-    handle(
-        &handler,
-        &headers,
-        &payload,
-        Some("r".into()),
-        &nats,
-        &js,
-        &prefix(),
-    )
-    .await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
 
     let body = parse_published_response(&nats, 0);
     assert_eq!(

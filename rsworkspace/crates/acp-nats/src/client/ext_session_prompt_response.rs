@@ -40,17 +40,14 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient + SubscribeCl
 
     let session_id_typed: SessionId = validated.as_str().to_string().into();
 
-    let (prompt_token_opt, response_result) = match decode_notification_params::<PromptResponse>(
-        "ext/session/prompt_response",
-        headers,
-        payload,
-    ) {
-        Ok(response) => (extract_prompt_token(&response), Ok(response)),
-        Err(e) => {
-            let token = extract_prompt_token_from_raw(payload);
-            (token, Err(e.to_string()))
-        }
-    };
+    let (prompt_token_opt, response_result) =
+        match decode_notification_params::<PromptResponse>("ext/session/prompt_response", headers, payload) {
+            Ok(response) => (extract_prompt_token(&response), Ok(response)),
+            Err(e) => {
+                let token = extract_prompt_token_from_raw(payload);
+                (token, Err(e.to_string()))
+            }
+        };
 
     let Some(prompt_token) = prompt_token_opt else {
         warn!(

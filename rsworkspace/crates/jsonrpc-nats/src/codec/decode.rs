@@ -16,9 +16,7 @@ pub fn decode(
     body: &[u8],
 ) -> Result<Message, CodecError> {
     let id_header = headers.get(HEADER_ID).map(|values| values.as_str().to_string());
-    let error_code_header = headers
-        .get(HEADER_ERROR_CODE)
-        .map(|values| values.as_str().to_string());
+    let error_code_header = headers.get(HEADER_ERROR_CODE).map(|values| values.as_str().to_string());
 
     match direction {
         Direction::Request => {
@@ -53,14 +51,13 @@ pub fn decode(
             };
 
             if let Some(code_str) = error_code_header {
-                let code: i32 = code_str.parse().map_err(|_| CodecError::InvalidErrorCodeHeader {
-                    value: code_str,
-                })?;
+                let code: i32 = code_str
+                    .parse()
+                    .map_err(|_| CodecError::InvalidErrorCodeHeader { value: code_str })?;
                 let (message, data) = if body.is_empty() {
                     (String::new(), None)
                 } else {
-                    let value: serde_json::Value =
-                        serde_json::from_slice(body).map_err(CodecError::Deserialize)?;
+                    let value: serde_json::Value = serde_json::from_slice(body).map_err(CodecError::Deserialize)?;
                     let obj = value.as_object().ok_or_else(|| {
                         CodecError::Deserialize(serde::de::Error::custom("error body must be object"))
                     })?;
@@ -69,7 +66,7 @@ pub fn decode(
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or_default()
                         .to_string();
-                    let data = obj.get("data").map(|v| v.clone());
+                    let data = obj.get("data").cloned();
                     (message, data)
                 };
                 return Ok(Message::Error {

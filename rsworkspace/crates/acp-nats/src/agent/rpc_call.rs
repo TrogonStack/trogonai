@@ -25,8 +25,6 @@ where
             agent_client_protocol::ErrorCode::InternalError.into(),
             "Invalid response from agent",
         )),
-        Err(error @ JsonRpcRequestError::Nats(_)) => {
-            Err(map_nats_error(error.into_nats_error(&subject_str)))
-        }
+        Err(error @ JsonRpcRequestError::Nats(_)) => Err(map_nats_error(error.into_nats_error(&subject_str))),
     }
 }

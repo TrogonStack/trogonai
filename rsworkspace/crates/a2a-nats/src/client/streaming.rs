@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use a2a::types::SendMessageResponse;
-use serde::de::Error as _;
 use serde::Serialize;
+use serde::de::Error as _;
 use tokio::time::timeout;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};

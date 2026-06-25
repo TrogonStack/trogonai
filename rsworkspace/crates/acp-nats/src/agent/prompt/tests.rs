@@ -1,8 +1,8 @@
 use super::*;
 use crate::config::Config;
 use jsonrpc_nats::{Message, ResponseId, encode};
-use trogon_nats::jetstream::mocks::*;
 use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::jetstream::mocks::*;
 
 fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> async_nats::Message {
     async_nats::Message {

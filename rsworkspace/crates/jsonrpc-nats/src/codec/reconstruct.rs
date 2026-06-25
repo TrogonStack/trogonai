@@ -11,7 +11,7 @@ pub fn to_json_value(message: &Message) -> Value {
         Message::Request { id, method, params } => {
             let mut obj = Map::new();
             obj.insert("jsonrpc".to_string(), Value::String(JSONRPC_VERSION.to_string()));
-            obj.insert("id".to_string(), serde_json::to_value(id).expect("id serializes"));
+            obj.insert("id".to_string(), id.to_json());
             obj.insert("method".to_string(), Value::String(method.clone()));
             obj.insert("params".to_string(), params.clone());
             Value::Object(obj)
@@ -26,7 +26,7 @@ pub fn to_json_value(message: &Message) -> Value {
         Message::Success { id, result } => {
             let mut obj = Map::new();
             obj.insert("jsonrpc".to_string(), Value::String(JSONRPC_VERSION.to_string()));
-            obj.insert("id".to_string(), serde_json::to_value(id).expect("id serializes"));
+            obj.insert("id".to_string(), id.to_json());
             obj.insert("result".to_string(), result.clone());
             Value::Object(obj)
         }
@@ -44,7 +44,7 @@ pub fn to_json_value(message: &Message) -> Value {
             }
             let mut obj = Map::new();
             obj.insert("jsonrpc".to_string(), Value::String(JSONRPC_VERSION.to_string()));
-            obj.insert("id".to_string(), serde_json::to_value(id).expect("id serializes"));
+            obj.insert("id".to_string(), id.to_json());
             obj.insert("error".to_string(), Value::Object(error));
             Value::Object(obj)
         }
@@ -53,9 +53,9 @@ pub fn to_json_value(message: &Message) -> Value {
 
 /// Parse a canonical JSON-RPC 2.0 value into a codec message.
 pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
-    let obj = value.as_object().ok_or_else(|| {
-        CodecError::Deserialize(serde_json::Error::custom("expected JSON-RPC object"))
-    })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| CodecError::Deserialize(serde_json::Error::custom("expected JSON-RPC object")))?;
 
     if obj.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
         return Err(CodecError::Deserialize(serde_json::Error::custom(
@@ -64,10 +64,7 @@ pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
     }
 
     if let Some(method) = obj.get("method").and_then(Value::as_str) {
-        let params = obj
-            .get("params")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let params = obj.get("params").cloned().unwrap_or(Value::Null);
         return match obj.get("id") {
             Some(id_value) => {
                 if id_value.is_null() {
@@ -112,9 +109,6 @@ pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
         });
     }
 
-    let result = obj
-        .get("result")
-        .cloned()
-        .ok_or(CodecError::AmbiguousResponse)?;
+    let result = obj.get("result").cloned().ok_or(CodecError::AmbiguousResponse)?;
     Ok(Message::Success { id, result })
 }

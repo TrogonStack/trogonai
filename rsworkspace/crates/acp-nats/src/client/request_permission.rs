@@ -26,10 +26,7 @@ pub fn error_code_and_message(e: &RequestPermissionError) -> (ErrorCode, String)
 
 /// Handles session/request_permission: decodes wire request params, calls client, and publishes
 /// a wire-encoded reply. Reply is required (request-reply pattern).
-#[instrument(
-    name = "acp.client.session.request_permission",
-    skip(headers, payload, client, nats)
-)]
+#[instrument(name = "acp.client.session.request_permission", skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],
@@ -52,14 +49,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     let response_id = response_id_from_request_headers(headers);
     match forward_to_client(headers, payload, client, session_id).await {
         Ok(response) => {
-            rpc_reply::publish_success_reply(
-                nats,
-                reply_to,
-                response_id,
-                &response,
-                "request_permission reply",
-            )
-            .await;
+            rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "request_permission reply").await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -68,8 +58,15 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
                 session_id = %session_id,
                 "Failed to handle request_permission"
             );
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "request_permission error reply")
-                .await;
+            rpc_reply::publish_error_reply(
+                nats,
+                reply_to,
+                response_id,
+                code,
+                &message,
+                "request_permission error reply",
+            )
+            .await;
         }
     }
 }
@@ -80,10 +77,8 @@ async fn forward_to_client<C: Client>(
     client: &C,
     expected_session_id: &str,
 ) -> Result<RequestPermissionResponse, RequestPermissionError> {
-    let request: RequestPermissionRequest =
-        decode_request_params("session/request_permission", headers, payload).map_err(|e| {
-            RequestPermissionError::InvalidRequest(serde_json::Error::custom(format!("{e}")))
-        })?;
+    let request: RequestPermissionRequest = decode_request_params("session/request_permission", headers, payload)
+        .map_err(|e| RequestPermissionError::InvalidRequest(serde_json::Error::custom(format!("{e}"))))?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
         return Err(RequestPermissionError::InvalidRequest(serde_json::Error::custom(

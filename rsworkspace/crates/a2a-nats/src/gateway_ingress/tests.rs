@@ -1,5 +1,5 @@
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::{decode, to_json_value, Direction};
+use jsonrpc_nats::{Direction, decode, to_json_value};
 
 use super::*;
 use crate::a2a_prefix::A2aPrefix;

@@ -6,9 +6,7 @@
 //! through this encoding prematurely.
 
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::{
-    CodecError, Direction, Encoded, Message, RequestId, ResponseId, decode, encode,
-};
+use jsonrpc_nats::{CodecError, Direction, Encoded, Message, RequestId, ResponseId, decode, encode};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 

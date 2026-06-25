@@ -1,9 +1,7 @@
 //! JSON-RPC content-mode wire helpers for ACP over NATS.
 
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::{
-    CodecError, Direction, Encoded, Message, RequestId, ResponseId, decode, encode,
-};
+use jsonrpc_nats::{CodecError, Direction, Encoded, Message, RequestId, ResponseId, decode, encode};
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
@@ -36,9 +34,7 @@ pub fn decode_notification_params<Req: DeserializeOwned>(
     body: &[u8],
 ) -> Result<Req, WireError> {
     match decode(Direction::Request, Some(method), headers, body)? {
-        Message::Notification { params, .. } => {
-            serde_json::from_value(params).map_err(WireError::Deserialize)
-        }
+        Message::Notification { params, .. } => serde_json::from_value(params).map_err(WireError::Deserialize),
         _ => Err(WireError::UnexpectedMessage),
     }
 }
@@ -102,10 +98,7 @@ pub fn decode_response<Res: DeserializeOwned>(
             Ok(Ok(value))
         }
         Message::Error {
-            code,
-            message,
-            data: _,
-            ..
+            code, message, data: _, ..
         } => Ok(Err(agent_client_protocol::Error::new(code, message))),
         _ => Err(WireError::UnexpectedMessage),
     }
@@ -118,9 +111,7 @@ pub fn decode_request_params<Req: DeserializeOwned>(
     body: &[u8],
 ) -> Result<Req, WireError> {
     match decode(Direction::Request, Some(method), headers, body)? {
-        Message::Request { params, .. } => {
-            serde_json::from_value(params).map_err(WireError::Deserialize)
-        }
+        Message::Request { params, .. } => serde_json::from_value(params).map_err(WireError::Deserialize),
         _ => Err(WireError::UnexpectedMessage),
     }
 }
@@ -128,8 +119,7 @@ pub fn decode_request_params<Req: DeserializeOwned>(
 /// Extract the response id from request headers for reply correlation.
 pub fn response_id_from_request_headers(headers: &HeaderMap) -> ResponseId {
     match headers.get(jsonrpc_nats::HEADER_ID) {
-        Some(value) => jsonrpc_nats::decode_response_id_literal(value.as_str())
-            .unwrap_or(ResponseId::Null),
+        Some(value) => jsonrpc_nats::decode_response_id_literal(value.as_str()).unwrap_or(ResponseId::Null),
         None => ResponseId::Null,
     }
 }

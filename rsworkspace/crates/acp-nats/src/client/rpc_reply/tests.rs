@@ -24,5 +24,6 @@ fn encode_agent_error_sets_error_code_header() {
 fn encode_agent_error_null_id() {
     let error = Error::new(ErrorCode::InternalError.into(), "Internal error");
     let encoded = encode_agent_error_for_test(ResponseId::Null, &error).unwrap();
-    assert_eq!(encoded.headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(), "null");
+    assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_none());
+    assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
 }

@@ -1,29 +1,27 @@
 use super::*;
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
+use async_nats::header::HeaderMap;
 use async_trait::async_trait;
+use jsonrpc_nats::RequestId;
 use std::error::Error;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
-use async_nats::header::HeaderMap;
-use jsonrpc_nats::RequestId;
 
 fn empty_headers() -> HeaderMap {
     HeaderMap::new()
 }
 
 fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
-    crate::client::test_support::encode_wire_request(
-        "fs/read_text_file",
-        RequestId::Number(1),
-        params,
-    )
+    crate::client::test_support::encode_wire_request("fs/read_text_file", RequestId::Number(1), params)
 }
 
-
 fn sample_request() -> ReadTextFileRequest {
-    ReadTextFileRequest::new(agent_client_protocol::SessionId::from("sess-1"), "/tmp/foo.txt".to_string())
+    ReadTextFileRequest::new(
+        agent_client_protocol::SessionId::from("sess-1"),
+        "/tmp/foo.txt".to_string(),
+    )
 }
 struct MockClient {
     content: String,
@@ -87,12 +85,6 @@ impl Client for FailingClient {
 #[tokio::test]
 async fn fs_read_text_file_forwards_request_and_returns_response() {
     let client = MockClient::new("hello world");
-    let request = ReadTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
-        "/tmp/foo.txt".to_string(),
-    );
-    
-
     let (headers, payload) = make_wire_request(&ReadTextFileRequest::new(
         agent_client_protocol::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
@@ -138,13 +130,11 @@ async fn fs_read_text_file_returns_client_error_when_client_fails() {
     let client = FailingClient;
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     let result = forward_to_client(&headers, &payload, &client).await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), FsReadTextFileError::ClientError(_)));
 }
-
 
 #[tokio::test]
 async fn handle_success_publishes_response_to_reply_subject() {
@@ -152,17 +142,8 @@ async fn handle_success_publishes_response_to_reply_subject() {
     let client = MockClient::new("file content");
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -173,7 +154,6 @@ async fn handle_no_reply_does_not_publish() {
     let client = MockClient::new("content");
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
     handle(&headers, &payload, &client, None, &nats, "sess-1").await;
 
@@ -198,32 +178,22 @@ async fn handle_invalid_payload_publishes_error_reply() {
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
 
-
 #[tokio::test]
 async fn handle_client_error_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = FailingClient;
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
 
 #[test]
 fn error_code_and_message_invalid_request_returns_invalid_params() {
-    let err = "invalid request".to_string();
-    let fs_err = FsReadTextFileError::InvalidRequest(err.to_string());
+    let err = "Invalid read_text_file request: invalid request".to_string();
+    let fs_err = FsReadTextFileError::InvalidRequest(err);
     let (code, message) = error_code_and_message(&fs_err);
     assert_eq!(code, ErrorCode::InvalidParams);
     assert!(message.contains("Invalid read_text_file request"));
@@ -245,17 +215,8 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let client = MockClient::new("content");
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -267,17 +228,8 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let client = MockClient::new("content");
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -289,17 +241,8 @@ async fn handle_client_error_publish_failure_exercises_error_path() {
     let client = FailingClient;
     let request = sample_request();
     let (headers, payload) = make_wire_request(&request);
-    
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -307,8 +250,6 @@ async fn handle_client_error_publish_failure_exercises_error_path() {
 #[tokio::test]
 async fn forward_to_client_params_none_returns_invalid_request() {
     let client = MockClient::new("content");
-    let request = sample_request();
-    let (headers, payload) = make_wire_request(&request);
     let result = forward_to_client(&empty_headers(), b"{}", &client).await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), FsReadTextFileError::InvalidRequest(_)));
@@ -330,7 +271,7 @@ fn fs_read_text_file_error_display() {
 fn fs_read_text_file_error_source() {
     let err = "invalid request".to_string();
     let fs_err = FsReadTextFileError::InvalidRequest(err.to_string());
-    assert!(fs_err.source().is_some());
+    assert!(fs_err.source().is_none());
 
     let client_err = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "file not found");
     let fs_err = FsReadTextFileError::ClientError(client_err);

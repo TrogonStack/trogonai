@@ -23,8 +23,8 @@ fn empty_response() -> a2a::types::ListTaskPushNotificationConfigsResponse {
 fn list_payload(req_id: i64) -> (async_nats::HeaderMap, Vec<u8>) {
     wire_request(
         "tasks/pushNotificationConfig/list",
-        RequestId::Number(id),
-        serde_json::json!({}),
+        RequestId::Number(req_id),
+        serde_json::to_value(list_request()).unwrap(),
     )
 }
 
@@ -78,7 +78,11 @@ async fn missing_params_returns_invalid_params_error() {
 async fn invalid_params_shape_returns_invalid_params_code() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let (headers, payload) = wire_request("METHOD", RequestId::Number(5), serde_json::Value::Null);
+    let (headers, payload) = wire_request(
+        "tasks/pushNotificationConfig/list",
+        RequestId::Number(6),
+        serde_json::json!({ "taskId": 42 }),
+    );
     handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32602);
@@ -89,7 +93,9 @@ async fn invalid_params_shape_returns_invalid_params_code() {
 async fn malformed_json_still_publishes_parse_error_with_null_id() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    handle(&handler, &async_nats::HeaderMap::new(), b"not json", Some("r".into()), &nats).await;
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "null");
+    handle(&handler, &headers, b"not json", Some("r".into()), &nats).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32700);
     assert!(body["id"].is_null());
@@ -99,7 +105,10 @@ async fn malformed_json_still_publishes_parse_error_with_null_id() {
 async fn notification_without_id_is_dropped() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    let (headers, payload) = wire_request("METHOD", RequestId::Number(5), serde_json::Value::Null);
+    let (headers, payload) = wire_notification(
+        "tasks/pushNotificationConfig/list",
+        serde_json::json!({ "taskId": "task-1" }),
+    );
     handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     assert!(nats.published_messages().is_empty());
 }

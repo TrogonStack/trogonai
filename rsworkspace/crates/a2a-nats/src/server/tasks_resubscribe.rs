@@ -7,7 +7,10 @@ use crate::server::wire::{
 
 const METHOD: &str = "tasks/resubscribe";
 
-#[instrument(name = "a2a.server.tasks_resubscribe", skip(handler, headers, payload, reply_subject, nats))]
+#[instrument(
+    name = "a2a.server.tasks_resubscribe",
+    skip(handler, headers, payload, reply_subject, nats)
+)]
 pub async fn handle<H, N>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,

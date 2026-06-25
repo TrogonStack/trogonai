@@ -228,13 +228,8 @@ async fn run_with_agent_id_dispatches_injected_message_then_exits_on_shutdown() 
     let handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent(), shutdown_for_test).await });
 
     let (headers, payload) = rpc_payload_for("agent/getAuthenticatedExtendedCard");
-    tx.unbounded_send(msg(
-        "a2a.agents.bot.card",
-        Some("r"),
-        headers,
-        &payload,
-    ))
-    .unwrap();
+    tx.unbounded_send(msg("a2a.agents.bot.card", Some("r"), headers, &payload))
+        .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     shutdown.cancel();
     let result = handle.await.unwrap();
@@ -256,7 +251,12 @@ async fn dispatch_drops_unknown_subject_suffix() {
         &handler,
         &nats,
         &js,
-        msg("a2a.agents.bot.unknown.method", Some("r"), async_nats::HeaderMap::new(), b"{}"),
+        msg(
+            "a2a.agents.bot.unknown.method",
+            Some("r"),
+            async_nats::HeaderMap::new(),
+            b"{}",
+        ),
         prefix_len,
     )
     .await;

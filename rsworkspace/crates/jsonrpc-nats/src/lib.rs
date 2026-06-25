@@ -7,6 +7,7 @@
 //! (HTTP/SSE, WebSocket, stdio bridges), centralized in this crate — never ad
 //! hoc in domain handlers. The NATS backbone carries one content-mode message
 //! per NATS message; batch arrays are unbundled at those edges.
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod codec;
 pub mod constants;
@@ -22,9 +23,7 @@ pub use direction::Direction;
 pub use error::CodecError;
 pub use id::{RequestId, ResponseId, decode_response_id_literal, encode_id_literal, encode_response_id_literal};
 pub use message::Message;
-pub use transport::{
-    TransportError, jsonrpc_publish, jsonrpc_request_with_timeout, merge_jsonrpc_headers,
-};
+pub use transport::{TransportError, jsonrpc_publish, jsonrpc_request_with_timeout, merge_jsonrpc_headers};
 
 #[cfg(test)]
 mod tests {

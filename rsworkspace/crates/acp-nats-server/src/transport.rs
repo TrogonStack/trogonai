@@ -121,12 +121,6 @@ pub enum HttpTransportError {
         source: Option<BoxError>,
     },
     #[error("{message}")]
-    NotImplemented {
-        message: &'static str,
-        #[source]
-        source: Option<BoxError>,
-    },
-    #[error("{message}")]
     Internal {
         message: &'static str,
         #[source]
@@ -173,10 +167,6 @@ impl HttpTransportError {
         Self::NotAcceptable { message, source: None }
     }
 
-    fn not_implemented(message: &'static str) -> Self {
-        Self::NotImplemented { message, source: None }
-    }
-
     fn internal(message: &'static str) -> Self {
         Self::Internal { message, source: None }
     }
@@ -196,7 +186,6 @@ impl HttpTransportError {
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::UnsupportedMediaType { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::NotAcceptable { .. } => StatusCode::NOT_ACCEPTABLE,
-            Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -294,6 +283,7 @@ pub struct IncomingHttpMessage {
 }
 
 impl IncomingHttpMessage {
+    #[cfg(test)]
     pub fn parse(raw: String) -> Result<Self, HttpTransportError> {
         let mut messages = Self::parse_all(raw)?;
         if messages.len() != 1 {
@@ -316,9 +306,8 @@ impl IncomingHttpMessage {
             values
                 .into_iter()
                 .map(|value| {
-                    let element_raw = serde_json::to_string(&value).map_err(|error| {
-                        HttpTransportError::bad_request_with("invalid JSON-RPC payload", error)
-                    })?;
+                    let element_raw = serde_json::to_string(&value)
+                        .map_err(|error| HttpTransportError::bad_request_with("invalid JSON-RPC payload", error))?;
                     Self::parse_one(element_raw)
                 })
                 .collect()
@@ -724,14 +713,12 @@ async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<
             let values: Vec<Value> = json_outcomes
                 .into_iter()
                 .map(|body| {
-                    serde_json::from_str(&body).map_err(|error| {
-                        HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error)
-                    })
+                    serde_json::from_str(&body)
+                        .map_err(|error| HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error))
                 })
                 .collect::<Result<_, _>>()?;
-            let body = serde_json::to_string(&values).map_err(|error| {
-                HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error)
-            })?;
+            let body = serde_json::to_string(&values)
+                .map_err(|error| HttpTransportError::internal_with("invalid outbound JSON-RPC payload", error))?;
             Ok(build_json_response(
                 connection_id.unwrap_or_default(),
                 protocol_version,
@@ -1126,8 +1113,7 @@ pub async fn run_http_connection<N, J>(
         }
     });
 
-    let mut client_task =
-        tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge));
+    let mut client_task = tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge));
     let mut io_task = tokio::task::spawn_local(io_task);
 
     let mut pending_request: Option<PendingRequest> = None;

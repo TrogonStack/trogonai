@@ -105,10 +105,7 @@ where
             subject: subject.to_string(),
             error: error.to_string(),
         })?;
-    client
-        .flush()
-        .await
-        .map_err(|error| TransportError::Flush {
-            error: error.to_string(),
-        })
+    client.flush().await.map_err(|error| TransportError::Flush {
+        error: error.to_string(),
+    })
 }

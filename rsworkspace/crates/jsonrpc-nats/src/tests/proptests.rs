@@ -25,7 +25,7 @@ fn arb_json_value() -> impl Strategy<Value = serde_json::Value> {
         Just(serde_json::Value::Null),
         any::<bool>().prop_map(serde_json::Value::Bool),
         any::<i64>().prop_map(|n| serde_json::Value::Number(n.into())),
-        r#".{0,32}"#.prop_map(|s| serde_json::Value::String(s)),
+        r#".{0,32}"#.prop_map(serde_json::Value::String),
         prop::collection::vec(any::<i64>(), 0..4).prop_map(|items| {
             serde_json::Value::Array(items.into_iter().map(|n| serde_json::Value::Number(n.into())).collect())
         }),

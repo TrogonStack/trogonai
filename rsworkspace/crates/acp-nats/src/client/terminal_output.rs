@@ -35,8 +35,15 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
                 session_id = %session_id,
                 "Failed to handle terminal/output"
             );
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "terminal/output error reply")
-                .await;
+            rpc_reply::publish_error_reply(
+                nats,
+                reply_to,
+                response_id,
+                code,
+                &message,
+                "terminal/output error reply",
+            )
+            .await;
             return;
         }
     };

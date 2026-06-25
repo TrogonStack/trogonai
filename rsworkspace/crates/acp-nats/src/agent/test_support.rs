@@ -108,12 +108,7 @@ pub fn set_wire_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient
     mock.set_response_wire(subject, encoded.headers, encoded.body);
 }
 
-pub fn set_wire_agent_error(
-    mock: &AdvancedMockNatsClient,
-    subject: &str,
-    code: i32,
-    message: &str,
-) {
+pub fn set_wire_agent_error(mock: &AdvancedMockNatsClient, subject: &str, code: i32, message: &str) {
     use jsonrpc_nats::{Message, ResponseId};
     let encoded = jsonrpc_nats::encode(&Message::Error {
         id: ResponseId::Number(1),

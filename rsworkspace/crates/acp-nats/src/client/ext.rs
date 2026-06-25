@@ -62,8 +62,7 @@ async fn handle_request<N: PublishClient + FlushClient, C: Client>(
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
             warn!(error = %e, "Failed to handle ext method");
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "ext_method error reply")
-                .await;
+            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "ext_method error reply").await;
         }
     }
 }
@@ -91,8 +90,8 @@ async fn forward_request<C: Client>(
     ext_method_name: &str,
     wire_method: &str,
 ) -> Result<ExtResponse, ExtError> {
-    let params: Arc<RawValue> = decode_request_params(wire_method, headers, payload)
-        .map_err(|e| ExtError::MalformedJson(e.to_string()))?;
+    let params: Arc<RawValue> =
+        decode_request_params(wire_method, headers, payload).map_err(|e| ExtError::MalformedJson(e.to_string()))?;
     let request = ExtRequest::new(ext_method_name, params);
     client.ext_method(request).await.map_err(ExtError::ClientError)
 }

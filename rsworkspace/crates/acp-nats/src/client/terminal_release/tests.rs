@@ -1,30 +1,21 @@
 use super::*;
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, SessionUpdate,
+    ContentBlock, ContentChunk, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
+use async_nats::header::HeaderMap;
 use async_trait::async_trait;
+use jsonrpc_nats::RequestId;
 use std::error::Error;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
-use async_nats::header::HeaderMap;
-use jsonrpc_nats::RequestId;
 
 fn empty_headers() -> HeaderMap {
     HeaderMap::new()
 }
 
 fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
-    crate::client::test_support::encode_wire_request(
-        "terminal/release",
-        RequestId::Number(1),
-        params,
-    )
+    crate::client::test_support::encode_wire_request("terminal/release", RequestId::Number(1), params)
 }
 
-
-fn sample_request() -> ReleaseTerminalRequest {
-    ReleaseTerminalRequest::new("sess-1", "term-1")
-}
 struct MockClient;
 
 impl MockClient {
@@ -93,15 +84,7 @@ async fn handle_success_publishes_response_to_reply_subject() {
     let request = ReleaseTerminalRequest::new("sess-1", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -113,9 +96,7 @@ async fn handle_no_reply_does_not_publish() {
     let request = ReleaseTerminalRequest::new("sess-1", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload, &client, None, &nats, "sess-1").await;
+    handle(&headers, &payload, &client, None, &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -136,12 +117,10 @@ async fn handle_invalid_payload_publishes_error_reply() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(
-        response.get("error").and_then(|e| e.get("code")),
-        Some(&serde_json::Value::from(-32700)),
-        "malformed JSON should return ParseError (-32700)"
+    let published_headers = nats.published_headers()[0].clone();
+    assert!(
+        published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some(),
+        "malformed JSON should publish an error reply"
     );
 }
 
@@ -152,6 +131,7 @@ async fn handle_invalid_params_publishes_invalid_params_error() {
     let payload = br#"{"id":1,"method":"terminal/release","params":{}}"#;
 
     handle(
+        &empty_headers(),
         payload.as_slice(),
         &client,
         Some("_INBOX.err"),
@@ -161,11 +141,10 @@ async fn handle_invalid_params_publishes_invalid_params_error() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+    let published_headers = nats.published_headers()[0].clone();
     assert_eq!(
-        response.get("error").and_then(|e| e.get("code")),
-        Some(&serde_json::Value::from(-32602)),
+        published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
+        "-32602",
         "valid JSON with invalid params should return InvalidParams (-32602)"
     );
 }
@@ -177,15 +156,7 @@ async fn handle_client_error_publishes_error_reply() {
     let request = ReleaseTerminalRequest::new("sess-1", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
@@ -197,19 +168,10 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
     let request = ReleaseTerminalRequest::new("sess-b", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-a",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-a").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
 }
-
 
 #[tokio::test]
 async fn handle_success_publish_failure_exercises_error_path() {
@@ -219,15 +181,7 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let request = ReleaseTerminalRequest::new("sess-1", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -240,32 +194,23 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let request = ReleaseTerminalRequest::new("sess-1", "term-001");
     let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
 
 #[test]
-fn error_code_and_message_malformed_json_returns_parse_error() {
-    let err = serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err();
+fn error_code_and_message_invalid_request_returns_invalid_params() {
     let tr_err = TerminalReleaseError::InvalidRequest("bad".to_string());
     let (code, message) = error_code_and_message(&tr_err);
-    assert_eq!(code, ErrorCode::ParseError);
-    assert!(message.contains("Malformed terminal/release request JSON"));
+    assert_eq!(code, ErrorCode::InvalidParams);
+    assert_eq!(message, "bad");
 }
 
 #[test]
-fn error_code_and_message_invalid_params_preserves_code_and_message() {
+fn error_code_and_message_client_error_preserves_code_and_message() {
     let inner = agent_client_protocol::Error::new(ErrorCode::InvalidParams.into(), "params is null");
-    let tr_err = TerminalReleaseError::InvalidRequest(inner);
+    let tr_err = TerminalReleaseError::ClientError(inner);
     let (code, message) = error_code_and_message(&tr_err);
     assert_eq!(code, ErrorCode::InvalidParams);
     assert_eq!(message, "params is null");

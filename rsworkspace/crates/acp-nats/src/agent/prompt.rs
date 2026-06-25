@@ -12,8 +12,8 @@ use trogon_nats::jetstream::{
 use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
-use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::nats::parsing::SessionAgentMethod;
+use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 use crate::wire::{WireError, decode_notification_params, decode_response, encode_request};

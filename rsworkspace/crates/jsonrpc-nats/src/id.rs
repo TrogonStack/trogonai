@@ -19,6 +19,27 @@ pub enum ResponseId {
     Null,
 }
 
+impl RequestId {
+    /// Canonical JSON value for this id (infallible: ids are numbers or strings).
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Number(n) => Value::Number((*n).into()),
+            Self::String(s) => Value::String(s.clone()),
+        }
+    }
+}
+
+impl ResponseId {
+    /// Canonical JSON value for this id (infallible).
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Number(n) => Value::Number((*n).into()),
+            Self::String(s) => Value::String(s.clone()),
+            Self::Null => Value::Null,
+        }
+    }
+}
+
 impl From<RequestId> for ResponseId {
     fn from(id: RequestId) -> Self {
         match id {
@@ -42,7 +63,7 @@ impl TryFrom<ResponseId> for RequestId {
 
 /// Encode a non-null id as its JSON literal for the `Jsonrpc-Id` header.
 pub fn encode_id_literal(id: &RequestId) -> String {
-    serde_json::to_string(id).expect("request id always serializes")
+    id.to_json().to_string()
 }
 
 /// Encode a response id as its JSON literal; `null` omits the header.
@@ -50,7 +71,7 @@ pub fn encode_response_id_literal(id: &ResponseId) -> Option<String> {
     match id {
         ResponseId::Null => None,
         ResponseId::Number(n) => Some(n.to_string()),
-        ResponseId::String(s) => Some(serde_json::to_string(s).expect("string id always serializes")),
+        ResponseId::String(s) => Some(Value::String(s.clone()).to_string()),
     }
 }
 

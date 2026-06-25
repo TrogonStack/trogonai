@@ -162,7 +162,11 @@ async fn dispatch_initialize_calls_agent_and_publishes_response() {
     assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
 }
 
-async fn dispatch_authenticate<T: serde::Serialize>(subject: &str, args: &T, reply: Option<&str>) -> (MockNatsClient, MockAgent) {
+async fn dispatch_authenticate<T: serde::Serialize>(
+    subject: &str,
+    args: &T,
+    reply: Option<&str>,
+) -> (MockNatsClient, MockAgent) {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let encoded = acp_nats::wire::encode_request("authenticate", jsonrpc_nats::RequestId::Number(1), args).unwrap();
@@ -551,7 +555,10 @@ async fn serve_global_dispatches_message() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let encoded = wire_encode_request("initialize", &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0));
+            let encoded = wire_encode_request(
+                "initialize",
+                &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
+            );
             let msg = Message {
                 subject: "acp.agent.initialize".into(),
                 reply: Some("_INBOX.serve".into()),
@@ -591,7 +598,11 @@ async fn serve_js_dispatches_message() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     factory.add_consumer(consumer);
 
-    let js_msg = make_js_msg("acp.session.s1.agent.load", &LoadSessionRequest::new("s1", "/tmp"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.load",
+        &LoadSessionRequest::new("s1", "/tmp"),
+        None,
+    );
     tx.unbounded_send(Ok(js_msg)).unwrap();
     drop(tx);
 
@@ -716,7 +727,11 @@ async fn dispatch_js_message_missing_req_id_header() {
 async fn dispatch_js_message_global_method_returns_early() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.agent.initialize", &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0), Some("_INBOX.1"));
+    let js_msg = make_js_msg(
+        "acp.agent.initialize",
+        &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
+        Some("_INBOX.1"),
+    );
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
     // Global methods return early — no dispatch, no reply
     assert!(nats.published_messages().is_empty());
@@ -726,7 +741,10 @@ async fn dispatch_js_message_global_method_returns_early() {
 async fn dispatch_js_message_global_method_ack_failure() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_failing_js_msg("acp.agent.initialize", &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0));
+    let js_msg = make_failing_js_msg(
+        "acp.agent.initialize",
+        &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
+    );
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 }
 
@@ -791,11 +809,7 @@ async fn dispatch_js_message_global_ext_no_session_id() {
 async fn dispatch_js_message_prompt_uses_prompt_response_subject() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg(
-        "acp.session.s1.agent.prompt",
-        &PromptRequest::new("s1", vec![]),
-        None,
-    );
+    let js_msg = make_js_msg("acp.session.s1.agent.prompt", &PromptRequest::new("s1", vec![]), None);
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -811,7 +825,11 @@ async fn dispatch_js_message_prompt_uses_prompt_response_subject() {
 async fn dispatch_js_message_non_prompt_session_uses_response_subject() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.session.s1.agent.load", &LoadSessionRequest::new("s1", "/tmp"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.load",
+        &LoadSessionRequest::new("s1", "/tmp"),
+        None,
+    );
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -842,7 +860,10 @@ async fn serve_subscribes_and_dispatches_messages() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let encoded = wire_encode_request("initialize", &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0));
+            let encoded = wire_encode_request(
+                "initialize",
+                &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
+            );
             let msg = Message {
                 subject: "acp.agent.initialize".into(),
                 reply: Some("_INBOX.serve".into()),
@@ -953,7 +974,11 @@ fn assert_js_response_method_not_found(nats: &MockNatsClient, expected_subject: 
 async fn dispatch_js_message_set_mode() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.session.s1.agent.set_mode", &SetSessionModeRequest::new("s1", "code"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.set_mode",
+        &SetSessionModeRequest::new("s1", "code"),
+        None,
+    );
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -975,7 +1000,11 @@ async fn dispatch_js_message_close_session() {
 async fn dispatch_js_message_fork_session() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.session.s1.agent.fork", &ForkSessionRequest::new("s1", "/tmp"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.fork",
+        &ForkSessionRequest::new("s1", "/tmp"),
+        None,
+    );
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -1001,7 +1030,11 @@ async fn dispatch_js_message_set_config_option() {
 async fn dispatch_js_message_set_model() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.session.s1.agent.set_model", &SetSessionModelRequest::new("s1", "gpt-4"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.set_model",
+        &SetSessionModelRequest::new("s1", "gpt-4"),
+        None,
+    );
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -1012,7 +1045,11 @@ async fn dispatch_js_message_set_model() {
 async fn dispatch_js_message_resume_session() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_js_msg("acp.session.s1.agent.resume", &ResumeSessionRequest::new("s1", "/tmp"), None);
+    let js_msg = make_js_msg(
+        "acp.session.s1.agent.resume",
+        &ResumeSessionRequest::new("s1", "/tmp"),
+        None,
+    );
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
@@ -1161,13 +1198,9 @@ async fn handle_request_with_keepalive_completes_fast() {
     let js_msg = make_js_msg("acp.agent.initialize", &init, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result = handle_jsonrpc_request_with_keepalive(
-        &msg,
-        "initialize",
-        &nats,
-        &js_msg,
-        |req: InitializeRequest| agent.initialize(req),
-    )
+    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| {
+        agent.initialize(req)
+    })
     .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
@@ -1184,8 +1217,7 @@ async fn handle_request_with_keepalive_no_reply_subject() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.agent.initialize", &init, None);
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
     assert!(result.is_err());
 }
 
@@ -1194,8 +1226,7 @@ async fn handle_request_with_keepalive_bad_payload() {
     let nats = MockNatsClient::new();
     let msg = make_nats_message("acp.agent.initialize", b"not json", Some("_INBOX.1"));
     let js_msg = make_js_msg_raw("acp.agent.initialize", b"not json", Some("_INBOX.1"));
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
     assert!(result.is_err());
 }
 
@@ -1208,8 +1239,7 @@ async fn handle_request_with_keepalive_handler_returns_error() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.agent.initialize", &init, Some("_INBOX.1"));
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
@@ -1241,11 +1271,12 @@ async fn handle_request_with_keepalive_progress_ack_failure() {
     });
 
     let agent = MockAgent::new();
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| async {
-        tokio::time::sleep(Duration::from_secs(20)).await;
-        agent.initialize(req).await
-    })
-    .await;
+    let result =
+        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| async {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            agent.initialize(req).await
+        })
+        .await;
     assert!(result.is_ok());
 }
 
@@ -1260,14 +1291,11 @@ async fn handle_request_with_keepalive_handler_error() {
     let js_msg = make_js_msg("acp.agent.authenticate", &auth, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result = handle_jsonrpc_request_with_keepalive(
-        &msg,
-        "authenticate",
-        &nats,
-        &js_msg,
-        |req: AuthenticateRequest| agent.authenticate(req),
-    )
-    .await;
+    let result =
+        handle_jsonrpc_request_with_keepalive(&msg, "authenticate", &nats, &js_msg, |req: AuthenticateRequest| {
+            agent.authenticate(req)
+        })
+        .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);

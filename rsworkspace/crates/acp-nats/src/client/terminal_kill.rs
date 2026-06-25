@@ -71,9 +71,8 @@ async fn forward_to_client<C: Client>(
     client: &C,
     expected_session_id: &str,
 ) -> Result<KillTerminalResponse, TerminalKillError> {
-    let request: KillTerminalRequest = decode_request_params("terminal/kill", headers, payload).map_err(|e| {
-        invalid_params_error(format!("Invalid terminal/kill request: {e}"))
-    })?;
+    let request: KillTerminalRequest = decode_request_params("terminal/kill", headers, payload)
+        .map_err(|e| invalid_params_error(format!("Invalid terminal/kill request: {e}")))?;
 
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {

@@ -2,7 +2,7 @@
 
 mod config;
 
-use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
+use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, SessionNotification};
 use std::rc::Rc;
 use tracing::{error, info};
@@ -102,11 +102,7 @@ where
 
     let client_connection = connection.clone();
     let bridge_for_client = bridge.clone();
-    let mut client_task = tokio::task::spawn_local(client::run(
-        nats_client,
-        client_connection,
-        bridge_for_client,
-    ));
+    let mut client_task = tokio::task::spawn_local(client::run(nats_client, client_connection, bridge_for_client));
     info!("ACP bridge running on stdio with NATS client proxy");
 
     let shutdown_result = tokio::select! {

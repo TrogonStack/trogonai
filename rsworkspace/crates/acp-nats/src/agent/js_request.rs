@@ -83,7 +83,10 @@ where
                 }
                 Err(e) => {
                     let _ = js_msg.ack_with(AckKind::Term).await;
-                    Err(Error::new(ErrorCode::InternalError.into(), format!("decode response: {e}")))
+                    Err(Error::new(
+                        ErrorCode::InternalError.into(),
+                        format!("decode response: {e}"),
+                    ))
                 }
             }
         }

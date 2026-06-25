@@ -157,11 +157,7 @@ async fn publish_wire_reply<N: trogon_nats::PublishClient>(
         }
     };
     match nats
-        .publish_with_headers(
-            async_nats::Subject::from(reply),
-            encoded.headers,
-            encoded.body,
-        )
+        .publish_with_headers(async_nats::Subject::from(reply), encoded.headers, encoded.body)
         .await
     {
         Ok(()) => true,

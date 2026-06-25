@@ -104,15 +104,7 @@ async fn request_publishes_response_to_reply_subject() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{"key":"value"}"#);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "my_method",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     let payloads = nats.published_payloads();
@@ -136,11 +128,8 @@ async fn request_invalid_payload_publishes_error_reply() {
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let headers = nats.published_headers()[0].as_ref().unwrap();
-    assert_eq!(
-        headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
-        "-32602"
-    );
+    let headers = nats.published_headers()[0].clone();
+    assert_eq!(headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(), "-32700");
 }
 
 #[tokio::test]
@@ -149,21 +138,14 @@ async fn request_client_error_publishes_error_reply() {
     let client = FailingClient;
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "my_method",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "my_method").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let published_headers = nats.published_headers()[0].as_ref().unwrap();
+    let published_headers = nats.published_headers()[0].clone();
     assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
     let payloads = nats.published_payloads();
-    assert_eq!(payloads[0].as_ref(), b"ext method failed");
+    let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
+    assert_eq!(body["message"], "ext method failed");
 }
 
 #[tokio::test]
@@ -173,15 +155,7 @@ async fn request_publish_failure_exercises_error_path() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "my_method",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -193,15 +167,7 @@ async fn request_flush_failure_exercises_warn_path() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(
-        &headers,
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "my_method",
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -211,22 +177,11 @@ async fn request_missing_params_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
 
-    handle(
-        &empty_headers(),
-        b"{}",
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "my_method",
-    )
-    .await;
+    handle(&empty_headers(), b"{}", &client, Some("_INBOX.err"), &nats, "my_method").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let headers = nats.published_headers()[0].as_ref().unwrap();
-    assert_eq!(
-        headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
-        "-32602"
-    );
+    let headers = nats.published_headers()[0].clone();
+    assert_eq!(headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(), "-32700");
 }
 
 // --- notification tests ---

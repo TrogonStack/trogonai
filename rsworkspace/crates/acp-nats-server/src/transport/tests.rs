@@ -112,10 +112,6 @@ fn http_transport_error_into_response_maps_status_codes() {
             StatusCode::NOT_ACCEPTABLE,
         ),
         (
-            HttpTransportError::not_implemented("not-implemented"),
-            StatusCode::NOT_IMPLEMENTED,
-        ),
-        (
             HttpTransportError::internal("internal"),
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
@@ -146,11 +142,6 @@ fn http_transport_error_display_and_source_chain_return_expected_values() {
             .is_none()
     );
     assert!(HttpTransportError::not_acceptable("not-acceptable").source().is_none());
-    assert!(
-        HttpTransportError::not_implemented("not-implemented")
-            .source()
-            .is_none()
-    );
     assert_eq!(HttpTransportError::internal("internal").to_string(), "internal");
     assert!(HttpTransportError::internal("internal").source().is_none());
 

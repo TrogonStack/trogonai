@@ -155,12 +155,7 @@ where
                         source: Box::new(source),
                     })?;
                     let response_headers = response.headers.clone().unwrap_or_default();
-                    let parsed = wire::decode_rx::<R>(
-                        Direction::Response,
-                        None,
-                        &response_headers,
-                        &response.payload,
-                    )?;
+                    let parsed = wire::decode_rx::<R>(Direction::Response, None, &response_headers, &response.payload)?;
                     inbound_tx
                         .send(parsed)
                         .await
@@ -250,12 +245,7 @@ where
     }
 }
 
-async fn publish_raw<N>(
-    nats: &N,
-    subject: &str,
-    headers: HeaderMap,
-    payload: Bytes,
-) -> Result<(), NatsTransportError>
+async fn publish_raw<N>(nats: &N, subject: &str, headers: HeaderMap, payload: Bytes) -> Result<(), NatsTransportError>
 where
     N: PublishClient + FlushClient,
     N::PublishError: 'static,

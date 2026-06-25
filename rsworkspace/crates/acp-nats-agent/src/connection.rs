@@ -9,12 +9,12 @@ use agent_client_protocol::{
     PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
 };
 use async_nats::Message;
-use serde::de::Error;
 use async_nats::jetstream::AckKind;
 #[cfg(test)]
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::future::LocalBoxFuture;
+use serde::de::Error;
 use std::rc::Rc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -257,8 +257,10 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
             .await
         }
         GlobalAgentMethod::Logout => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: LogoutRequest| agent.logout(req))
-                .await
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: LogoutRequest| {
+                agent.logout(req)
+            })
+            .await
         }
         GlobalAgentMethod::SessionNew => {
             handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: NewSessionRequest| {
@@ -299,8 +301,7 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: Agent>(
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: PromptRequest| agent.prompt(req))
-                .await
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: PromptRequest| agent.prompt(req)).await
         }
         SessionAgentMethod::Cancel => {
             handle_wire_notification(msg, method.wire_method(), |req: CancelNotification| agent.cancel(req)).await
@@ -389,9 +390,9 @@ where
             let id = response_id_from_request_headers(&headers);
             let encoded = encode_agent_error(id, &error)?;
             let _ = reply_wire(nats, reply_to, encoded).await;
-            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(
-                format!("{e}"),
-            )));
+            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
+                "{e}"
+            ))));
         }
     };
 
@@ -468,9 +469,9 @@ where
             let id = response_id_from_request_headers(&headers);
             let encoded = encode_agent_error(id, &error)?;
             let _ = reply_wire(nats, reply_to, encoded).await;
-            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(
-                format!("{e}"),
-            )));
+            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
+                "{e}"
+            ))));
         }
     };
 
@@ -624,13 +625,9 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request_with_keepalive(
-                &msg,
-                method.wire_method(),
-                nats,
-                &js_msg,
-                |req: PromptRequest| agent.prompt(req),
-            )
+            handle_jsonrpc_request_with_keepalive(&msg, method.wire_method(), nats, &js_msg, |req: PromptRequest| {
+                agent.prompt(req)
+            })
             .await
         }
         SessionAgentMethod::Cancel => {
@@ -643,9 +640,12 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
             .await
         }
         SessionAgentMethod::SetConfigOption => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: SetSessionConfigOptionRequest| {
-                agent.set_session_config_option(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.wire_method(),
+                nats,
+                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+            )
             .await
         }
         SessionAgentMethod::SetModel => {

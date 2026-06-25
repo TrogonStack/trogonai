@@ -52,8 +52,15 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
                 session_id = %session_id,
                 "Failed to handle terminal/release"
             );
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "terminal_release error reply")
-                .await;
+            rpc_reply::publish_error_reply(
+                nats,
+                reply_to,
+                response_id,
+                code,
+                &message,
+                "terminal_release error reply",
+            )
+            .await;
         }
     }
 }
@@ -64,9 +71,8 @@ async fn forward_to_client<C: Client>(
     client: &C,
     expected_session_id: &str,
 ) -> Result<ReleaseTerminalResponse, TerminalReleaseError> {
-    let request: ReleaseTerminalRequest = decode_request_params("terminal/release", headers, payload).map_err(|e| {
-        TerminalReleaseError::InvalidRequest(format!("Invalid terminal/release request: {e}"))
-    })?;
+    let request: ReleaseTerminalRequest = decode_request_params("terminal/release", headers, payload)
+        .map_err(|e| TerminalReleaseError::InvalidRequest(format!("Invalid terminal/release request: {e}")))?;
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
         return Err(TerminalReleaseError::InvalidRequest(format!(

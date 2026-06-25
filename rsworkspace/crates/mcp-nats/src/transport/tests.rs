@@ -149,10 +149,7 @@ async fn server_transport_receives_client_request_from_subscription() {
         ClientJsonRpcMessage::request(ClientRequest::PingRequest(PingRequest::default()), RequestId::Number(9));
 
     inbound
-        .unbounded_send(message_wire_client(
-            "mcp.server.filesystem.ping",
-            &request,
-        ))
+        .unbounded_send(message_wire_client("mcp.server.filesystem.ping", &request))
         .unwrap();
 
     assert!(matches!(
@@ -391,10 +388,7 @@ async fn transport_skips_invalid_subscription_payloads() {
         .unbounded_send(message("mcp.server.filesystem.ping", b"not-json".to_vec()))
         .unwrap();
     inbound
-        .unbounded_send(message_wire_client(
-            "mcp.server.filesystem.ping",
-            &request,
-        ))
+        .unbounded_send(message_wire_client("mcp.server.filesystem.ping", &request))
         .unwrap();
 
     assert!(matches!(

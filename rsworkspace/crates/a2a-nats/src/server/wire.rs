@@ -24,11 +24,7 @@ pub async fn publish_reply<N: PublishClient>(
         }
     };
     if let Err(e) = nats
-        .publish_with_headers(
-            async_nats::Subject::from(reply),
-            encoded.headers,
-            encoded.body,
-        )
+        .publish_with_headers(async_nats::Subject::from(reply), encoded.headers, encoded.body)
         .await
     {
         tracing::warn!(error = %e, label, "failed to publish reply");
@@ -48,12 +44,7 @@ pub fn encode_error_reply(
     message: impl Into<String>,
     data: Option<serde_json::Value>,
 ) -> Result<Encoded, WireError> {
-    encode_error(
-        response_id_from_request_headers(request_headers),
-        code,
-        message,
-        data,
-    )
+    encode_error(response_id_from_request_headers(request_headers), code, message, data)
 }
 
 pub fn request_id(headers: &HeaderMap) -> Option<JsonRpcId> {

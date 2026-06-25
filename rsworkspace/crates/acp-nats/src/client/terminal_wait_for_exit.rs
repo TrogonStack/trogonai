@@ -63,14 +63,8 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     let response_id = response_id_from_request_headers(headers);
     match forward_to_client(headers, payload, client, expected_session_id, operation_timeout).await {
         Ok(response) => {
-            rpc_reply::publish_success_reply(
-                nats,
-                reply_to,
-                response_id,
-                &response,
-                "terminal/wait_for_exit reply",
-            )
-            .await;
+            rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "terminal/wait_for_exit reply")
+                .await;
         }
         Err(e) => {
             let (code, message) = error_code_and_message(&e);
@@ -111,10 +105,8 @@ fn parse_request(
     payload: &[u8],
     expected_session_id: &str,
 ) -> Result<WaitForTerminalExitRequest, TerminalWaitForExitError> {
-    let request: WaitForTerminalExitRequest =
-        decode_request_params("terminal/wait_for_exit", headers, payload).map_err(|e| {
-            invalid_params_error(format!("Invalid terminal/wait_for_exit request: {e}"))
-        })?;
+    let request: WaitForTerminalExitRequest = decode_request_params("terminal/wait_for_exit", headers, payload)
+        .map_err(|e| invalid_params_error(format!("Invalid terminal/wait_for_exit request: {e}")))?;
 
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {

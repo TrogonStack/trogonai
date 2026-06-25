@@ -17,14 +17,7 @@ struct DummyResult {
 
 #[test]
 fn encode_client_request_puts_id_in_header_and_params_in_body() {
-    let encoded = encode_client_request(
-        "tasks/get",
-        JsonRpcId::Number(1),
-        &DummyParams {
-            value: "x".into(),
-        },
-    )
-    .unwrap();
+    let encoded = encode_client_request("tasks/get", JsonRpcId::Number(1), &DummyParams { value: "x".into() }).unwrap();
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_some());
     let params: DummyParams = serde_json::from_slice(&encoded.body).unwrap();
     assert_eq!(params.value, "x");
@@ -63,9 +56,7 @@ fn roundtrip_reconstructs_canonical_json_at_edge() {
     let encoded = encode_client_request(
         "tasks/get",
         JsonRpcId::String("abc".into()),
-        &DummyParams {
-            value: "x".into(),
-        },
+        &DummyParams { value: "x".into() },
     )
     .unwrap();
     let message = decode(Direction::Request, Some("tasks/get"), &encoded.headers, &encoded.body).unwrap();

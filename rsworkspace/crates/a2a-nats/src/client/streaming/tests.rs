@@ -1,6 +1,6 @@
 use bytes::Bytes;
-use jsonrpc_nats::{Message, ResponseId, encode, to_json_value};
 use jsonrpc_nats::Direction;
+use jsonrpc_nats::{Message, ResponseId, encode, to_json_value};
 
 use a2a::types::{SendMessageResponse, Task, TaskState, TaskStatus};
 use trogon_nats::AdvancedMockNatsClient;

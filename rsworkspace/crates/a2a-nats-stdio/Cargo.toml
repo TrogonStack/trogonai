@@ -28,6 +28,7 @@ trogon-std = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
 bytes = { workspace = true }
+jsonrpc-nats = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

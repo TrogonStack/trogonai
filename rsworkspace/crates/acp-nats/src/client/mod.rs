@@ -279,15 +279,7 @@ async fn dispatch_client_method<
             .await;
         }
         ClientMethod::Ext(ref method_name) => {
-            ext::handle(
-                headers,
-                &payload,
-                ctx.client,
-                reply.as_deref(),
-                ctx.nats,
-                method_name,
-            )
-            .await;
+            ext::handle(headers, &payload, ctx.client, reply.as_deref(), ctx.nats, method_name).await;
         }
     }
 }

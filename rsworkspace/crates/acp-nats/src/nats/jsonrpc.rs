@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use agent_client_protocol::Error;
 use jsonrpc_nats::{
-    Message, RequestId, TransportError,
-    jsonrpc_request_with_timeout as shared_jsonrpc_request_with_timeout,
+    Message, RequestId, TransportError, jsonrpc_request_with_timeout as shared_jsonrpc_request_with_timeout,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_nats::{NatsError, RequestClient, build_request_headers};
@@ -38,14 +37,11 @@ where
     )
     .await
     {
-        Ok(Message::Success { result, .. }) => {
-            serde_json::from_value(result).map_err(WireError::Deserialize).map_err(JsonRpcRequestError::Wire)
-        }
+        Ok(Message::Success { result, .. }) => serde_json::from_value(result)
+            .map_err(WireError::Deserialize)
+            .map_err(JsonRpcRequestError::Wire),
         Ok(Message::Error {
-            code,
-            message,
-            data: _,
-            ..
+            code, message, data: _, ..
         }) => Err(JsonRpcRequestError::Agent(Error::new(code, message))),
         Ok(_) => Err(JsonRpcRequestError::Wire(WireError::UnexpectedMessage)),
         Err(error) => Err(map_transport_error(error, &subject)),
@@ -80,10 +76,9 @@ impl JsonRpcRequestError {
         match self {
             Self::Nats(error) => error,
             Self::Wire(error) => NatsError::Other(format!("{subject}: {error}")),
-            Self::Agent(error) => NatsError::Other(format!(
-                "agent error {} on {subject}: {}",
-                error.code, error.message
-            )),
+            Self::Agent(error) => {
+                NatsError::Other(format!("agent error {} on {subject}: {}", error.code, error.message))
+            }
         }
     }
 }

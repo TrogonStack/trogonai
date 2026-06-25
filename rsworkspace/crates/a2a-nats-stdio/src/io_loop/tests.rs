@@ -2,6 +2,7 @@ use super::*;
 use a2a_nats::client::A2aClient;
 use a2a_nats::{A2aAgentId, A2aPrefix};
 use bytes::Bytes;
+use jsonrpc_nats::{Message as JrpcMessage, ResponseId, encode};
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use trogon_nats::AdvancedMockNatsClient;
@@ -16,7 +17,7 @@ fn make_client(
     A2aClient::new(prefix, agent_id, nats, js)
 }
 
-fn task_response(task_id: &str) -> Bytes {
+fn task_response(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = a2a::types::Task {
         id: task_id.to_string(),
         context_id: String::new(),
@@ -29,11 +30,12 @@ fn task_response(task_id: &str) -> Bytes {
         history: None,
         metadata: None,
     };
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0", "id": "x", "result": task
-    }))
-    .unwrap()
-    .into()
+    let encoded = encode(&JrpcMessage::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(task),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 // run_io_loop-exercising tests are skipped under cfg(coverage) because
@@ -67,7 +69,8 @@ async fn io_loop_exits_on_shutdown_signal() {
 #[tokio::test]
 async fn io_loop_skips_blank_lines() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.get", task_response("t-blank"));
+    let (headers, body) = task_response("t-blank");
+    nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
@@ -95,7 +98,8 @@ async fn io_loop_skips_blank_lines() {
 #[tokio::test]
 async fn io_loop_handles_valid_request() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.get", task_response("t1"));
+    let (headers, body) = task_response("t1");
+    nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
@@ -230,7 +234,8 @@ impl tokio::io::AsyncWrite for FailingWriter {
 
 async fn run_with_failing_writer(writes_until_fail: usize, fail_on_flush: bool) -> std::io::Result<()> {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.bot.tasks.get", task_response("t-fw"));
+    let (headers, body) = task_response("t-fw");
+    nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
 
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);

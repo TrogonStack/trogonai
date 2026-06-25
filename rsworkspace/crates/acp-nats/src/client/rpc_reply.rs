@@ -19,7 +19,10 @@ pub async fn publish_wire_reply<N: PublishClient + FlushClient>(
     context: &str,
 ) {
     let headers = reply_headers(&encoded.headers);
-    if let Err(e) = nats.publish_with_headers(reply_to.to_string(), headers, encoded.body).await {
+    if let Err(e) = nats
+        .publish_with_headers(reply_to.to_string(), headers, encoded.body)
+        .await
+    {
         warn!(error = %e, "Failed to publish {}", context);
     }
     if let Err(e) = nats.flush().await {
@@ -125,10 +128,7 @@ pub fn encode_success_for_test<Res: serde::Serialize>(
 }
 
 #[cfg(test)]
-pub fn encode_agent_error_for_test(
-    response_id: ResponseId,
-    error: &Error,
-) -> Result<Encoded, crate::wire::WireError> {
+pub fn encode_agent_error_for_test(response_id: ResponseId, error: &Error) -> Result<Encoded, crate::wire::WireError> {
     encode_agent_error(response_id, error)
 }
 

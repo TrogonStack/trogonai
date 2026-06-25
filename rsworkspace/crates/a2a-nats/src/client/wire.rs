@@ -8,11 +8,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::jsonrpc::JsonRpcId;
 
-pub fn encode_client_request<Req: Serialize>(
-    method: &str,
-    id: JsonRpcId,
-    params: &Req,
-) -> Result<Encoded, WireError> {
+pub fn encode_client_request<Req: Serialize>(method: &str, id: JsonRpcId, params: &Req) -> Result<Encoded, WireError> {
     let request_id = match id {
         JsonRpcId::Number(n) => RequestId::Number(n),
         JsonRpcId::String(s) => RequestId::String(s),
