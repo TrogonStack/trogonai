@@ -15,6 +15,7 @@ use jsonwebtoken::jwk::{
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
+use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use trogon_aauth_verify::{
     InMemoryReplayStore, NatsHeaders, NatsPopVerifier, NatsRequest, StaticJwks, SystemTimeSource, TimeSource,
@@ -145,6 +146,5 @@ async fn end_to_end_nats_pop_verifies() {
 
 /// PKCS#8 PEM for a p256 SigningKey.
 fn pkcs8_pem_from_signing_key(sk: &SigningKey) -> String {
-    use p256::pkcs8::EncodePrivateKey;
     sk.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).expect("pkcs8").to_string()
 }
