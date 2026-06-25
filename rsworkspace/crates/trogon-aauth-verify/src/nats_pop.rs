@@ -132,14 +132,26 @@ impl<'a> NatsHeaders<'a> {
     /// `aauth-token` headers were the easiest way for a smuggling attack to
     /// have the signature checked against one value while a downstream
     /// consumer reads another.
+    ///
+    /// `NatsPopVerifier::verify` runs the same check itself as
+    /// defense-in-depth; this constructor lets callers surface a clear error
+    /// at the call site instead.
     pub fn new_checked(items: &'a [(String, String)]) -> Result<Self, NatsPopError> {
+        Self::new(items).ensure_no_duplicate_security_headers()?;
+        Ok(Self { items })
+    }
+
+    /// Returns the first duplicate security-sensitive header (case-
+    /// insensitive) found in this view, if any. Used by both the
+    /// constructor and the verifier so the check is unconditional.
+    fn ensure_no_duplicate_security_headers(&self) -> Result<(), NatsPopError> {
         for &name in SECURITY_HEADERS {
-            let count = items.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).count();
+            let count = self.items.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).count();
             if count > 1 {
                 return Err(NatsPopError::DuplicateHeader(name));
             }
         }
-        Ok(Self { items })
+        Ok(())
     }
 
     fn get(&self, name: &str) -> Option<&str> {
@@ -190,6 +202,12 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> NatsPopVerifier<R, C, S> {
         if self.max_skew_secs < 0 {
             return Err(NatsPopError::NegativeMaxSkew(self.max_skew_secs));
         }
+
+        // Defense-in-depth: regardless of which constructor produced the
+        // header view, the verifier itself rejects duplicate security
+        // headers. Otherwise a caller using `NatsHeaders::new` would silently
+        // bypass the smuggling protection that `new_checked` enforces.
+        req.headers.ensure_no_duplicate_security_headers()?;
 
         let token = req
             .headers

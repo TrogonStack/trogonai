@@ -70,6 +70,29 @@ fn new_checked_accepts_unique_security_headers() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_duplicate_security_headers_even_with_unchecked_new() {
+    // Defense-in-depth: a caller that builds NatsHeaders via `new` (no
+    // duplicate-check) must still be rejected by the verifier, not silently
+    // pick one header value.
+    let items = vec![
+        (headers::NATS_TOKEN.to_string(), "first".into()),
+        (headers::NATS_TOKEN.to_string(), "second".into()),
+    ];
+    let req = NatsRequest {
+        subject: "s",
+        reply: None,
+        payload: b"",
+        headers: NatsHeaders::new(&items),
+    };
+    let verifier = NatsPopVerifier::new(StaticJwks::new(), SystemTimeSource, InMemoryReplayStore::new());
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::DuplicateHeader(name) if name == headers::NATS_TOKEN
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_returns_negative_max_skew_when_misconfigured() {
     let req = NatsRequest {
         subject: "s",
