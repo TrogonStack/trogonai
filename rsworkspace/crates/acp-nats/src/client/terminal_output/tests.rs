@@ -1,7 +1,7 @@
 use super::*;
 use agent_client_protocol::{
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-    TerminalOutputResponse,
+    ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, SessionUpdate, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
@@ -203,8 +203,6 @@ async fn serialization_failure_sends_fallback_error() {
 
 #[tokio::test]
 async fn mock_client_trait_methods_exercise_coverage() {
-    use agent_client_protocol::{ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields};
-
     let client = MockClient::success();
     let notification = SessionNotification::new(
         "sess-1",

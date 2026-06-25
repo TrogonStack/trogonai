@@ -1,5 +1,6 @@
 use crate::agent::Bridge;
 use crate::config::Config;
+use jsonrpc_nats::{Message, ResponseId};
 use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
@@ -98,7 +99,6 @@ pub fn set_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, sub
 }
 
 pub fn set_wire_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient, subject: &str, resp: &T) {
-    use jsonrpc_nats::{Message, ResponseId};
     let result = serde_json::to_value(resp).unwrap();
     let encoded = jsonrpc_nats::encode(&Message::Success {
         id: ResponseId::Number(1),
@@ -109,7 +109,6 @@ pub fn set_wire_json_response<T: serde::Serialize>(mock: &AdvancedMockNatsClient
 }
 
 pub fn set_wire_agent_error(mock: &AdvancedMockNatsClient, subject: &str, code: i32, message: &str) {
-    use jsonrpc_nats::{Message, ResponseId};
     let encoded = jsonrpc_nats::encode(&Message::Error {
         id: ResponseId::Number(1),
         code,
@@ -136,7 +135,6 @@ pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
 }
 
 pub fn set_js_response<T: serde::Serialize>(js: &MockJs, resp: &T) {
-    use jsonrpc_nats::{Message, ResponseId};
     let result = serde_json::to_value(resp).unwrap();
     let encoded = jsonrpc_nats::encode(&Message::Success {
         id: ResponseId::Number(1),

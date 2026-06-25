@@ -5,7 +5,9 @@ use agent_client_protocol::{
     PromptResponse, StopReason,
 };
 use std::cell::RefCell;
+use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::MockNatsClient;
+use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
 struct MockAgent {
     initialized: RefCell<bool>,
@@ -488,8 +490,6 @@ fn make_js_msg<T: serde::Serialize>(subject: &str, args: &T, reply: Option<&str>
 
 #[tokio::test]
 async fn with_jetstream_runs_both_loops() {
-    use trogon_nats::jetstream::MockJetStreamConsumerFactory;
-
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let factory = MockJetStreamConsumerFactory::new();
@@ -589,8 +589,6 @@ async fn serve_global_dispatches_message() {
 
 #[tokio::test]
 async fn serve_js_dispatches_message() {
-    use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
-
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let factory = MockJetStreamConsumerFactory::new();
@@ -624,8 +622,6 @@ async fn serve_js_dispatches_message() {
 
 #[tokio::test]
 async fn serve_js_handles_consumer_stream_error() {
-    use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
-
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let factory = MockJetStreamConsumerFactory::new();
@@ -650,8 +646,6 @@ async fn serve_js_handles_consumer_stream_error() {
 
 #[tokio::test]
 async fn serve_js_consumer_creation_failure() {
-    use trogon_nats::jetstream::MockJetStreamConsumerFactory;
-
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let factory = MockJetStreamConsumerFactory::new();
@@ -762,7 +756,6 @@ fn make_js_msg_no_headers(subject: &str, payload: &[u8]) -> MockJsMessage {
 
 #[tokio::test]
 async fn dispatch_js_message_ext_notification_handler_error() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();
@@ -776,7 +769,6 @@ async fn dispatch_js_message_ext_notification_handler_error() {
 
 #[tokio::test]
 async fn dispatch_js_message_ext_notification_handler_error_ack_failure() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();
@@ -838,7 +830,6 @@ async fn dispatch_js_message_non_prompt_session_uses_response_subject() {
 
 #[tokio::test]
 async fn dispatch_error_logs_warning_with_subscriber() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();
@@ -1165,7 +1156,6 @@ async fn dispatch_js_message_cancel_notification_ack_failure() {
 
 #[tokio::test]
 async fn dispatch_js_message_cancel_notification_handler_error_ack_failure() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();
@@ -1248,7 +1238,6 @@ async fn handle_request_with_keepalive_handler_returns_error() {
 
 #[tokio::test(start_paused = true)]
 async fn handle_request_with_keepalive_progress_ack_failure() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();

@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use async_nats::Message;
 use futures::StreamExt;
-use jsonrpc_nats::{Direction, jsonrpc_publish_with_timeout, jsonrpc_request_raw};
+use jsonrpc_nats::{Direction, TransportError, jsonrpc_publish_with_timeout, jsonrpc_request_raw};
 use rmcp::model::{JsonRpcMessage, RequestId};
 use rmcp::service::{RoleClient, RoleServer, RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
 use rmcp::transport::Transport;
@@ -237,8 +237,7 @@ where
     }
 }
 
-fn map_transport_error(err: jsonrpc_nats::TransportError) -> NatsTransportError {
-    use jsonrpc_nats::TransportError;
+fn map_transport_error(err: TransportError) -> NatsTransportError {
     match err {
         TransportError::Codec(source) => NatsTransportError::Codec(source),
         TransportError::Timeout { subject } => NatsTransportError::RequestTimedOut { subject },

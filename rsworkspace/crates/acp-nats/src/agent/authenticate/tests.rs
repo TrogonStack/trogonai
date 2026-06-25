@@ -1,4 +1,6 @@
-use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_wire_json_response};
+use crate::agent::test_support::{
+    has_request_metric, mock_bridge, mock_bridge_with_metrics, set_wire_agent_error, set_wire_json_response,
+};
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, ErrorCode};
 
@@ -26,7 +28,6 @@ async fn authenticate_returns_error_when_nats_request_fails() {
 
 #[tokio::test]
 async fn authenticate_surfaces_structured_agent_error_from_header() {
-    use crate::agent::test_support::set_wire_agent_error;
     let (mock, _js, bridge) = mock_bridge();
     set_wire_agent_error(
         &mock,

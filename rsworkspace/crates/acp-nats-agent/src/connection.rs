@@ -2,6 +2,7 @@ use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
+use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
 use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification, ExtRequest,
@@ -374,17 +375,14 @@ where
     F: std::future::Future<Output = agent_client_protocol::Result<Resp>>,
     Resp: serde::Serialize,
 {
-    use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
-    use agent_client_protocol::{Error, ErrorCode};
-
     let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
     let headers = msg.headers.clone().unwrap_or_default();
 
     let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
-            let error = Error::new(
-                ErrorCode::InvalidParams.into(),
+            let error = agent_client_protocol::Error::new(
+                agent_client_protocol::ErrorCode::InvalidParams.into(),
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
@@ -453,17 +451,14 @@ where
     Resp: serde::Serialize,
     M: JsAckWith,
 {
-    use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
-    use agent_client_protocol::{Error, ErrorCode};
-
     let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
     let headers = msg.headers.clone().unwrap_or_default();
 
     let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
-            let error = Error::new(
-                ErrorCode::InvalidParams.into(),
+            let error = agent_client_protocol::Error::new(
+                agent_client_protocol::ErrorCode::InvalidParams.into(),
                 format!("Failed to deserialize request: {e}"),
             );
             let id = response_id_from_request_headers(&headers);
