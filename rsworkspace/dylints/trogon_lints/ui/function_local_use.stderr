@@ -1,0 +1,35 @@
+error: `use` declared inside a function body
+  --> $DIR/function_local_use.rs:9:5
+   |
+LL |     use std::fmt::Write;
+   |     ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move the import to module level (a `use` at the top of the file or module)
+   = note: `#[deny(function_local_use)]` on by default
+
+error: `use` declared inside a function body
+  --> $DIR/function_local_use.rs:17:5
+   |
+LL |     use std::cmp::Ordering::*;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move the import to module level (a `use` at the top of the file or module)
+
+error: `use` declared inside a function body
+  --> $DIR/function_local_use.rs:28:5
+   |
+LL |     use std::fmt::{Debug, Display};
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move the import to module level (a `use` at the top of the file or module)
+
+error: `use` declared inside a function body
+  --> $DIR/function_local_use.rs:34:9
+   |
+LL |         use std::fmt::Debug;
+   |         ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: move the import to module level (a `use` at the top of the file or module)
+
+error: aborting due to 4 previous errors
+

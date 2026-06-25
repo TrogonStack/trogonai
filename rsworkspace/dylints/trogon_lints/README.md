@@ -14,6 +14,14 @@ lint crate rather than in per-invocation flags.
 
 - `error_string_comparison` (`deny`): prevents semantic checks against strings
   derived from `std::error::Error::to_string`.
+- `function_local_use` (`deny`): requires `use` imports to live at module level
+  rather than inside a function body or block. A function-local import is never
+  required (every name is reachable by full path or a module-level `use`, with
+  `as` for collisions) and it hides a module's dependency surface inside its
+  functions. Macro-generated imports come from expansion and are exempt;
+  suppress a justified exception with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(function_local_use))]` at the
+  site.
 - `manual_error_impl` (`deny`): requires deriving `std::error::Error` with
   `thiserror` instead of hand-writing the impl.
 - `inline_module_block` (`deny`): requires modules to live in their own file
