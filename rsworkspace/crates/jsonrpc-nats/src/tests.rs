@@ -1,4 +1,4 @@
-mod proptests;
+mod prop_tests;
 
 use super::*;
 use crate::constants::{HEADER_ERROR_CODE, HEADER_ID};

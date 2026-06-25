@@ -75,4 +75,4 @@ fn supports_standard_string_conversions_and_display() {
     );
 }
 
-mod proptests;
+mod prop_tests;

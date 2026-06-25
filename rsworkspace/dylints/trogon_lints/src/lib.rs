@@ -11,6 +11,7 @@ mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
 mod redundant_module_path;
+mod test_module_naming;
 
 use rustc_hir::{Expr, Item, LetStmt, Stmt};
 use rustc_lint::{LateContext, LateLintPass, LintStore};
@@ -26,6 +27,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         INLINE_MODULE_BLOCK,
         MANUAL_ERROR_IMPL,
         REDUNDANT_MODULE_PATH,
+        TEST_MODULE_NAMING,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
@@ -226,6 +228,42 @@ rustc_session::declare_lint! {
     "declare `use` imports at module level, not inside a function body",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects modules that contain `#[test]` (or `#[tokio::test]`) functions
+    /// but are not named `tests` or `*_tests`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Test suites live in their own file-backed module (see
+    /// `inline_module_block`), and that module's name becomes its file name. A
+    /// fixed naming rule keeps test files discoverable and uniform: `tests` for
+    /// the sole test module of a parent, and `*_tests` for siblings that split
+    /// tests by concern or `cfg` gate (`parse_tests`, `cov_stub_tests`). Modules
+    /// that only hold test *support* (mocks, fixtures, testkit) carry no `#[test]`
+    /// functions and are left alone.
+    ///
+    /// ### Example
+    ///
+    /// ```rust
+    /// // in helpers.rs
+    /// #[test]
+    /// fn it_works() {}
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust
+    /// // in tests.rs (or parse_tests.rs for a sibling module)
+    /// #[test]
+    /// fn it_works() {}
+    /// ```
+    pub TEST_MODULE_NAMING,
+    Deny,
+    "name a module of tests `tests` or `*_tests`",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
@@ -248,6 +286,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
+        test_module_naming::check_item(cx, item);
     }
 }
 
@@ -256,6 +295,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,
+    TEST_MODULE_NAMING,
 ]);
 
 rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [REDUNDANT_MODULE_PATH]);

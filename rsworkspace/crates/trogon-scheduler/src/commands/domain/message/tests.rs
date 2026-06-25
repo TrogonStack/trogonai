@@ -107,4 +107,4 @@ fn message_conversion_includes_content_and_headers() {
     assert_eq!(message.headers[0].value, "heartbeat");
 }
 
-mod proptests;
+mod prop_tests;

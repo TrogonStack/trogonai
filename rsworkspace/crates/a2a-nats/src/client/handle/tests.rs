@@ -91,14 +91,14 @@ fn prefix_accessor_returns_constructor_value() {
     assert_eq!(client.prefix().as_str(), "a2a");
 }
 
-mod agent_card_op;
-mod message_send_op;
-mod message_stream_op;
-mod push_delete_op;
-mod push_get_op;
-mod push_list_op;
-mod push_set_op;
-mod tasks_cancel_op;
-mod tasks_get_op;
-mod tasks_list_op;
-mod tasks_resubscribe_op;
+mod agent_card_op_tests;
+mod message_send_op_tests;
+mod message_stream_op_tests;
+mod push_delete_op_tests;
+mod push_get_op_tests;
+mod push_list_op_tests;
+mod push_set_op_tests;
+mod tasks_cancel_op_tests;
+mod tasks_get_op_tests;
+mod tasks_list_op_tests;
+mod tasks_resubscribe_op_tests;
