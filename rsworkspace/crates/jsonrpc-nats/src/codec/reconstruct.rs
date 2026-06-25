@@ -58,10 +58,11 @@ pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
         ))
     })?;
 
-    if obj.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
-        return Err(CodecError::Deserialize(
-            <serde_json::Error as serde::de::Error>::custom("unsupported jsonrpc version"),
-        ));
+    let version = obj.get("jsonrpc").and_then(Value::as_str);
+    if version != Some(JSONRPC_VERSION) {
+        return Err(CodecError::UnsupportedVersion {
+            found: version.map(str::to_string),
+        });
     }
 
     if let Some(method) = obj.get("method").and_then(Value::as_str) {

@@ -2,7 +2,26 @@ mod proptests;
 
 use super::*;
 use crate::direction::Direction;
-use crate::{decode, encode};
+use crate::error::CodecError;
+use crate::{decode, encode, from_json_value};
+
+#[test]
+fn from_json_value_rejects_mismatched_version() {
+    let v3 = serde_json::json!({ "jsonrpc": "3.0", "id": 1, "method": "ping", "params": {} });
+    assert!(matches!(
+        from_json_value(&v3),
+        Err(CodecError::UnsupportedVersion { found }) if found.as_deref() == Some("3.0")
+    ));
+}
+
+#[test]
+fn from_json_value_rejects_missing_version() {
+    let missing = serde_json::json!({ "id": 1, "method": "ping", "params": {} });
+    assert!(matches!(
+        from_json_value(&missing),
+        Err(CodecError::UnsupportedVersion { found: None })
+    ));
+}
 
 #[test]
 fn numeric_and_string_ids_are_distinct_on_the_wire() {
