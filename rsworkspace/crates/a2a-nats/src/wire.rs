@@ -22,14 +22,8 @@ pub enum WireError {
     UnexpectedMessage,
 }
 
-pub fn merge_jsonrpc_headers(mut base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
-    if let Some(id) = overlay.get(jsonrpc_nats::HEADER_ID) {
-        base.insert(jsonrpc_nats::HEADER_ID, id.as_str());
-    }
-    if let Some(code) = overlay.get(jsonrpc_nats::HEADER_ERROR_CODE) {
-        base.insert(jsonrpc_nats::HEADER_ERROR_CODE, code.as_str());
-    }
-    base
+pub fn merge_jsonrpc_headers(base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
+    jsonrpc_nats::merge_jsonrpc_headers(base, overlay)
 }
 
 pub fn response_id_from_request_headers(headers: &HeaderMap) -> ResponseId {

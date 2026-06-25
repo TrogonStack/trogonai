@@ -26,22 +26,19 @@ stays in the body, and success-versus-error is decided by the presence of the
   `Jsonrpc-Id` and `error.code` → `Jsonrpc-Error-Code` through the shared codec;
   subject-based dispatch (`A2aMethod::from_subject`) retained. Redaction is
   unaffected (`result`/`message`/`data`/`params` stay in the body).
+- **Shared transport** (`jsonrpc-nats/src/transport.rs`): ACP and MCP both run
+  on the shared `merge_jsonrpc_headers`, `jsonrpc_request_raw` (byte-level
+  request/reply with timeout), and `jsonrpc_publish[_with_timeout]`. A2A's
+  duplicated header-merge now delegates to the shared one too. This resolves the
+  ADR "Open Implementation Questions": the shared seam owns header projection +
+  request/publish + timeouts, while the **typed decode** stays in the domain
+  crate (ACP decodes the generic `Message`; MCP decodes rmcp's
+  `RxJsonRpcMessage`). MCP keeps a thin `rmcp::Transport` (Sink/Stream) adapter
+  over those shared primitives because rmcp fixes its transport shape and its
+  server-initiated streaming + JetStream keepalive ack are domain concerns that
+  do not belong in the shared core.
 
 ## Remaining Work
-
-### Phase 5 — Fold `mcp-nats` and `acp-nats` onto one shared transport
-Both run on the codec but still carry separate transport + wire layers. Converge
-them onto a single transport so ACP and MCP share one implementation (ADR
-Consequences). This requires resolving the ADR **"Open Implementation
-Questions"** first — they are design decisions, not just code:
-- the transport trait spanning core request/reply **and** JetStream durable
-  delivery;
-- how ACP server-initiated streaming (prompt notification stream + final
-  response) and JetStream keepalive ack compose on top of the peer primitives
-  without leaking into the shared core.
-
-Deliver a short design note answering those before refactoring, then converge
-behind the codec one transport concern at a time.
 
 ### Phase 6 (signing only) — Extend per-message signing to cover the headers
 ⚠️ **Blocked.** ADR §5 says to extend A2A signing so it spans `Jsonrpc-Id` and

@@ -57,6 +57,9 @@ fn map_transport_error(error: TransportError, _subject: &str) -> JsonRpcRequestE
         TransportError::Publish { subject, error } => {
             JsonRpcRequestError::Nats(NatsError::Other(format!("{subject}: {error}")))
         }
+        TransportError::PublishTimeout { subject } => {
+            JsonRpcRequestError::Nats(NatsError::Other(format!("publish timed out on {subject}")))
+        }
         TransportError::Flush { error } => JsonRpcRequestError::Nats(NatsError::Other(error)),
     }
 }

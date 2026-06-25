@@ -214,11 +214,22 @@ fall out of sync with a separate type tag.
 
 ## Open Implementation Questions
 
-- The exact transport trait spanning core request/reply and JetStream durable
-  delivery.
-- How server-initiated streaming (the ACP prompt notification stream plus its
-  final response) and JetStream keepalive acknowledgement compose on top of the
-  peer primitives without entering the shared core.
+These are now resolved by the `jsonrpc-nats` transport seam:
+
+- **The transport trait spanning core request/reply and JetStream durable
+  delivery.** The shared core is a small set of free functions over the
+  `trogon-nats` client traits, not a single bespoke trait: `merge_jsonrpc_headers`,
+  `jsonrpc_request_raw` (byte-level request/reply with timeout), and
+  `jsonrpc_publish[_with_timeout]`. They own header projection, the request/publish
+  mechanics, and timeouts. The **typed decode is injected by the domain crate** —
+  ACP decodes the generic `Message`, MCP decodes rmcp's `RxJsonRpcMessage` — so the
+  shared core never depends on a protocol's message types.
+- **How server-initiated streaming and JetStream keepalive ack compose.** They
+  stay in the domain adapter, layered on top of the shared primitives rather than
+  inside the shared core. MCP keeps a thin `rmcp::Transport` (Sink/Stream) adapter
+  because rmcp fixes its transport shape; ACP's prompt notification stream and
+  keepalive ack live in its runner. Both still send/publish through the shared
+  functions, so the wire encoding is identical.
 
 ## Migration
 

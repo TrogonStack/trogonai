@@ -4,10 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::Message;
-use async_nats::header::HeaderMap;
-use bytes::Bytes;
 use futures::StreamExt;
-use jsonrpc_nats::Direction;
+use jsonrpc_nats::{Direction, jsonrpc_publish_with_timeout, jsonrpc_request_raw};
 use rmcp::model::{JsonRpcMessage, RequestId};
 use rmcp::service::{RoleClient, RoleServer, RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
 use rmcp::transport::Transport;
@@ -142,20 +140,11 @@ where
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
                     let encoded = wire::encode_tx::<R>(&item)?;
                     let headers = wire::merge_headers(headers_with_trace_context(), encoded.headers);
-                    let response = tokio::time::timeout(
-                        timeout,
-                        nats.request_with_headers(subject.clone(), headers, encoded.body),
-                    )
-                    .await
-                    .map_err(|_| NatsTransportError::RequestTimedOut {
-                        subject: subject.clone(),
-                    })?
-                    .map_err(|source| NatsTransportError::Request {
-                        subject: subject.clone(),
-                        source: Box::new(source),
-                    })?;
-                    let response_headers = response.headers.clone().unwrap_or_default();
-                    let parsed = wire::decode_rx::<R>(Direction::Response, None, &response_headers, &response.payload)?;
+                    let (response_headers, response_body) =
+                        jsonrpc_request_raw(&nats, &subject, headers, encoded.body, timeout)
+                            .await
+                            .map_err(map_transport_error)?;
+                    let parsed = wire::decode_rx::<R>(Direction::Response, None, &response_headers, &response_body)?;
                     inbound_tx
                         .send(parsed)
                         .await
@@ -166,8 +155,9 @@ where
                     let subject = subject_for_message::<R>(&prefix, &remote_peer_id, &item)?;
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
                     let encoded = wire::encode_tx::<R>(&item)?;
-                    let headers = wire::merge_headers(headers_with_trace_context(), encoded.headers);
-                    publish_raw_with_timeout(&nats, &subject, headers, encoded.body, timeout).await
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)
                 }
                 JsonRpcMessage::Response(response) => {
                     let request_id = response.id.clone();
@@ -177,8 +167,9 @@ where
                     let item: TxJsonRpcMessage<R> = JsonRpcMessage::Response(response);
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
                     let encoded = wire::encode_tx::<R>(&item)?;
-                    let headers = wire::merge_headers(headers_with_trace_context(), encoded.headers);
-                    publish_raw_with_timeout(&nats, &subject, headers, encoded.body, timeout).await?;
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)?;
                     forget_reply_subject(&request_id, &pending_replies).await;
                     Ok(())
                 }
@@ -190,8 +181,9 @@ where
                     let item: TxJsonRpcMessage<R> = JsonRpcMessage::Error(error);
                     crate::telemetry::transport::record_subject(&Span::current(), &subject);
                     let encoded = wire::encode_tx::<R>(&item)?;
-                    let headers = wire::merge_headers(headers_with_trace_context(), encoded.headers);
-                    publish_raw_with_timeout(&nats, &subject, headers, encoded.body, timeout).await?;
+                    jsonrpc_publish_with_timeout(&nats, &subject, encoded, headers_with_trace_context(), timeout)
+                        .await
+                        .map_err(map_transport_error)?;
                     forget_reply_subject(&request_id, &pending_replies).await;
                     Ok(())
                 }
@@ -245,40 +237,25 @@ where
     }
 }
 
-async fn publish_raw<N>(nats: &N, subject: &str, headers: HeaderMap, payload: Bytes) -> Result<(), NatsTransportError>
-where
-    N: PublishClient + FlushClient,
-    N::PublishError: 'static,
-    N::FlushError: 'static,
-{
-    nats.publish_with_headers(subject.to_string(), headers, payload)
-        .await
-        .map_err(|source| NatsTransportError::Publish {
-            subject: subject.to_string(),
-            source: Box::new(source),
-        })?;
-    nats.flush().await.map_err(|source| NatsTransportError::Flush {
-        source: Box::new(source),
-    })
-}
-
-async fn publish_raw_with_timeout<N>(
-    nats: &N,
-    subject: &str,
-    headers: HeaderMap,
-    payload: Bytes,
-    timeout: Duration,
-) -> Result<(), NatsTransportError>
-where
-    N: PublishClient + FlushClient,
-    N::PublishError: 'static,
-    N::FlushError: 'static,
-{
-    tokio::time::timeout(timeout, publish_raw(nats, subject, headers, payload))
-        .await
-        .map_err(|_| NatsTransportError::PublishTimedOut {
-            subject: subject.to_string(),
-        })?
+fn map_transport_error(err: jsonrpc_nats::TransportError) -> NatsTransportError {
+    use jsonrpc_nats::TransportError;
+    match err {
+        TransportError::Codec(source) => NatsTransportError::Codec(source),
+        TransportError::Timeout { subject } => NatsTransportError::RequestTimedOut { subject },
+        TransportError::Request { subject, error } => NatsTransportError::Request {
+            subject,
+            source: error.into(),
+        },
+        TransportError::Publish { subject, error } => NatsTransportError::Publish {
+            subject,
+            source: error.into(),
+        },
+        TransportError::PublishTimeout { subject } => NatsTransportError::PublishTimedOut { subject },
+        TransportError::Flush { error } => NatsTransportError::Flush { source: error.into() },
+        TransportError::UnexpectedResponse => NatsTransportError::Deserialize(
+            <serde_json::Error as serde::de::Error>::custom("unexpected JSON-RPC response variant"),
+        ),
+    }
 }
 
 async fn reply_subject_for_response(request_id: &RequestId, pending_replies: &PendingReplies) -> Option<String> {
