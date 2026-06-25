@@ -1,3 +1,5 @@
+use tracing_subscriber::util::SubscriberInitExt;
+
 use super::*;
 use crate::constants::{
     DEFAULT_PUSH_DLQ_CALLER_SEGMENT as PLACEHOLDER_CALLER_SEGMENT, ENV_MAX_CONCURRENT_CLIENT_TASKS,
@@ -12,7 +14,6 @@ fn default_nats() -> NatsConfig {
 }
 
 fn with_subscriber<F: FnOnce()>(f: F) {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
     f();
 }

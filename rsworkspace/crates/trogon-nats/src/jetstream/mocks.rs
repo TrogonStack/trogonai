@@ -18,10 +18,12 @@ use async_nats::{
     header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
 };
 use bytes::Bytes;
+use futures::StreamExt;
 use futures::channel::mpsc;
 use futures::stream::{BoxStream, Iter};
 use std::vec::IntoIter as VecIntoIter;
 use time::OffsetDateTime;
+use tokio::io::AsyncReadExt;
 
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
@@ -1402,7 +1404,6 @@ impl JetStreamConsumer for MockJetStreamConsumer {
     type Messages = BoxStream<'static, Result<MockJsMessage, MockError>>;
 
     async fn messages(&self) -> Result<Self::Messages, MockError> {
-        use futures::StreamExt;
         let rx = self
             .rx
             .lock()
@@ -1457,8 +1458,6 @@ impl ObjectStorePut for MockObjectStore {
     type Info = ();
 
     async fn put<R: tokio::io::AsyncRead + Unpin + Send>(&self, name: &str, data: &mut R) -> Result<(), MockError> {
-        use tokio::io::AsyncReadExt;
-
         let should_fail = {
             let mut count = self.put_fail_count.lock().unwrap();
             if *count > 0 {

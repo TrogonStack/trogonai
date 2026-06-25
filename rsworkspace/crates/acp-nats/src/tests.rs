@@ -1,5 +1,7 @@
 use super::*;
-use agent_client_protocol::{SessionNotification, SessionUpdate};
+use agent_client_protocol::{
+    Client, RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -68,7 +70,6 @@ async fn spawn_notification_forwarder_delivers_notifications() {
 
 #[tokio::test]
 async fn mock_client_request_permission_returns_error() {
-    use agent_client_protocol::{Client, RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields};
     let client = MockClient::new(None);
     let tool_call = ToolCallUpdate::new("id", ToolCallUpdateFields::new());
     let result = client

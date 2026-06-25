@@ -1,7 +1,7 @@
 use super::*;
 use agent_client_protocol::{
     ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionUpdate,
+    SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_trait::async_trait;
 use std::cell::RefCell;
@@ -100,8 +100,6 @@ async fn has_reply_logs_warning_but_still_forwards() {
 
 #[tokio::test]
 async fn mock_client_trait_coverage() {
-    use agent_client_protocol::{ToolCallUpdate, ToolCallUpdateFields};
-
     let client = MockClient::new();
     let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
     let req = RequestPermissionRequest::new("sess-1", tool_call, vec![]);

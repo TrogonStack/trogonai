@@ -5,6 +5,9 @@
 //! inner params/result as `serde_json::Value` or typed generics so we can parse the
 //! envelope cheaply and delegate inner deserialization to the typed A2A structs.
 
+use serde::Deserialize as _;
+use serde::de::IntoDeserializer;
+
 use crate::jsonrpc::JsonRpcId;
 
 /// Inbound JSON-RPC 2.0 request from a client.
@@ -30,8 +33,6 @@ fn deserialize_optional_id<'de, D>(deserializer: D) -> Result<Option<JsonRpcId>,
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::Deserialize as _;
-    use serde::de::IntoDeserializer;
     let value: serde_json::Value = serde::Deserialize::deserialize(deserializer)?;
     if value.is_null() {
         return Ok(Some(JsonRpcId::Null));

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use super::super::{GetElapsed, GetNow};
 use super::*;
 
 #[test]
@@ -121,8 +122,6 @@ fn test_mock_instant_ordering() {
 
 #[test]
 fn test_generic_function_with_mock_clock() {
-    use super::super::{GetElapsed, GetNow};
-
     fn is_expired<C: GetNow + GetElapsed>(clock: &C, started_at: C::Instant, ttl: Duration) -> bool {
         clock.elapsed(started_at) >= ttl
     }

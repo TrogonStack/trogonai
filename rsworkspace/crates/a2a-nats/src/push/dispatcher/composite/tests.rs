@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::Mutex;
+use trogon_nats::AdvancedMockNatsClient;
 
 /// Test dispatcher that records which leg was invoked, so the composite's
 /// routing rules can be asserted without spinning up real transports.
@@ -193,8 +194,6 @@ impl PushDispatcher for NatsBox {
 
 #[tokio::test]
 async fn factory_returns_dyn_dispatcher_routing_by_target() {
-    use trogon_nats::AdvancedMockNatsClient;
-
     let nats = AdvancedMockNatsClient::new();
     let js = trogon_nats::jetstream::mocks::MockJetStreamPublisher::new();
     let dispatcher = composite_push_dispatcher(nats.clone(), js, reqwest::Client::new());

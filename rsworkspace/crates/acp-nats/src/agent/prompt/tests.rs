@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::Config;
+use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::AdvancedMockNatsClient;
 
 fn make_nats_msg(payload: &[u8]) -> async_nats::Message {
@@ -399,7 +400,6 @@ async fn prompt_js_bad_notification_payload_skipped() {
 
 #[tokio::test]
 async fn prompt_js_notification_receiver_dropped() {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let mock = AdvancedMockNatsClient::new();

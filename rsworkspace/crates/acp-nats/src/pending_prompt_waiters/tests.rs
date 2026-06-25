@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::{PromptResponse, SessionId, StopReason};
@@ -19,8 +20,6 @@ fn lock_poisoned_error_is_std_error() {
 
 #[test]
 fn lock_poisoned_error_from_poison_error() {
-    use std::sync::{Arc, Mutex};
-
     let mutex = Arc::new(Mutex::new(42));
     let mutex_clone = mutex.clone();
 

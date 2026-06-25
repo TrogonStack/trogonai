@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use super::*;
 
 #[test]
@@ -30,7 +32,6 @@ async fn poisoned_mutex_yields_typed_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn expires_after_ttl() {
-    use std::sync::atomic::{AtomicI64, Ordering};
     let now = std::sync::Arc::new(AtomicI64::new(1000));
     let now_c = now.clone();
     let store = InMemoryReplayStore::new().with_clock(move || now_c.load(Ordering::SeqCst));

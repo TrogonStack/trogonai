@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use super::*;
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
@@ -91,7 +93,6 @@ fn agent_id_from_subject_rejects_invalid_agent_id_segment() {
 
 #[test]
 fn agent_suffix_error_display_and_source() {
-    use std::error::Error;
     assert_eq!(
         AgentSuffixError::NotARegisterSubject.to_string(),
         "subject is not a `{prefix}.catalog.register.` register subject"
@@ -166,7 +167,6 @@ fn error_reply_serializes_correctly() {
 
 #[test]
 fn register_payload_error_display_and_source_covers_every_variant() {
-    use std::error::Error;
     let json = serde_json::from_str::<String>("x").unwrap_err();
     let schema = a2a_pack::validate_agent_card_value(&serde_json::json!({})).unwrap_err();
     let value = serde_json::from_str::<String>("x").unwrap_err();

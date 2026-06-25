@@ -15,6 +15,7 @@ use a2a::types::{
     ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
 };
 use a2a_nats::client::{A2aClient, ClientError};
+use a2a_nats::error::*;
 use a2a_nats::task_id::A2aTaskId;
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -415,7 +416,6 @@ pub(crate) fn rest_error_response(err: &ClientError) -> Response {
 }
 
 pub(crate) fn http_status_for_jsonrpc_code(code: i32) -> StatusCode {
-    use a2a_nats::error::*;
     match code {
         TASK_NOT_FOUND => StatusCode::NOT_FOUND,
         TASK_NOT_CANCELABLE => StatusCode::CONFLICT,

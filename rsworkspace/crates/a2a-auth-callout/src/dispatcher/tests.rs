@@ -1,5 +1,6 @@
 use super::*;
 use crate::account_resolver::StaticAccountResolver;
+use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
 use crate::credentials::api_key::{ApiKey, ApiKeyEntry, ApiKeyRegistry, HmacApiKeyVerifier};
 use crate::credentials::mtls::ClientCertPem;
 use crate::credentials::oidc::BearerToken;
@@ -147,8 +148,6 @@ async fn dispatch_infers_oidc_when_user_jwt_present() {
 
 #[tokio::test]
 async fn dispatch_mtls_when_cert_present() {
-    use crate::bridge_mint::{BridgeClientInfo, BridgeMintRequest};
-
     let mtls: Arc<dyn MTlsVerifier> = Arc::new(StubMtlsVerifier);
     let d = dispatcher_with(None, Some(mtls), None, &["tenant-acme"]);
     let req = ServerAuthRequestClaims::from_bridge_mint(BridgeMintRequest {

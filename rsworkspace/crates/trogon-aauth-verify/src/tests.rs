@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 
 #[test]
@@ -31,7 +33,6 @@ fn system_time_source_returns_a_recent_unix_timestamp() {
 
 #[test]
 fn arc_wrapped_time_source_delegates() {
-    use std::sync::Arc;
     let inner = Arc::new(SystemTimeSource);
     // Force the Arc<T> blanket impl path.
     let ts: Arc<dyn TimeSource> = inner;
