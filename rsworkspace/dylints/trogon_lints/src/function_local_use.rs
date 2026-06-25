@@ -1,7 +1,7 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use rustc_hir::{ItemKind, Stmt, StmtKind};
 use rustc_lint::LateContext;
-use rustc_span::Span;
+use rustc_span::{SourceFile, Span};
 use std::collections::HashSet;
 
 use crate::FUNCTION_LOCAL_USE;
@@ -28,6 +28,14 @@ impl FunctionLocalUse {
             return;
         }
 
+        // Generated files (proto codegen, etc.) emit function-local imports whose
+        // placement is dictated by codegen and must not be reshaped. Skip any file
+        // carrying the conventional `@generated` marker near its top.
+        let file = cx.tcx.sess.source_map().lookup_char_pos(stmt.span.lo()).file;
+        if is_generated(&file) {
+            return;
+        }
+
         // `use a::{b, c};` lowers to several HIR items (a list stem plus one per
         // leaf), each surfacing as its own statement that shares this span.
         // Report the statement once.
@@ -45,4 +53,11 @@ impl FunctionLocalUse {
             },
         );
     }
+}
+
+fn is_generated(file: &SourceFile) -> bool {
+    let Some(src) = &file.src else {
+        return false;
+    };
+    src.lines().take(5).any(|line| line.contains("@generated"))
 }

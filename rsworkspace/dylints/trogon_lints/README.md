@@ -18,8 +18,8 @@ lint crate rather than in per-invocation flags.
   rather than inside a function body or block. A function-local import is never
   required (every name is reachable by full path or a module-level `use`, with
   `as` for collisions) and it hides a module's dependency surface inside its
-  functions. Macro-generated imports come from expansion and are exempt;
-  suppress a justified exception with
+  functions. Macro-generated imports (from expansion) and `@generated` files
+  (proto codegen, etc.) are exempt; suppress a justified exception with
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(function_local_use))]` at the
   site.
 - `manual_error_impl` (`deny`): requires deriving `std::error::Error` with

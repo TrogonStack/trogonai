@@ -56,4 +56,9 @@ macro_rules! make_use {
 
 make_use!();
 
+// Generated files (carrying an `@generated` marker near the top) are exempt: the
+// function-local `use` inside this file-backed generated module must NOT fire.
+#[path = "auxiliary/generated_use.rs"]
+mod generated_file;
+
 fn main() {}
