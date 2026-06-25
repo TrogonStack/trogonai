@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use agent_client_protocol::{PromptResponse, SessionId};
@@ -90,7 +92,6 @@ impl<I: Copy> PendingSessionPromptResponseWaiters<I> {
         ),
         (),
     > {
-        use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT_TOKEN: AtomicU64 = AtomicU64::new(0);
 
         let (tx, rx) = oneshot::channel();

@@ -1,3 +1,7 @@
+use async_nats::jetstream::stream::RetentionPolicy;
+
+use crate::jetstream::stream_options::{EventsStreamMaxAge, PushDlqDuplicateWindow, StreamProvisionOptions};
+
 use super::*;
 use trogon_nats::jetstream::MockJetStreamContext;
 
@@ -43,10 +47,6 @@ async fn provision_returns_error_on_failure() {
 
 #[tokio::test]
 async fn provision_with_events_max_age_override() {
-    use async_nats::jetstream::stream::RetentionPolicy;
-
-    use crate::jetstream::stream_options::{EventsStreamMaxAge, PushDlqDuplicateWindow, StreamProvisionOptions};
-
     let ctx = MockJetStreamContext::new();
     let options = StreamProvisionOptions {
         events_max_age: EventsStreamMaxAge::from_secs(3600),

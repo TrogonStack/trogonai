@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use super::*;
+use tracing_subscriber::util::SubscriberInitExt;
 
 fn default_nats() -> NatsConfig {
     NatsConfig {
@@ -61,7 +62,6 @@ fn config_with_prefix_accepts_validated_prefix() {
 }
 
 fn with_subscriber<F: FnOnce()>(f: F) {
-    use tracing_subscriber::util::SubscriberInitExt;
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
     f();
 }

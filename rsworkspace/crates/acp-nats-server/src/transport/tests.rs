@@ -4,6 +4,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::Request as HttpRequest;
 use axum::http::header::{HOST, ORIGIN};
 use serde_json::{Value, json};
+use std::error::Error as _;
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::{mpsc, oneshot, watch};
 use trogon_nats::AdvancedMockNatsClient;
@@ -131,8 +132,6 @@ fn http_transport_error_into_response_maps_status_codes() {
 
 #[test]
 fn http_transport_error_display_and_source_chain_return_expected_values() {
-    use std::error::Error as _;
-
     assert_eq!(HttpTransportError::bad_request("bad").to_string(), "bad");
     assert!(HttpTransportError::bad_request("bad").source().is_none());
     assert!(HttpTransportError::not_found("missing").source().is_none());

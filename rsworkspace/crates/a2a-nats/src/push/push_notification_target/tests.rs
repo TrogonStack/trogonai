@@ -1,4 +1,5 @@
 use super::*;
+use std::error::Error as _;
 
 #[test]
 fn parses_https_webhook() {
@@ -89,7 +90,6 @@ fn display_roundtrips_http_target() {
 
 #[test]
 fn error_display_covers_every_variant() {
-    use std::error::Error as _;
     let empty = PushNotificationTargetError::Empty;
     assert_eq!(empty.to_string(), "push notification URL must not be empty");
     assert!(empty.source().is_none());

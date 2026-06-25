@@ -1,7 +1,8 @@
 use super::*;
 use agent_client_protocol::{
-    RequestId, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-    TerminalOutputResponse,
+    ContentBlock, ContentChunk, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, SessionUpdate, TerminalOutputResponse, ToolCallUpdate,
+    ToolCallUpdateFields,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -223,8 +224,6 @@ async fn serialization_failure_sends_fallback_error() {
 
 #[tokio::test]
 async fn mock_client_trait_methods_exercise_coverage() {
-    use agent_client_protocol::{ContentBlock, ContentChunk, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields};
-
     let client = MockClient::success();
     let notification = SessionNotification::new(
         "sess-1",

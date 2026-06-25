@@ -1,3 +1,8 @@
+#[cfg(feature = "test-support")]
+use std::sync::{Arc, Mutex};
+
+use opentelemetry::propagation::Injector;
+
 use super::*;
 
 #[cfg(feature = "test-support")]
@@ -119,7 +124,6 @@ fn test_inject_trace_context_does_not_panic() {
 
 #[test]
 fn header_map_carrier_set_inserts_value() {
-    use opentelemetry::propagation::Injector;
     let mut headers = async_nats::HeaderMap::new();
     let mut carrier = HeaderMapCarrier(&mut headers);
     carrier.set("x-test-key", "test-value".to_string());
@@ -396,8 +400,6 @@ fn nats_error_source() {
 #[tokio::test]
 #[cfg(feature = "test-support")]
 async fn test_retry_policy_execute_success_first_attempt() {
-    use std::sync::{Arc, Mutex};
-
     let policy = RetryPolicy::standard();
     let call_count = Arc::new(Mutex::new(0));
 
@@ -425,8 +427,6 @@ async fn test_retry_policy_execute_success_first_attempt() {
 #[tokio::test]
 #[cfg(feature = "test-support")]
 async fn test_retry_policy_execute_success_after_retries() {
-    use std::sync::{Arc, Mutex};
-
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let policy = RetryPolicy::standard();
     let call_count = Arc::new(Mutex::new(0));
@@ -460,8 +460,6 @@ async fn test_retry_policy_execute_success_after_retries() {
 #[tokio::test]
 #[cfg(feature = "test-support")]
 async fn test_retry_policy_execute_exhausted() {
-    use std::sync::{Arc, Mutex};
-
     let _ = tracing_subscriber::fmt().with_test_writer().try_init();
     let policy = RetryPolicy::standard();
     let call_count = Arc::new(Mutex::new(0));
@@ -529,8 +527,6 @@ async fn test_request_returns_error_on_mock_failure() {
 #[tokio::test]
 #[cfg(feature = "test-support")]
 async fn test_retry_policy_no_retries_fails_immediately() {
-    use std::sync::{Arc, Mutex};
-
     let policy = RetryPolicy::no_retries();
     let call_count = Arc::new(Mutex::new(0));
 

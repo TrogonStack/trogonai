@@ -2,6 +2,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
+use tokio::sync::Notify;
+use tokio::sync::oneshot;
+
 use super::*;
 use crate::jwks::StaticJwks;
 
@@ -130,8 +133,6 @@ async fn invalidate_mid_fetch_triggers_refetch_and_drops_stale_result() {
     // between snapshot and write, the cache must DROP the in-flight
     // outcome and re-fetch — otherwise a pre-rotation resolve started
     // before invalidate() can still hand stale keys back to the verifier.
-    use tokio::sync::Notify;
-
     struct GenBumper {
         calls: AtomicUsize,
         bump_until: usize,
@@ -187,7 +188,6 @@ async fn slow_path_returns_peer_cache_entry_when_one_appears_mid_flight() {
     // loser used to return its OWN outcome (which could be a transient
     // error) rather than honor the cached Hit. Verify the slow path now
     // returns the peer's cached entry instead.
-    use tokio::sync::oneshot;
 
     struct GatedInner {
         gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,
@@ -270,7 +270,6 @@ async fn entry_expiry_anchors_to_clock_after_inner_resolve_not_before() {
     // entry's expires_at = old_now + ttl outlived the configured TTL by
     // the duration of the fetch. Verify expires_at uses the post-await
     // clock value.
-    use tokio::sync::oneshot;
 
     struct GatedOk {
         gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,

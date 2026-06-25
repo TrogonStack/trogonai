@@ -1,6 +1,9 @@
 use bytes::Bytes;
+use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
 
 use super::*;
+use crate::server::handler::A2aError;
 use crate::server::test_support::stub;
 
 fn prefix() -> A2aPrefix {
@@ -25,10 +28,6 @@ fn msg(subject: &str, reply: Option<&str>, payload: &[u8]) -> async_nats::Messag
 
 #[tokio::test]
 async fn dispatch_routes_agent_card_to_handler() {
-    use crate::server::handler::A2aError;
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());
@@ -69,9 +68,6 @@ fn rpc_payload_for(method: &str) -> Vec<u8> {
 }
 
 async fn route_to_unsupported_handler(method_subject: &str, method: &str) -> serde_json::Value {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());
@@ -144,9 +140,6 @@ async fn dispatch_routes_push_delete_to_handler() {
 
 #[tokio::test]
 async fn dispatch_routes_message_stream_to_handler() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());
@@ -177,9 +170,6 @@ async fn dispatch_routes_message_stream_to_handler() {
 
 #[tokio::test]
 async fn run_with_agent_id_returns_on_shutdown() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let _msg_tx = nats.inject_messages(); // pre-queue a subscription stream
     let js = MockJetStreamPublisher::new();
@@ -194,9 +184,6 @@ async fn run_with_agent_id_returns_on_shutdown() {
 
 #[tokio::test]
 async fn run_with_agent_id_returns_subscribe_error_when_no_subscription_queued() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = stub();
@@ -209,9 +196,6 @@ async fn run_with_agent_id_returns_subscribe_error_when_no_subscription_queued()
 
 #[tokio::test]
 async fn run_with_agent_id_returns_when_subscription_closes() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let tx = nats.inject_messages();
     drop(tx); // close the subscription stream before run starts
@@ -226,9 +210,6 @@ async fn run_with_agent_id_returns_when_subscription_closes() {
 
 #[tokio::test]
 async fn run_with_agent_id_dispatches_injected_message_then_exits_on_shutdown() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let tx = nats.inject_messages();
     let js = MockJetStreamPublisher::new();
@@ -256,9 +237,6 @@ async fn run_with_agent_id_dispatches_injected_message_then_exits_on_shutdown() 
 
 #[tokio::test]
 async fn dispatch_drops_unknown_subject_suffix() {
-    use trogon_nats::AdvancedMockNatsClient;
-    use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
-
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());

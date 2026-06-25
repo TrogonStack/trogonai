@@ -6,10 +6,11 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod error_string_comparison;
+mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
 
-use rustc_hir::{Expr, Item, LetStmt};
+use rustc_hir::{Expr, Item, LetStmt, Stmt};
 use rustc_lint::{LateContext, LateLintPass, LintStore};
 
 dylint_linting::dylint_library!();
@@ -17,7 +18,12 @@ dylint_linting::dylint_library!();
 #[unsafe(no_mangle)]
 pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore) {
     dylint_linting::init_config(sess);
-    lint_store.register_lints(&[ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
+    lint_store.register_lints(&[
+        ERROR_STRING_COMPARISON,
+        FUNCTION_LOCAL_USE,
+        INLINE_MODULE_BLOCK,
+        MANUAL_ERROR_IMPL,
+    ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
 }
 
@@ -134,9 +140,53 @@ rustc_session::declare_lint! {
     "implement `std::error::Error` with the thiserror derive, not by hand",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects `use` declarations placed inside a function body (or any block)
+    /// instead of at module level.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// `use` is pure name resolution: a function-local import is never required,
+    /// since every name it brings in is equally reachable by its full path or by
+    /// a module-level `use` (with `as` for collisions). Hiding imports inside
+    /// function bodies scatters a module's dependency surface across its
+    /// functions, so what a file depends on can no longer be read from the top
+    /// of the file. Keep imports at module level where they are discoverable.
+    /// Macro-generated imports come from expansion and are exempt.
+    ///
+    /// ### Example
+    ///
+    /// ```rust
+    /// fn render(value: u8) -> String {
+    ///     use std::fmt::Write;
+    ///     let mut out = String::new();
+    ///     write!(out, "{value}").unwrap();
+    ///     out
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust
+    /// use std::fmt::Write;
+    ///
+    /// fn render(value: u8) -> String {
+    ///     let mut out = String::new();
+    ///     write!(out, "{value}").unwrap();
+    ///     out
+    /// }
+    /// ```
+    pub FUNCTION_LOCAL_USE,
+    Deny,
+    "declare `use` imports at module level, not inside a function body",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
+    function_local_use: function_local_use::FunctionLocalUse,
 }
 
 impl<'tcx> LateLintPass<'tcx> for TrogonLints {
@@ -148,13 +198,22 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         self.error_string_comparison.check_expr(cx, expr);
     }
 
+    fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
+        self.function_local_use.check_stmt(cx, stmt);
+    }
+
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
     }
 }
 
-rustc_session::impl_lint_pass!(TrogonLints => [ERROR_STRING_COMPARISON, INLINE_MODULE_BLOCK, MANUAL_ERROR_IMPL]);
+rustc_session::impl_lint_pass!(TrogonLints => [
+    ERROR_STRING_COMPARISON,
+    FUNCTION_LOCAL_USE,
+    INLINE_MODULE_BLOCK,
+    MANUAL_ERROR_IMPL,
+]);
 
 #[test]
 fn ui() {

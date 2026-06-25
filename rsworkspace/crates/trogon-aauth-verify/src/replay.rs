@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 
@@ -48,7 +49,6 @@ impl InMemoryReplayStore {
         Self {
             inner: Mutex::new(HashMap::new()),
             clock: Box::new(|| {
-                use std::time::{SystemTime, UNIX_EPOCH};
                 let secs = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_secs())

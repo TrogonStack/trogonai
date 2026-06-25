@@ -1,12 +1,16 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::AssertUnwindSafe;
 use std::sync::Mutex;
 
 use buffa::MessageField;
+use trogon_decider_runtime::{StreamEvent, StreamPosition};
 use trogonai_proto::scheduler::schedules::v1;
 
 use super::super::testkit::{
     InMemoryExecution, InMemoryKv, MemoryEventStore, malformed_stream_event, recorded_at, stream_event,
 };
 use super::*;
+use super::{ReadyOutcome, resolve_ready_key};
 use crate::commands::domain::MessageContent;
 use crate::commands::domain::{
     Delivery, MessageEnvelope, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
@@ -14,7 +18,7 @@ use crate::commands::domain::{
 };
 use crate::processor::execution::checkpoints::ScheduleCheckpointStore;
 use crate::processor::execution::execution_schedules::ExecutionScheduleWriter;
-use crate::processor::execution::reconciliation::ScheduleSubject;
+use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleSubject};
 use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
 use crate::processor::execution::worker::ProcessorMetrics;
 
@@ -707,8 +711,6 @@ async fn finalize_report_merges_process_and_settlement_errors() {
 
 #[tokio::test]
 async fn panicking_message_term_and_retry_also_panic() {
-    use std::panic::AssertUnwindSafe;
-
     let message = PanickingMessage;
     assert!(AssertUnwindSafe(message.term()).catch_unwind().await.is_err());
     assert!(AssertUnwindSafe(message.retry()).catch_unwind().await.is_err());
@@ -962,8 +964,6 @@ async fn dropped_report_receiver_stops_drain_early() {
 /// closed channel, confirming the queue is cleared and the function returns.
 #[test]
 fn flush_pending_reports_clears_queue_when_channel_is_closed() {
-    use trogon_decider_runtime::StreamPosition;
-
     let (tx, rx) = mpsc::channel::<DispatchReport>(4);
     drop(rx);
 
@@ -988,8 +988,6 @@ fn flush_pending_reports_clears_queue_when_channel_is_closed() {
 /// the channel and leaves the queue empty.
 #[test]
 fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
-    use trogon_decider_runtime::StreamPosition;
-
     let (tx, mut rx) = mpsc::channel::<DispatchReport>(8);
     let lane = key_for_stream("flush-ok");
     let mut pending_reports = std::collections::VecDeque::new();
@@ -1014,8 +1012,6 @@ fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
 /// `drain_one_reserved_report`: success arm pops one report and sends it.
 #[tokio::test]
 async fn drain_one_reserved_report_sends_front_report_through_permit() {
-    use trogon_decider_runtime::StreamPosition;
-
     let (tx, mut rx) = mpsc::channel::<DispatchReport>(4);
     let permit = tx.reserve().await.expect("permit must reserve");
 
@@ -1037,8 +1033,6 @@ async fn drain_one_reserved_report_sends_front_report_through_permit() {
 /// loop doesn't keep replaying reports against a receiver that's gone.
 #[test]
 fn drain_one_reserved_report_clears_queue_when_channel_closed() {
-    use trogon_decider_runtime::StreamPosition;
-
     let lane = key_for_stream("drain-closed");
     let mut pending_reports = std::collections::VecDeque::new();
     pending_reports.push_back(DispatchReport {
@@ -1056,8 +1050,6 @@ fn drain_one_reserved_report_clears_queue_when_channel_closed() {
 /// queued for the next select tick instead of dropping or clearing it.
 #[test]
 fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
-    use trogon_decider_runtime::StreamPosition;
-
     let (tx, _rx) = mpsc::channel::<DispatchReport>(1);
     let lane = key_for_stream("flush-full");
     let blocker = DispatchReport {
@@ -1093,12 +1085,6 @@ fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
 /// duplicates.
 #[test]
 fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
-    use std::collections::{HashMap, HashSet, VecDeque};
-    use trogon_decider_runtime::StreamEvent;
-
-    use super::{ReadyOutcome, resolve_ready_key};
-    use crate::processor::execution::reconciliation::DecodedScheduleEvent;
-
     let key = key_for_stream("in-flight-key");
 
     let mut in_flight = HashSet::new();
@@ -1131,12 +1117,6 @@ fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
 /// guard against internal state corruption.
 #[test]
 fn resolve_ready_key_returns_empty_queue_when_pending_entry_is_absent() {
-    use std::collections::{HashMap, HashSet, VecDeque};
-    use trogon_decider_runtime::StreamEvent;
-
-    use super::{ReadyOutcome, resolve_ready_key};
-    use crate::processor::execution::reconciliation::DecodedScheduleEvent;
-
     let key = key_for_stream("no-pending-key");
 
     let in_flight: HashSet<ScheduleKey> = HashSet::new();

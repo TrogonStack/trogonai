@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 use chrono::Utc;
 use trogon_decider_runtime::StreamPosition;
 use trogon_nats::jetstream::MockJetStreamKvStore;
@@ -277,8 +278,6 @@ async fn invalid_key_backend_errors_are_permanent() {
 
 #[test]
 fn permanent_publish_errors_in_the_source_chain_are_not_transient() {
-    use async_nats::jetstream::context::{PublishError, PublishErrorKind};
-
     for kind in [PublishErrorKind::StreamNotFound, PublishErrorKind::MaxPayloadExceeded] {
         let update = kv::UpdateError::with_source(kv::UpdateErrorKind::Other, PublishError::new(kind));
         let error = CheckpointStoreError::backend(update);

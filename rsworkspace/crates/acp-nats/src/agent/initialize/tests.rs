@@ -1,5 +1,7 @@
 use super::Bridge;
-use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
+use crate::agent::test_support::{
+    MockJs, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
+};
 use crate::config::Config;
 use crate::error::AGENT_UNAVAILABLE;
 use agent_client_protocol::{Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion};
@@ -93,7 +95,6 @@ async fn initialize_records_metrics_on_failure() {
 
 #[tokio::test]
 async fn handlers_use_custom_prefix() {
-    use crate::agent::test_support::MockJs;
     let mock = AdvancedMockNatsClient::new();
     let bridge = Bridge::new(
         mock.clone(),

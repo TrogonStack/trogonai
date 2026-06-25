@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use sha2::{Digest, Sha256};
 
 use crate::agent_id::A2aAgentId;
@@ -126,7 +128,6 @@ impl AuditEnvelope {
         let params_fingerprint = raw_params.filter(|b| !b.is_empty()).map(|b| {
             let hash = Sha256::digest(b);
             hash.iter().fold(String::with_capacity(64), |mut acc, byte| {
-                use std::fmt::Write as _;
                 let _ = write!(acc, "{byte:02x}");
                 acc
             })
