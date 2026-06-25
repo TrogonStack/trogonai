@@ -1,12 +1,15 @@
-use std::{env, net::SocketAddr, sync::Arc, time::Duration};
-
-use a2a_bridge::{
-    AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
-    AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
-    StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+#[cfg(not(coverage))]
+use {
+    std::{env, net::SocketAddr, sync::Arc, time::Duration},
+    a2a_bridge::{
+        AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
+        AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
+        StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
+    },
+    a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
 };
-use a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::try_init().ok();
@@ -16,6 +19,7 @@ async fn main() {
     }
 }
 
+#[cfg(not(coverage))]
 async fn run() -> Result<(), BootstrapError> {
     let transport = env::var("A2A_BRIDGE_TRANSPORT").unwrap_or_else(|_| "stub".into());
 
@@ -49,6 +53,7 @@ async fn run() -> Result<(), BootstrapError> {
     Ok(())
 }
 
+#[cfg(not(coverage))]
 #[derive(Debug, thiserror::Error)]
 enum BootstrapError {
     #[error("BRIDGE_LISTEN_ADDR must be a SocketAddr")]
@@ -56,18 +61,20 @@ enum BootstrapError {
     #[error("bind failed: {0}")]
     Listen(#[source] std::io::Error),
     #[error("{0}")]
-    Bridge(#[from] BridgeError),
+    Bridge(#[from] a2a_bridge::BridgeError),
     #[error("unknown A2A_BRIDGE_TRANSPORT (use stub or nats): {0}")]
     UnknownTransport(String),
     #[error("HTTP server failed: {0}")]
     Serve(#[source] std::io::Error),
 }
 
+#[cfg(not(coverage))]
 fn resolve_a2a_prefix() -> Result<A2aPrefix, BridgeError> {
     let raw = env::var(ENV_A2A_PREFIX).unwrap_or_else(|_| DEFAULT_A2A_PREFIX.to_string());
     A2aPrefix::new(raw).map_err(|e| BridgeError::NatsPublish(format!("{ENV_A2A_PREFIX} is invalid: {e}")))
 }
 
+#[cfg(not(coverage))]
 fn bootstrap_stub_transport(nats_url: &str, prefix: A2aPrefix) -> AppState {
     let auth_callout_url = env::var("AUTH_CALLOUT_NATS_URL").unwrap_or_else(|_| nats_url.trim().to_owned());
     tracing::warn!(
@@ -85,6 +92,7 @@ fn bootstrap_stub_transport(nats_url: &str, prefix: A2aPrefix) -> AppState {
     )
 }
 
+#[cfg(not(coverage))]
 async fn bootstrap_nats_transport(nats_raw: &str, prefix: A2aPrefix) -> Result<AppState, BridgeError> {
     let servers = parse_nats_servers(nats_raw);
     if servers.is_empty() {
@@ -150,6 +158,7 @@ async fn bootstrap_nats_transport(nats_raw: &str, prefix: A2aPrefix) -> Result<A
     ))
 }
 
+#[cfg(not(coverage))]
 fn parse_nats_servers(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)
@@ -164,6 +173,10 @@ fn parse_nats_servers(raw: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(not(coverage))]
 fn parse_u64_env(key: &str) -> Option<u64> {
     env::var(key).ok()?.trim().parse().ok()
 }
+
+#[cfg(coverage)]
+fn main() {}

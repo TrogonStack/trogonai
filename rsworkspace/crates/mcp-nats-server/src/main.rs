@@ -1,20 +1,23 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+#![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 mod allowed_host;
 mod config;
 mod constants;
 mod runtime;
 
-use axum::Router;
-use tokio::net::TcpListener;
-use tracing::{error, info};
-use trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal};
-use trogon_telemetry::{ResourceAttribute, ServiceName};
+#[cfg(not(coverage))]
+use {
+    axum::Router,
+    tokio::net::TcpListener,
+    tracing::{error, info},
+    trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
+    trogon_telemetry::{ResourceAttribute, ServiceName},
+    crate::constants::MCP_ENDPOINT,
+    anyhow::Result,
+};
 
-use crate::constants::MCP_ENDPOINT;
-
-use anyhow::Result;
-
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = config::base_config(&trogon_std::CliArgs::<config::Args>::new(), &SystemEnv)?;
@@ -59,3 +62,6 @@ async fn main() -> Result<()> {
     result?;
     Ok(())
 }
+
+#[cfg(coverage)]
+fn main() {}

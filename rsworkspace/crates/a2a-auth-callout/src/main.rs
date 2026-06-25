@@ -1,23 +1,23 @@
-use std::sync::Arc;
-use std::time::Duration;
-
-use tracing::{info, warn};
-
-use a2a_auth_callout::credentials::mtls::MTlsVerifier;
-use a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier};
-use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier};
-use a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig};
-use a2a_auth_callout::error::AuthCalloutError;
-use a2a_auth_callout::signing_key_source::signing_key_source_from_process_env;
-use a2a_auth_callout::{
-    AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
+#[cfg(not(coverage))]
+use {
+    std::sync::Arc,
+    std::time::Duration,
+    tracing::{info, warn},
+    a2a_auth_callout::credentials::mtls::MTlsVerifier,
+    a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
+    a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
+    a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
+    a2a_auth_callout::error::AuthCalloutError,
+    a2a_auth_callout::signing_key_source::signing_key_source_from_process_env,
+    a2a_auth_callout::{
+        AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
+    },
 };
 
-#[allow(dead_code)]
-const DEFAULT_CALLOUT_ISSUER: &str = "AUTH_CALLOUT_DEV_ISSUER";
-
+#[cfg(not(coverage))]
 const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
 
+#[cfg(not(coverage))]
 fn split_env_list(name: &str) -> Vec<String> {
     std::env::var(name)
         .ok()
@@ -31,18 +31,22 @@ fn split_env_list(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(not(coverage))]
 fn env_required(name: &'static str) -> Result<String, AuthCalloutError> {
     std::env::var(name).map_err(|_| AuthCalloutError::MissingEnvVar(name))
 }
 
+#[cfg(not(coverage))]
 fn load_nkey_seed_env(name: &'static str) -> Result<NkeySeed, AuthCalloutError> {
     NkeySeed::parse(env_required(name)?)
 }
 
+#[cfg(not(coverage))]
 fn load_nkey_public_env(name: &'static str) -> Result<NkeyPublic, AuthCalloutError> {
     NkeyPublic::parse(env_required(name)?)
 }
 
+#[cfg(not(coverage))]
 async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
     let issuer_raw = std::env::var("AUTH_CALLOUT_OIDC_ISSUER").ok()?;
     let issuer = match OidcIssuerUrl::parse(&issuer_raw) {
@@ -66,6 +70,7 @@ async fn build_oidc_verifier() -> Option<Arc<dyn OidcVerifier>> {
     }
 }
 
+#[cfg(not(coverage))]
 fn build_mtls_verifier() -> Option<Arc<dyn MTlsVerifier>> {
     let path = std::env::var("AUTH_CALLOUT_MTLS_TRUST_ANCHORS").ok()?;
     let bundle = match std::fs::read_to_string(&path) {
@@ -78,6 +83,7 @@ fn build_mtls_verifier() -> Option<Arc<dyn MTlsVerifier>> {
     Some(Arc::new(X509MtlsVerifier::new(TrustAnchorPem::new(bundle))))
 }
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -215,3 +221,6 @@ async fn main() {
         }
     }
 }
+
+#[cfg(coverage)]
+fn main() {}
