@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{CloseSessionRequest, CloseSessionResponse, Error, ErrorCode, Result};
@@ -34,7 +35,12 @@ where
     let subject = commands::CloseSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<CloseSessionRequest, CloseSessionResponse>(&subject, &args, &session_id)
+        .session_request::<CloseSessionRequest, CloseSessionResponse>(
+            &subject,
+            SessionAgentMethod::Close.wire_method(),
+            &args,
+            &session_id,
+        )
         .await;
 
     bridge.metrics.record_request(

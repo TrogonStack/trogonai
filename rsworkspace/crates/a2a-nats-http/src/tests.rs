@@ -7,6 +7,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Request, StatusCode};
 use base64::Engine;
+use bytes::Bytes;
+use jsonrpc_nats::{Message, ResponseId, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use trogon_nats::AdvancedMockNatsClient;
@@ -61,32 +63,43 @@ async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-fn task_response_bytes(task_id: &str) -> bytes::Bytes {
+fn task_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_COMPLETED" } });
-    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": task });
-    serde_json::to_vec(&envelope).unwrap().into()
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("any".into()),
+        result: task,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
-fn send_message_response_bytes(task_id: &str) -> bytes::Bytes {
+fn send_message_response_bytes(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = json!({ "id": task_id, "contextId": "", "status": { "state": "TASK_STATE_SUBMITTED" } });
     let resp = json!({ "task": task });
-    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": resp });
-    serde_json::to_vec(&envelope).unwrap().into()
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("any".into()),
+        result: resp,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
-fn error_response_bytes(code: i32, msg: &str) -> bytes::Bytes {
-    let envelope = json!({
-        "jsonrpc": "2.0",
-        "id": "ignored",
-        "error": { "code": code, "message": msg }
-    });
-    serde_json::to_vec(&envelope).unwrap().into()
+fn error_response_bytes(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&Message::Error {
+        id: ResponseId::String("any".into()),
+        code,
+        message: msg.to_string(),
+        data: None,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
 }
 
 #[tokio::test]
 async fn message_send_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.message.send", send_message_response_bytes("t1"));
+    let (headers, body) = send_message_response_bytes("t1");
+    nats.set_response_wire("a2a.agents.test-agent.message.send", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -106,7 +119,8 @@ async fn message_send_returns_jsonrpc_result() {
 #[tokio::test]
 async fn tasks_get_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.tasks.get", task_response_bytes("task-1"));
+    let (headers, body) = task_response_bytes("task-1");
+    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -125,10 +139,8 @@ async fn tasks_get_returns_jsonrpc_result() {
 #[tokio::test]
 async fn tasks_get_not_found_returns_jsonrpc_error() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.test-agent.tasks.get",
-        error_response_bytes(-32001, "not found"),
-    );
+    let (headers, body) = error_response_bytes(-32001, "not found");
+    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -147,7 +159,8 @@ async fn tasks_get_not_found_returns_jsonrpc_error() {
 #[tokio::test]
 async fn tasks_cancel_returns_jsonrpc_result() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.tasks.cancel", task_response_bytes("task-c"));
+    let (headers, body) = task_response_bytes("task-c");
+    nats.set_response_wire("a2a.agents.test-agent.tasks.cancel", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -207,11 +220,12 @@ async fn tasks_list_returns_jsonrpc_result() {
         "pageSize": 0,
         "totalSize": 0
     });
-    let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
-    nats.set_response(
-        "a2a.agents.test-agent.tasks.list",
-        serde_json::to_vec(&envelope).unwrap().into(),
-    );
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("any".into()),
+        result: list_resp,
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.test-agent.tasks.list", encoded.headers, encoded.body);
 
     let app = build_app(nats);
     let response = app
@@ -247,11 +261,12 @@ async fn agent_card_endpoint_returns_json() {
         security_requirements: None,
         signatures: None,
     };
-    let envelope = serde_json::json!({ "jsonrpc": "2.0", "id": "ignored", "result": card });
-    nats.set_response(
-        "a2a.agents.test-agent.card",
-        serde_json::to_vec(&envelope).unwrap().into(),
-    );
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("any".into()),
+        result: serde_json::json!(card),
+    })
+    .unwrap();
+    nats.set_response_wire("a2a.agents.test-agent.card", encoded.headers, encoded.body);
 
     let js = MockJetStreamConsumerFactory::new();
     let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
@@ -276,10 +291,8 @@ async fn agent_card_endpoint_returns_json() {
 #[tokio::test]
 async fn message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.test-agent.message.stream",
-        send_message_response_bytes("ts1"),
-    );
+    let (headers, body) = send_message_response_bytes("ts1");
+    nats.set_response_wire("a2a.agents.test-agent.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = trogon_nats::jetstream::mocks::MockJetStreamConsumer::new();
@@ -303,15 +316,8 @@ async fn message_stream_returns_sse_content_type() {
 #[tokio::test]
 async fn agent_card_unavailable_returns_503() {
     let nats = AdvancedMockNatsClient::new();
-    let envelope = json!({
-        "jsonrpc": "2.0",
-        "id": "ignored",
-        "error": { "code": -32050, "message": "unavailable" }
-    });
-    nats.set_response(
-        "a2a.agents.test-agent.card",
-        serde_json::to_vec(&envelope).unwrap().into(),
-    );
+    let (headers, body) = error_response_bytes(-32050, "unavailable");
+    nats.set_response_wire("a2a.agents.test-agent.card", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let client = A2aClient::new(test_config(), test_agent_id(), nats, js);
@@ -334,7 +340,8 @@ async fn agent_card_unavailable_returns_503() {
 #[tokio::test]
 async fn jsonrpc_string_id_is_forwarded() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.tasks.get", task_response_bytes("t99"));
+    let (headers, body) = task_response_bytes("t99");
+    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -351,10 +358,8 @@ async fn jsonrpc_string_id_is_forwarded() {
 #[tokio::test]
 async fn push_set_not_supported_maps_to_correct_error_code() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.test-agent.push.set",
-        error_response_bytes(-32003, "not supported"),
-    );
+    let (headers, body) = error_response_bytes(-32003, "not supported");
+    nats.set_response_wire("a2a.agents.test-agent.push.set", headers, body);
 
     let app = build_app(nats);
     let response = app
@@ -380,10 +385,8 @@ fn runtime_error_display_shows_env_var_name() {
 #[tokio::test]
 async fn gateway_routed_message_send_targets_gateway_subject() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.gateway.test-agent.message.send",
-        send_message_response_bytes("t-gw"),
-    );
+    let (headers, body) = send_message_response_bytes("t-gw");
+    nats.set_response_wire("a2a.gateway.test-agent.message.send", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let client =
@@ -405,10 +408,8 @@ async fn gateway_routed_message_send_targets_gateway_subject() {
 #[tokio::test]
 async fn agent_routed_subject_unanswered_when_gateway_routing_enabled() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response(
-        "a2a.agents.test-agent.tasks.get",
-        task_response_bytes("should-not-be-hit"),
-    );
+    let (headers, body) = task_response_bytes("should-not-be-hit");
+    nats.set_response_wire("a2a.agents.test-agent.tasks.get", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let client =

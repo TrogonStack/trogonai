@@ -10,12 +10,12 @@ pub mod error;
 pub mod ext_method_name;
 pub(crate) mod in_flight_slot_guard;
 pub mod jetstream;
-pub(crate) mod jsonrpc;
 pub mod nats;
 pub(crate) mod pending_prompt_waiters;
 pub mod req_id;
 pub mod session_id;
 pub(crate) mod telemetry;
+pub mod wire;
 
 pub use acp_prefix::{AcpPrefix, AcpPrefixError};
 pub use agent::Bridge;

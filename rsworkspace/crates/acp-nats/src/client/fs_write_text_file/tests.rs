@@ -1,13 +1,29 @@
 use super::*;
 use agent_client_protocol::{
-    ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, Request, RequestId,
-    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
+    ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
+use async_nats::header::HeaderMap;
 use async_trait::async_trait;
+use jsonrpc_nats::RequestId;
 use std::error::Error;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
-use trogon_std::{FailNextSerialize, StdJsonSerialize};
 
+fn empty_headers() -> HeaderMap {
+    HeaderMap::new()
+}
+
+fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
+    crate::client::test_support::encode_wire_request("fs/write_text_file", RequestId::Number(1), params)
+}
+
+fn sample_request() -> WriteTextFileRequest {
+    WriteTextFileRequest::new(
+        agent_client_protocol::SessionId::from("sess-1"),
+        "/tmp/foo.txt".to_string(),
+        "data".to_string(),
+    )
+}
 struct MockClient;
 
 #[async_trait(?Send)]
@@ -74,25 +90,17 @@ impl Client for FailingClient {
 #[tokio::test]
 async fn fs_write_text_file_forwards_request_and_returns_response() {
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/foo.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    let result = forward_to_client(&payload, &client, "sess-1").await;
+    let result = forward_to_client(&headers, &payload, &client, "sess-1").await;
     assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn fs_write_text_file_returns_error_when_payload_is_invalid_json() {
     let client = MockClient;
-    let result = forward_to_client(b"not json", &client, "sess-1").await;
+    let result = forward_to_client(&empty_headers(), b"not json", &client, "sess-1").await;
     assert!(result.is_err());
 }
 
@@ -121,67 +129,22 @@ async fn failing_client_session_notification_returns_ok() {
 #[tokio::test]
 async fn fs_write_text_file_returns_client_error_when_client_fails() {
     let client = FailingClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/forbidden.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    let result = forward_to_client(&payload, &client, "sess-1").await;
+    let result = forward_to_client(&headers, &payload, &client, "sess-1").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), FsWriteTextFileError::ClientError(_)));
-}
-
-#[tokio::test]
-async fn handle_success_serialization_fallback_sends_error_reply() {
-    let nats = MockNatsClient::new();
-    let client = MockClient;
-    let serializer = FailNextSerialize::new(1);
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/file.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
-
-    handle(&payload, &client, Some("_INBOX.reply"), &nats, "sess-1", &serializer).await;
-
-    assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
 
 #[tokio::test]
 async fn handle_success_publishes_response_to_reply_subject() {
     let nats = MockNatsClient::new();
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(42),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/file.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-        &StdJsonSerialize,
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -190,18 +153,10 @@ async fn handle_success_publishes_response_to_reply_subject() {
 async fn handle_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/foo.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(&payload, &client, None, &nats, "sess-1", &StdJsonSerialize).await;
+    handle(&headers, &payload, &client, None, &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -210,34 +165,23 @@ async fn handle_no_reply_does_not_publish() {
 async fn handle_client_error_publishes_error_reply_with_matching_id() {
     let nats = MockNatsClient::new();
     let client = FailingClient;
-    let envelope = Request {
-        id: RequestId::Number(99),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/forbidden.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-1",
-        &StdJsonSerialize,
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    assert_eq!(payloads.len(), 1);
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(response["id"], 99, "error response must preserve request id");
-    assert!(response.get("error").is_some(), "error response must have error field");
-    assert_eq!(response["error"]["code"], i32::from(ErrorCode::InvalidParams));
+    let published_headers = nats.published_headers()[0].clone();
+    assert_eq!(
+        published_headers.get(jsonrpc_nats::HEADER_ID).unwrap().as_str(),
+        "1",
+        "error response must preserve request id"
+    );
+    assert_eq!(
+        published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
+        i32::from(ErrorCode::InvalidParams).to_string().as_str(),
+        "error response must have error code"
+    );
 }
 
 #[tokio::test]
@@ -246,41 +190,18 @@ async fn handle_invalid_payload_publishes_error_reply() {
     let client = MockClient;
 
     handle(
+        &empty_headers(),
         b"not json",
         &client,
         Some("_INBOX.err"),
         &nats,
         "sess-1",
-        &StdJsonSerialize,
     )
     .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
-    let payloads = nats.published_payloads();
-    assert_eq!(payloads.len(), 1);
-    let response: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert!(response.get("error").is_some());
-}
-
-#[tokio::test]
-async fn handle_client_error_serialization_last_resort_returns_plain_text() {
-    let nats = MockNatsClient::new();
-    let client = FailingClient;
-    let serializer = FailNextSerialize::new(2);
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/forbidden.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
-
-    handle(&payload, &client, Some("_INBOX.err"), &nats, "sess-1", &serializer).await;
-
-    assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+    let published_headers = nats.published_headers()[0].clone();
+    assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
 }
 
 #[test]
@@ -306,26 +227,10 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_flush();
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/file.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-        &StdJsonSerialize,
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -335,26 +240,10 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/file.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.reply"),
-        &nats,
-        "sess-1",
-        &StdJsonSerialize,
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -364,26 +253,10 @@ async fn handle_client_error_publish_failure_exercises_error_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let client = FailingClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/forbidden.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    handle(
-        &payload,
-        &client,
-        Some("_INBOX.err"),
-        &nats,
-        "sess-1",
-        &StdJsonSerialize,
-    )
-    .await;
+    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -391,14 +264,10 @@ async fn handle_client_error_publish_failure_exercises_error_path() {
 #[tokio::test]
 async fn forward_to_client_params_none_returns_invalid_request() {
     let client = MockClient;
-    let envelope = Request::<WriteTextFileRequest> {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: None,
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let headers = empty_headers();
+    let payload = b"{}";
 
-    let result = forward_to_client(&payload, &client, "sess-1").await;
+    let result = forward_to_client(&headers, payload, &client, "sess-1").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), FsWriteTextFileError::InvalidRequest(_)));
 }
@@ -406,18 +275,10 @@ async fn forward_to_client_params_none_returns_invalid_request() {
 #[tokio::test]
 async fn forward_to_client_session_id_mismatch_returns_invalid_request() {
     let client = MockClient;
-    let envelope = Request {
-        id: RequestId::Number(1),
-        method: std::sync::Arc::from("fs/write_text_file"),
-        params: Some(WriteTextFileRequest::new(
-            agent_client_protocol::SessionId::from("sess-1"),
-            "/tmp/foo.txt".to_string(),
-            "content".to_string(),
-        )),
-    };
-    let payload = serde_json::to_vec(&envelope).unwrap();
+    let request = sample_request();
+    let (headers, payload) = make_wire_request(&request);
 
-    let result = forward_to_client(&payload, &client, "sess-other").await;
+    let result = forward_to_client(&headers, &payload, &client, "sess-other").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), FsWriteTextFileError::InvalidRequest(_)));
 }

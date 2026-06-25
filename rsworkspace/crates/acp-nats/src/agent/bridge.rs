@@ -141,6 +141,7 @@ where
     pub(crate) async fn session_request<Req, Res>(
         &self,
         subject: &impl crate::nats::markers::SessionCommand,
+        method: &str,
         args: &Req,
         session_id: &crate::session_id::AcpSessionId,
     ) -> Result<Res>
@@ -150,11 +151,11 @@ where
     {
         let subject_str = subject.to_string();
         let req_id = crate::req_id::ReqId::new();
-        js_request::js_request::<J, _, Res, _>(
+        js_request::js_request::<J, _, Res>(
             self.js(),
             &subject_str,
+            method,
             args,
-            &trogon_std::StdJsonSerialize,
             self.config.acp_prefix_ref(),
             session_id,
             &req_id,
@@ -198,7 +199,7 @@ where
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        prompt::handle(self, args, &trogon_std::StdJsonSerialize).await
+        prompt::handle(self, args).await
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {

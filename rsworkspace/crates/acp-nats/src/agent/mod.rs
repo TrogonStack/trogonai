@@ -13,6 +13,7 @@ mod logout;
 mod new_session;
 mod prompt;
 mod resume_session;
+pub(crate) mod rpc_call;
 mod set_session_config_option;
 mod set_session_mode;
 mod set_session_model;

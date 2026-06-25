@@ -1,10 +1,11 @@
 use bytes::Bytes;
+use jsonrpc_nats::RequestId;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::MockJetStreamPublisher;
 
 use super::*;
 use crate::server::handler::A2aError;
-use crate::server::test_support::stub;
+use crate::server::test_support::{parse_published_response, rpc_payload, stub, wire_request};
 
 fn prefix() -> A2aPrefix {
     A2aPrefix::new("a2a").unwrap()
@@ -14,12 +15,12 @@ fn agent() -> A2aAgentId {
     A2aAgentId::new("bot").unwrap()
 }
 
-fn msg(subject: &str, reply: Option<&str>, payload: &[u8]) -> async_nats::Message {
+fn msg(subject: &str, reply: Option<&str>, headers: async_nats::HeaderMap, payload: &[u8]) -> async_nats::Message {
     async_nats::Message {
         subject: subject.into(),
         reply: reply.map(|r| r.into()),
         payload: Bytes::copy_from_slice(payload),
-        headers: None,
+        headers: Some(headers),
         status: None,
         description: None,
         length: payload.len(),
@@ -33,38 +34,26 @@ async fn dispatch_routes_agent_card_to_handler() {
     let handler = Arc::new(stub());
     handler.lock().unwrap().agent_card_result = Some(Err(A2aError::unsupported_operation("stub")));
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "agent/getAuthenticatedExtendedCard",
-        "params": {}
-    }))
-    .unwrap();
+    let (headers, payload) = rpc_payload("agent/getAuthenticatedExtendedCard", 1);
     let prefix_len = format!("{}.agents.{}", prefix().as_str(), agent().as_str()).len();
     dispatch_message(
         &prefix(),
         &handler,
         &nats,
         &js,
-        msg("a2a.agents.bot.card", Some("r"), &payload),
+        msg("a2a.agents.bot.card", Some("r"), headers, &payload),
         prefix_len,
     )
     .await;
-    let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
+    let body = parse_published_response(&nats, 0);
     assert_eq!(
         body["error"]["code"].as_i64(),
         Some(i64::from(crate::error::UNSUPPORTED_OPERATION))
     );
 }
 
-fn rpc_payload_for(method: &str) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method,
-        "params": {}
-    }))
-    .unwrap()
+fn rpc_payload_for(method: &str) -> (async_nats::HeaderMap, Vec<u8>) {
+    rpc_payload(method, 1)
 }
 
 async fn route_to_unsupported_handler(method_subject: &str, method: &str) -> serde_json::Value {
@@ -72,16 +61,17 @@ async fn route_to_unsupported_handler(method_subject: &str, method: &str) -> ser
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());
     let prefix_len = format!("{}.agents.{}", prefix().as_str(), agent().as_str()).len();
+    let (headers, payload) = rpc_payload_for(method);
     dispatch_message(
         &prefix(),
         &handler,
         &nats,
         &js,
-        msg(method_subject, Some("r"), &rpc_payload_for(method)),
+        msg(method_subject, Some("r"), headers, &payload),
         prefix_len,
     )
     .await;
-    serde_json::from_slice(&nats.published_payloads()[0]).unwrap()
+    parse_published_response(&nats, 0)
 }
 
 #[tokio::test]
@@ -143,25 +133,22 @@ async fn dispatch_routes_message_stream_to_handler() {
     let nats = AdvancedMockNatsClient::new();
     let js = MockJetStreamPublisher::new();
     let handler = Arc::new(stub());
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "req-1",
-        "method": "message/stream",
-        "params": {"message": {"messageId":"m","role":"ROLE_USER","parts":[]}}
-    }))
-    .unwrap();
+    let (headers, payload) = wire_request(
+        "message/stream",
+        RequestId::String("req-1".into()),
+        serde_json::json!({"message": {"messageId":"m","role":"ROLE_USER","parts":[]}}),
+    );
     let prefix_len = format!("{}.agents.{}", prefix().as_str(), agent().as_str()).len();
     dispatch_message(
         &prefix(),
         &handler,
         &nats,
         &js,
-        msg("a2a.agents.bot.message.stream", Some("r"), &payload),
+        msg("a2a.agents.bot.message.stream", Some("r"), headers, &payload),
         prefix_len,
     )
     .await;
-    let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
-    // Stub handler returns Err(unsupported_operation), so we expect a JSON-RPC error.
+    let body = parse_published_response(&nats, 0);
     assert_eq!(
         body["error"]["code"].as_i64(),
         Some(i64::from(crate::error::UNSUPPORTED_OPERATION))
@@ -171,7 +158,7 @@ async fn dispatch_routes_message_stream_to_handler() {
 #[tokio::test]
 async fn run_with_agent_id_returns_on_shutdown() {
     let nats = AdvancedMockNatsClient::new();
-    let _msg_tx = nats.inject_messages(); // pre-queue a subscription stream
+    let _msg_tx = nats.inject_messages();
     let js = MockJetStreamPublisher::new();
     let handler = stub();
     let config = Config::for_test("a2a");
@@ -198,12 +185,12 @@ async fn run_with_agent_id_returns_subscribe_error_when_no_subscription_queued()
 async fn run_with_agent_id_returns_when_subscription_closes() {
     let nats = AdvancedMockNatsClient::new();
     let tx = nats.inject_messages();
-    drop(tx); // close the subscription stream before run starts
+    drop(tx);
     let js = MockJetStreamPublisher::new();
     let handler = stub();
     let config = Config::for_test("a2a");
     let bridge = Bridge::new(config, handler, nats, js);
-    let shutdown = CancellationToken::new(); // not cancelled — exit must come from stream close
+    let shutdown = CancellationToken::new();
     let result = bridge.run_with_agent_id(&agent(), shutdown).await;
     assert!(result.is_ok());
 }
@@ -221,13 +208,9 @@ async fn run_with_agent_id_dispatches_injected_message_then_exits_on_shutdown() 
     let shutdown_for_test = shutdown.clone();
     let handle = tokio::spawn(async move { bridge.run_with_agent_id(&agent(), shutdown_for_test).await });
 
-    tx.unbounded_send(msg(
-        "a2a.agents.bot.card",
-        Some("r"),
-        &rpc_payload_for("agent/getAuthenticatedExtendedCard"),
-    ))
-    .unwrap();
-    // Yield to let the dispatch loop process the message before we cancel.
+    let (headers, payload) = rpc_payload_for("agent/getAuthenticatedExtendedCard");
+    tx.unbounded_send(msg("a2a.agents.bot.card", Some("r"), headers, &payload))
+        .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     shutdown.cancel();
     let result = handle.await.unwrap();
@@ -246,7 +229,12 @@ async fn dispatch_drops_unknown_subject_suffix() {
         &handler,
         &nats,
         &js,
-        msg("a2a.agents.bot.unknown.method", Some("r"), b"{}"),
+        msg(
+            "a2a.agents.bot.unknown.method",
+            Some("r"),
+            async_nats::HeaderMap::new(),
+            b"{}",
+        ),
         prefix_len,
     )
     .await;

@@ -2,6 +2,7 @@ use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
+use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
 use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
 use agent_client_protocol::{
     Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification, ExtRequest,
@@ -14,6 +15,7 @@ use async_nats::jetstream::AckKind;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::future::LocalBoxFuture;
+use serde::de::Error;
 use std::rc::Rc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -39,6 +41,8 @@ enum DispatchError {
     Reply(#[source] trogon_nats::NatsError),
     #[error("notification handler: {0}")]
     NotificationHandler(#[source] agent_client_protocol::Error),
+    #[error("jsonrpc wire: {0}")]
+    Wire(#[from] acp_nats::wire::WireError),
 }
 
 use crate::constants::{DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL};
@@ -242,21 +246,41 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
 ) -> Result<(), DispatchError> {
     match method {
         GlobalAgentMethod::Initialize => {
-            handle_request(msg, nats, |req: InitializeRequest| agent.initialize(req)).await
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: InitializeRequest| {
+                agent.initialize(req)
+            })
+            .await
         }
         GlobalAgentMethod::Authenticate => {
-            handle_request(msg, nats, |req: AuthenticateRequest| agent.authenticate(req)).await
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: AuthenticateRequest| {
+                agent.authenticate(req)
+            })
+            .await
         }
-        GlobalAgentMethod::Logout => handle_request(msg, nats, |req: LogoutRequest| agent.logout(req)).await,
+        GlobalAgentMethod::Logout => {
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: LogoutRequest| {
+                agent.logout(req)
+            })
+            .await
+        }
         GlobalAgentMethod::SessionNew => {
-            handle_request(msg, nats, |req: NewSessionRequest| agent.new_session(req)).await
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: NewSessionRequest| {
+                agent.new_session(req)
+            })
+            .await
         }
         GlobalAgentMethod::SessionList => {
-            handle_request(msg, nats, |req: ListSessionsRequest| agent.list_sessions(req)).await
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ListSessionsRequest| {
+                agent.list_sessions(req)
+            })
+            .await
         }
         GlobalAgentMethod::Ext(_) => {
             if msg.reply.is_some() {
-                handle_request(msg, nats, |req: ExtRequest| agent.ext_method(req)).await
+                handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ExtRequest| {
+                    agent.ext_method(req)
+                })
+                .await
             } else {
                 handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
             }
@@ -271,50 +295,77 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: Agent>(
     nats: &N,
 ) -> Result<(), DispatchError> {
     match method {
-        SessionAgentMethod::Load => handle_request(msg, nats, |req: LoadSessionRequest| agent.load_session(req)).await,
-        SessionAgentMethod::Prompt => handle_request(msg, nats, |req: PromptRequest| agent.prompt(req)).await,
-        SessionAgentMethod::Cancel => handle_notification(msg, |req: CancelNotification| agent.cancel(req)).await,
+        SessionAgentMethod::Load => {
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: LoadSessionRequest| {
+                agent.load_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Prompt => {
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: PromptRequest| agent.prompt(req)).await
+        }
+        SessionAgentMethod::Cancel => {
+            handle_wire_notification(msg, method.wire_method(), |req: CancelNotification| agent.cancel(req)).await
+        }
         SessionAgentMethod::SetMode => {
-            handle_request(msg, nats, |req: SetSessionModeRequest| agent.set_session_mode(req)).await
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionModeRequest| {
+                agent.set_session_mode(req)
+            })
+            .await
         }
         SessionAgentMethod::SetConfigOption => {
-            handle_request(msg, nats, |req: SetSessionConfigOptionRequest| {
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionConfigOptionRequest| {
                 agent.set_session_config_option(req)
             })
             .await
         }
         SessionAgentMethod::SetModel => {
-            handle_request(msg, nats, |req: SetSessionModelRequest| agent.set_session_model(req)).await
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionModelRequest| {
+                agent.set_session_model(req)
+            })
+            .await
         }
-        SessionAgentMethod::Fork => handle_request(msg, nats, |req: ForkSessionRequest| agent.fork_session(req)).await,
+        SessionAgentMethod::Fork => {
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: ForkSessionRequest| {
+                agent.fork_session(req)
+            })
+            .await
+        }
         SessionAgentMethod::Resume => {
-            handle_request(msg, nats, |req: ResumeSessionRequest| agent.resume_session(req)).await
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: ResumeSessionRequest| {
+                agent.resume_session(req)
+            })
+            .await
         }
         SessionAgentMethod::Close => {
-            handle_request(msg, nats, |req: CloseSessionRequest| agent.close_session(req)).await
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: CloseSessionRequest| {
+                agent.close_session(req)
+            })
+            .await
         }
     }
 }
 
-async fn reply<N: PublishClient + FlushClient, T: serde::Serialize>(
+async fn reply_wire<N: PublishClient + FlushClient>(
     nats: &N,
     reply_to: &str,
-    value: &T,
-) -> Result<(), DispatchError> {
-    trogon_nats::publish(
-        nats,
-        reply_to,
-        value,
-        trogon_nats::PublishOptions::builder()
-            .flush_policy(trogon_nats::FlushPolicy::standard())
-            .build(),
-    )
-    .await
-    .map_err(DispatchError::Reply)
+    encoded: jsonrpc_nats::Encoded,
+) -> Result<(), DispatchError>
+where
+    N::PublishError: std::error::Error + Send + Sync + 'static,
+    N::FlushError: std::error::Error + Send + Sync + 'static,
+{
+    nats.publish_with_headers(reply_to.to_string(), encoded.headers, encoded.body)
+        .await
+        .map_err(|error| DispatchError::Reply(trogon_nats::NatsError::Other(error.to_string())))?;
+    nats.flush()
+        .await
+        .map_err(|error| DispatchError::Reply(trogon_nats::NatsError::Other(error.to_string())))
 }
 
-async fn handle_request<N, Resp, ReqT, F>(
+async fn handle_jsonrpc_request<N, Resp, ReqT, F>(
     msg: &Message,
+    method: &str,
     nats: &N,
     handler: impl FnOnce(ReqT) -> F,
 ) -> Result<(), DispatchError>
@@ -325,23 +376,51 @@ where
     Resp: serde::Serialize,
 {
     let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
+    let headers = msg.headers.clone().unwrap_or_default();
 
-    let request: ReqT = match serde_json::from_slice(&msg.payload) {
+    let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
             let error = agent_client_protocol::Error::new(
                 agent_client_protocol::ErrorCode::InvalidParams.into(),
-                format!("Failed to deserialize request: {}", e),
+                format!("Failed to deserialize request: {e}"),
             );
-            let _ = reply(nats, reply_to, &error).await;
-            return Err(DispatchError::DeserializeRequest(e));
+            let id = response_id_from_request_headers(&headers);
+            let encoded = encode_agent_error(id, &error)?;
+            let _ = reply_wire(nats, reply_to, encoded).await;
+            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
+                "{e}"
+            ))));
         }
     };
 
+    let response_id = response_id_from_request_headers(&headers);
     match handler(request).await {
-        Ok(resp) => reply(nats, reply_to, &resp).await,
-        Err(err) => reply(nats, reply_to, &err).await,
+        Ok(resp) => {
+            let encoded = encode_success(response_id, &resp)?;
+            reply_wire(nats, reply_to, encoded).await
+        }
+        Err(err) => {
+            let encoded = encode_agent_error(response_id, &err)?;
+            reply_wire(nats, reply_to, encoded).await
+        }
     }
+}
+
+async fn handle_wire_notification<ReqT, F>(
+    msg: &Message,
+    method: &str,
+    handler: impl FnOnce(ReqT) -> F,
+) -> Result<(), DispatchError>
+where
+    ReqT: serde::de::DeserializeOwned,
+    F: std::future::Future<Output = agent_client_protocol::Result<()>>,
+{
+    let headers = msg.headers.clone().unwrap_or_default();
+    let request: ReqT = acp_nats::wire::decode_notification_params(method, &headers, &msg.payload)
+        .map_err(|error| DispatchError::DeserializeNotification(serde_json::Error::custom(format!("{error}"))))?;
+
+    handler(request).await.map_err(DispatchError::NotificationHandler)
 }
 
 async fn handle_notification<ReqT, F>(msg: &Message, handler: impl FnOnce(ReqT) -> F) -> Result<(), DispatchError>
@@ -358,8 +437,9 @@ use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JsAckWith, JsDispatchMessage,
 };
 
-async fn handle_request_with_keepalive<N, Resp, ReqT, F, M>(
+async fn handle_jsonrpc_request_with_keepalive<N, Resp, ReqT, F, M>(
     msg: &Message,
+    method: &str,
     nats: &N,
     js_msg: &M,
     handler: impl FnOnce(ReqT) -> F,
@@ -372,19 +452,25 @@ where
     M: JsAckWith,
 {
     let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
+    let headers = msg.headers.clone().unwrap_or_default();
 
-    let request: ReqT = match serde_json::from_slice(&msg.payload) {
+    let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
             let error = agent_client_protocol::Error::new(
                 agent_client_protocol::ErrorCode::InvalidParams.into(),
-                format!("Failed to deserialize request: {}", e),
+                format!("Failed to deserialize request: {e}"),
             );
-            let _ = reply(nats, reply_to, &error).await;
-            return Err(DispatchError::DeserializeRequest(e));
+            let id = response_id_from_request_headers(&headers);
+            let encoded = encode_agent_error(id, &error)?;
+            let _ = reply_wire(nats, reply_to, encoded).await;
+            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
+                "{e}"
+            ))));
         }
     };
 
+    let response_id = response_id_from_request_headers(&headers);
     let handler_fut = handler(request);
     tokio::pin!(handler_fut);
 
@@ -395,8 +481,14 @@ where
         tokio::select! {
             result = &mut handler_fut => {
                 return match result {
-                    Ok(resp) => reply(nats, reply_to, &resp).await,
-                    Err(err) => reply(nats, reply_to, &err).await,
+                    Ok(resp) => {
+                        let encoded = encode_success(response_id, &resp)?;
+                        reply_wire(nats, reply_to, encoded).await
+                    }
+                    Err(err) => {
+                        let encoded = encode_agent_error(response_id, &err)?;
+                        reply_wire(nats, reply_to, encoded).await
+                    }
                 };
             }
             _ = keepalive.tick() => {
@@ -521,29 +613,59 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
     let subject = msg.subject.as_str();
 
     let result = match method {
-        SessionAgentMethod::Load => handle_request(&msg, nats, |req: LoadSessionRequest| agent.load_session(req)).await,
-        SessionAgentMethod::Prompt => {
-            handle_request_with_keepalive(&msg, nats, &js_msg, |req: PromptRequest| agent.prompt(req)).await
-        }
-        SessionAgentMethod::Cancel => handle_notification(&msg, |req: CancelNotification| agent.cancel(req)).await,
-        SessionAgentMethod::SetMode => {
-            handle_request(&msg, nats, |req: SetSessionModeRequest| agent.set_session_mode(req)).await
-        }
-        SessionAgentMethod::SetConfigOption => {
-            handle_request(&msg, nats, |req: SetSessionConfigOptionRequest| {
-                agent.set_session_config_option(req)
+        SessionAgentMethod::Load => {
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: LoadSessionRequest| {
+                agent.load_session(req)
             })
             .await
         }
-        SessionAgentMethod::SetModel => {
-            handle_request(&msg, nats, |req: SetSessionModelRequest| agent.set_session_model(req)).await
+        SessionAgentMethod::Prompt => {
+            handle_jsonrpc_request_with_keepalive(&msg, method.wire_method(), nats, &js_msg, |req: PromptRequest| {
+                agent.prompt(req)
+            })
+            .await
         }
-        SessionAgentMethod::Fork => handle_request(&msg, nats, |req: ForkSessionRequest| agent.fork_session(req)).await,
+        SessionAgentMethod::Cancel => {
+            handle_wire_notification(&msg, method.wire_method(), |req: CancelNotification| agent.cancel(req)).await
+        }
+        SessionAgentMethod::SetMode => {
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: SetSessionModeRequest| {
+                agent.set_session_mode(req)
+            })
+            .await
+        }
+        SessionAgentMethod::SetConfigOption => {
+            handle_jsonrpc_request(
+                &msg,
+                method.wire_method(),
+                nats,
+                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+            )
+            .await
+        }
+        SessionAgentMethod::SetModel => {
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: SetSessionModelRequest| {
+                agent.set_session_model(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Fork => {
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: ForkSessionRequest| {
+                agent.fork_session(req)
+            })
+            .await
+        }
         SessionAgentMethod::Resume => {
-            handle_request(&msg, nats, |req: ResumeSessionRequest| agent.resume_session(req)).await
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: ResumeSessionRequest| {
+                agent.resume_session(req)
+            })
+            .await
         }
         SessionAgentMethod::Close => {
-            handle_request(&msg, nats, |req: CloseSessionRequest| agent.close_session(req)).await
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: CloseSessionRequest| {
+                agent.close_session(req)
+            })
+            .await
         }
     };
 
@@ -563,7 +685,7 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
                 warn!(subject, error = %e, "Failed to term missing reply subject");
             }
         }
-        Err(DispatchError::Reply(_)) => {
+        Err(DispatchError::Reply(_) | DispatchError::Wire(_)) => {
             if let Err(e) = js_msg.ack().await {
                 warn!(subject, error = %e, "Failed to ack after reply failure");
             }

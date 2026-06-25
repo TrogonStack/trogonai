@@ -1,6 +1,7 @@
 # Rust
 debug
 /rsworkspace/target/
+/rsworkspace/crates/*/target/
 **/*.rs.bk
 *.pdb
 *.rlib

@@ -1,4 +1,5 @@
 use super::Bridge;
+use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, Result, SetSessionModelRequest, SetSessionModelResponse};
@@ -34,7 +35,12 @@ where
     let subject = commands::SetModelSubject::new(prefix, &session_id);
 
     let result = bridge
-        .session_request::<SetSessionModelRequest, SetSessionModelResponse>(&subject, &args, &session_id)
+        .session_request::<SetSessionModelRequest, SetSessionModelResponse>(
+            &subject,
+            SessionAgentMethod::SetModel.wire_method(),
+            &args,
+            &session_id,
+        )
         .await;
 
     bridge.metrics.record_request(

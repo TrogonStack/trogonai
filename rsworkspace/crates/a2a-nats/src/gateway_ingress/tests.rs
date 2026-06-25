@@ -1,3 +1,6 @@
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::{Direction, decode, to_json_value};
+
 use super::*;
 use crate::a2a_prefix::A2aPrefix;
 
@@ -118,9 +121,10 @@ fn compose_rejects_blank_method_suffix() {
 
 #[test]
 fn invalid_request_payload_produces_stable_jsonrpc_wrapper() {
+    let headers = HeaderMap::new();
     let hint = br#"{"jsonrpc":"2.0","id":"x","method":"m"}"#;
-    let bytes = ingress_invalid_request_response_bytes(hint, "bad ingress").unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let encoded = ingress_error_response_wire(&headers, hint, -32600, "bad ingress", None).unwrap();
+    let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
     assert_eq!(value["jsonrpc"], "2.0");
     assert_eq!(value["id"], "x");
     assert_eq!(value["error"]["code"], -32600);
@@ -189,33 +193,44 @@ fn ingress_error_display_covers_every_variant() {
     );
 }
 
-fn parse_error_code(bytes: &[u8]) -> i64 {
-    let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+fn parse_error_code(encoded: &jsonrpc_nats::Encoded) -> i64 {
+    let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
     value["error"]["code"].as_i64().unwrap()
 }
 
 #[test]
 fn policy_denied_emits_code_minus_32801() {
-    let bytes = ingress_gateway_policy_denied_response_bytes(b"{}", "denied").unwrap();
-    assert_eq!(parse_error_code(&bytes), -32_801);
+    let headers = HeaderMap::new();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_801, "denied", None).unwrap();
+    assert_eq!(parse_error_code(&encoded), -32_801);
 }
 
 #[test]
 fn declarative_denied_emits_code_minus_32803() {
-    let bytes = ingress_gateway_declarative_denied_response_bytes(b"{}", "tier1").unwrap();
-    assert_eq!(parse_error_code(&bytes), -32_803);
+    let headers = HeaderMap::new();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_803, "tier1", None).unwrap();
+    assert_eq!(parse_error_code(&encoded), -32_803);
 }
 
 #[test]
 fn tier3_refused_emits_code_minus_32802_with_rule() {
-    let bytes = ingress_gateway_tier3_refused_response_bytes(b"{}", "refused", "no-pii").unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let headers = HeaderMap::new();
+    let encoded = ingress_error_response_wire(
+        &headers,
+        b"{}",
+        -32_802,
+        "refused",
+        Some(serde_json::json!({ "rule": "no-pii" })),
+    )
+    .unwrap();
+    let value = to_json_value(&decode(Direction::Response, None, &encoded.headers, &encoded.body).unwrap());
     assert_eq!(value["error"]["code"], -32_802);
     assert_eq!(value["error"]["data"]["rule"], "no-pii");
 }
 
 #[test]
 fn deadline_exceeded_emits_code_minus_32800() {
-    let bytes = ingress_gateway_deadline_exceeded_response_bytes(b"{}", "timeout").unwrap();
-    assert_eq!(parse_error_code(&bytes), -32_800);
+    let headers = HeaderMap::new();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_800, "timeout", None).unwrap();
+    assert_eq!(parse_error_code(&encoded), -32_800);
 }

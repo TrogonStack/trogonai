@@ -155,17 +155,32 @@ protocol.
 
 - `decode(encode(m))` equals `m` for every valid JSON-RPC message, id type
   included.
-- `jsonrpc` is constant `"2.0"`; it is re-injected on decode.
+- `jsonrpc` is constant `"2.0"`; it is re-injected on decode. When an edge
+  reconstructs a message from canonical JSON-RPC, a `jsonrpc` value other than
+  `"2.0"` (or an absent one) is rejected outright rather than coerced, so a
+  foreign or future version fails hard instead of being mis-parsed as `2.0`.
 - A response is an error iff `Jsonrpc-Error-Code` (an integer) is present: an error
   response has a `message` body, a success response has a `result` body.
 - A response with neither a `result` body nor a `Jsonrpc-Error-Code` is a protocol
   error.
-- `Jsonrpc-Id` is the id's JSON literal; absent means a notification (request) or
-  `id: null` (response), told apart by the message direction. Requests use a
-  non-null id.
+- `Jsonrpc-Id` is the id's JSON literal and is purely an application-level
+  correlation token: the server echoes it back into the response so the client can
+  match the reply to its request. Its **presence is how a client asks for a
+  reply**; its **absence means a notification** (request), and the server does not
+  respond and does not invoke a request handler for it. Requests use a non-null id.
+  A `null` id in a *response* is reserved for the one case where the server could
+  not determine the request's id (a parse error / invalid request); it is never
+  used for a success response, and there is no other situation that produces a
+  `null`-id reply.
 - The method is carried by the subject.
-- The JSON-RPC `id` is not the transport correlation key; correlation is a
-  transport concern outside this codec.
+- The JSON-RPC `id` is not the transport *routing* key; routing a reply
+  (`X-Req-Id`, the NATS reply inbox, the JetStream response consumer) is a separate
+  transport concern. The two layers do not override each other: a reply inbox only
+  says *where* a reply would go, not *whether* one is owed. A message with no
+  `Jsonrpc-Id` is a notification and receives no reply **even if a reply inbox is
+  present** — the absent id, not the inbox, is authoritative for the
+  request-versus-notification decision. (A well-formed notification is published
+  with no reply inbox in the first place.)
 
 ## Design Rules
 
@@ -211,11 +226,22 @@ fall out of sync with a separate type tag.
 
 ## Open Implementation Questions
 
-- The exact transport trait spanning core request/reply and JetStream durable
-  delivery.
-- How server-initiated streaming (the ACP prompt notification stream plus its
-  final response) and JetStream keepalive acknowledgement compose on top of the
-  peer primitives without entering the shared core.
+These are now resolved by the `jsonrpc-nats` transport seam:
+
+- **The transport trait spanning core request/reply and JetStream durable
+  delivery.** The shared core is a small set of free functions over the
+  `trogon-nats` client traits, not a single bespoke trait: `merge_jsonrpc_headers`,
+  `jsonrpc_request_raw` (byte-level request/reply with timeout), and
+  `jsonrpc_publish[_with_timeout]`. They own header projection, the request/publish
+  mechanics, and timeouts. The **typed decode is injected by the domain crate** —
+  ACP decodes the generic `Message`, MCP decodes rmcp's `RxJsonRpcMessage` — so the
+  shared core never depends on a protocol's message types.
+- **How server-initiated streaming and JetStream keepalive ack compose.** They
+  stay in the domain adapter, layered on top of the shared primitives rather than
+  inside the shared core. MCP keeps a thin `rmcp::Transport` (Sink/Stream) adapter
+  because rmcp fixes its transport shape; ACP's prompt notification stream and
+  keepalive ack live in its runner. Both still send/publish through the shared
+  functions, so the wire encoding is identical.
 
 ## Migration
 

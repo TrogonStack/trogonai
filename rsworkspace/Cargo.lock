@@ -96,6 +96,7 @@ dependencies = [
  "bytes",
  "futures",
  "http",
+ "jsonrpc-nats",
  "moka",
  "reqwest",
  "serde",
@@ -131,6 +132,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-util",
+ "jsonrpc-nats",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -170,6 +172,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -216,6 +219,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "opentelemetry",
  "opentelemetry_sdk",
  "serde",
@@ -239,6 +243,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2805,6 +2810,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc-nats"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "trogon-nats",
+]
+
+[[package]]
 name = "jsonschema"
 version = "0.46.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2983,6 +3002,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures",
+ "jsonrpc-nats",
  "rmcp",
  "serde",
  "serde_json",

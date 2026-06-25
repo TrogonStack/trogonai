@@ -1,40 +1,39 @@
 use agent_client_protocol::{Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason};
 use async_nats::jetstream::AckKind;
-use bytes::Bytes;
 use futures::StreamExt;
+use jsonrpc_nats::RequestId;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
-use trogon_std::JsonSerialize;
 
 use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
+use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
+use crate::wire::{WireError, decode_notification_params, decode_response, encode_request};
 
 pub use trogon_nats::REQ_ID_HEADER;
 
 #[instrument(
     name = "acp.session.prompt",
-    skip(bridge, args, serializer),
+    skip(bridge, args),
     fields(session_id = %args.session_id)
 )]
-pub async fn handle<N, C, J, S>(
+pub async fn handle<N, C, J>(
     bridge: &Bridge<N, C, J>,
     args: PromptRequest,
-    serializer: &S,
 ) -> agent_client_protocol::Result<PromptResponse>
 where
     N: RequestClient + PublishClient + SubscribeClient + FlushClient,
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
-    S: JsonSerialize,
 {
     let start = bridge.clock.now();
 
@@ -46,7 +45,7 @@ where
     let req_id = ReqId::new();
     let prefix = bridge.config.acp_prefix_ref();
 
-    let result = handle_js(bridge, bridge.js(), &args, serializer, &session_id, prefix, &req_id).await;
+    let result = handle_js(bridge, bridge.js(), &args, &session_id, prefix, &req_id).await;
 
     bridge
         .metrics
@@ -55,11 +54,10 @@ where
     result
 }
 
-async fn handle_js<N, C, J, S>(
+async fn handle_js<N, C, J>(
     bridge: &Bridge<N, C, J>,
     js: &J,
     args: &PromptRequest,
-    serializer: &S,
     session_id: &AcpSessionId,
     prefix: &crate::acp_prefix::AcpPrefix,
     req_id: &ReqId,
@@ -69,7 +67,6 @@ where
     C: trogon_std::time::GetElapsed,
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
-    S: JsonSerialize,
 {
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
     // JetStream consumers with DeliverAll replay from stream start, so they'll see the
@@ -118,16 +115,19 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("subscribe cancelled: {e}")))?;
 
     // Now publish — consumers are ready, no race condition.
-    let payload_bytes = serializer
-        .to_vec(args)
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("serialize: {e}")))?;
+    let encoded = encode_request(
+        SessionAgentMethod::Prompt.wire_method(),
+        RequestId::String(req_id.as_str().to_string()),
+        args,
+    )
+    .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
 
-    let mut headers = async_nats::HeaderMap::new();
+    let mut headers = encoded.headers;
     headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     let prompt_subject = commands::PromptSubject::new(prefix, session_id);
-    js.publish_with_headers(prompt_subject, headers, Bytes::from(payload_bytes))
+    js.publish_with_headers(prompt_subject, headers, encoded.body)
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
         .await
@@ -154,7 +154,13 @@ where
                         ));
                     }
                     Some(Ok(js_msg)) => {
-                        let notification: SessionNotification = match serde_json::from_slice(js_msg.message().payload.as_ref()) {
+                        let message = js_msg.message();
+                        let notification_headers = message.headers.clone().unwrap_or_default();
+                        let notification: SessionNotification = match decode_notification_params(
+                            "session/update",
+                            &notification_headers,
+                            message.payload.as_ref(),
+                        ) {
                             Ok(n) => n,
                             Err(e) => {
                                 warn!(error = %e, "bad notification payload; skipping");
@@ -172,21 +178,31 @@ where
             resp = timeout(op_timeout, resp_messages.next()) => {
                 match resp {
                     Ok(Some(Ok(js_msg))) => {
-                        match serde_json::from_slice::<PromptResponse>(js_msg.message().payload.as_ref()) {
-                            Ok(response) => {
+                        let message = js_msg.message();
+                        let response_headers = message.headers.clone().unwrap_or_default();
+                        match decode_response::<PromptResponse>(&response_headers, message.payload.as_ref()) {
+                            Ok(Ok(response)) => {
                                 let _ = js_msg.ack().await;
                                 break Ok(response);
                             }
-                            Err(_) => {
-                                if let Ok(agent_err) = serde_json::from_slice::<Error>(js_msg.message().payload.as_ref()) {
-                                    let _ = js_msg.ack().await;
-                                    break Err(agent_err);
-                                }
+                            Ok(Err(agent_err)) => {
+                                let _ = js_msg.ack().await;
+                                break Err(agent_err);
+                            }
+                            Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
                                 let _ = js_msg.ack_with(AckKind::Term).await;
                                 bridge.metrics.record_error("prompt", "bad_response_payload");
                                 break Err(Error::new(
                                     ErrorCode::InternalError.into(),
                                     "bad response payload",
+                                ));
+                            }
+                            Err(e) => {
+                                let _ = js_msg.ack_with(AckKind::Term).await;
+                                bridge.metrics.record_error("prompt", "bad_response_payload");
+                                break Err(Error::new(
+                                    ErrorCode::InternalError.into(),
+                                    format!("decode response: {e}"),
                                 ));
                             }
                         }

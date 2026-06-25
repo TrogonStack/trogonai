@@ -1,6 +1,7 @@
 use super::Bridge;
-use crate::nats::{self, FlushClient, PublishClient, commands, responses};
+use crate::nats::{self, FlushClient, PublishClient, commands, parsing::SessionAgentMethod, responses};
 use crate::session_id::AcpSessionId;
+use crate::wire::encode_notification;
 use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_std::time::GetElapsed;
@@ -34,15 +35,20 @@ pub async fn handle<N: PublishClient + FlushClient, C: GetElapsed, J>(
     let prefix = bridge.config.acp_prefix_ref();
     let subject = commands::CancelSubject::new(prefix, &session_id);
 
-    let publish_result = nats::publish(
-        bridge.nats(),
-        &subject,
-        &args,
-        nats::PublishOptions::builder()
-            .flush_policy(nats::FlushPolicy::no_retries())
-            .build(),
-    )
-    .await;
+    let publish_result = match encode_notification(SessionAgentMethod::Cancel.wire_method(), &args) {
+        Ok(encoded) => {
+            nats::publish_wire(
+                bridge.nats(),
+                &subject,
+                encoded,
+                nats::PublishOptions::builder()
+                    .flush_policy(nats::FlushPolicy::no_retries())
+                    .build(),
+            )
+            .await
+        }
+        Err(error) => Err(trogon_nats::NatsError::Other(format!("encode cancel: {error}"))),
+    };
 
     if let Err(error) = &publish_result {
         warn!(

@@ -2,6 +2,9 @@
 //!
 //! `StubHandler` grows a result slot per operation as each per-op PR lands.
 
+use async_nats::header::HeaderMap;
+use jsonrpc_nats::{Direction, Message, RequestId, ResponseId, decode, encode, to_json_value};
+
 use crate::server::handler::{A2aError, A2aExecutor, TaskEventStream};
 
 #[derive(Default)]
@@ -96,16 +99,61 @@ pub fn stub() -> std::sync::Mutex<StubHandler> {
     std::sync::Mutex::new(StubHandler::default())
 }
 
-pub fn rpc_payload(method: &str, id: i64) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": {}
-    }))
-    .unwrap()
+pub fn wire_request(method: &str, id: RequestId, params: serde_json::Value) -> (HeaderMap, Vec<u8>) {
+    let encoded = encode(&Message::Request {
+        id,
+        method: method.to_string(),
+        params,
+    })
+    .expect("wire request must encode");
+    (encoded.headers, encoded.body.to_vec())
 }
 
-pub fn parse_response(bytes: &[u8]) -> serde_json::Value {
-    serde_json::from_slice(bytes).expect("response must be valid JSON")
+pub fn wire_notification(method: &str, params: serde_json::Value) -> (HeaderMap, Vec<u8>) {
+    let encoded = encode(&Message::Notification {
+        method: method.to_string(),
+        params,
+    })
+    .expect("wire notification must encode");
+    (encoded.headers, encoded.body.to_vec())
+}
+
+pub fn rpc_payload(method: &str, id: i64) -> (HeaderMap, Vec<u8>) {
+    wire_request(method, RequestId::Number(id), serde_json::json!({}))
+}
+
+pub fn parse_response(headers: &HeaderMap, body: &[u8]) -> serde_json::Value {
+    let message = decode(Direction::Response, None, headers, body).expect("response must decode");
+    to_json_value(&message)
+}
+
+pub fn parse_published_response(nats: &trogon_nats::AdvancedMockNatsClient, index: usize) -> serde_json::Value {
+    parse_response(&nats.published_headers()[index], &nats.published_payloads()[index])
+}
+
+pub fn set_wire_success_response(
+    mock: &trogon_nats::AdvancedMockNatsClient,
+    subject: &str,
+    id: ResponseId,
+    result: serde_json::Value,
+) {
+    let encoded = encode(&Message::Success { id, result }).expect("wire success must encode");
+    mock.set_response_wire(subject, encoded.headers, encoded.body);
+}
+
+pub fn set_wire_error_response(
+    mock: &trogon_nats::AdvancedMockNatsClient,
+    subject: &str,
+    id: ResponseId,
+    code: i32,
+    message: &str,
+) {
+    let encoded = encode(&Message::Error {
+        id,
+        code,
+        message: message.to_string(),
+        data: None,
+    })
+    .expect("wire error must encode");
+    mock.set_response_wire(subject, encoded.headers, encoded.body);
 }
