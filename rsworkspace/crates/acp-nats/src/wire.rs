@@ -98,8 +98,8 @@ pub fn decode_response<Res: DeserializeOwned>(
             Ok(Ok(value))
         }
         Message::Error {
-            code, message, data: _, ..
-        } => Ok(Err(agent_client_protocol::Error::new(code, message))),
+            code, message, data, ..
+        } => Ok(Err(agent_client_protocol::Error::new(code, message).data(data))),
         _ => Err(WireError::UnexpectedMessage),
     }
 }
@@ -123,3 +123,6 @@ pub fn response_id_from_request_headers(headers: &HeaderMap) -> ResponseId {
         None => ResponseId::Null,
     }
 }
+
+#[cfg(test)]
+mod tests;

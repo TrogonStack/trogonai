@@ -41,8 +41,8 @@ where
             .map_err(WireError::Deserialize)
             .map_err(JsonRpcRequestError::Wire),
         Ok(Message::Error {
-            code, message, data: _, ..
-        }) => Err(JsonRpcRequestError::Agent(Error::new(code, message))),
+            code, message, data, ..
+        }) => Err(JsonRpcRequestError::Agent(Error::new(code, message).data(data))),
         Ok(_) => Err(JsonRpcRequestError::Wire(WireError::UnexpectedMessage)),
         Err(error) => Err(map_transport_error(error, &subject)),
     }
