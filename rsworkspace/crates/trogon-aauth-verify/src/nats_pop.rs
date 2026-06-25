@@ -100,6 +100,14 @@ pub struct NatsRequest<'a> {
     pub headers: NatsHeaders<'a>,
 }
 
+/// Floor for the replay-store TTL. The derived TTL is
+/// `max(MIN_REPLAY_TTL_SECS, max_skew_secs * 2)` so a zero-skew configuration
+/// still keeps nonce entries long enough to refuse the same signed request
+/// arriving twice — without this floor a `max_skew_secs = 0` deployment would
+/// install nonces with a zero-second TTL and lose replay protection on the
+/// next GC pass.
+const MIN_REPLAY_TTL_SECS: i64 = 60;
+
 /// Security-sensitive headers that drive PoP verification. If any appears more
 /// than once (case-insensitive) in a request, the verifier refuses rather
 /// than silently picking one value and letting the rest go unauthenticated.
@@ -278,11 +286,15 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> NatsPopVerifier<R, C, S> {
         verify_signature_with_jwk(&verified_agent.claims.cnf.jwk, canonical.as_bytes(), sig)?;
 
         // Replay protection only fires once the signature has authenticated
-        // the request.
+        // the request. Derive the TTL using saturating arithmetic and floor
+        // it at MIN_REPLAY_TTL_SECS so a zero-skew configuration still keeps
+        // entries long enough for the replay window to be meaningful.
+        let ttl_secs = self.max_skew_secs.saturating_mul(2).max(MIN_REPLAY_TTL_SECS);
+        let ttl_u32 = u32::try_from(ttl_secs).unwrap_or(u32::MAX);
         let nonce_key = format!("nats-pop:{nonce}");
         let fresh = self
             .replay
-            .check_and_insert(&nonce_key, u32::try_from(self.max_skew_secs * 2).unwrap_or(600))
+            .check_and_insert(&nonce_key, ttl_u32)
             .await
             .map_err(NatsPopError::Backend)?;
         if !fresh {
