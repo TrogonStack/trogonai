@@ -124,5 +124,8 @@ fn telemetry_shutdown_error_includes_logger_failure() {
             source: anyhow::anyhow!("logger failed"),
         }],
     };
-    assert!(matches!(error.errors.as_slice(), [TelemetryProviderShutdownError::Logger { .. }]));
+    assert!(matches!(
+        error.errors.as_slice(),
+        [TelemetryProviderShutdownError::Logger { .. }]
+    ));
 }

@@ -1,8 +1,5 @@
 #[cfg(not(coverage))]
 use {
-    std::sync::Arc,
-    std::time::Duration,
-    tracing::{info, warn},
     a2a_auth_callout::credentials::mtls::MTlsVerifier,
     a2a_auth_callout::credentials::mtls::{TrustAnchorPem, X509MtlsVerifier},
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
@@ -12,6 +9,9 @@ use {
     a2a_auth_callout::{
         AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
     },
+    std::sync::Arc,
+    std::time::Duration,
+    tracing::{info, warn},
 };
 
 #[cfg(not(coverage))]

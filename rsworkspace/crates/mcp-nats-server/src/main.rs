@@ -8,13 +8,13 @@ mod runtime;
 
 #[cfg(not(coverage))]
 use {
+    crate::constants::MCP_ENDPOINT,
+    anyhow::Result,
     axum::Router,
     tokio::net::TcpListener,
     tracing::{error, info},
     trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
     trogon_telemetry::{ResourceAttribute, ServiceName},
-    crate::constants::MCP_ENDPOINT,
-    anyhow::Result,
 };
 
 #[cfg(not(coverage))]

@@ -336,7 +336,9 @@ fn same_origin_returns_false_for_empty_host() {
 
 #[tokio::test]
 async fn verify_fails_with_non_rsa_jwk() {
-    use jsonwebtoken::jwk::{AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk};
+    use jsonwebtoken::jwk::{
+        AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
+    };
     let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
     let ec_jwk = Jwk {
         common: CommonParameters {
@@ -357,8 +359,8 @@ async fn verify_fails_with_non_rsa_jwk() {
     // but decoding_key_for_jwk must reject the non-RSA key.
     // We can't sign with the EC key easily, but we can make a header-only token
     // that references the EC kid.  decode_header just parses the header.
-    let header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(br#"{"alg":"ES256","kid":"ec-kid","typ":"JWT"}"#);
+    let header_b64 =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","kid":"ec-kid","typ":"JWT"}"#);
     let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
     let fake_token = format!("{header_b64}.{payload_b64}.sig");
 
@@ -379,10 +381,16 @@ async fn oidc_verifier_trait_delegates_to_verify_internal() {
     let rng = &mut OsRng;
     let (jwks, enc) = test_jwks_and_encoding_key(rng);
     let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
-    let verifier: &dyn OidcVerifier = &JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
+    let verifier: &dyn OidcVerifier =
+        &JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
     use serde::Serialize;
     #[derive(Serialize)]
-    struct IdClaims { sub: String, iss: String, aud: String, exp: u64 }
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

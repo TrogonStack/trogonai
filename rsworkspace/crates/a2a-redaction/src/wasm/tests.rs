@@ -301,10 +301,7 @@ fn preload_skill_bundle_fails_when_manifest_missing() {
 #[test]
 fn tier3_refusal_is_surfaced_from_redact_part_bytes() {
     let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
-    let wasm = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/tier3_refuse.wasm"
-    ));
+    let wasm = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tier3_refuse.wasm"));
     let skill = SkillId::new("tier3").expect("valid");
     host.register_skill_wasm(skill.clone(), wasm).unwrap();
 
@@ -315,10 +312,7 @@ fn tier3_refusal_is_surfaced_from_redact_part_bytes() {
 #[test]
 fn tier3_refusal_is_surfaced_from_redact_message() {
     let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
-    let wasm = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/tier3_refuse.wasm"
-    ));
+    let wasm = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tier3_refuse.wasm"));
     let skill = SkillId::new("tier3-msg").expect("valid");
     host.register_skill_wasm(skill.clone(), wasm).unwrap();
 
@@ -344,10 +338,7 @@ fn tier3_refusal_is_surfaced_from_redact_message() {
 #[test]
 fn tier3_refusal_is_surfaced_from_redact_artifact() {
     let host = WasmRedactorHost::new(WasmBundlePath::new(std::env::temp_dir())).unwrap();
-    let wasm = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/tier3_refuse.wasm"
-    ));
+    let wasm = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tier3_refuse.wasm"));
     let skill = SkillId::new("tier3-art").expect("valid");
     host.register_skill_wasm(skill.clone(), wasm).unwrap();
 

@@ -1,12 +1,12 @@
 #[cfg(not(coverage))]
 use {
-    std::{env, net::SocketAddr, sync::Arc, time::Duration},
     a2a_bridge::{
         AppState, AsyncNatsAuthMintWire, AsyncNatsTokenGatewayUnary, AsyncNatsTokenTaskJetstream,
         AuthCalloutJsonMintClient, BridgeError, BridgeTenantAccount, GatewayInboundPublisher, StubAuthCalloutClient,
         StubInboundGatewayPublish, StubTaskJetStreamPort, gateway_router,
     },
     a2a_nats::{A2aPrefix, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX},
+    std::{env, net::SocketAddr, sync::Arc, time::Duration},
 };
 
 #[cfg(not(coverage))]

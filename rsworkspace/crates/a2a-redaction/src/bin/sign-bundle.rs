@@ -1,13 +1,13 @@
 #[cfg(not(coverage))]
 use {
-    std::fs,
-    std::path::{Path, PathBuf},
-    clap::Parser,
-    ed25519_dalek::{Signer, SigningKey},
     a2a_redaction::signed_bundle::{
         Ed25519Signature, SIGNED_BUNDLE_VERSION, Sha256Digest, SignedBundleManifest, sign_bundle_digest,
     },
     a2a_redaction::{SkillId, SkillIdError},
+    clap::Parser,
+    ed25519_dalek::{Signer, SigningKey},
+    std::fs,
+    std::path::{Path, PathBuf},
 };
 
 #[cfg(not(coverage))]

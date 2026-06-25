@@ -1,7 +1,7 @@
 use std::time::{Duration, UNIX_EPOCH};
 
-use super::*;
 use super::super::EpochClock;
+use super::*;
 
 #[test]
 fn fixed_epoch_clock_from_secs_returns_unix_epoch_offset() {

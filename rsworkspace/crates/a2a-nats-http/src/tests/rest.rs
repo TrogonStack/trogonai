@@ -7,9 +7,9 @@ use tower::ServiceExt;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
+use super::{build_app, error_response_bytes, response_json, send_message_response_bytes, task_response_bytes};
 use crate::rest::rest_error_response;
 use crate::router;
-use super::{build_app, error_response_bytes, response_json, send_message_response_bytes, task_response_bytes};
 
 // ---------------------------------------------------------------------------
 // Helper builders
@@ -45,11 +45,7 @@ fn task_snapshot_bytes(task_id: &str) -> bytes::Bytes {
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn post_json_request(uri: &str, body: &str) -> Request<Body> {
@@ -136,10 +132,7 @@ async fn rest_message_send_returns_200_and_task() {
 
     let app = build_app(nats);
     let body = r#"{"message":{"messageId":"m1","role":"ROLE_USER","parts":[]}}"#;
-    let response = app
-        .oneshot(post_json_request("/v1/message:send", body))
-        .await
-        .unwrap();
+    let response = app.oneshot(post_json_request("/v1/message:send", body)).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let resp_body = response_json(response).await;
@@ -156,10 +149,7 @@ async fn rest_message_send_error_returns_error_status() {
 
     let app = build_app(nats);
     let body = r#"{"message":{"messageId":"m1","role":"ROLE_USER","parts":[]}}"#;
-    let response = app
-        .oneshot(post_json_request("/v1/message:send", body))
-        .await
-        .unwrap();
+    let response = app.oneshot(post_json_request("/v1/message:send", body)).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
@@ -228,7 +218,10 @@ async fn rest_tasks_list_returns_200_and_tasks() {
     let nats = AdvancedMockNatsClient::new();
     let list_resp = json!({ "tasks": [], "nextPageToken": "", "pageSize": 0, "totalSize": 0 });
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
-    nats.set_response("a2a.agents.test-agent.tasks.list", serde_json::to_vec(&envelope).unwrap().into());
+    nats.set_response(
+        "a2a.agents.test-agent.tasks.list",
+        serde_json::to_vec(&envelope).unwrap().into(),
+    );
 
     let app = build_app(nats);
     let response = app.oneshot(get_request("/v1/tasks")).await.unwrap();
@@ -243,7 +236,10 @@ async fn rest_tasks_list_with_query_params_returns_200() {
     let nats = AdvancedMockNatsClient::new();
     let list_resp = json!({ "tasks": [], "nextPageToken": "tok123", "pageSize": 10, "totalSize": 0 });
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": list_resp });
-    nats.set_response("a2a.agents.test-agent.tasks.list", serde_json::to_vec(&envelope).unwrap().into());
+    nats.set_response(
+        "a2a.agents.test-agent.tasks.list",
+        serde_json::to_vec(&envelope).unwrap().into(),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -326,7 +322,10 @@ async fn rest_tasks_get_not_found_returns_404() {
 #[tokio::test]
 async fn rest_tasks_cancel_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.tasks.cancel", task_response_bytes("task-cancel-1"));
+    nats.set_response(
+        "a2a.agents.test-agent.tasks.cancel",
+        task_response_bytes("task-cancel-1"),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -344,7 +343,10 @@ async fn rest_tasks_cancel_via_slash_path_returns_200() {
     // Verify the canonical /v1/tasks/{id}/cancel path works (covered here
     // because the colon-form rewrite is tested elsewhere via the router itself).
     let nats = AdvancedMockNatsClient::new();
-    nats.set_response("a2a.agents.test-agent.tasks.cancel", task_response_bytes("task-slash-c"));
+    nats.set_response(
+        "a2a.agents.test-agent.tasks.cancel",
+        task_response_bytes("task-slash-c"),
+    );
 
     let app = build_app(nats);
     let response = app
@@ -645,7 +647,9 @@ async fn rest_push_delete_error_returns_error_status() {
 
     let app = build_app(nats);
     let response = app
-        .oneshot(delete_request("/v1/tasks/task-del-err/pushNotificationConfigs/cfg-del-err"))
+        .oneshot(delete_request(
+            "/v1/tasks/task-del-err/pushNotificationConfigs/cfg-del-err",
+        ))
         .await
         .unwrap();
 
