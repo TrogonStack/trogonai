@@ -1,3 +1,5 @@
+mod proptests;
+
 use super::*;
 use crate::direction::Direction;
 use crate::{decode, encode};
