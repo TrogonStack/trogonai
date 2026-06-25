@@ -2,7 +2,9 @@ use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tracing::{instrument, warn};
 
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{encode_error_reply, encode_success_reply, parse_request_params, publish_reply};
+use crate::server::wire::{
+    encode_error_reply, encode_success_reply, is_notification, parse_request_params, publish_reply,
+};
 
 const METHOD: &str = "agent/getAuthenticatedExtendedCard";
 
@@ -17,6 +19,10 @@ pub async fn handle<H, N>(
     H: A2aExecutor,
     N: trogon_nats::PublishClient,
 {
+    if is_notification(headers) {
+        return;
+    }
+
     let Some(reply) = reply_subject else {
         warn!("agent/getAuthenticatedExtendedCard received without reply subject; dropping");
         return;

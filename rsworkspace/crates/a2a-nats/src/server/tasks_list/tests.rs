@@ -76,14 +76,9 @@ async fn invalid_params_shape_returns_invalid_params_code() {
 async fn malformed_json_still_publishes_parse_error_with_null_id() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
-    handle(
-        &handler,
-        &async_nats::HeaderMap::new(),
-        b"not json",
-        Some("r".into()),
-        &nats,
-    )
-    .await;
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "null");
+    handle(&handler, &headers, b"not json", Some("r".into()), &nats).await;
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["error"]["code"], -32700);
     assert!(body["id"].is_null());
@@ -94,6 +89,6 @@ async fn notification_without_id_is_dropped() {
     let nats = AdvancedMockNatsClient::new();
     let handler = stub();
     let (headers, payload) = wire_notification("tasks/list", serde_json::json!({"id": "t"}));
-    handle(&handler, &headers, &payload, None, &nats).await;
+    handle(&handler, &headers, &payload, Some("r".into()), &nats).await;
     assert!(nats.published_messages().is_empty());
 }

@@ -7,7 +7,9 @@ use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{encode_error_reply, encode_success_reply, parse_request_params, request_id};
+use crate::server::wire::{
+    encode_error_reply, encode_success_reply, is_notification, parse_request_params, request_id,
+};
 use crate::task_id::A2aTaskId;
 
 const METHOD: &str = "message/stream";
@@ -36,6 +38,10 @@ pub async fn handle<H, N, J>(
     N: trogon_nats::PublishClient,
     J: JetStreamPublisher,
 {
+    if is_notification(headers) {
+        return;
+    }
+
     let Some(reply) = reply_subject else {
         warn!("message/stream received without reply subject; dropping");
         return;
