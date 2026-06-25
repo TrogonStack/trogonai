@@ -165,10 +165,20 @@ protocol.
   error.
 - `Jsonrpc-Id` is the id's JSON literal; absent means a notification (request) or
   `id: null` (response), told apart by the message direction. Requests use a
-  non-null id.
+  non-null id. The `id` is purely an application-level correlation token: the
+  server echoes it back into the response and it never decides whether a reply is
+  sent.
 - The method is carried by the subject.
-- The JSON-RPC `id` is not the transport correlation key; correlation is a
-  transport concern outside this codec.
+- The JSON-RPC `id` is not the transport correlation key; correlation — and
+  whether a reply is expected at all — is a transport concern outside this codec.
+  On a request/reply transport (a NATS core request carries a reply inbox; a
+  fire-and-forget publish does not) the reply decision is made by the transport,
+  not the `id`: a message that arrives with a reply destination is answered —
+  echoing `id: null` when no `Jsonrpc-Id` is present — while a message with no
+  reply destination is dropped. A handler must therefore not treat a missing
+  `Jsonrpc-Id` as "do not reply"; doing so conflates the application-level id with
+  the transport's reply mechanism and would hang a caller that is waiting on its
+  reply inbox.
 
 ## Design Rules
 
