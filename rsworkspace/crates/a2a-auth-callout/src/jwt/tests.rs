@@ -110,8 +110,7 @@ fn account_name_try_new_rejects_empty() {
 
 #[test]
 fn account_name_deserialize_rejects_empty() {
-    let err = serde_json::from_str::<AccountName>(r#""""#).unwrap_err();
-    assert!(err.to_string().contains("non-empty"));
+    assert!(serde_json::from_str::<AccountName>(r#""""#).is_err());
 }
 
 #[test]

@@ -376,3 +376,6 @@ impl PurgeOutcome for stream::PurgeResponse {
         self.success
     }
 }
+
+#[cfg(test)]
+mod tests;

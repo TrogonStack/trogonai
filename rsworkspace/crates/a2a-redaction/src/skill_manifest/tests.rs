@@ -796,6 +796,74 @@ version = "1.0.0"
     assert!(no_overlap.is_empty());
 }
 
+/// Two registries loaded from separate directories with the same skill_id
+/// cannot be merged via insert — the second insert must return DuplicateSkillId.
+#[test]
+fn load_from_dir_rejects_duplicate_skill_id_across_files() {
+    let dir1 = TempDir::new().unwrap();
+    let dir2 = TempDir::new().unwrap();
+    write_manifest(&dir1, "pii.email_mask.v1", VALID_MANIFEST);
+    write_manifest(&dir2, "pii.email_mask.v1", VALID_MANIFEST);
+
+    let reg1 = SkillManifestRegistry::load_from_dir(dir1.path()).unwrap();
+    let mut reg2 = SkillManifestRegistry::load_from_dir(dir2.path()).unwrap();
+    let manifest = reg1
+        .lookup(&SkillId::new("pii.email_mask.v1").expect("valid"))
+        .unwrap()
+        .clone();
+    let err = reg2.insert(manifest).unwrap_err();
+    assert!(matches!(err, SkillManifestError::DuplicateSkillId { .. }));
+}
+
+/// RateLimit skills should sort after InternalRoute, Credentials and Pii but
+/// before Custom — exercising the priority() method for RateLimit.
+#[test]
+fn skills_for_method_orders_rate_limit_after_pii_before_custom() {
+    let dir = TempDir::new().unwrap();
+    write_manifest(
+        &dir,
+        "rate.limit.v1",
+        r#"
+skill_id = "rate.limit.v1"
+wasm_path = "skills/rate_limit.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "RateLimit"
+version = "1.0.0"
+"#,
+    );
+    write_manifest(
+        &dir,
+        "pii.email_mask.v1",
+        r#"
+skill_id = "pii.email_mask.v1"
+wasm_path = "skills/pii_email_mask.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = "Pii"
+version = "1.0.0"
+"#,
+    );
+    write_manifest(
+        &dir,
+        "custom.hook.v1",
+        r#"
+skill_id = "custom.hook.v1"
+wasm_path = "skills/custom.wasm"
+applies_to_method = { kind = "Any" }
+applies_to_paths = ["$.message.parts[*].text"]
+category = { Custom = "hook" }
+version = "1.0.0"
+"#,
+    );
+
+    let registry = SkillManifestRegistry::load_from_dir(dir.path()).unwrap();
+    let matches = registry.skills_for_method(&A2aMethod::MessageSend);
+    let ids: Vec<_> = matches.iter().map(|m| m.skill_id().as_str()).collect();
+    // Pii (2) < RateLimit (3) < Custom (4)
+    assert_eq!(ids, vec!["pii.email_mask.v1", "rate.limit.v1", "custom.hook.v1"]);
+}
+
 #[test]
 fn skills_for_method_sorts_same_category_by_skill_id() {
     let dir = TempDir::new().unwrap();

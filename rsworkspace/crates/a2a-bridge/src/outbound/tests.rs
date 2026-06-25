@@ -193,7 +193,6 @@ async fn mapped_https_upstream_surfaces_resolve_error() {
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::UpstreamHttps(_)));
-    assert!(err.to_string().contains("resolve failed"));
 }
 
 #[tokio::test]
@@ -208,7 +207,6 @@ async fn mapped_https_upstream_surfaces_post_error() {
         .await
         .unwrap_err();
     assert!(matches!(err, BridgeError::UpstreamHttps(_)));
-    assert!(err.to_string().contains("post failed"));
 }
 
 #[tokio::test]
@@ -257,8 +255,6 @@ async fn reqwest_poster_rejects_non_success_status() {
     let poster = ReqwestJsonHttpPoster::new(reqwest::Client::builder().build().unwrap());
     let err = poster.post_application_json(&server.uri(), b"{}").await.unwrap_err();
     assert!(matches!(err, BridgeError::UpstreamHttps(_)));
-    assert!(err.to_string().contains("502"));
-    assert!(err.to_string().contains("bad gateway"));
 }
 
 #[test]

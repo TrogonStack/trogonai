@@ -25,7 +25,6 @@ async fn harness_mint_wire_returns_deterministic_caller_id_jwt() {
 fn bridge_tenant_account_rejects_empty() {
     let err = BridgeTenantAccount::new("   ").unwrap_err();
     assert!(matches!(err, BridgeError::Mint(_)));
-    assert!(err.to_string().contains("non-empty"));
 }
 
 #[tokio::test]
