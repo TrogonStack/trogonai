@@ -152,3 +152,35 @@ fn requirement_header_round_trips_clarification_and_approval_pending() {
         assert_eq!(Requirement::parse(&header), req);
     }
 }
+
+#[test]
+fn aauth_parse_error_display_messages() {
+    assert_eq!(
+        AAuthParseError::MissingField("token").to_string(),
+        "aauth: missing field token"
+    );
+    assert_eq!(
+        AAuthParseError::InvalidNumber("created").to_string(),
+        "aauth: invalid number for created"
+    );
+}
+
+#[test]
+fn requirement_parse_unquoted_resource_token() {
+    let raw = "requirement=auth-token; resource-token=unquoted-tok";
+    let req = Requirement::parse(raw);
+    assert_eq!(
+        req,
+        Requirement::AuthToken {
+            resource_token: "unquoted-tok".into()
+        }
+    );
+}
+
+#[test]
+fn requirement_other_variant_round_trips() {
+    let req = Requirement::Other {
+        raw: "requirement=custom".into(),
+    };
+    assert_eq!(req.to_header_value(), "requirement=custom");
+}

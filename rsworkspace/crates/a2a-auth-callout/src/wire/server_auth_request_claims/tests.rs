@@ -119,3 +119,66 @@ fn debug_includes_user_nkey_and_server_id() {
     assert!(debug.contains("user_nkey"));
     assert!(debug.contains(req.server_id()));
 }
+
+fn decode_request_with_extra_nats_json(
+    server: &KeyPair,
+    patch: impl FnMut(&mut Claims<AuthRequest>),
+    nats_json_override: serde_json::Value,
+) -> ServerAuthRequestClaims {
+    let user = KeyPair::new_user();
+    let token = signed_auth_request(server, &user, patch);
+    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
+    let inner = server_pub.verify_jwt_issuer(&token).unwrap();
+    ServerAuthRequestClaims::from_decoded(inner, nats_json_override)
+}
+
+#[test]
+fn connect_opts_jwt_falls_back_to_nats_json() {
+    let server = KeyPair::new_account();
+    let nats_json = serde_json::json!({
+        "connect_opts": {
+            "jwt": "fallback.jwt.token"
+        }
+    });
+    let req = decode_request_with_extra_nats_json(
+        &server,
+        |c| {
+            c.nats.connect_opts.jwt = None;
+        },
+        nats_json,
+    );
+    assert_eq!(req.connect_opts_jwt(), Some("fallback.jwt.token"));
+}
+
+#[test]
+fn connect_opts_opaque_pass_falls_back_to_nats_json() {
+    let server = KeyPair::new_account();
+    let nats_json = serde_json::json!({
+        "connect_opts": {
+            "pass": "fallback-pass"
+        }
+    });
+    let req = decode_request_with_extra_nats_json(
+        &server,
+        |c| {
+            c.nats.connect_opts.pass = None;
+        },
+        nats_json,
+    );
+    assert_eq!(req.connect_opts_opaque_pass(), Some("fallback-pass"));
+}
+
+#[test]
+fn client_tls_pem_certs_reads_verified_chains_from_nats_json() {
+    let server = KeyPair::new_account();
+    let nats_json = serde_json::json!({
+        "client_tls": {
+            "verified_chains": [["chain-cert-1", "chain-cert-2"]]
+        }
+    });
+    let req = decode_request_with_extra_nats_json(&server, |_| {}, nats_json);
+    let certs = req.client_tls_pem_certs();
+    assert_eq!(certs.len(), 2);
+    assert_eq!(certs[0].as_str(), "chain-cert-1");
+    assert_eq!(certs[1].as_str(), "chain-cert-2");
+}

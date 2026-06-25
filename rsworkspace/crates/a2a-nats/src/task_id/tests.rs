@@ -47,3 +47,10 @@ fn task_id_error_display() {
         "task_id is too long: 129 characters (max 128)"
     );
 }
+
+#[test]
+fn a2a_task_id_rejects_too_long() {
+    let long = "a".repeat(129);
+    let err = A2aTaskId::new(&long).unwrap_err();
+    assert!(matches!(err, TaskIdError::TooLong(129)));
+}

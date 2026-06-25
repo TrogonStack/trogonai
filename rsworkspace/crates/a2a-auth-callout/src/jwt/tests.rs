@@ -289,3 +289,131 @@ fn jwt_error_converts_to_auth_callout_error() {
     let err: AuthCalloutError = JwtError::InvalidCallerId.into();
     assert!(matches!(err, AuthCalloutError::Jwt(JwtError::InvalidCallerId)));
 }
+
+#[test]
+fn account_name_try_new_returns_ok_for_non_empty() {
+    let a = AccountName::try_new("tenant-acme").unwrap();
+    assert_eq!(a.as_str(), "tenant-acme");
+}
+
+#[test]
+fn signing_key_from_secret_clone_roundtrips() {
+    let key = SigningKey::from_secret(b"hmac-test-secret");
+    let cloned = key.clone();
+    let _ = cloned.encoding_key();
+}
+
+#[test]
+fn minted_user_jwt_ensure_fresh_ok_for_future_exp() {
+    let issuer = KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let user = KeyPair::new_user();
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let caller_id = CallerId::new("caller1").unwrap();
+    let claims = UserJwtClaims {
+        kid: material.version().clone(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-acme"),
+        data: SpiceDbPrincipal(json!({})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+    };
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    let token = claims
+        .mint(
+            &material,
+            &subject,
+            std::time::SystemTime::now(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+    assert!(token.ensure_fresh().is_ok());
+}
+
+#[test]
+fn verify_minted_user_jwt_rejects_expired_token() {
+    let issuer = KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let user = KeyPair::new_user();
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let caller_id = CallerId::new("caller1").unwrap();
+    let claims = UserJwtClaims {
+        kid: material.version().clone(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-a"),
+        data: SpiceDbPrincipal(json!({})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+    };
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    let token = claims
+        .mint_for_test_ttl(&material, &subject, Duration::from_secs(60))
+        .unwrap();
+    let source = StaticSigningKeySource::new(&issuer_seed, material.version().clone()).unwrap();
+    let err =
+        UserJwtClaims::verify_minted_user_jwt(token.as_str(), &source, &AccountName::new("tenant-a")).unwrap_err();
+    assert!(matches!(err, JwtError::Decode(ref m) if m.contains("expired")));
+}
+
+#[test]
+fn verify_minted_user_jwt_rejects_not_yet_valid_token() {
+    let issuer = KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let user = KeyPair::new_user();
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let caller_id = CallerId::new("caller1").unwrap();
+    let claims = UserJwtClaims {
+        kid: material.version().clone(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-a"),
+        data: SpiceDbPrincipal(json!({})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+    };
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    // Mint with issued_at far in the future so nbf is also in the future while exp is valid.
+    let future_issued_at = std::time::UNIX_EPOCH + Duration::from_secs(9_999_999_999);
+    let token = claims
+        .mint(&material, &subject, future_issued_at, Duration::from_secs(7200))
+        .unwrap();
+    let source = StaticSigningKeySource::new(&issuer_seed, material.version().clone()).unwrap();
+    let err =
+        UserJwtClaims::verify_minted_user_jwt(token.as_str(), &source, &AccountName::new("tenant-a")).unwrap_err();
+    assert!(matches!(err, JwtError::Decode(ref m) if m.contains("not yet valid")));
+}
+
+#[test]
+fn ensure_fresh_rejects_not_yet_valid_token() {
+    let issuer = KeyPair::new_account();
+    let issuer_seed = issuer.seed().expect("issuer seed");
+    let user = KeyPair::new_user();
+    let material = MintingMaterial::new(
+        SigningKey::from_seed(&issuer_seed).unwrap().keypair().clone(),
+        KeyVersion::new("test").unwrap(),
+    );
+    let caller_id = CallerId::new("caller1").unwrap();
+    let claims = UserJwtClaims {
+        kid: material.version().clone(),
+        sub: ExternalSubject::new("alice").unwrap(),
+        aud: AccountName::new("tenant-a"),
+        data: SpiceDbPrincipal(json!({})),
+        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+        caller_id,
+    };
+    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
+    let future_issued_at = std::time::UNIX_EPOCH + Duration::from_secs(9_999_999_999);
+    let token = claims
+        .mint(&material, &subject, future_issued_at, Duration::from_secs(7200))
+        .unwrap();
+    let err = token.ensure_fresh().unwrap_err();
+    assert!(matches!(err, JwtError::Decode(ref m) if m.contains("not yet valid")));
+}
