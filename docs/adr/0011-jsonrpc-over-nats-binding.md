@@ -155,7 +155,10 @@ protocol.
 
 - `decode(encode(m))` equals `m` for every valid JSON-RPC message, id type
   included.
-- `jsonrpc` is constant `"2.0"`; it is re-injected on decode.
+- `jsonrpc` is constant `"2.0"`; it is re-injected on decode. When an edge
+  reconstructs a message from canonical JSON-RPC, a `jsonrpc` value other than
+  `"2.0"` (or an absent one) is rejected outright rather than coerced, so a
+  foreign or future version fails hard instead of being mis-parsed as `2.0`.
 - A response is an error iff `Jsonrpc-Error-Code` (an integer) is present: an error
   response has a `message` body, a success response has a `result` body.
 - A response with neither a `result` body nor a `Jsonrpc-Error-Code` is a protocol

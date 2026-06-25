@@ -161,7 +161,9 @@ for wire encoding. **Remaining:** `prompt` JetStream path (`handle_js` in
 
 ## Invariants to Enforce (ADR "Invariants")
 - `decode(encode(m)) == m` for every valid message, id type included.
-- `jsonrpc` is constant `"2.0"`, re-injected on decode.
+- `jsonrpc` is constant `"2.0"`, re-injected on decode; an edge rejects any
+  reconstructed envelope whose `jsonrpc` is absent or not `"2.0"` (hard fail,
+  `CodecError::UnsupportedVersion`) rather than coercing it.
 - Response is an error iff `Jsonrpc-Error-Code` (integer) is present; error has a
   `message` body, success has a `result` body.
 - Response with neither `result` body nor `Jsonrpc-Error-Code` = protocol error.
