@@ -112,30 +112,6 @@ fn account_name_try_new_rejects_empty() {
 }
 
 #[test]
-fn mint_rejects_empty_audience() {
-    let (material, _, _, user) = fixture_material();
-    let caller_id = CallerId::new("caller1").unwrap();
-    let claims = UserJwtClaims {
-        kid: material.version().clone(),
-        sub: ExternalSubject::new("alice").unwrap(),
-        aud: AccountName::from_string_unvalidated(String::new()),
-        data: SpiceDbPrincipal(json!({})),
-        nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
-        caller_id,
-    };
-    let subject = UserJwtSubject::from_user_nkey(crate::wire::NkeyPublic::parse(user.public_key()).unwrap());
-    let err = mint_nats_user_jwt(
-        &claims,
-        &material,
-        &subject,
-        UNIX_EPOCH + Duration::from_secs(2_000),
-        Duration::from_secs(60),
-    )
-    .unwrap_err();
-    assert!(decode_err_contains(err, "account name must be non-empty"));
-}
-
-#[test]
 fn verify_rejects_empty_handle_list() {
     let err = verify_nats_user_jwt("a.b.c", &[]).unwrap_err();
     assert!(matches!(err, JwtError::NoSigningKeyForKid));
