@@ -7,9 +7,7 @@ use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{
-    encode_error_reply, encode_success_reply, is_notification, parse_request_params, request_id,
-};
+use crate::server::wire::{encode_error_reply, encode_success_reply, parse_request_params, request_id};
 use crate::task_id::A2aTaskId;
 
 const METHOD: &str = "message/stream";
@@ -42,10 +40,6 @@ pub async fn handle<H, N, J>(
         warn!("message/stream received without reply subject; dropping");
         return;
     };
-
-    if request_id(headers).is_none() && is_notification(headers) {
-        return;
-    }
 
     let id = request_id(headers);
     let prepared = prepare_bootstrap(handler, headers, payload, &id).await;

@@ -167,7 +167,7 @@ async fn notification_without_id_is_dropped() {
     let js = MockJetStreamPublisher::new();
     let handler = stub();
     let (headers, payload) = wire_notification("message/stream", stream_params());
-    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
+    handle(&handler, &headers, &payload, None, &nats, &js, &prefix()).await;
     assert!(nats.published_messages().is_empty());
 }
 

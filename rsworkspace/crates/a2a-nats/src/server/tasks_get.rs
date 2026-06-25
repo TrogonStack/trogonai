@@ -1,9 +1,7 @@
 use tracing::{instrument, warn};
 
 use crate::server::handler::{A2aError, A2aExecutor};
-use crate::server::wire::{
-    encode_error_reply, encode_success_reply, is_notification, parse_request_params, publish_reply, request_id,
-};
+use crate::server::wire::{encode_error_reply, encode_success_reply, parse_request_params, publish_reply};
 
 const METHOD: &str = "tasks/get";
 
@@ -22,10 +20,6 @@ pub async fn handle<H, N>(
         warn!("tasks/get received without reply subject; dropping");
         return;
     };
-
-    if request_id(headers).is_none() && is_notification(headers) {
-        return;
-    }
 
     let result = match parse_request_params::<serde_json::Value>(METHOD, headers, payload) {
         Err(_) => Err(A2aError::new(-32700, "Parse error")),
