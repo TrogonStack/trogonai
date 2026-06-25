@@ -15,4 +15,10 @@ mod relocated;
 #[path = "allowed.rs"]
 mod allowed;
 
+// Non-crate-root owner: `owner.rs` is itself a file-backed module, so its child
+// `mod inner;` resolves into the `owner/` subdirectory. The `#[path]` inside
+// `owner.rs` spelling that default must fire, exercising the non-root branch.
+#[path = "auxiliary/owner.rs"]
+mod owner;
+
 fn main() {}
