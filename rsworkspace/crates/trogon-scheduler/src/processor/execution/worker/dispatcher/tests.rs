@@ -183,7 +183,6 @@ async fn records_for_one_schedule_are_processed_in_submission_order() {
     let reports = drain(reports, 4).await;
     join.await.unwrap();
 
-    // Per-aggregate ordering: positions reported in submission order.
     let positions: Vec<u64> = reports.iter().map(|r| r.stream_position.as_u64()).collect();
     assert_eq!(positions, vec![1, 2, 3, 4]);
     let outcomes: Vec<ProcessedOutcome> = reports.iter().map(|r| r.result.clone().unwrap()).collect();
@@ -197,7 +196,6 @@ async fn records_for_one_schedule_are_processed_in_submission_order() {
         ]
     );
 
-    // Final checkpoint is Removed and no execution schedule remains.
     let stored = kv.contains(&format!("v1.{}", key.simple()));
     assert!(stored, "checkpoint record persists");
     assert_eq!(execution.scheduled_count(subject.as_str()), 0);
@@ -243,7 +241,6 @@ async fn distinct_schedules_all_make_progress_and_lanes_are_evicted() {
 async fn transient_failure_is_retried_not_acked() {
     let kv = InMemoryKv::new();
     let execution = InMemoryExecution::new();
-    // Fail the publish so the record reaches no durable outcome.
     execution.fail_next_publish();
     let writer = ExecutionScheduleWriter::new(execution.clone(), execution.clone());
     let processor = Arc::new(ScheduleProcessor::new(
@@ -268,7 +265,6 @@ async fn transient_failure_is_retried_not_acked() {
 
     assert!(reports[0].result.is_err());
     assert!(matches!(log.lock().unwrap().as_slice(), [Settlement::Retry]));
-    // No checkpoint advanced because the execution schedule write failed before persistence.
     assert!(!kv.contains(&format!("v1.{}", key_for_stream(id).simple())));
 }
 
@@ -951,15 +947,6 @@ async fn dropped_report_receiver_stops_drain_early() {
     join.await.unwrap();
 }
 
-// -------------------------------------------------------------------------
-// Deterministic coverage for four concurrency-edge-case branches
-// -------------------------------------------------------------------------
-
-/// Branch 1 — `flush_pending_reports`: `TrySendError::Closed` arm (lines
-/// 184-186 in the original, now inside `flush_pending_reports`).
-///
-/// Directly exercises the extracted helper with a pre-populated queue and a
-/// closed channel, confirming the queue is cleared and the function returns.
 #[test]
 fn flush_pending_reports_clears_queue_when_channel_is_closed() {
     use trogon_decider_runtime::StreamPosition;
@@ -984,8 +971,6 @@ fn flush_pending_reports_clears_queue_when_channel_is_closed() {
     );
 }
 
-/// `flush_pending_reports`: `Ok(())` success arm drains every report into
-/// the channel and leaves the queue empty.
 #[test]
 fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
     use trogon_decider_runtime::StreamPosition;
@@ -1011,7 +996,6 @@ fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
     assert_eq!(drained, 4);
 }
 
-/// `drain_one_reserved_report`: success arm pops one report and sends it.
 #[tokio::test]
 async fn drain_one_reserved_report_sends_front_report_through_permit() {
     use trogon_decider_runtime::StreamPosition;
@@ -1033,8 +1017,6 @@ async fn drain_one_reserved_report_sends_front_report_through_permit() {
     assert!(rx.try_recv().is_ok(), "channel must have received the report");
 }
 
-/// `drain_one_reserved_report`: closed-channel arm clears the queue so the
-/// loop doesn't keep replaying reports against a receiver that's gone.
 #[test]
 fn drain_one_reserved_report_clears_queue_when_channel_closed() {
     use trogon_decider_runtime::StreamPosition;
@@ -1052,8 +1034,6 @@ fn drain_one_reserved_report_clears_queue_when_channel_closed() {
     assert!(pending_reports.is_empty(), "queue must be cleared on channel close");
 }
 
-/// `flush_pending_reports`: `TrySendError::Full` arm leaves the report
-/// queued for the next select tick instead of dropping or clearing it.
 #[test]
 fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
     use trogon_decider_runtime::StreamPosition;
@@ -1065,8 +1045,6 @@ fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
         lane,
         result: Ok(ProcessedOutcome::Published),
     };
-    // Saturate the channel before the helper runs so the next try_send
-    // returns Full immediately.
     tx.try_send(blocker).expect("seeded send must fit");
 
     let mut pending_reports = std::collections::VecDeque::new();
@@ -1085,12 +1063,6 @@ fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
     );
 }
 
-/// Branch 2 — `resolve_ready_key`: `AlreadyInFlight` arm (lines 196-198).
-///
-/// Constructs the dispatcher's internal state directly (key present in both
-/// `ready` and `in_flight`) and calls the extracted helper, which would be
-/// unreachable via the public submission API because `queued_ready` prevents
-/// duplicates.
 #[test]
 fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -1124,11 +1096,6 @@ fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
     );
 }
 
-/// Branch 3 — `resolve_ready_key`: `EmptyQueue` arm (lines 200-203).
-///
-/// Constructs state where `ready` contains a key whose `pending` queue is
-/// absent, exercising the defensive eviction branch that is an invariant
-/// guard against internal state corruption.
 #[test]
 fn resolve_ready_key_returns_empty_queue_when_pending_entry_is_absent() {
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -1154,11 +1121,6 @@ fn resolve_ready_key_returns_empty_queue_when_pending_entry_is_absent() {
     );
 }
 
-/// Branch 4 — `drain`: `None` arm (line 607).
-///
-/// Calls the test-local `drain` helper with a channel whose sender has
-/// already been dropped, so `recv()` immediately returns `None` and the
-/// helper stops before collecting `expected` items.
 #[tokio::test]
 async fn drain_stops_early_when_channel_closes_before_expected_count() {
     let (tx, rx) = mpsc::channel::<DispatchReport>(4);

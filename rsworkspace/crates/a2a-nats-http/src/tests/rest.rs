@@ -11,10 +11,6 @@ use super::{build_app, error_response_bytes, response_json, send_message_respons
 use crate::rest::rest_error_response;
 use crate::router;
 
-// ---------------------------------------------------------------------------
-// Helper builders
-// ---------------------------------------------------------------------------
-
 fn push_config_response_bytes(task_id: &str, config_id: &str) -> bytes::Bytes {
     let cfg = json!({
         "taskId": task_id,
@@ -65,10 +61,6 @@ fn delete_request(uri: &str) -> Request<Body> {
         .unwrap()
 }
 
-// ---------------------------------------------------------------------------
-// GET /v1/card
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_get_card_returns_200_and_agent_card() {
     let nats = AdvancedMockNatsClient::new();
@@ -118,10 +110,6 @@ async fn rest_get_card_error_returns_503() {
     assert_eq!(body["error"]["code"], -32050);
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/message:send
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_message_send_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
@@ -154,10 +142,6 @@ async fn rest_message_send_error_returns_error_status() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/message:stream
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_message_stream_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
@@ -166,7 +150,6 @@ async fn rest_message_stream_returns_sse_content_type() {
         send_message_response_bytes("stream-task-1"),
     );
 
-    // SSE endpoint requires a JetStream consumer to succeed
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -208,10 +191,6 @@ async fn rest_message_stream_error_returns_error_status() {
 
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
-
-// ---------------------------------------------------------------------------
-// GET /v1/tasks
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn rest_tasks_list_returns_200_and_tasks() {
@@ -266,10 +245,6 @@ async fn rest_tasks_list_error_returns_error_status() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
-// ---------------------------------------------------------------------------
-// GET /v1/tasks/{id}
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_tasks_get_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
@@ -315,10 +290,6 @@ async fn rest_tasks_get_not_found_returns_404() {
     assert_eq!(body["error"]["code"], -32001);
 }
 
-// ---------------------------------------------------------------------------
-// POST /v1/tasks/{id}/cancel  (also tests the URL rewrite: /v1/tasks/{id}:cancel)
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_tasks_cancel_returns_200_and_task() {
     let nats = AdvancedMockNatsClient::new();
@@ -340,8 +311,6 @@ async fn rest_tasks_cancel_returns_200_and_task() {
 
 #[tokio::test]
 async fn rest_tasks_cancel_via_slash_path_returns_200() {
-    // Verify the canonical /v1/tasks/{id}/cancel path works (covered here
-    // because the colon-form rewrite is tested elsewhere via the router itself).
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
         "a2a.agents.test-agent.tasks.cancel",
@@ -376,10 +345,6 @@ async fn rest_tasks_cancel_not_cancelable_returns_409() {
     assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
-// ---------------------------------------------------------------------------
-// GET /v1/tasks/{id}/subscribe  (also tests colon-form)
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_tasks_subscribe_returns_sse_content_type() {
     let nats = AdvancedMockNatsClient::new();
@@ -407,7 +372,6 @@ async fn rest_tasks_subscribe_returns_sse_content_type() {
 
 #[tokio::test]
 async fn rest_tasks_subscribe_via_slash_path_returns_sse() {
-    // Verify the canonical /v1/tasks/{id}/subscribe path works directly.
     let nats = AdvancedMockNatsClient::new();
     nats.set_response(
         "a2a.agents.test-agent.tasks.resubscribe",
@@ -462,9 +426,6 @@ async fn rest_tasks_subscribe_invalid_task_id_returns_400() {
     let client = A2aClient::new(super::test_config(), super::test_agent_id(), nats, js);
     let app = router::build(client);
 
-    // A dot in the task ID is valid in a URI path segment but invalid as a NATS token.
-    // The handler calls A2aTaskId::new which rejects it with InvalidCharacter('.')
-    // and returns 400 BAD_REQUEST.
     let response = app
         .oneshot(get_request("/v1/tasks/invalid.task.id/subscribe"))
         .await
@@ -474,10 +435,6 @@ async fn rest_tasks_subscribe_invalid_task_id_returns_400() {
     let body = response_json(response).await;
     assert_eq!(body["error"]["code"], -32602);
 }
-
-// ---------------------------------------------------------------------------
-// POST /v1/tasks/{id}/pushNotificationConfigs
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn rest_push_set_returns_200_and_config() {
@@ -496,7 +453,6 @@ async fn rest_push_set_returns_200_and_config() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let resp_body = response_json(response).await;
-    // The handler overwrites task_id from path, so result has taskId = "task-push-1"
     assert_eq!(resp_body["taskId"], "task-push-1");
 }
 
@@ -505,7 +461,6 @@ async fn rest_push_set_body_task_id_mismatch_returns_400() {
     let nats = AdvancedMockNatsClient::new();
 
     let app = build_app(nats);
-    // body task_id "wrong-task" doesn't match path "task-push-2"
     let body = r#"{"taskId":"wrong-task","url":"https://example.com/webhook"}"#;
     let response = app
         .oneshot(post_json_request("/v1/tasks/task-push-2/pushNotificationConfigs", body))
@@ -535,10 +490,6 @@ async fn rest_push_set_error_returns_501() {
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 
-// ---------------------------------------------------------------------------
-// GET /v1/tasks/{id}/pushNotificationConfigs
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_push_list_returns_200_and_empty_configs() {
     let nats = AdvancedMockNatsClient::new();
@@ -552,8 +503,6 @@ async fn rest_push_list_returns_200_and_empty_configs() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
-    // configs is serialized as an empty array OR omitted (skip_serializing_if = "Vec::is_empty")
-    // Either way, the response is a valid JSON object.
     assert!(body.is_object());
 }
 
@@ -573,10 +522,6 @@ async fn rest_push_list_error_returns_error_status() {
 
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
-
-// ---------------------------------------------------------------------------
-// GET /v1/tasks/{id}/pushNotificationConfigs/{configId}
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn rest_push_get_returns_200_and_config() {
@@ -614,14 +559,9 @@ async fn rest_push_get_not_found_returns_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-// ---------------------------------------------------------------------------
-// DELETE /v1/tasks/{id}/pushNotificationConfigs/{configId}
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn rest_push_delete_returns_204() {
     let nats = AdvancedMockNatsClient::new();
-    // push_delete returns () on success; the mock must return a valid JSON-RPC envelope with null result.
     let envelope = json!({ "jsonrpc": "2.0", "id": "ignored", "result": null });
     nats.set_response(
         "a2a.agents.test-agent.push.delete",
@@ -656,10 +596,6 @@ async fn rest_push_delete_error_returns_error_status() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
-// ---------------------------------------------------------------------------
-// http_status_for_jsonrpc_code coverage
-// ---------------------------------------------------------------------------
-
 #[test]
 fn http_status_for_all_known_jsonrpc_codes() {
     use crate::rest::http_status_for_jsonrpc_code;
@@ -674,14 +610,9 @@ fn http_status_for_all_known_jsonrpc_codes() {
     assert_eq!(http_status_for_jsonrpc_code(-32008), StatusCode::BAD_REQUEST);
     assert_eq!(http_status_for_jsonrpc_code(-32009), StatusCode::BAD_REQUEST);
     assert_eq!(http_status_for_jsonrpc_code(-32050), StatusCode::SERVICE_UNAVAILABLE);
-    // Any other code maps to 500
     assert_eq!(http_status_for_jsonrpc_code(-32603), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(http_status_for_jsonrpc_code(0), StatusCode::INTERNAL_SERVER_ERROR);
 }
-
-// ---------------------------------------------------------------------------
-// rest_error_response helper
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn rest_error_response_formats_json_body() {
@@ -691,10 +622,6 @@ async fn rest_error_response_formats_json_body() {
     let body: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["error"]["code"], -32001);
 }
-
-// ---------------------------------------------------------------------------
-// router rewrite_a2a_custom_method coverage
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn router_rewrite_does_not_rewrite_unrelated_paths() {
@@ -722,7 +649,6 @@ async fn router_rewrite_does_not_rewrite_unrelated_paths() {
     );
 
     let app = build_app(nats);
-    // This path does NOT match the rewrite pattern → plain /v1/card is served
     let response = app.oneshot(get_request("/v1/card")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 }
@@ -733,7 +659,6 @@ async fn router_cancel_with_query_param_returns_200() {
     nats.set_response("a2a.agents.test-agent.tasks.cancel", task_response_bytes("task-qp"));
 
     let app = build_app(nats);
-    // The canonical /v1/tasks/{id}/cancel path with a query param exercises the CancelQuery handler.
     let response = app
         .oneshot(post_json_request("/v1/tasks/task-qp/cancel?tenant=t1", "{}"))
         .await
@@ -741,10 +666,6 @@ async fn router_cancel_with_query_param_returns_200() {
 
     assert_eq!(response.status(), StatusCode::OK);
 }
-
-// ---------------------------------------------------------------------------
-// handlers/mod.rs — uncovered branches
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn jsonrpc_invalid_version_returns_invalid_request_error() {
@@ -819,7 +740,6 @@ async fn jsonrpc_tasks_resubscribe_with_metadata_last_event_id() {
     let client = A2aClient::new(super::test_config(), super::test_agent_id(), nats, js);
     let app = router::build(client);
 
-    // Use metadata.lastEventId form (older client convention)
     let response = app
         .oneshot(
             Request::builder()
@@ -854,7 +774,6 @@ async fn jsonrpc_tasks_resubscribe_bad_task_id_returns_invalid_params() {
                 .uri("/")
                 .header(CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    // Empty id string should fail A2aTaskId::new validation
                     r#"{"jsonrpc":"2.0","id":12,"method":"tasks/resubscribe","params":{"id":""}}"#,
                 ))
                 .unwrap(),
@@ -1453,7 +1372,6 @@ async fn jsonrpc_push_set_error_returns_jsonrpc_error_result() {
     assert_eq!(body["error"]["code"], -32003);
 }
 
-// Ensure handlers::agent_card (the .well-known handler) also covers its error branch
 #[tokio::test]
 async fn well_known_agent_card_error_returns_proper_status() {
     let nats = AdvancedMockNatsClient::new();
