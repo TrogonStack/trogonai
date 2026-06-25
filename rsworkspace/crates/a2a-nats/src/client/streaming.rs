@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use a2a::types::SendMessageResponse;
 use serde::Serialize;
-use serde::de::Error as _;
 use tokio::time::timeout;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
@@ -57,7 +56,7 @@ where
         gateway_caller_jwt,
     } = ctx;
     let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
-        .map_err(|e| ClientError::Serialize(serde_json::Error::custom(format!("{e}"))))?;
+        .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
 
     let event_stream = open_task_stream(js, prefix, req_id).await?;
 
@@ -79,7 +78,7 @@ where
 
     let response_headers = msg.headers.unwrap_or_default();
     match decode_client_response::<SendMessageResponse>(&response_headers, &msg.payload)
-        .map_err(|e| ClientError::Deserialize(serde_json::Error::custom(format!("{e}"))))?
+        .map_err(|e| ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?
     {
         Ok(result) => Ok((result, event_stream)),
         Err((code, message)) => Err(ClientError::from_jsonrpc_code(code, message)),

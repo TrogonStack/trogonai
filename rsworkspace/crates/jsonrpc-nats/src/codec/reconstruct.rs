@@ -2,7 +2,6 @@ use crate::constants::JSONRPC_VERSION;
 use crate::error::CodecError;
 use crate::id::{RequestId, ResponseId};
 use crate::message::Message;
-use serde::de::Error as _;
 use serde_json::{Map, Value};
 
 /// Reconstruct canonical JSON-RPC 2.0 from a codec message (for protocol edges).
@@ -53,14 +52,16 @@ pub fn to_json_value(message: &Message) -> Value {
 
 /// Parse a canonical JSON-RPC 2.0 value into a codec message.
 pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
-    let obj = value
-        .as_object()
-        .ok_or_else(|| CodecError::Deserialize(serde_json::Error::custom("expected JSON-RPC object")))?;
+    let obj = value.as_object().ok_or_else(|| {
+        CodecError::Deserialize(<serde_json::Error as serde::de::Error>::custom(
+            "expected JSON-RPC object",
+        ))
+    })?;
 
     if obj.get("jsonrpc").and_then(Value::as_str) != Some(JSONRPC_VERSION) {
-        return Err(CodecError::Deserialize(serde_json::Error::custom(
-            "unsupported jsonrpc version",
-        )));
+        return Err(CodecError::Deserialize(
+            <serde_json::Error as serde::de::Error>::custom("unsupported jsonrpc version"),
+        ));
     }
 
     if let Some(method) = obj.get("method").and_then(Value::as_str) {
@@ -90,11 +91,9 @@ pub fn from_json_value(value: &Value) -> Result<Message, CodecError> {
     };
 
     if let Some(error) = obj.get("error") {
-        let code = error
-            .get("code")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| CodecError::Deserialize(serde_json::Error::custom("error missing code")))?
-            as i32;
+        let code = error.get("code").and_then(Value::as_i64).ok_or_else(|| {
+            CodecError::Deserialize(<serde_json::Error as serde::de::Error>::custom("error missing code"))
+        })? as i32;
         let message = error
             .get("message")
             .and_then(Value::as_str)

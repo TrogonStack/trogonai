@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use serde::de::Error as _;
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_nats::RequestClient;
 
@@ -28,7 +27,7 @@ where
     Res: DeserializeOwned,
 {
     let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
-        .map_err(|e| ClientError::Serialize(serde_json::Error::custom(format!("{e}"))))?;
+        .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
 
     let headers = match gateway_caller_jwt {
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
@@ -56,7 +55,7 @@ where
 fn map_wire_error(error: crate::wire::WireError) -> ClientError {
     match error {
         crate::wire::WireError::Deserialize(e) => ClientError::Deserialize(e),
-        other => ClientError::Deserialize(serde_json::Error::custom(format!("{other}"))),
+        other => ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{other}"))),
     }
 }
 
