@@ -49,6 +49,14 @@ fn header_values_cover_conversions_display_and_refs() {
 }
 
 #[test]
+fn new_is_empty_and_equivalent_to_empty() {
+    let headers = Headers::new();
+
+    assert_eq!(headers, Headers::empty());
+    assert!(headers.is_empty());
+}
+
+#[test]
 fn headers_preserve_deterministic_order_and_replace_values() {
     let mut headers = Headers::empty();
 

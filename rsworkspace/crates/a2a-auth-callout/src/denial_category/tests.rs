@@ -96,3 +96,31 @@ fn credential_invalid_request_maps_to_invalid_request() {
         DenialCategory::InvalidRequest
     );
 }
+
+#[test]
+fn key_load_variants_map_to_internal_error() {
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::MissingEnvVar("SIGNING_KEY")),
+        DenialCategory::InternalError
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::UnknownSigningKeySource("vault".into())),
+        DenialCategory::InternalError
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::VaultNotConfigured),
+        DenialCategory::InternalError
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::KeyLoadIo {
+            path: std::path::PathBuf::from("/etc/key"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+        }),
+        DenialCategory::InternalError
+    );
+    let utf8_err = String::from_utf8(vec![0x80, 0x80]).unwrap_err().utf8_error();
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::KeyLoadUtf8(utf8_err)),
+        DenialCategory::InternalError
+    );
+}

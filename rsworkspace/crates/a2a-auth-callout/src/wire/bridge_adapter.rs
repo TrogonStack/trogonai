@@ -114,3 +114,6 @@ impl ServerAuthRequestClaims {
         Ok(Self::from_decoded(inner, nats_json))
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, Jwk, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType,
+    AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, KeyOperations,
+    PublicKeyUse, RSAKeyParameters, RSAKeyType,
 };
 use rand::rngs::OsRng;
 use rsa::RsaPrivateKey;
@@ -291,4 +292,117 @@ fn same_origin_normalizes_default_ports() {
         "http://idp.example.com/jwks",
         "https://idp.example.com"
     ));
+}
+
+#[test]
+fn oidc_issuer_url_strips_trailing_slashes_and_rejects_empty() {
+    let url = OidcIssuerUrl::parse("https://idp.example.com///").unwrap();
+    assert_eq!(url.as_str(), "https://idp.example.com");
+
+    let err = OidcIssuerUrl::parse("///").unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+    ));
+
+    let err_empty = OidcIssuerUrl::parse("").unwrap_err();
+    assert!(matches!(
+        err_empty,
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+    ));
+}
+
+#[test]
+fn oidc_client_id_as_str_returns_value() {
+    let id = OidcClientId::new("my-client").unwrap();
+    assert_eq!(id.as_str(), "my-client");
+}
+
+#[test]
+fn same_origin_returns_false_when_candidate_has_no_scheme() {
+    // No "://" separator → url_origin returns None → same_origin returns false.
+    assert!(!super::same_origin("no-scheme", "https://idp.example.com"));
+}
+
+#[test]
+fn same_origin_returns_false_when_expected_has_no_scheme() {
+    assert!(!super::same_origin("https://idp.example.com/jwks", "no-scheme"));
+}
+
+#[test]
+fn same_origin_returns_false_for_empty_host() {
+    // scheme://... with no host component → url_origin returns None.
+    assert!(!super::same_origin("https:///path", "https://idp.example.com"));
+}
+
+#[tokio::test]
+async fn verify_fails_with_non_rsa_jwk() {
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let ec_jwk = Jwk {
+        common: CommonParameters {
+            key_id: Some("ec-kid".into()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+            curve: jsonwebtoken::jwk::EllipticCurve::P256,
+            x: "dummyx".into(),
+            y: "dummyy".into(),
+        }),
+    };
+    let jwks = JwkSet { keys: vec![ec_jwk] };
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
+
+    // Craft a fake JWT whose kid matches the EC JWK; decode_header will succeed
+    // but decoding_key_for_jwk must reject the non-RSA key.
+    // We can't sign with the EC key easily, but we can make a header-only token
+    // that references the EC kid.  decode_header just parses the header.
+    let header_b64 =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","kid":"ec-kid","typ":"JWT"}"#);
+    let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
+    let fake_token = format!("{header_b64}.{payload_b64}.sig");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+    ));
+}
+
+#[tokio::test]
+async fn oidc_verifier_trait_delegates_to_verify_internal() {
+    // Exercise the OidcVerifier::verify blanket impl on JwksOidcVerifier.
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let verifier: &dyn OidcVerifier =
+        &JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
+    #[derive(Serialize)]
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let id = IdClaims {
+        sub: "user-1".into(),
+        iss: issuer.as_str().to_owned(),
+        aud: "a2a-client".into(),
+        exp: now + 600,
+    };
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+    header.kid = Some("test-kid".into());
+    let token = jsonwebtoken::encode(&header, &id, &enc).expect("encode");
+    let claims = verifier
+        .verify(&BearerToken::new(token), &AudienceAccount::new("nats-acct"))
+        .await
+        .expect("verify via trait");
+    assert_eq!(claims.sub.as_str(), "user-1");
 }

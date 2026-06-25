@@ -51,3 +51,32 @@ fn with_extension_appends() {
     let cfg = SpecNegotiationConfig::default().with_extension("https://example.com/ext/x");
     assert!(cfg.supported_extensions.contains("https://example.com/ext/x"));
 }
+
+#[test]
+fn parses_bare_question_mark_as_none() {
+    assert!(RequestedExtension::parse("?").is_none());
+}
+
+#[test]
+fn parses_semicolon_with_empty_uri_as_none() {
+    assert!(RequestedExtension::parse(";q=0").is_none());
+}
+
+#[test]
+fn parses_q_zero_point_zero_as_optional() {
+    let ext = RequestedExtension::parse("https://example.com/ext/foo;q=0.0").unwrap();
+    assert!(!ext.required);
+    assert_eq!(ext.uri, "https://example.com/ext/foo");
+}
+
+#[test]
+fn parses_optional_keyword_as_optional() {
+    let ext = RequestedExtension::parse("https://example.com/ext/bar;optional").unwrap();
+    assert!(!ext.required);
+}
+
+#[test]
+fn default_config_wraps_default_version() {
+    let config = default_config();
+    assert!(config.supported_versions.contains(DEFAULT_A2A_VERSION));
+}

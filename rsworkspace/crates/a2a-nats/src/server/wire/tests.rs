@@ -68,3 +68,34 @@ fn malformed_body_still_allows_id_recovery_from_headers() {
     let err = decode_request_params::<serde_json::Value>("tasks/get", &headers, b"{");
     assert!(err.is_err());
 }
+
+#[test]
+fn encode_success_reply_with_no_id_header_produces_null_id() {
+    let headers = HeaderMap::new();
+    let encoded = encode_success_reply(&headers, &serde_json::json!({"result": true})).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
+    assert_eq!(body["result"], true);
+}
+
+#[test]
+fn encode_error_reply_with_no_id_header_produces_null_id() {
+    let headers = HeaderMap::new();
+    let encoded = encode_error_reply(&headers, -32600, "invalid request", None).unwrap();
+    assert_eq!(
+        encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).unwrap().as_str(),
+        "-32600"
+    );
+}
+
+#[test]
+fn request_id_returns_none_when_header_absent() {
+    let headers = HeaderMap::new();
+    assert_eq!(request_id(&headers), None);
+}
+
+#[test]
+fn request_id_returns_some_when_header_present() {
+    let mut headers = HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "5");
+    assert_eq!(request_id(&headers), Some(JsonRpcId::Number(5)));
+}

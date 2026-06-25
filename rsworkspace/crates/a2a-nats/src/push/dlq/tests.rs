@@ -311,3 +311,31 @@ async fn publish_path_swallows_ack_failure_without_panicking() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn publish_uses_empty_push_config_id_when_missing() {
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let prefix = prefix();
+    let task_id = A2aTaskId::new("task-no-config-id").unwrap();
+    let mut config = sample_config();
+    config.id = None;
+    let err = DispatchError::InvalidTarget(PushNotificationTargetError::UnknownScheme { raw: "bad".into() });
+
+    publish_push_delivery_failure(
+        &js,
+        &prefix,
+        &CallerId::default(),
+        &task_id,
+        &config,
+        br#"{}"#,
+        &err,
+        StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
+        &dedup,
+    )
+    .await;
+
+    let payload = &js.publishes.lock().unwrap()[0].2;
+    let body: serde_json::Value = serde_json::from_slice(payload).unwrap();
+    assert_eq!(body["push_config_id"], "");
+}

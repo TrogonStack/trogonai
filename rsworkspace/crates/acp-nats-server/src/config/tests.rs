@@ -90,6 +90,21 @@ fn test_new_server_env_vars_override_defaults() {
 }
 
 #[test]
+fn test_invalid_acp_prefix_maps_to_server_config_error() {
+    let env = InMemoryEnv::new();
+    let args = Args {
+        acp_prefix: Some("acp.*".into()),
+        host: None,
+        port: None,
+    };
+    let err = config_from_args(args, &env)
+        .err()
+        .expect("invalid ACP prefix should fail");
+    assert!(matches!(err, ServerConfigError::InvalidAcpPrefix(_)));
+    assert!(!err.to_string().is_empty());
+}
+
+#[test]
 fn test_invalid_new_server_env_var_fails() {
     let env = InMemoryEnv::new();
     env.set("ACP_SERVER_PORT", "abc");

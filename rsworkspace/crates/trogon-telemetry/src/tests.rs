@@ -111,3 +111,21 @@ fn meter_returns_named_meter() {
     counter.add(1, &[]);
     assert!(!format!("{:?}", m).is_empty());
 }
+
+#[test]
+fn shutdown_otel_succeeds_when_providers_not_initialized() {
+    assert!(shutdown_otel().is_ok());
+}
+
+#[test]
+fn telemetry_shutdown_error_includes_logger_failure() {
+    let error = TelemetryShutdownError {
+        errors: vec![TelemetryProviderShutdownError::Logger {
+            source: anyhow::anyhow!("logger failed"),
+        }],
+    };
+    assert!(matches!(
+        error.errors.as_slice(),
+        [TelemetryProviderShutdownError::Logger { .. }]
+    ));
+}

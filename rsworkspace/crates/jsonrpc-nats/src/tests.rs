@@ -1,9 +1,12 @@
 mod prop_tests;
 
 use super::*;
+use crate::constants::{HEADER_ERROR_CODE, HEADER_ID};
 use crate::direction::Direction;
 use crate::error::CodecError;
+use crate::id::encode_id_literal;
 use crate::{decode, encode, from_json_value};
+use async_nats::header::HeaderMap;
 
 #[test]
 fn from_json_value_rejects_mismatched_version() {
@@ -106,4 +109,61 @@ fn round_trip_via_json_value() {
     let message = from_json_value(&original).unwrap();
     let roundtrip = to_json_value(&message);
     assert_eq!(roundtrip, original);
+}
+
+#[test]
+fn decode_request_with_id_and_empty_body_has_null_params() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ID, encode_id_literal(&RequestId::Number(1)));
+    let msg = decode(Direction::Request, Some("ping"), &headers, &[]).unwrap();
+    assert!(matches!(msg, Message::Request { params, .. } if params.is_null()));
+}
+
+#[test]
+fn decode_request_without_id_but_error_code_is_ambiguous() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ERROR_CODE, "1");
+    let err = decode(Direction::Request, Some("ping"), &headers, &[]).unwrap_err();
+    assert!(matches!(err, CodecError::AmbiguousResponse));
+}
+
+#[test]
+fn decode_request_without_id_and_empty_body_is_notification() {
+    let headers = HeaderMap::new();
+    let msg = decode(Direction::Request, Some("notify"), &headers, &[]).unwrap();
+    assert!(matches!(msg, Message::Notification { params, .. } if params.is_null()));
+}
+
+#[test]
+fn decode_response_error_with_empty_body_has_empty_message() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ERROR_CODE, "42");
+    let msg = decode(Direction::Response, None, &headers, &[]).unwrap();
+    assert!(matches!(msg, Message::Error { message, data, .. } if message.is_empty() && data.is_none()));
+}
+
+#[test]
+fn decode_response_error_body_must_be_object() {
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ERROR_CODE, "42");
+    let err = decode(Direction::Response, None, &headers, b"\"scalar\"").unwrap_err();
+    assert!(matches!(err, CodecError::Deserialize(_)));
+}
+
+#[test]
+fn from_json_value_rejects_request_with_null_id() {
+    let value = serde_json::json!({ "jsonrpc": "2.0", "method": "ping", "id": null, "params": {} });
+    assert!(matches!(from_json_value(&value), Err(CodecError::RequestWithoutId)));
+}
+
+#[test]
+fn from_json_value_parses_request_with_id() {
+    let value = serde_json::json!({ "jsonrpc": "2.0", "method": "ping", "id": 7, "params": { "a": 1 } });
+    assert!(matches!(from_json_value(&value).unwrap(), Message::Request { method, .. } if method == "ping"));
+}
+
+#[test]
+fn from_json_value_rejects_error_without_code() {
+    let value = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "error": { "message": "boom" } });
+    assert!(matches!(from_json_value(&value), Err(CodecError::Deserialize(_))));
 }

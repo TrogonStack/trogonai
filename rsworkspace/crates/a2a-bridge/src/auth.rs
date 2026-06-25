@@ -160,3 +160,6 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
         BridgeUserJwt::new(response.user_jwt)
     }
 }
+
+#[cfg(test)]
+mod tests;

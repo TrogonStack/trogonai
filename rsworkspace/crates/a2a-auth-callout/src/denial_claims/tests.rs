@@ -72,3 +72,38 @@ fn denial_jwt_rejects_wrong_signing_key() {
     );
     assert!(err.is_err());
 }
+
+#[test]
+fn callout_issuer_rejects_empty() {
+    assert_eq!(CalloutIssuer::new("").unwrap_err(), CalloutIssuerError::Empty);
+}
+
+#[test]
+fn server_audience_rejects_empty() {
+    assert_eq!(ServerAudience::new("").unwrap_err(), ServerAudienceError::Empty);
+}
+
+#[test]
+fn user_nkey_subject_rejects_empty() {
+    assert_eq!(UserNkeySubject::new("").unwrap_err(), UserNkeySubjectError::Empty);
+}
+
+#[test]
+fn denial_claims_error_converts_to_internal_auth_error() {
+    let err: AuthCalloutError = DenialClaimsError::IssuedAtOutOfRange.into();
+    assert!(matches!(err, AuthCalloutError::Internal(message) if message.contains("issued-at")));
+}
+
+#[test]
+fn mint_rejects_time_before_unix_epoch() {
+    let signing_key = SigningKey::from_secret(b"denial-test-secret--------------");
+    let claims = sample_claims();
+    let err = claims
+        .mint(
+            &signing_key,
+            UNIX_EPOCH - Duration::from_secs(1),
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+    assert!(matches!(err, DenialClaimsError::SystemTime(_)));
+}

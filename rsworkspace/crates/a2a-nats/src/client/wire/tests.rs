@@ -79,3 +79,9 @@ fn merge_headers_overlays_jsonrpc_fields() {
     assert_eq!(merged.get("X-Req-Id").unwrap().as_str(), "transport");
     assert!(merged.get(jsonrpc_nats::HEADER_ID).is_some());
 }
+
+#[test]
+fn encode_client_request_rejects_null_id() {
+    let err = encode_client_request("tasks/get", JsonRpcId::Null, &DummyParams { value: "x".into() }).unwrap_err();
+    assert!(matches!(err, WireError::Codec(_)));
+}

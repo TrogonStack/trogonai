@@ -1,5 +1,6 @@
 use super::*;
 use crate::error::CredentialError;
+use crate::jwt::JwtError;
 
 fn make_registry() -> ApiKeyRegistry {
     ApiKeyRegistry::new(b"test-hmac-secret".to_vec())
@@ -66,6 +67,15 @@ fn apikey_rejects_empty() {
     let err = ApiKey::new("").unwrap_err();
     assert!(matches!(err, ApiKeyError::Empty));
     assert_eq!(err.to_string(), "API key must not be empty");
+}
+
+#[test]
+fn caller_id_derivation_failure_maps_to_invalid_credentials() {
+    let err: AuthCalloutError = ApiKeyError::CallerIdDerivation(JwtError::InvalidCallerId).into();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(message)) = err else {
+        panic!("expected InvalidCredentials");
+    };
+    assert!(message.contains("caller_id derivation failed"));
 }
 
 #[test]
