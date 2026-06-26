@@ -1,0 +1,27 @@
+[package]
+name = "a2a-gateway"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "A2A gateway service: ingress on {prefix}.gateway.> with policy-driven forwarding"
+publish = false
+
+[lib]
+name = "a2a_gateway"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-nats = { workspace = true }
+async-nats = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+nkeys = { workspace = true }
+serde_json = { workspace = true }
