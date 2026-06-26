@@ -20,7 +20,7 @@ base64 = { workspace = true }
 # crate's parser only models cleanly from jsonwebtoken 10.x; keep the
 # version pin local to this crate so main's other jsonwebtoken 9.3
 # consumers (auth-callout, etc.) are not forced to upgrade in lockstep.
-jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
