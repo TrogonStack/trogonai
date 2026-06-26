@@ -152,9 +152,33 @@ async fn mirror_publish_adds_header_and_retries() {
     assert_eq!(published.len(), 1);
     assert_eq!(published[0].0, "a2a.push.dlq.mirror.alice.task-1");
     assert!(published[0].1.get(PUSH_DLQ_MIRROR_HEADER).is_some());
+    // Mirror Nats-Msg-Id MUST be prefixed so JetStream doesn't dedup the
+    // mirror against the authoritative envelope within its duplicate_window
+    // (both land on the same A2A_PUSH_DLQ stream).
     assert_eq!(
         published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str(),
-        "task-1:failed:https://example.com/hook"
+        "mirror:task-1:failed:https://example.com/hook"
+    );
+}
+
+#[tokio::test]
+async fn mirror_msg_id_is_prefixed_to_avoid_jetstream_dedup_collision() {
+    // Regression: the previous version reused the authoritative envelope's
+    // idempotency_key as Nats-Msg-Id. Both publishes land on A2A_PUSH_DLQ
+    // which dedupes by Nats-Msg-Id, so the mirror was silently dropped.
+    let js = RecordingPublisher::default();
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let payload = br#"{"idempotency_key":"task-collide:failed"}"#;
+    mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-collide", None, payload, &dedup).await;
+    let published = js.publishes.lock().unwrap();
+    let msg_id = published[0].1.get(NATS_MSG_ID_HEADER).unwrap().as_str();
+    assert!(
+        msg_id.starts_with(MIRROR_MSG_ID_PREFIX),
+        "expected mirror prefix, got {msg_id}"
+    );
+    assert_ne!(
+        msg_id, "task-collide:failed",
+        "mirror msg-id must NOT equal authoritative key"
     );
 }
 
