@@ -5,11 +5,71 @@
 //! `config_from_args` is the single seam tests and the binary share so the
 //! same env-resolution path is exercised under both.
 
+use std::fmt;
+
 use a2a_nats::{A2aPrefix, A2aPrefixError, NatsConfig};
 use clap::Parser;
 use trogon_std::env::ReadEnv;
 
 const ENV_GATEWAY_QUEUE_GROUP: &str = "A2A_GATEWAY_QUEUE_GROUP";
+
+/// Validated NATS server URL. Carrying the validation in the type stops
+/// later layers (connect, audit) from inheriting empty/whitespace
+/// primitives that look usable until the first network call fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NatsServerUrl(String);
+
+impl NatsServerUrl {
+    pub fn new(raw: impl Into<String>) -> Result<Self, NatsServerUrlError> {
+        let value = raw.into();
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(NatsServerUrlError::Empty);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for NatsServerUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NatsServerUrlError {
+    #[error("NATS server URL must not be empty")]
+    Empty,
+}
+
+/// Validated NATS queue group name. Non-empty, trimmed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueGroup(String);
+
+impl QueueGroup {
+    pub fn new(raw: impl Into<String>) -> Result<Self, QueueGroupError> {
+        let value = raw.into();
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(QueueGroupError::Empty);
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum QueueGroupError {
+    #[error("queue group must not be empty")]
+    Empty,
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "a2a-gateway")]
@@ -30,12 +90,13 @@ pub struct Args {
 
 /// Resolved gateway configuration. Pairs with [`NatsConfig`] returned from
 /// [`config_from_args`] — `NatsConfig` carries the wire-level NATS knobs and
-/// `Config` carries gateway-specific values.
+/// `Config` carries gateway-specific values. Every field is a validated
+/// value object so later layers can't inherit invalid primitives.
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub nats_servers: Vec<String>,
+    pub nats_servers: Vec<NatsServerUrl>,
     pub a2a_prefix: A2aPrefix,
-    pub queue_group: Option<String>,
+    pub queue_group: Option<QueueGroup>,
 }
 
 impl Config {
@@ -53,18 +114,39 @@ pub enum ConfigError {
     /// is rejected.
     #[error("invalid A2A prefix")]
     InvalidPrefix(#[source] A2aPrefixError),
+    /// `--nats-url` / `NATS_URL` parsed to zero usable servers. Refuse
+    /// rather than return a config that defers the failure to the first
+    /// connect attempt.
+    #[error("--nats-url / NATS_URL must list at least one server, got {raw:?}")]
+    EmptyNatsServers { raw: String },
+    /// One of the comma-separated `--nats-url` entries did not validate as
+    /// a NATS server URL.
+    #[error("invalid NATS server URL")]
+    InvalidNatsServerUrl(#[source] NatsServerUrlError),
+    /// `--queue-group` / `A2A_GATEWAY_QUEUE_GROUP` was present but empty
+    /// after trimming.
+    #[error("invalid queue group")]
+    InvalidQueueGroup(#[source] QueueGroupError),
 }
 
 pub fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(Config, NatsConfig), ConfigError> {
     let a2a_prefix = A2aPrefix::new(args.prefix).map_err(ConfigError::InvalidPrefix)?;
 
+    let nats_servers = parse_servers(&args.nats_url)?;
     let mut nats_config = NatsConfig::from_env(env);
-    nats_config.servers = parse_servers(&args.nats_url);
+    nats_config.servers = nats_servers.iter().map(|s| s.as_str().to_owned()).collect();
 
-    let queue_group = args.queue_group.or_else(|| env.var(ENV_GATEWAY_QUEUE_GROUP).ok());
+    // Resolve queue group from CLI first, then env. Validate the chosen
+    // value through QueueGroup so an empty env value is rejected the same
+    // way an empty CLI value would be.
+    let queue_group_raw = args.queue_group.or_else(|| env.var(ENV_GATEWAY_QUEUE_GROUP).ok());
+    let queue_group = match queue_group_raw {
+        Some(raw) => Some(QueueGroup::new(raw).map_err(ConfigError::InvalidQueueGroup)?),
+        None => None,
+    };
 
     let config = Config {
-        nats_servers: nats_config.servers.clone(),
+        nats_servers,
         a2a_prefix,
         queue_group,
     };
@@ -72,12 +154,18 @@ pub fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(Config, Nats
     Ok((config, nats_config))
 }
 
-fn parse_servers(raw: &str) -> Vec<String> {
-    raw.split(',')
+fn parse_servers(raw: &str) -> Result<Vec<NatsServerUrl>, ConfigError> {
+    let servers: Vec<NatsServerUrl> = raw
+        .split(',')
         .map(str::trim)
         .filter(|server| !server.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
+        .map(NatsServerUrl::new)
+        .collect::<Result<_, _>>()
+        .map_err(ConfigError::InvalidNatsServerUrl)?;
+    if servers.is_empty() {
+        return Err(ConfigError::EmptyNatsServers { raw: raw.to_owned() });
+    }
+    Ok(servers)
 }
 
 #[cfg(test)]
