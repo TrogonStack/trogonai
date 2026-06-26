@@ -8,6 +8,7 @@
 //! the dispatch glue so it can be unit-tested in isolation.
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use trogon_aauth_verify::challenge::ResourceChallenge;
 use trogon_aauth_verify::nats_pop::{NatsHeaders, NatsPopError, NatsRequest};
@@ -284,7 +285,6 @@ impl AAuthDeny {
 }
 
 fn uuid_like() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
