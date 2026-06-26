@@ -16,8 +16,6 @@ use trogon_std::env::ReadEnv;
 // Pump-only imports — gated so `cfg(coverage)` doesn't warn on unused
 // imports when the pull-consumer loop stubs out.
 #[cfg(not(coverage))]
-use std::sync::Arc;
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::consumers::gateway_events_consumer;
 #[cfg(not(coverage))]
 use a2a_nats::jetstream::streams::events_stream_name;
@@ -27,6 +25,8 @@ use async_nats::jetstream::{self, AckKind};
 use bytes::Bytes;
 #[cfg(not(coverage))]
 use futures::StreamExt;
+#[cfg(not(coverage))]
+use std::sync::Arc;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
 
