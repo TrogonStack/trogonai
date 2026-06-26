@@ -449,7 +449,10 @@ async fn run_fetch_cycle(
             continue;
         };
 
-        let attempt = 1u32;
+        // JetStream tracks per-message delivery attempts; carry that count
+        // into the planner so persistently undeliverable events get Term'd
+        // after the configured retry budget instead of NAK-looping forever.
+        let attempt = u32::try_from(message.info().map(|i| i.delivered).unwrap_or(1)).unwrap_or(u32::MAX);
         let forward_result = forward_task_event(client, prefix, &req_id, &message.payload).await;
         match planner.forward_disposition(attempt, forward_result.err().as_deref()) {
             EgressAckDisposition::Ack => {

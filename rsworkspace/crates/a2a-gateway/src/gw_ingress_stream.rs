@@ -14,10 +14,6 @@ use trogon_std::env::ReadEnv;
 // Pump-only imports — gated so `cfg(coverage)` doesn't warn on unused
 // imports when the pump stubs out.
 #[cfg(not(coverage))]
-use std::sync::Arc;
-#[cfg(not(coverage))]
-use std::time::Duration;
-#[cfg(not(coverage))]
 use a2a_nats::jetstream::consumers::{gateway_stream_events_consumer, resubscribe_consumer_with_flow};
 #[cfg(not(coverage))]
 use a2a_nats::jetstream::streams::events_stream_name;
@@ -34,10 +30,6 @@ pub const ENV_GATEWAY_STREAMING_MAX_INFLIGHT: &str = "A2A_GATEWAY_STREAMING_MAX_
 
 pub const DEFAULT_STREAMING_MAX_ACK_PENDING: i64 = 32;
 pub const DEFAULT_STREAMING_MAX_INFLIGHT: usize = 32;
-#[cfg(not(coverage))]
-const FETCH_EXPIRES: Duration = Duration::from_secs(30);
-#[cfg(not(coverage))]
-const FETCH_HEARTBEAT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GatewayStreamingIngressConfig {
@@ -86,6 +78,32 @@ pub struct StreamingIngressSpawn {
     pub last_seq: Option<u64>,
     pub reply: async_nats::Subject,
     pub caller_key: String,
+}
+
+/// Shared per-caller inflight cap for all streaming-ingress pumps spawned
+/// against the same gateway. The runtime constructs one instance and hands
+/// it to every `spawn_streaming_ingress_pump` call — otherwise each pump
+/// would build a fresh gate and `max_inflight_per_caller` would never
+/// constrain concurrent pumps for the same `caller_key`.
+#[derive(Clone)]
+pub struct StreamingIngressGate {
+    inner: std::sync::Arc<CallerInflightGate>,
+}
+
+impl StreamingIngressGate {
+    /// Build a gate with the configured per-caller limit. Pass the same
+    /// instance (clone the cheap `Arc`) to every spawned pump.
+    #[must_use]
+    pub fn new(config: GatewayStreamingIngressConfig) -> Self {
+        Self {
+            inner: std::sync::Arc::new(CallerInflightGate::new(config.max_inflight_per_caller)),
+        }
+    }
+
+    #[must_use]
+    fn try_acquire<'a>(&'a self, caller_key: &str) -> Option<CallerInflightPermit<'a>> {
+        self.inner.try_acquire(caller_key)
+    }
 }
 
 // Under `cfg(coverage)` the pump function is stubbed and never touches the
@@ -149,19 +167,24 @@ impl Drop for CallerInflightPermit<'_> {
 }
 
 /// Spawn the streaming-ingress pump on a background task. The pump owns its
-/// JetStream consumer and forwards each event to the caller's `reply` until
-/// shutdown fires or the consumer ends. Gated behind `cfg(not(coverage))`
-/// because the pump binds a real JetStream context.
+/// JetStream consumer and forwards events to the caller's `reply` until
+/// shutdown fires or the consumer ends.
+///
+/// `gate` MUST be the shared `StreamingIngressGate` the runtime built once
+/// at boot — passing a fresh gate per spawn would disable
+/// `max_inflight_per_caller`. Gated behind `cfg(not(coverage))` because the
+/// pump binds a real JetStream context.
 #[cfg(not(coverage))]
 pub fn spawn_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
+    gate: StreamingIngressGate,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
 ) {
     tokio::spawn(async move {
-        run_streaming_ingress_pump(client, prefix, config, spawn, shutdown).await;
+        run_streaming_ingress_pump(client, prefix, config, gate, spawn, shutdown).await;
     });
 }
 
@@ -170,6 +193,7 @@ pub fn spawn_streaming_ingress_pump(
     _client: async_nats::Client,
     _prefix: A2aPrefix,
     _config: GatewayStreamingIngressConfig,
+    _gate: StreamingIngressGate,
     _spawn: StreamingIngressSpawn,
     _shutdown: CancellationToken,
 ) {
@@ -180,11 +204,15 @@ async fn run_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
     config: GatewayStreamingIngressConfig,
+    gate: StreamingIngressGate,
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
 ) {
-    let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller));
-    let Some(_permit) = inflight_gate.try_acquire(&spawn.caller_key) else {
+    // Hold a permit from the SHARED gate for the pump's whole lifetime so
+    // `max_inflight_per_caller` actually constrains concurrent pumps for
+    // the same caller. A per-pump gate would let a single caller open
+    // unlimited concurrent streams.
+    let Some(_permit) = gate.try_acquire(&spawn.caller_key) else {
         warn!(
             caller = %spawn.caller_key,
             method = ?spawn.method,
@@ -235,17 +263,15 @@ async fn run_streaming_ingress_pump(
         }
     };
 
-    let mut messages = match consumer
-        .fetch()
-        .max_messages(1)
-        .expires(FETCH_EXPIRES)
-        .heartbeat(FETCH_HEARTBEAT)
-        .messages()
-        .await
-    {
+    // `consumer.fetch().max_messages(1).messages()` would yield ONE batch
+    // and then close — the pump exited after a single event. Use the
+    // continuous `messages()` stream so the pump keeps pulling until the
+    // shutdown token fires or the consumer ends. The expiry/heartbeat hints
+    // are passed at consumer creation rather than here.
+    let mut messages = match consumer.messages().await {
         Ok(messages) => messages,
         Err(error) => {
-            warn!(error = %error, "gateway streaming ingress fetch setup failed");
+            warn!(error = %error, "gateway streaming ingress messages stream unavailable");
             return;
         }
     };
