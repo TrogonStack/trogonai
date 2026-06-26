@@ -66,6 +66,7 @@ version = "0.1.0"
 dependencies = [
  "a2a-auth-callout",
  "a2a-nats",
+ "a2a-pack",
  "async-nats",
  "base64 0.22.1",
  "clap",
