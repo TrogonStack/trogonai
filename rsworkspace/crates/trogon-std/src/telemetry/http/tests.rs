@@ -1,4 +1,5 @@
 use super::*;
+use trogon_semconv::attribute;
 use tower::ServiceExt;
 
 fn value_for<'a>(attributes: &'a [KeyValue], key: &str) -> Option<&'a opentelemetry::Value> {
@@ -43,39 +44,39 @@ fn server_request_attributes_follow_http_semantic_conventions() {
     let attributes = server_request_attributes(&request);
 
     assert_eq!(
-        value_for(&attributes, semconv::HTTP_REQUEST_METHOD)
+        value_for(&attributes, attribute::HTTP_REQUEST_METHOD)
             .unwrap()
             .as_str()
             .as_ref(),
         "POST"
     );
     assert_eq!(
-        value_for(&attributes, semconv::URL_PATH).unwrap().as_str().as_ref(),
+        value_for(&attributes, attribute::URL_PATH).unwrap().as_str().as_ref(),
         "/github/webhook"
     );
     assert_eq!(
-        value_for(&attributes, semconv::NETWORK_PROTOCOL_VERSION)
+        value_for(&attributes, attribute::NETWORK_PROTOCOL_VERSION)
             .unwrap()
             .as_str()
             .as_ref(),
         "1.1"
     );
     assert_eq!(
-        value_for(&attributes, semconv::USER_AGENT_ORIGINAL)
+        value_for(&attributes, attribute::USER_AGENT_ORIGINAL)
             .unwrap()
             .as_str()
             .as_ref(),
         "curl/8.7.1"
     );
     assert_eq!(
-        value_for(&attributes, semconv::SERVER_ADDRESS)
+        value_for(&attributes, attribute::SERVER_ADDRESS)
             .unwrap()
             .as_str()
             .as_ref(),
         "gateway.test"
     );
     assert_eq!(
-        value_for(&attributes, semconv::SERVER_PORT),
+        value_for(&attributes, attribute::SERVER_PORT),
         Some(&opentelemetry::Value::I64(8443))
     );
 }
@@ -92,26 +93,26 @@ fn server_request_attributes_skip_optional_headers_when_missing() {
     let attributes = server_request_attributes(&request);
 
     assert_eq!(
-        value_for(&attributes, semconv::HTTP_REQUEST_METHOD)
+        value_for(&attributes, attribute::HTTP_REQUEST_METHOD)
             .unwrap()
             .as_str()
             .as_ref(),
         "GET"
     );
     assert_eq!(
-        value_for(&attributes, semconv::URL_PATH).unwrap().as_str().as_ref(),
+        value_for(&attributes, attribute::URL_PATH).unwrap().as_str().as_ref(),
         "/-/liveness"
     );
     assert_eq!(
-        value_for(&attributes, semconv::NETWORK_PROTOCOL_VERSION)
+        value_for(&attributes, attribute::NETWORK_PROTOCOL_VERSION)
             .unwrap()
             .as_str()
             .as_ref(),
         "2"
     );
-    assert!(value_for(&attributes, semconv::USER_AGENT_ORIGINAL).is_none());
-    assert!(value_for(&attributes, semconv::SERVER_ADDRESS).is_none());
-    assert!(value_for(&attributes, semconv::SERVER_PORT).is_none());
+    assert!(value_for(&attributes, attribute::USER_AGENT_ORIGINAL).is_none());
+    assert!(value_for(&attributes, attribute::SERVER_ADDRESS).is_none());
+    assert!(value_for(&attributes, attribute::SERVER_PORT).is_none());
 }
 
 #[test]
@@ -138,7 +139,7 @@ fn server_request_attributes_cover_other_protocol_versions() {
     assert_eq!(
         value_for(
             &server_request_attributes(&http_09_request),
-            semconv::NETWORK_PROTOCOL_VERSION,
+            attribute::NETWORK_PROTOCOL_VERSION,
         )
         .unwrap()
         .as_str()
@@ -148,7 +149,7 @@ fn server_request_attributes_cover_other_protocol_versions() {
     assert_eq!(
         value_for(
             &server_request_attributes(&http_10_request),
-            semconv::NETWORK_PROTOCOL_VERSION,
+            attribute::NETWORK_PROTOCOL_VERSION,
         )
         .unwrap()
         .as_str()
@@ -158,7 +159,7 @@ fn server_request_attributes_cover_other_protocol_versions() {
     assert_eq!(
         value_for(
             &server_request_attributes(&http_3_request),
-            semconv::NETWORK_PROTOCOL_VERSION,
+            attribute::NETWORK_PROTOCOL_VERSION,
         )
         .unwrap()
         .as_str()
@@ -179,13 +180,13 @@ fn server_request_attributes_ignore_invalid_host_header() {
 
     let attributes = server_request_attributes(&request);
 
-    assert!(value_for(&attributes, semconv::SERVER_ADDRESS).is_none());
-    assert!(value_for(&attributes, semconv::SERVER_PORT).is_none());
+    assert!(value_for(&attributes, attribute::SERVER_ADDRESS).is_none());
+    assert!(value_for(&attributes, attribute::SERVER_PORT).is_none());
 }
 
 #[test]
 fn direct_span_attribute_helpers_do_not_panic() {
-    let span = tracing::info_span!("http.server.request.test");
+    let span = tracing::info_span!(trogon_semconv::span::HTTP_SERVER_REQUEST);
     let _guard = span.enter();
     let request = Request::builder()
         .method("GET")
@@ -204,7 +205,7 @@ fn server_response_attributes_follow_http_semantic_conventions() {
     let attributes = server_response_attributes(StatusCode::CREATED);
 
     assert_eq!(
-        value_for(&attributes, semconv::HTTP_RESPONSE_STATUS_CODE),
+        value_for(&attributes, attribute::HTTP_RESPONSE_STATUS_CODE),
         Some(&opentelemetry::Value::I64(201))
     );
 }

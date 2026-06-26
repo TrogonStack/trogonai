@@ -25,7 +25,7 @@ groups:
         stability: development
         brief: Direction of the MCP NATS transport message.
 
-  - id: span.mcp.send
+  - id: span.send
     type: span
     span_kind: internal
     stability: development
@@ -33,7 +33,7 @@ groups:
     attributes:
       - ref: mcp.nats.subject
       - ref: mcp.nats.direction
-  - id: span.mcp.receive
+  - id: span.receive
     type: span
     span_kind: internal
     stability: development

@@ -4,11 +4,12 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
+use trogon_semconv::span::ACP_SESSION_FORK;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.fork",
+    name = ACP_SESSION_FORK,
     skip(bridge, args),
     fields(session_id = %args.session_id, new_session_id = tracing::field::Empty)
 )]

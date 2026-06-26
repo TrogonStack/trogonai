@@ -3,10 +3,11 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{FlushClient, PublishClient, RequestClient, global};
 use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
 use tracing::{Span, info, instrument};
+use trogon_semconv::span::ACP_SESSION_NEW;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.new",
+    name = ACP_SESSION_NEW,
     skip(bridge, args),
     fields(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), session_id = tracing::field::Empty)
 )]

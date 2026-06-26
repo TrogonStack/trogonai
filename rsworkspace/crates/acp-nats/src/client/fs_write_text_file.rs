@@ -5,6 +5,7 @@ use agent_client_protocol::{Client, ErrorCode, WriteTextFileRequest, WriteTextFi
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_FS_WRITE_TEXT_FILE;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FsWriteTextFileError {
@@ -25,7 +26,7 @@ pub fn error_code_and_message(e: &FsWriteTextFileError) -> (ErrorCode, String) {
 }
 
 /// Handles write_text_file: decodes wire request params, calls client, and publishes a wire-encoded reply.
-#[instrument(name = "acp.client.fs.write_text_file", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_FS_WRITE_TEXT_FILE, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

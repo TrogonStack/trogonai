@@ -27,12 +27,13 @@ otel/semconv/
   policies/          # Rego policies (metric + attribute naming)
     trogon_naming.rego
   templates/         # Weaver Forge codegen templates, one subtree per target
-    registry/rust/   # Rust target (weaver.yaml + *.j2)
+    registry/rust/   # Rust target (weaver.yaml + attribute/metric/span *.j2)
 ```
 
 The generated `trogon-semconv` crate under `rsworkspace/crates/trogon-semconv/src/gen/`
-is the initial scheduler seed and is **not** regenerated from this inventory. It
-stays frozen until the migration step; do not edit it by hand.
+holds the Rust bindings emitted from this registry. Runtime telemetry call sites
+import constants from that crate; do not edit `gen/` by hand. When the registry
+changes, run `mise run semconv:generate` and commit the updated output.
 
 ## Commands
 
@@ -61,11 +62,9 @@ Coverage today: `trogon-scheduler`, `acp-nats`, `trogon-nats`, `mcp-nats`,
 `a2a-nats`, `trogon-gateway`, and `trogon-std` (7 metrics, ~55 spans, ~50
 attributes).
 
-Nothing here is wired into the running code. Enforcing a naming convention (such
-as a `trogonai.` root), referencing upstream OTel attributes instead of
-re-declaring them, and migrating call sites onto generated constants are all
-deferred follow-ups. The `trogon-semconv` crate stays the initial seed and is
-not regenerated from this inventory.
+Runtime code uses the generated `trogon-semconv` constants for metric names,
+span names, and attribute keys. Regenerate and commit bindings whenever the
+registry changes so call sites stay aligned.
 
 Some attribute-less spans (all `a2a.server.*`, several `acp.client.*`,
 `twitter.crc`) produce advisory Weaver warnings; `weaver registry check` still

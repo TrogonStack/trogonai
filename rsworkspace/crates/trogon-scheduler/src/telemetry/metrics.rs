@@ -7,6 +7,7 @@
 
 use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
+use trogon_semconv::{attribute, metric};
 
 const METER_NAME: &str = "trogon-scheduler";
 
@@ -25,19 +26,19 @@ impl ProcessorMetrics {
         let meter = global::meter(METER_NAME);
         Self {
             records: meter
-                .u64_counter("scheduler.processor.records")
+                .u64_counter(metric::SCHEDULER_PROCESSOR_RECORDS)
                 .with_description("schedule event records processed, by reconciliation outcome")
                 .build(),
             publishes: meter
-                .u64_counter("scheduler.processor.execution_publishes")
+                .u64_counter(metric::SCHEDULER_PROCESSOR_EXECUTION_PUBLISHES)
                 .with_description("execution schedule messages published")
                 .build(),
             purges: meter
-                .u64_counter("scheduler.processor.execution_purges")
+                .u64_counter(metric::SCHEDULER_PROCESSOR_EXECUTION_PURGES)
                 .with_description("execution schedule subjects purged")
                 .build(),
             redeliveries: meter
-                .u64_counter("scheduler.processor.redeliveries")
+                .u64_counter(metric::SCHEDULER_PROCESSOR_REDELIVERIES)
                 .with_description("schedule event records observed as NATS redeliveries")
                 .build(),
         }
@@ -45,7 +46,7 @@ impl ProcessorMetrics {
 
     /// Records one processed record with its outcome label.
     pub fn record_outcome(&self, outcome: &'static str) {
-        self.records.add(1, &[KeyValue::new("outcome", outcome)]);
+        self.records.add(1, &[KeyValue::new(attribute::OUTCOME, outcome)]);
     }
 
     /// Records one execution schedule publish.

@@ -6,6 +6,7 @@ use async_nats::header::HeaderMap;
 use serde_json::value::RawValue;
 use std::sync::Arc;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_EXT;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExtError {
@@ -23,7 +24,7 @@ pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {
 }
 
 #[instrument(
-    name = "acp.client.ext",
+    name = ACP_CLIENT_EXT,
     skip(headers, payload, client, nats),
     fields(ext_method = %ext_method_name)
 )]

@@ -4,6 +4,7 @@ use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::{Client, ErrorCode, ReleaseTerminalRequest, ReleaseTerminalResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_TERMINAL_RELEASE;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalReleaseError {
@@ -20,7 +21,7 @@ pub fn error_code_and_message(e: &TerminalReleaseError) -> (ErrorCode, String) {
     }
 }
 
-#[instrument(name = "acp.client.terminal.release", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_TERMINAL_RELEASE, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

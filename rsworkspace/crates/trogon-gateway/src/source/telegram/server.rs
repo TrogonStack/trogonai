@@ -12,6 +12,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::TELEGRAM_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
@@ -86,7 +87,7 @@ fn extract_update_type(value: &serde_json::Value) -> Option<&'static str> {
 }
 
 #[instrument(
-    name = "telegram.webhook",
+    name = TELEGRAM_WEBHOOK,
     skip_all,
     fields(
         update_type = tracing::field::Empty,
@@ -127,9 +128,9 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}", state.subject_prefix, update_type);
 
     let span = tracing::Span::current();
-    span.record("update_type", update_type);
-    span.record("update_id", &update_id);
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::UPDATE_TYPE, update_type);
+    span.record(trogon_semconv::attribute::UPDATE_ID, &update_id);
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, update_id.as_str());

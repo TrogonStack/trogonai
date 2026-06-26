@@ -8,10 +8,10 @@ use axum::{
     },
 };
 use opentelemetry::KeyValue;
-use opentelemetry_semantic_conventions::trace as semconv;
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use trogon_semconv::{attribute, span};
 
 pub fn instrument_router<S>(router: Router<S>) -> Router<S>
 where
@@ -21,7 +21,7 @@ where
         TraceLayer::new_for_http()
             .make_span_with(|request: &Request<Body>| {
                 let span = tracing::info_span!(
-                    "http.server.request",
+                    span::HTTP_SERVER_REQUEST,
                     otel.kind = "server",
                     method = %request.method(),
                     path = %request.uri().path()
@@ -39,16 +39,16 @@ where
 
 pub fn server_request_attributes<B>(request: &Request<B>) -> Vec<KeyValue> {
     let mut attributes = vec![
-        KeyValue::new(semconv::HTTP_REQUEST_METHOD, request.method().as_str().to_owned()),
-        KeyValue::new(semconv::URL_PATH, request.uri().path().to_owned()),
+        KeyValue::new(attribute::HTTP_REQUEST_METHOD, request.method().as_str().to_owned()),
+        KeyValue::new(attribute::URL_PATH, request.uri().path().to_owned()),
     ];
 
     if let Some(protocol_version) = protocol_version(request.version()) {
-        attributes.push(KeyValue::new(semconv::NETWORK_PROTOCOL_VERSION, protocol_version));
+        attributes.push(KeyValue::new(attribute::NETWORK_PROTOCOL_VERSION, protocol_version));
     }
 
     if let Some(user_agent) = request.headers().get(USER_AGENT).and_then(|value| value.to_str().ok()) {
-        attributes.push(KeyValue::new(semconv::USER_AGENT_ORIGINAL, user_agent.to_owned()));
+        attributes.push(KeyValue::new(attribute::USER_AGENT_ORIGINAL, user_agent.to_owned()));
     }
 
     if let Some(authority) = request
@@ -57,9 +57,9 @@ pub fn server_request_attributes<B>(request: &Request<B>) -> Vec<KeyValue> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<Authority>().ok())
     {
-        attributes.push(KeyValue::new(semconv::SERVER_ADDRESS, authority.host().to_owned()));
+        attributes.push(KeyValue::new(attribute::SERVER_ADDRESS, authority.host().to_owned()));
         if let Some(port) = authority.port_u16() {
-            attributes.push(KeyValue::new(semconv::SERVER_PORT, i64::from(port)));
+            attributes.push(KeyValue::new(attribute::SERVER_PORT, i64::from(port)));
         }
     }
 
@@ -74,7 +74,7 @@ pub fn set_server_request_span_attributes<B>(span: &Span, request: &Request<B>) 
 
 pub fn server_response_attributes(status: StatusCode) -> [KeyValue; 1] {
     [KeyValue::new(
-        semconv::HTTP_RESPONSE_STATUS_CODE,
+        attribute::HTTP_RESPONSE_STATUS_CODE,
         i64::from(status.as_u16()),
     )]
 }

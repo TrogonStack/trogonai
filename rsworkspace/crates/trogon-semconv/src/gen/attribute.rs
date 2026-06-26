@@ -6,16 +6,319 @@
 //! Each attribute is exposed as its dotted key string. Enumerated attributes
 //! additionally expose a typed value object for their allowed values.
 
-/// Type of the schedule event record being reconciled
-pub const SCHEDULER_EVENT_TYPE: &str = "scheduler.event.type";
+/// ACP NATS subject prefix for the service instance. Resource attribute in acp-nats-server / acp-nats-stdio
+pub const ACP_PREFIX: &str = "acp.prefix";
 
-/// Reconciliation outcome for a processed schedule event record
-pub const SCHEDULER_OUTCOME: &str = "scheduler.outcome";
+/// Standard OTel error.type. Emitted on nats.request / nats.publish failures
+pub const ERROR_TYPE: &str = "error.type";
 
-/// Allowed values for the `scheduler.outcome` attribute
+/// Allowed values for the `error.type` attribute
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum SchedulerOutcome {
+pub enum ErrorType {
+    /// Payload deserialization failed
+    Deserialize,
+    /// Flush operation failed
+    FlushOperation,
+    /// Publish operation failed
+    PublishOperation,
+    /// Request operation failed
+    Request,
+    /// Payload serialization failed
+    Serialize,
+    /// Operation timed out
+    Timeout,
+}
+
+impl ErrorType {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Deserialize => "deserialize",
+            Self::FlushOperation => "flush_operation",
+            Self::PublishOperation => "publish_operation",
+            Self::Request => "request",
+            Self::Serialize => "serialize",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+/// Standard OTel http.request.method. Emitted by http.server.request
+pub const HTTP_REQUEST_METHOD: &str = "http.request.method";
+
+/// Standard OTel http.response.status_code. Emitted by http.server.request
+pub const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
+
+/// Direction of the MCP NATS transport message
+pub const MCP_NATS_DIRECTION: &str = "mcp.nats.direction";
+
+/// Allowed values for the `mcp.nats.direction` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum McpNatsDirection {
+    /// Outbound transport message
+    Send,
+    /// Inbound transport message
+    Receive,
+}
+
+impl McpNatsDirection {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Send => "send",
+            Self::Receive => "receive",
+        }
+    }
+}
+
+/// NATS subject for an MCP transport message
+pub const MCP_NATS_SUBJECT: &str = "mcp.nats.subject";
+
+/// MCP NATS subject prefix for the service instance. Resource attribute in mcp-nats-server / mcp-nats-stdio
+pub const MCP_PREFIX: &str = "mcp.prefix";
+
+/// Standard OTel messaging.destination.name (the NATS subject)
+pub const MESSAGING_DESTINATION_NAME: &str = "messaging.destination.name";
+
+/// Standard OTel messaging.message.body.size, in bytes. Emitted by linear.webhook
+pub const MESSAGING_MESSAGE_BODY_SIZE: &str = "messaging.message.body.size";
+
+/// Standard OTel messaging.operation.name
+pub const MESSAGING_OPERATION_NAME: &str = "messaging.operation.name";
+
+/// Allowed values for the `messaging.operation.name` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MessagingOperationName {
+    /// Request-reply operation
+    Request,
+    /// Fire-and-forget publish operation
+    Publish,
+}
+
+impl MessagingOperationName {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Request => "request",
+            Self::Publish => "publish",
+        }
+    }
+}
+
+/// Standard OTel messaging.operation.type
+pub const MESSAGING_OPERATION_TYPE: &str = "messaging.operation.type";
+
+/// Allowed values for the `messaging.operation.type` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MessagingOperationType {
+    /// Send operation type
+    Send,
+}
+
+impl MessagingOperationType {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Send => "send",
+        }
+    }
+}
+
+/// Standard OTel messaging.system. Emitted by nats.request / nats.publish
+pub const MESSAGING_SYSTEM: &str = "messaging.system";
+
+/// Allowed values for the `messaging.system` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MessagingSystem {
+    /// NATS messaging system
+    Nats,
+}
+
+impl MessagingSystem {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Nats => "nats",
+        }
+    }
+}
+
+/// NATS subject field on trogon-nats claim_check debug log events
+pub const NATS_SUBJECT: &str = "nats.subject";
+
+/// Standard OTel network.protocol.version. Emitted by http.server.request
+pub const NETWORK_PROTOCOL_VERSION: &str = "network.protocol.version";
+
+/// Action carried by the webhook (Sentry, Linear)
+pub const ACTION: &str = "action";
+
+/// Authentication mode used for the NATS connection
+pub const AUTH: &str = "auth";
+
+/// Config option id being set on an ACP session
+pub const CONFIG_ID: &str = "config_id";
+
+/// Working directory for a new ACP session
+pub const CWD: &str = "cwd";
+
+/// GitHub webhook delivery identifier
+pub const DELIVERY: &str = "delivery";
+
+/// Webhook event name (GitHub, GitLab)
+pub const EVENT: &str = "event";
+
+/// Webhook event identifier (Slack, Notion)
+pub const EVENT_ID: &str = "event_id";
+
+/// Event type discriminator. Reused by scheduler reconciliation and several gateway webhook spans with different value spaces
+pub const EVENT_TYPE: &str = "event_type";
+
+/// Extension method name on the acp.client.ext span
+pub const EXT_METHOD: &str = "ext_method";
+
+/// MCP servers configured for a new ACP session
+pub const MCP_SERVERS: &str = "mcp_servers";
+
+/// Operation method. OVERLOADED today: the listed values are the ACP request methods on acp.requests / acp.request.duration; the same `method` key is also emitted with free-form values by acp.ext / acp.ext.notification and with HTTP methods by http.server.request
+pub const METHOD: &str = "method";
+
+/// Allowed values for the `method` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Method {
+    /// ACP initialize request
+    Initialize,
+    /// ACP authenticate request
+    Authenticate,
+    /// ACP new_session request
+    NewSession,
+    /// ACP load_session request
+    LoadSession,
+    /// ACP fork_session request
+    ForkSession,
+    /// ACP close_session request
+    CloseSession,
+    /// ACP resume_session request
+    ResumeSession,
+    /// ACP prompt request
+    Prompt,
+    /// ACP cancel request
+    Cancel,
+    /// ACP list_sessions request
+    ListSessions,
+    /// ACP set_session_model request
+    SetSessionModel,
+    /// ACP set_session_mode request
+    SetSessionMode,
+    /// ACP set_session_config_option request
+    SetSessionConfigOption,
+    /// ACP extension method request
+    ExtMethod,
+    /// ACP extension notification
+    ExtNotification,
+    /// ACP logout request
+    Logout,
+}
+
+impl Method {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Initialize => "initialize",
+            Self::Authenticate => "authenticate",
+            Self::NewSession => "new_session",
+            Self::LoadSession => "load_session",
+            Self::ForkSession => "fork_session",
+            Self::CloseSession => "close_session",
+            Self::ResumeSession => "resume_session",
+            Self::Prompt => "prompt",
+            Self::Cancel => "cancel",
+            Self::ListSessions => "list_sessions",
+            Self::SetSessionModel => "set_session_model",
+            Self::SetSessionMode => "set_session_mode",
+            Self::SetSessionConfigOption => "set_session_config_option",
+            Self::ExtMethod => "ext_method",
+            Self::ExtNotification => "ext_notification",
+            Self::Logout => "logout",
+        }
+    }
+}
+
+/// Authentication method identifier
+pub const METHOD_ID: &str = "method_id";
+
+/// Mode id being set on an ACP session
+pub const MODE_ID: &str = "mode_id";
+
+/// Model id being set on an ACP session
+pub const MODEL_ID: &str = "model_id";
+
+/// Session id of the newly forked ACP session
+pub const NEW_SESSION_ID: &str = "new_session_id";
+
+/// Microsoft Graph notification batch count
+pub const NOTIFICATION_COUNT: &str = "notification_count";
+
+/// ACP operation where an error occurred
+pub const OPERATION: &str = "operation";
+
+/// Allowed values for the `operation` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Operation {
+    /// Prompt operation
+    Prompt,
+    /// Cancel operation
+    Cancel,
+    /// Extension method operation
+    ExtMethod,
+    /// Extension notification operation
+    ExtNotification,
+    /// Session validation
+    SessionValidate,
+    /// Session readiness signal
+    SessionReady,
+    /// Client-directed operation
+    Client,
+    /// Client extension prompt-response operation
+    ClientExtSessionPromptResponse,
+}
+
+impl Operation {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Prompt => "prompt",
+            Self::Cancel => "cancel",
+            Self::ExtMethod => "ext_method",
+            Self::ExtNotification => "ext_notification",
+            Self::SessionValidate => "session_validate",
+            Self::SessionReady => "session_ready",
+            Self::Client => "client",
+            Self::ClientExtSessionPromptResponse => "client.ext.session.prompt_response",
+        }
+    }
+}
+
+/// Reconciliation outcome for a processed schedule event record
+pub const OUTCOME: &str = "outcome";
+
+/// Allowed values for the `outcome` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Outcome {
     /// An execution schedule message was published
     Published,
     /// An execution schedule subject was purged
@@ -36,7 +339,7 @@ pub enum SchedulerOutcome {
     DurableFailure,
 }
 
-impl SchedulerOutcome {
+impl Outcome {
     /// Returns the wire value recorded for this attribute member.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
@@ -54,11 +357,137 @@ impl SchedulerOutcome {
     }
 }
 
+/// Raw request path field emitted alongside the standard url.path
+pub const PATH: &str = "path";
+
+/// Twitter webhook payload kind
+pub const PAYLOAD_KIND: &str = "payload_kind";
+
+/// ACP protocol version negotiated on initialize
+pub const PROTOCOL_VERSION: &str = "protocol_version";
+
+/// Reason code for the ACP error
+pub const REASON: &str = "reason";
+
+/// Allowed values for the `reason` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Reason {
+    /// Session id was invalid
+    InvalidSessionId,
+    /// Method name was invalid
+    InvalidMethodName,
+    /// Publishing the cancel failed
+    CancelPublishFailed,
+    /// Publishing the extension notification failed
+    ExtNotificationPublishFailed,
+    /// Notification stream closed
+    NotificationStreamClosed,
+    /// Notification consumer errored
+    NotificationConsumerError,
+    /// Response payload was malformed
+    BadResponsePayload,
+    /// Response consumer errored
+    ResponseConsumerError,
+    /// Response stream closed
+    ResponseStreamClosed,
+    /// Prompt timed out
+    PromptTimeout,
+    /// Publishing session readiness failed
+    SessionReadyPublishFailed,
+    /// Rejected due to client backpressure
+    ClientBackpressureRejected,
+    /// Prompt id was missing
+    MissingPromptId,
+    /// Parsing the prompt response failed
+    PromptResponseParseFailed,
+}
+
+impl Reason {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::InvalidSessionId => "invalid_session_id",
+            Self::InvalidMethodName => "invalid_method_name",
+            Self::CancelPublishFailed => "cancel_publish_failed",
+            Self::ExtNotificationPublishFailed => "ext_notification_publish_failed",
+            Self::NotificationStreamClosed => "notification_stream_closed",
+            Self::NotificationConsumerError => "notification_consumer_error",
+            Self::BadResponsePayload => "bad_response_payload",
+            Self::ResponseConsumerError => "response_consumer_error",
+            Self::ResponseStreamClosed => "response_stream_closed",
+            Self::PromptTimeout => "prompt_timeout",
+            Self::SessionReadyPublishFailed => "session_ready_publish_failed",
+            Self::ClientBackpressureRejected => "client_backpressure_rejected",
+            Self::MissingPromptId => "missing_prompt_id",
+            Self::PromptResponseParseFailed => "prompt_response_parse_failed",
+        }
+    }
+}
+
+/// Sentry webhook request identifier
+pub const REQUEST_ID: &str = "request_id";
+
+/// Sentry resource targeted by the webhook
+pub const RESOURCE: &str = "resource";
+
 /// Key uniquely identifying the schedule the record applies to
-pub const SCHEDULER_SCHEDULE_KEY: &str = "scheduler.schedule.key";
+pub const SCHEDULE_KEY: &str = "schedule_key";
+
+/// NATS server URLs used to establish the connection
+pub const SERVERS: &str = "servers";
+
+/// ACP session identifier; set on many session-scoped spans
+pub const SESSION_ID: &str = "session_id";
 
 /// Identifier of the event stream the schedule record belongs to
-pub const SCHEDULER_STREAM_ID: &str = "scheduler.stream.id";
+pub const STREAM_ID: &str = "stream_id";
 
-/// Position of the processed record within its event stream
-pub const SCHEDULER_STREAM_POSITION: &str = "scheduler.stream.position";
+/// Position of the processed record within its event stream (recorded as a string today)
+pub const STREAM_POSITION: &str = "stream_position";
+
+/// NATS subject for the operation. Emitted by trogon-nats, acp-nats, and every gateway webhook span
+pub const SUBJECT: &str = "subject";
+
+/// Notion subscription identifier
+pub const SUBSCRIPTION_ID: &str = "subscription_id";
+
+/// Whether the ACP request succeeded
+pub const SUCCESS: &str = "success";
+
+/// Connection timeout in seconds
+pub const TIMEOUT_SECS: &str = "timeout_secs";
+
+/// Telegram update identifier
+pub const UPDATE_ID: &str = "update_id";
+
+/// Telegram update type
+pub const UPDATE_TYPE: &str = "update_type";
+
+/// Webhook identifier (Linear, incident.io)
+pub const WEBHOOK_ID: &str = "webhook_id";
+
+/// GitLab webhook UUID
+pub const WEBHOOK_UUID: &str = "webhook_uuid";
+
+/// Standard OTel server.address. Emitted by http.server.request
+pub const SERVER_ADDRESS: &str = "server.address";
+
+/// Standard OTel server.port. Emitted by http.server.request
+pub const SERVER_PORT: &str = "server.port";
+
+/// Object-store key used for the claim-check payload (debug log field)
+pub const TROGON_CLAIM_CHECK_KEY: &str = "trogon.claim_check.key";
+
+/// Claim-check payload size threshold in bytes (debug log field)
+pub const TROGON_CLAIM_CHECK_THRESHOLD_BYTES: &str = "trogon.claim_check.threshold_bytes";
+
+/// Whether the claim-check pattern was applied (debug log field)
+pub const TROGON_CLAIM_CHECK_USED: &str = "trogon.claim_check.used";
+
+/// Standard OTel url.path. Emitted by http.server.request
+pub const URL_PATH: &str = "url.path";
+
+/// Standard OTel user_agent.original. Emitted by http.server.request
+pub const USER_AGENT_ORIGINAL: &str = "user_agent.original";

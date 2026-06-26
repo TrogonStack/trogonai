@@ -3,9 +3,10 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::{LogoutRequest, LogoutResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_LOGOUT;
 use trogon_std::time::GetElapsed;
 
-#[instrument(name = "acp.logout", skip(bridge, args))]
+#[instrument(name = ACP_LOGOUT, skip(bridge, args))]
 pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     bridge: &Bridge<N, C, J>,
     args: LogoutRequest,

@@ -13,6 +13,7 @@ use axum::{
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::GITHUB_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
@@ -78,7 +79,7 @@ fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "github.webhook",
+    name = GITHUB_WEBHOOK,
     skip_all,
     fields(
         event = tracing::field::Empty,
@@ -128,9 +129,9 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}", state.subject_prefix, event);
 
     let span = tracing::Span::current();
-    span.record("event", &event);
-    span.record("delivery", &delivery);
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::EVENT, &event);
+    span.record(trogon_semconv::attribute::DELIVERY, &delivery);
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, delivery.as_str());

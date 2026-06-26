@@ -6,10 +6,11 @@ use crate::wire::decode_notification_params;
 use agent_client_protocol::{PromptResponse, SessionId};
 use async_nats::header::HeaderMap;
 use tracing::{error, instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_EXT_SESSION_PROMPT_RESPONSE;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.client.ext.session.prompt_response",
+    name = ACP_CLIENT_EXT_SESSION_PROMPT_RESPONSE,
     skip(headers, payload, bridge),
     fields(session_id = %session_id)
 )]

@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 use trogon_std::NonZeroDuration;
@@ -78,7 +79,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "microsoft_graph.webhook",
+    name = MICROSOFT_GRAPH_WEBHOOK,
     skip_all,
     fields(
         notification_count = tracing::field::Empty,
@@ -118,8 +119,8 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
 
     let subject = format!("{}.change_notification_collection", state.subject_prefix);
     let span = tracing::Span::current();
-    span.record("notification_count", collection.value.len());
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::NOTIFICATION_COUNT, collection.value.len());
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let message_id = change_notification_collection_message_id(&collection.value);
     let mut headers = async_nats::HeaderMap::new();

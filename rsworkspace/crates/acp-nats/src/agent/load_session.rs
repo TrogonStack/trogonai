@@ -4,11 +4,12 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, LoadSessionRequest, LoadSessionResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_SESSION_LOAD;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.load",
+    name = ACP_SESSION_LOAD,
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]

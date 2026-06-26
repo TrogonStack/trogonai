@@ -12,6 +12,8 @@ use rmcp::transport::Transport;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tracing::{Instrument, Span, instrument};
+use trogon_semconv::span::RECEIVE;
+use trogon_semconv::span::SEND;
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, headers_with_trace_context};
 
 use crate::{Config, McpPeerId, McpPrefix, nats, wire};
@@ -123,7 +125,7 @@ where
 {
     type Error = NatsTransportError;
 
-    #[instrument(skip(self, item), fields(mcp.nats.subject = tracing::field::Empty, mcp.nats.direction = "send"))]
+    #[instrument(name = SEND, skip(self, item), fields(mcp.nats.subject = tracing::field::Empty, mcp.nats.direction = "send"))]
     fn send(&mut self, item: TxJsonRpcMessage<R>) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
         let nats = self.nats.clone();
         let prefix = self.prefix.clone();
@@ -192,7 +194,7 @@ where
         .instrument(span)
     }
 
-    #[instrument(skip(self), fields(mcp.nats.subject = tracing::field::Empty, mcp.nats.direction = "receive"))]
+    #[instrument(name = RECEIVE, skip(self), fields(mcp.nats.subject = tracing::field::Empty, mcp.nats.direction = "receive"))]
     async fn receive(&mut self) -> Option<RxJsonRpcMessage<R>> {
         loop {
             tokio::select! {

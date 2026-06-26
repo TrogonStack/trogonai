@@ -376,7 +376,7 @@ groups:
     brief: ACP client extension session prompt-response handling.
     attributes:
       - ref: session_id
-  - id: span.acp.dispatch_client_method
+  - id: span.dispatch_client_method
     type: span
     span_kind: internal
     stability: development

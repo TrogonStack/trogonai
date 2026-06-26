@@ -4,11 +4,12 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, Result, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_SESSION_SET_CONFIG_OPTION;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.set_config_option",
+    name = ACP_SESSION_SET_CONFIG_OPTION,
     skip(bridge, args),
     fields(session_id = %args.session_id, config_id = %args.config_id)
 )]

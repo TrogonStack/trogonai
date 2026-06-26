@@ -3,6 +3,7 @@ use crate::ext_method_name::ExtMethodName;
 use crate::nats::{self, FlushClient, PublishClient, global};
 use agent_client_protocol::{Error, ErrorCode, ExtNotification, Result};
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::ACP_EXT_NOTIFICATION;
 use trogon_std::time::GetElapsed;
 
 /// Handles extension notification requests (fire-and-forget).
@@ -11,7 +12,7 @@ use trogon_std::time::GetElapsed;
 /// Publish failure is logged and recorded as a metric but does not propagate
 /// to the caller, so the client always receives `Ok(())`.
 #[instrument(
-    name = "acp.ext.notification",
+    name = ACP_EXT_NOTIFICATION,
     skip(bridge, args),
     fields(method = %args.method)
 )]

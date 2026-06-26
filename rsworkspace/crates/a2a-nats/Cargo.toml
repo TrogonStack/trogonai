@@ -38,6 +38,7 @@ tokio = { workspace = true, features = ["time"] }
 tokio-util = { workspace = true }
 tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 url = { workspace = true }

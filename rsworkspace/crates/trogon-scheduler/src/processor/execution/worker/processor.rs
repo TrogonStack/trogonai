@@ -240,7 +240,7 @@ where
         now: DateTime<Utc>,
     ) -> Result<Processed, RetrySignal> {
         let span = tracing::info_span!(
-            "scheduler.process_schedule_event",
+            trogon_semconv::span::SCHEDULER_PROCESS_SCHEDULE_EVENT,
             stream_id = %stream_event.stream_id,
             stream_position = %stream_event.stream_position,
             schedule_key = tracing::field::Empty,
@@ -256,7 +256,7 @@ where
             .instrument(span.clone())
             .await;
         if let Ok(processed) = &result {
-            span.record("outcome", processed.outcome.metric_label());
+            span.record(trogon_semconv::attribute::OUTCOME, processed.outcome.metric_label());
             self.metrics.record_outcome(processed.outcome.metric_label());
         }
         result
@@ -308,7 +308,7 @@ where
 
         let schedule_id = change.schedule_id().clone();
         let key = ScheduleKey::derive(&schedule_id);
-        tracing::Span::current().record("schedule_key", key.simple());
+        tracing::Span::current().record(trogon_semconv::attribute::SCHEDULE_KEY, key.simple());
         let event_id = stream_event.event.id.to_string();
         let position = stream_event.stream_position;
 
