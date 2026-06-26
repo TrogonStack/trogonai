@@ -24,7 +24,10 @@ use rand_core::OsRng;
 use trogon_aauth_verify::nats_pop::content_digest_sha256;
 use trogon_identity_types::aauth::{Cnf, DWK_AGENT, DWK_RESOURCE, NatsSignatureEnvelope, TYP_AGENT, TYP_AUTH, headers};
 
-use a2a_gateway::aauth::{AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, StaticJwks};
+use a2a_gateway::aauth::{
+    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
+    NonNegativeSecs, PersonServerAudience, ResourceIssuer, StaticJwks,
+};
 
 struct AgentFixture {
     signing_key: SigningKey,
@@ -160,14 +163,14 @@ fn build_ingress(
     AAuthIngress::new_in_memory(AAuthConfig {
         mode,
         jwks,
-        resource_iss: resource_iss.into(),
-        person_server_aud: resource_iss.into(),
-        leeway_secs: 30,
+        resource_iss: ResourceIssuer::new(resource_iss).expect("resource iss"),
+        person_server_aud: PersonServerAudience::new(resource_iss).expect("aud"),
+        leeway_secs: LeewaySecs::new(30),
         challenge_alg: Algorithm::ES256,
         challenge_key,
-        challenge_kid: "gw-kid".into(),
-        challenge_ttl_secs: 60,
-        max_skew_secs: 60,
+        challenge_kid: ChallengeKid::new("gw-kid").expect("kid"),
+        challenge_ttl_secs: NonNegativeSecs::new(60).expect("ttl"),
+        max_skew_secs: NonNegativeSecs::new(60).expect("skew"),
     })
 }
 

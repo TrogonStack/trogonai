@@ -54,15 +54,15 @@ async fn resolve_nats_with_off_mode_returns_anonymous() {
     let cfg = AAuthConfig {
         mode: AAuthMode::Off,
         jwks: StaticJwks::new(),
-        resource_iss: "ps.example".into(),
-        person_server_aud: "ps.example".into(),
-        leeway_secs: 0,
+        resource_iss: ResourceIssuer::new("ps.example").expect("resource iss"),
+        person_server_aud: PersonServerAudience::new("ps.example").expect("aud"),
+        leeway_secs: LeewaySecs::new(0),
         challenge_alg: jsonwebtoken::Algorithm::ES256,
         // Off mode short-circuits before signing, so a stub HMAC key is OK.
         challenge_key: jsonwebtoken::EncodingKey::from_secret(b"ignored-in-off-mode"),
-        challenge_kid: "kid-off".into(),
-        challenge_ttl_secs: 60,
-        max_skew_secs: 60,
+        challenge_kid: ChallengeKid::new("kid-off").expect("kid"),
+        challenge_ttl_secs: NonNegativeSecs::new(60).expect("ttl"),
+        max_skew_secs: NonNegativeSecs::new(60).expect("skew"),
     };
     let ingress = AAuthIngress::new_in_memory(cfg);
     let res = ingress
@@ -76,14 +76,14 @@ fn shadow_cfg() -> AAuthConfig<StaticJwks> {
     AAuthConfig {
         mode: AAuthMode::Shadow,
         jwks: StaticJwks::new(),
-        resource_iss: "ps.example".into(),
-        person_server_aud: "ps.example".into(),
-        leeway_secs: 0,
+        resource_iss: ResourceIssuer::new("ps.example").expect("resource iss"),
+        person_server_aud: PersonServerAudience::new("ps.example").expect("aud"),
+        leeway_secs: LeewaySecs::new(0),
         challenge_alg: jsonwebtoken::Algorithm::ES256,
         challenge_key: jsonwebtoken::EncodingKey::from_secret(b"ignored-in-shadow"),
-        challenge_kid: "kid-shadow".into(),
-        challenge_ttl_secs: 60,
-        max_skew_secs: 60,
+        challenge_kid: ChallengeKid::new("kid-shadow").expect("kid"),
+        challenge_ttl_secs: NonNegativeSecs::new(60).expect("ttl"),
+        max_skew_secs: NonNegativeSecs::new(60).expect("skew"),
     }
 }
 
@@ -159,6 +159,42 @@ fn challenge_binding_borrows_from_verified_agent() {
     let binding = ChallengeBinding::from_agent(&agent);
     assert_eq!(binding.agent_sub, "agent-1");
     assert_eq!(binding.agent_jkt, "test-jkt");
+}
+
+#[test]
+fn resource_issuer_rejects_empty() {
+    assert!(matches!(ResourceIssuer::new(""), Err(ResourceIssuerError::Empty)));
+    assert!(matches!(ResourceIssuer::new("   "), Err(ResourceIssuerError::Empty)));
+    assert_eq!(ResourceIssuer::new(" ok ").unwrap().as_str(), "ok");
+}
+
+#[test]
+fn person_server_audience_rejects_empty() {
+    assert!(matches!(
+        PersonServerAudience::new(""),
+        Err(PersonServerAudienceError::Empty)
+    ));
+}
+
+#[test]
+fn challenge_kid_rejects_empty() {
+    assert!(matches!(ChallengeKid::new(""), Err(ChallengeKidError::Empty)));
+}
+
+#[test]
+fn leeway_secs_round_trips() {
+    assert_eq!(LeewaySecs::new(0).get(), 0);
+    assert_eq!(LeewaySecs::new(60).get(), 60);
+}
+
+#[test]
+fn non_negative_secs_rejects_negative() {
+    assert!(matches!(
+        NonNegativeSecs::new(-1),
+        Err(NonNegativeSecsError::Negative(-1))
+    ));
+    assert_eq!(NonNegativeSecs::new(0).unwrap().get(), 0);
+    assert_eq!(NonNegativeSecs::new(60).unwrap().get(), 60);
 }
 
 #[test]
