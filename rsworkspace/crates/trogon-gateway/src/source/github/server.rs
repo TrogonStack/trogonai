@@ -13,11 +13,11 @@ use axum::{
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::GITHUB_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::GITHUB_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {

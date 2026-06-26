@@ -1,6 +1,6 @@
 use super::*;
-use trogon_semconv::attribute;
 use tower::ServiceExt;
+use trogon_semconv::attribute;
 
 fn value_for<'a>(attributes: &'a [KeyValue], key: &str) -> Option<&'a opentelemetry::Value> {
     attributes

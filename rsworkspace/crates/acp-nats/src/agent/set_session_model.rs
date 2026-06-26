@@ -4,8 +4,8 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, Result, SetSessionModelRequest, SetSessionModelResponse};
 use tracing::{info, instrument};
-use trogon_semconv::span::ACP_SESSION_SET_MODEL;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
+use trogon_semconv::span::ACP_SESSION_SET_MODEL;
 use trogon_std::time::GetElapsed;
 
 #[instrument(

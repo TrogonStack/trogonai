@@ -5,11 +5,11 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::INCIDENTIO_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::INCIDENTIO_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use super::IncidentioConfig;
@@ -187,7 +187,10 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
-    span.record(trogon_semconv::attribute::WEBHOOK_ID, tracing::field::display(verified.webhook_id.as_str()));
+    span.record(
+        trogon_semconv::attribute::WEBHOOK_ID,
+        tracing::field::display(verified.webhook_id.as_str()),
+    );
     span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();

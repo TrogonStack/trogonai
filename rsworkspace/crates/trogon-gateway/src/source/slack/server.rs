@@ -20,11 +20,11 @@ use form_urlencoded;
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::SLACK_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::SLACK_WEBHOOK;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {

@@ -13,11 +13,11 @@ use axum::{
 };
 use serde::Deserialize;
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::SENTRY_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::SENTRY_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 #[derive(Deserialize)]

@@ -11,11 +11,11 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

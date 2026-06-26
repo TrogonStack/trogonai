@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use tracing::{instrument, warn};
-use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::jsonrpc::JsonRpcId;

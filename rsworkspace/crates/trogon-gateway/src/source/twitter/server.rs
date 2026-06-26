@@ -10,12 +10,12 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::TWITTER_CRC;
-use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
 use trogon_nats::{DottedNatsToken, NatsToken};
+use trogon_semconv::span::TWITTER_CRC;
+use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use super::config::{TwitterConfig, TwitterConsumerSecret};

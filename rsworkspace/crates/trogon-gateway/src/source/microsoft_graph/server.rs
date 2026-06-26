@@ -12,9 +12,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
+use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use super::config::MicrosoftGraphConfig;

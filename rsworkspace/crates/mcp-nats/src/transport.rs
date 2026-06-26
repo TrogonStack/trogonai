@@ -12,9 +12,9 @@ use rmcp::transport::Transport;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tracing::{Instrument, Span, instrument};
+use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, headers_with_trace_context};
 use trogon_semconv::span::RECEIVE;
 use trogon_semconv::span::SEND;
-use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, headers_with_trace_context};
 
 use crate::{Config, McpPeerId, McpPrefix, nats, wire};
 

@@ -4,11 +4,11 @@ use futures::StreamExt;
 use jsonrpc_nats::RequestId;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
-use trogon_semconv::span::ACP_SESSION_PROMPT;
 use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
+use trogon_semconv::span::ACP_SESSION_PROMPT;
 
 use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;

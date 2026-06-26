@@ -5,11 +5,11 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecret, NonZeroDuration};
 
 use super::NotionEventType;
@@ -298,7 +298,10 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
-    span.record(trogon_semconv::attribute::EVENT_ID, metadata.event_id.as_deref().unwrap_or("unknown"));
+    span.record(
+        trogon_semconv::attribute::EVENT_ID,
+        metadata.event_id.as_deref().unwrap_or("unknown"),
+    );
     span.record(
         "subscription_id",
         metadata.subscription_id.as_deref().unwrap_or("unknown"),
