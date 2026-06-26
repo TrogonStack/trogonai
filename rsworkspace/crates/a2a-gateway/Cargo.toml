@@ -20,6 +20,7 @@ workspace = true
 [dependencies]
 a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
+a2a-pack = { workspace = true }
 async-nats = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
