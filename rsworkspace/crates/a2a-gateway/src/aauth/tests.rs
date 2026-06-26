@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use trogon_aauth_verify::{StaticJwks, TokenError};
 
 use super::*;
@@ -32,7 +34,6 @@ fn deny_without_challenge_has_no_header() {
 
 #[test]
 fn deny_display_carries_reason_source_chain() {
-    use std::error::Error;
     let d = deny(AAuthDenyReason::Auth(unsupported_token_error()), None);
     let display = format!("{d}");
     assert!(display.contains("aauth denied"));
