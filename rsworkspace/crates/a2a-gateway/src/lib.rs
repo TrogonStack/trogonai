@@ -20,6 +20,9 @@
 //! - [`jwt_caller_identity`] — resolves a verified caller identity from a
 //!   minted NATS User JWT carried on the inbound message, with a
 //!   labs-only header-trust fallback gated behind an env flag.
+//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.push.dlq.>`
+//!   into a tenant-readable `mirror.*` view with in-process dedupe so a
+//!   re-delivered DLQ envelope only publishes once.
 //! - [`runtime`] — boot orchestration; surfaces [`RuntimeError`] as the
 //!   terminal error for the `main` binary.
 
@@ -31,6 +34,7 @@ pub mod agent_card_surface;
 pub mod caller_jwt_header;
 pub mod config;
 pub mod jwt_caller_identity;
+pub mod push_dlq_mirror;
 pub mod runtime;
 
 pub use config::{Args, Config, ConfigError};
