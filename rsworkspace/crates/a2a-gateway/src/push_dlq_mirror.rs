@@ -235,6 +235,11 @@ where
         }
     }
 
+    // All publish attempts failed. Release the dedup reservation so a
+    // JetStream redelivery (the consumer NAKs on PublishFailed) isn't
+    // silently dedup-suppressed and ACKed by the next pass — the envelope
+    // would otherwise never land on the tenant mirror subject.
+    dedup.release(&idempotency_key);
     MirrorDispatchOutcome::PublishFailed
 }
 

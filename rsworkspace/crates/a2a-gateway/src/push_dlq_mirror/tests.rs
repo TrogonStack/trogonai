@@ -205,6 +205,29 @@ async fn mirror_publish_failed_when_all_attempts_fail() {
 }
 
 #[tokio::test]
+async fn mirror_publish_failure_releases_dedup_so_redelivery_can_retry() {
+    // Regression: try_acquire reserved the key BEFORE publish; if publish
+    // failed and the consumer NAKed, the JetStream redelivery would see the
+    // key still reserved and short-circuit as Skipped, ACKing without
+    // mirroring. The release must run on PublishFailed so a redelivery can
+    // retry the publish.
+    let js = RecordingPublisher::default();
+    js.fail_next_n(MAX_PUBLISH_RETRIES + 1);
+    let dedup = PushDlqDedupGate::with_capacity(32);
+    let payload = br#"{"idempotency_key":"task-3:failed"}"#;
+    assert_eq!(
+        mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-3", None, payload, &dedup).await,
+        MirrorDispatchOutcome::PublishFailed
+    );
+
+    // Second attempt — let publish succeed this time. The redelivery must
+    // NOT be dedup-suppressed.
+    let outcome = mirror_push_dlq_envelope(&js, &prefix(), "a2a.push.dlq.alice.task-3", None, payload, &dedup).await;
+    assert_eq!(outcome, MirrorDispatchOutcome::Mirrored);
+    assert_eq!(js.publishes.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn mirror_skips_payload_without_idempotency_key() {
     let js = RecordingPublisher::default();
     let dedup = PushDlqDedupGate::with_capacity(32);
