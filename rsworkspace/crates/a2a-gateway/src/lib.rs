@@ -7,6 +7,10 @@
 //! share a single seam.
 //!
 //! Modules:
+//! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
+//!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
+//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDeny`] carrying a
+//!   `ResourceChallenge` for the reply.
 //! - [`caller_jwt_header`] — re-exports the wire-level header constants from
 //!   `a2a-auth-callout` so callers only depend on this crate.
 //! - [`config`] — clap-derived [`Args`] + env-resolved [`Config`].
@@ -19,6 +23,7 @@
 #![allow(clippy::module_name_repetitions)]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+pub mod aauth;
 pub mod caller_jwt_header;
 pub mod config;
 pub mod jwt_caller_identity;

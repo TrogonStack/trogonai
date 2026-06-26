@@ -68,6 +68,7 @@ dependencies = [
  "a2a-nats",
  "async-nats",
  "clap",
+ "jsonwebtoken 10.4.0",
  "nkeys",
  "serde",
  "serde_json",
@@ -75,6 +76,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
  "trogon-std",
 ]
 
