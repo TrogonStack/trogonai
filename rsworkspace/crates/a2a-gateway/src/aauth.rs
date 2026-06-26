@@ -110,30 +110,59 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         let mut resolution = AAuthResolution::from_agent(&agent);
 
         if let Some(auth_jwt) = auth_token {
-            match self.token_verifier.verify_auth(auth_jwt, &self.cfg.resource_iss).await {
-                Ok(auth) => resolution.attach_auth(auth),
-                Err(e) => return self.deny_or_shadow(AAuthDenyReason::Auth(e), Some(&agent.jkt)).await,
+            let auth = match self.token_verifier.verify_auth(auth_jwt, &self.cfg.resource_iss).await {
+                Ok(auth) => auth,
+                Err(e) => {
+                    return self
+                        .deny_or_shadow(AAuthDenyReason::Auth(e), Some(ChallengeBinding::from_agent(&agent)))
+                        .await;
+                }
+            };
+            // Auth token must bind to the PoP-verified agent. Otherwise a
+            // caller could pair its own valid `aa-agent+jwt` + PoP with
+            // someone else's `aa-auth+jwt` and inherit the foreign
+            // principal. Refuse when either side disagrees.
+            if auth.claims.agent != agent.claims.sub || auth.claims.agent_jkt != agent.jkt {
+                return self
+                    .deny_or_shadow(
+                        AAuthDenyReason::AuthAgentMismatch {
+                            agent_sub: agent.claims.sub.clone(),
+                            agent_jkt: agent.jkt.clone(),
+                            auth_agent: auth.claims.agent.clone(),
+                            auth_agent_jkt: auth.claims.agent_jkt.clone(),
+                        },
+                        Some(ChallengeBinding::from_agent(&agent)),
+                    )
+                    .await;
             }
+            resolution.attach_auth(auth);
         }
 
         Ok(resolution)
     }
 
-    async fn deny_or_shadow(&self, reason: AAuthDenyReason, jkt: Option<&str>) -> Result<AAuthResolution, AAuthDeny> {
+    async fn deny_or_shadow(
+        &self,
+        reason: AAuthDenyReason,
+        binding: Option<ChallengeBinding<'_>>,
+    ) -> Result<AAuthResolution, AAuthDeny> {
         if self.mode == AAuthMode::Shadow {
             // The reason is logged with %{reason} so the typed source chain
             // reaches operators without coupling them to its Display string.
             tracing::warn!(event = "aauth.shadow_deny", reason = %reason);
             return Ok(AAuthResolution::anonymous());
         }
-        let challenge = jkt.and_then(|jkt| {
+        let challenge = binding.and_then(|b| {
             let jti = uuid_like();
             self.challenge
                 .mint(&ResourceChallenge {
                     iss: &self.cfg.resource_iss,
                     aud_ps: &self.cfg.person_server_aud,
-                    agent: "",
-                    agent_jkt: jkt,
+                    // Bind the challenge to the PoP-verified agent so the
+                    // Person Server exchange can be tied to the presenting
+                    // agent, not just its key.
+                    agent: b.agent_sub,
+                    agent_jkt: b.agent_jkt,
                     scope: "*",
                     ttl_secs: self.cfg.challenge_ttl_secs,
                     kid: &self.cfg.challenge_kid,
@@ -147,6 +176,22 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
             reason,
             challenge,
         })
+    }
+}
+
+/// Pair of `sub` / `jkt` the verifier already authenticated on a presenting
+/// agent. Used to bind a minted `aa-resource+jwt` challenge to that agent.
+struct ChallengeBinding<'a> {
+    agent_sub: &'a str,
+    agent_jkt: &'a str,
+}
+
+impl<'a> ChallengeBinding<'a> {
+    fn from_agent(agent: &'a trogon_aauth_verify::VerifiedAgent) -> Self {
+        Self {
+            agent_sub: &agent.claims.sub,
+            agent_jkt: &agent.jkt,
+        }
     }
 }
 
@@ -198,6 +243,20 @@ pub enum AAuthDenyReason {
     Pop(#[source] NatsPopError),
     #[error("aa-auth+jwt verification: {0}")]
     Auth(#[source] TokenError),
+    /// The `aa-auth+jwt` verified, but its `agent` / `agent_jkt` claims do
+    /// not match the PoP-verified agent. Surface it as a distinct variant so
+    /// audit can record agent-impersonation attempts separately from token
+    /// validation failures.
+    #[error(
+        "aa-auth+jwt does not bind to presenting agent (auth.agent={auth_agent:?} \
+         auth.agent_jkt={auth_agent_jkt:?} vs presenter sub={agent_sub:?} jkt={agent_jkt:?})"
+    )]
+    AuthAgentMismatch {
+        agent_sub: String,
+        agent_jkt: String,
+        auth_agent: String,
+        auth_agent_jkt: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -122,6 +122,46 @@ async fn resolve_nats_enforce_mode_denies_without_jkt_carries_no_challenge() {
 }
 
 #[test]
+fn auth_agent_mismatch_variant_carries_both_sides() {
+    let reason = AAuthDenyReason::AuthAgentMismatch {
+        agent_sub: "agent-A".into(),
+        agent_jkt: "jkt-A".into(),
+        auth_agent: "agent-B".into(),
+        auth_agent_jkt: "jkt-B".into(),
+    };
+    let display = format!("{reason}");
+    assert!(display.contains("agent-A"));
+    assert!(display.contains("jkt-A"));
+    assert!(display.contains("agent-B"));
+    assert!(display.contains("jkt-B"));
+}
+
+#[test]
+fn challenge_binding_borrows_from_verified_agent() {
+    // The binding type only borrows from VerifiedAgent — construction must
+    // not allocate or copy. Smoke-test by asserting field equality through
+    // the borrow without holding the agent reference past the binding.
+    let claims_json = serde_json::json!({
+        "iss": "ap.test",
+        "sub": "agent-1",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 2000,
+        "dwk": "aa-agent",
+        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "x", "y": "y"}},
+    });
+    let claims: trogon_identity_types::aauth::AgentClaims = serde_json::from_value(claims_json).expect("claims");
+    let agent = trogon_aauth_verify::VerifiedAgent {
+        claims,
+        jkt: "test-jkt".into(),
+        raw_jwt: "raw".into(),
+    };
+    let binding = ChallengeBinding::from_agent(&agent);
+    assert_eq!(binding.agent_sub, "agent-1");
+    assert_eq!(binding.agent_jkt, "test-jkt");
+}
+
+#[test]
 fn uuid_like_is_non_empty_and_prefixed() {
     let v = uuid_like();
     assert!(v.starts_with("jti-"), "got {v}");
