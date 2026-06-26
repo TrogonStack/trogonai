@@ -69,7 +69,9 @@ dependencies = [
  "a2a-pack",
  "async-nats",
  "base64 0.22.1",
+ "bytes",
  "clap",
+ "futures",
  "jsonwebtoken 10.4.0",
  "nkeys",
  "p256",
@@ -79,10 +81,12 @@ dependencies = [
  "sha2 0.10.8",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trogon-aauth-verify",
  "trogon-identity-types",
+ "trogon-nats",
  "trogon-std",
 ]
 

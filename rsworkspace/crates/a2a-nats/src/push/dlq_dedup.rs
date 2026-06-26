@@ -65,6 +65,29 @@ impl PushDlqDedupGate {
         order.push_back(key);
         true
     }
+
+    /// Release a previously-acquired key so a subsequent `try_acquire` for
+    /// the same key returns `true` again. Use after a publish FAILED so a
+    /// JetStream redelivery isn't silently dedup-suppressed.
+    ///
+    /// Returns `true` when the key was present (and was removed), `false`
+    /// when it had already been evicted or never acquired.
+    pub fn release(&self, key: &PushIdempotencyKey) -> bool {
+        let key = key.as_str().to_owned();
+        let mut guard = match self.state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let (order, seen) = &mut *guard;
+        if !seen.remove(&key) {
+            return false;
+        }
+        // Also drop from the FIFO so capacity accounting stays accurate.
+        if let Some(pos) = order.iter().position(|k| k == &key) {
+            order.remove(pos);
+        }
+        true
+    }
 }
 
 impl Default for PushDlqDedupGate {
