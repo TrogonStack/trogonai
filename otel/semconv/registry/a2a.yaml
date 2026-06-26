@@ -1,0 +1,58 @@
+groups:
+  # a2a-nats: A2A server handlers (spans only, no metrics). These spans carry no
+  # attributes today.
+  - id: span.a2a.server.agent_card
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server agent_card request.
+  - id: span.a2a.server.message_send
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server message/send request.
+  - id: span.a2a.server.message_stream
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server message/stream request.
+  - id: span.a2a.server.tasks_get
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server tasks/get request.
+  - id: span.a2a.server.tasks_list
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server tasks/list request.
+  - id: span.a2a.server.tasks_cancel
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server tasks/cancel request.
+  - id: span.a2a.server.tasks_resubscribe
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server tasks/resubscribe request.
+  - id: span.a2a.server.push_get
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server push/get request.
+  - id: span.a2a.server.push_list
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server push/list request.
+  - id: span.a2a.server.push_set
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server push/set request.
+  - id: span.a2a.server.push_delete
+    type: span
+    span_kind: server
+    stability: development
+    brief: A2A server push/delete request.

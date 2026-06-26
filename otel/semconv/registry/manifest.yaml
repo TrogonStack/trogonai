@@ -1,0 +1,19 @@
+schema_url: https://trogon.ai/schemas/telemetry/0.1.0
+stability: development
+description: |
+  TrogonAi telemetry semantic-convention registry.
+
+  This is the cross-runtime source of truth for the metric, span, and attribute
+  names emitted by TrogonAi services. It is consumed by Weaver to validate naming
+  against policy and to generate per-language bindings (Rust today; Go and
+  TypeScript packages are intended to be generated from this same registry).
+
+# A dependency on the upstream OpenTelemetry semantic conventions can be added
+# here so that standard attributes (messaging.*, server.*, http.*, error.type, ...)
+# are referenced rather than redefined. Adding it requires network access during
+# `weaver registry check`/`generate`, so it is intentionally omitted from the
+# initial self-contained scaffold. To enable:
+#
+# dependencies:
+#   - schema_url: https://opentelemetry.io/schemas/1.42.0
+#     registry_path: https://github.com/open-telemetry/semantic-conventions.git@v1.42.0[model]
