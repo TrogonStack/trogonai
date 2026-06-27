@@ -86,10 +86,12 @@ pub struct StreamingIngressSpawn {
 /// would build a fresh gate and `max_inflight_per_caller` would never
 /// constrain concurrent pumps for the same `caller_key`.
 #[derive(Clone)]
+#[cfg_attr(coverage, allow(dead_code))]
 pub struct StreamingIngressGate {
     inner: std::sync::Arc<CallerInflightGate>,
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 impl StreamingIngressGate {
     /// Build a gate with the configured per-caller limit. Pass the same
     /// instance (clone the cheap `Arc`) to every spawned pump.
