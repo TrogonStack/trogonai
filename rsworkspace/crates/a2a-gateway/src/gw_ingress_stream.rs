@@ -165,6 +165,7 @@ pub struct StreamingIngressSpawn {
     pub caller_key: CallerKey,
 }
 
+#[cfg_attr(coverage, allow(dead_code))]
 impl StreamingIngressSpawn {
     fn req_id(&self) -> &ReqId {
         match &self.kind {
