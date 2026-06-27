@@ -22,8 +22,6 @@ use a2a_nats::jetstream::streams::events_stream_name;
 #[cfg(not(coverage))]
 use async_nats::jetstream::{self, AckKind};
 #[cfg(not(coverage))]
-use bytes::Bytes;
-#[cfg(not(coverage))]
 use futures::StreamExt;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
