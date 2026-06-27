@@ -24,6 +24,7 @@ a2a-pack = { workspace = true }
 a2a-redaction = { workspace = true }
 async-nats = { workspace = true }
 bytes = { workspace = true }
+cel-interpreter = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }

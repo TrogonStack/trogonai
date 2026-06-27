@@ -40,6 +40,9 @@ trogonai-proto = { path = "crates/trogonai-proto" }
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
 
+# CEL interpreter for Tier-2 declarative policy rules
+cel-interpreter = "=0.10.0"
+
 # ACP
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 
