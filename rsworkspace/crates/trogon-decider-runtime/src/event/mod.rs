@@ -9,19 +9,16 @@
 //! returning an error for payloads that claim to be part of its own event set
 //! but cannot be decoded.
 
-mod codec;
 mod event_id;
 mod event_identity;
-mod event_type;
 mod stream_event;
 
 use crate::headers::Headers;
 
-pub use codec::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError};
 pub use event_id::EventId;
 pub use event_identity::EventIdentity;
-pub use event_type::EventType;
 pub use stream_event::StreamEvent;
+pub use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {

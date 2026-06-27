@@ -5,6 +5,7 @@ include!("trogonai.scheduler.schedules.v1.schedule_completed.rs");
 include!("trogonai.scheduler.schedules.v1.message.rs");
 include!("trogonai.scheduler.schedules.v1.schedule.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_status.rs");
+include!("trogonai.scheduler.schedules.v1.create_schedule_command.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_created.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_occurrence_recorded.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_occurrence_scheduled.rs");
@@ -12,6 +13,9 @@ include!("trogonai.scheduler.schedules.v1.schedule_paused.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_removed.rs");
 include!("trogonai.scheduler.schedules.v1.schedule_resumed.rs");
 include!("trogonai.scheduler.schedules.v1.events.rs");
+include!("trogonai.scheduler.schedules.v1.pause_schedule_command.rs");
+include!("trogonai.scheduler.schedules.v1.remove_schedule_command.rs");
+include!("trogonai.scheduler.schedules.v1.resume_schedule_command.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -34,6 +38,7 @@ pub mod __buffa {
         include!("trogonai.scheduler.schedules.v1.message.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_status.__view.rs");
+        include!("trogonai.scheduler.schedules.v1.create_schedule_command.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_created.__view.rs");
         include!(
             "trogonai.scheduler.schedules.v1.schedule_occurrence_recorded.__view.rs"
@@ -45,6 +50,9 @@ pub mod __buffa {
         include!("trogonai.scheduler.schedules.v1.schedule_removed.__view.rs");
         include!("trogonai.scheduler.schedules.v1.schedule_resumed.__view.rs");
         include!("trogonai.scheduler.schedules.v1.events.__view.rs");
+        include!("trogonai.scheduler.schedules.v1.pause_schedule_command.__view.rs");
+        include!("trogonai.scheduler.schedules.v1.remove_schedule_command.__view.rs");
+        include!("trogonai.scheduler.schedules.v1.resume_schedule_command.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
@@ -81,6 +89,7 @@ pub mod __buffa {
         reg.register_json_any(super::__SCHEDULE_STATUS_JSON_ANY);
         reg.register_json_any(super::schedule_status::__SCHEDULED_JSON_ANY);
         reg.register_json_any(super::schedule_status::__PAUSED_JSON_ANY);
+        reg.register_json_any(super::__CREATE_SCHEDULE_COMMAND_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_CREATED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_OCCURRENCE_RECORDED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_OCCURRENCE_SCHEDULED_JSON_ANY);
@@ -88,6 +97,9 @@ pub mod __buffa {
         reg.register_json_any(super::__SCHEDULE_REMOVED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_RESUMED_JSON_ANY);
         reg.register_json_any(super::__SCHEDULE_EVENT_JSON_ANY);
+        reg.register_json_any(super::__PAUSE_SCHEDULE_COMMAND_JSON_ANY);
+        reg.register_json_any(super::__REMOVE_SCHEDULE_COMMAND_JSON_ANY);
+        reg.register_json_any(super::__RESUME_SCHEDULE_COMMAND_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -114,6 +126,10 @@ pub use self::__buffa::view::ScheduleOwnedView;
 pub use self::__buffa::view::ScheduleStatusView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleStatusOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CreateScheduleCommandView;
+#[doc(inline)]
+pub use self::__buffa::view::CreateScheduleCommandOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleCreatedView;
 #[doc(inline)]
@@ -142,5 +158,17 @@ pub use self::__buffa::view::ScheduleResumedOwnedView;
 pub use self::__buffa::view::ScheduleEventView;
 #[doc(inline)]
 pub use self::__buffa::view::ScheduleEventOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::PauseScheduleCommandView;
+#[doc(inline)]
+pub use self::__buffa::view::PauseScheduleCommandOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::RemoveScheduleCommandView;
+#[doc(inline)]
+pub use self::__buffa::view::RemoveScheduleCommandOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ResumeScheduleCommandView;
+#[doc(inline)]
+pub use self::__buffa::view::ResumeScheduleCommandOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

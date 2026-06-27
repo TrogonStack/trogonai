@@ -1,14 +1,17 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "light"))]
 mod r#gen;
 
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "light"))]
 mod codec;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
+
+#[cfg(feature = "light")]
+pub mod example;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;

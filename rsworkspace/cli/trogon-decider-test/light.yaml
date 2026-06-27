@@ -1,0 +1,67 @@
+suite: example.light
+scenarios:
+  - name: turn on from initial state
+    given: []
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: kitchen
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+          light_id: kitchen
+          turn_on_count: 1
+
+  - name: turn on increments count after prior event
+    given:
+      - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+        light_id: den
+        turn_on_count: 2
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: den
+    then:
+      rejected: true
+
+  - name: reject when already on via given history
+    given:
+      - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+        light_id: porch
+        turn_on_count: 1
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: porch
+    then:
+      rejected: true
+
+  - name: second light independent stream
+    given: []
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: bedroom
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+          light_id: bedroom
+          turn_on_count: 1
+
+  - name: state chain across two turn-ons in history
+    given:
+      - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+        light_id: hall
+        turn_on_count: 4
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: hall
+    then:
+      rejected: true
+
+  - name: first activation emits count one
+    given: []
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: garage
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+          light_id: garage
+          turn_on_count: 1

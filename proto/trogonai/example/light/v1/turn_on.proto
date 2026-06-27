@@ -1,0 +1,8 @@
+edition = "2024";
+
+package trogonai.example.light.v1;
+
+// TurnOn commands a light to switch on.
+message TurnOn {
+  string light_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

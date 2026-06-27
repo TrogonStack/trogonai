@@ -1,12 +1,20 @@
 use buffa::Message as _;
+use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
+
+#[cfg(feature = "runtime-snapshot")]
+use super::state_v1;
+use super::{ScheduleEventCase, v1};
+#[cfg(feature = "runtime-snapshot")]
+use crate::codec::snapshot_type as proto_snapshot_type;
+use crate::codec::{decode_event_case, event_type};
+
+#[cfg(feature = "runtime-host")]
+use trogon_decider_runtime::EventIdentity;
+#[cfg(feature = "runtime-snapshot")]
 use trogon_decider_runtime::{
-    EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventPayloadError, EventType,
     InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     SnapshotTypeName,
 };
-
-use super::{ScheduleEventCase, state_v1, v1};
-use crate::codec::{decode_event_case, event_type, snapshot_type as proto_snapshot_type};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -36,8 +44,6 @@ impl EventDecode for v1::ScheduleEvent {
     }
 }
 
-impl EventIdentity for v1::ScheduleEvent {}
-
 impl EventType for v1::ScheduleEvent {
     type Error = ScheduleEventPayloadError;
 
@@ -48,6 +54,9 @@ impl EventType for v1::ScheduleEvent {
             .ok_or(ScheduleEventPayloadError::MissingEvent)
     }
 }
+
+#[cfg(feature = "runtime-host")]
+impl EventIdentity for v1::ScheduleEvent {}
 
 fn encode_schedule_event_case(event: &ScheduleEventCase) -> Vec<u8> {
     match event {
@@ -88,6 +97,7 @@ fn schedule_event_case_type(event: &ScheduleEventCase) -> &'static str {
     }
 }
 
+#[cfg(feature = "runtime-snapshot")]
 impl SnapshotType for state_v1::State {
     type Error = InvalidSnapshotTypeName;
 
@@ -96,6 +106,7 @@ impl SnapshotType for state_v1::State {
     }
 }
 
+#[cfg(feature = "runtime-snapshot")]
 impl SnapshotPayloadEncode for state_v1::State {
     type Error = std::convert::Infallible;
 
@@ -104,6 +115,7 @@ impl SnapshotPayloadEncode for state_v1::State {
     }
 }
 
+#[cfg(feature = "runtime-snapshot")]
 impl SnapshotPayloadDecode for state_v1::State {
     type Error = StateSnapshotPayloadError;
 

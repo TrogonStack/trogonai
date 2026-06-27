@@ -78,10 +78,7 @@ pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
 pub mod stream;
 
-pub use event::{
-    Event, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventPayloadError,
-    EventType, StreamEvent,
-};
+pub use event::{Event, EventId, EventIdentity, StreamEvent};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
@@ -104,3 +101,4 @@ pub use trogon_decider::testing;
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
 pub use trogon_decider::{Act, ActBuilder, Decider, Decision, Events, WritePrecondition};
+pub use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};

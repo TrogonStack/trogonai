@@ -1,0 +1,24 @@
+[package]
+name = "trogon-decider-guest-sdk"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[features]
+default = []
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider = { workspace = true }
+trogon-decider-guest-macros = { workspace = true }
+wit-bindgen = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"
+trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["light"] }

@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.example.light.state.v1;
+
+// LightState tracks whether a light is on and how many times it has been turned on.
+message State {
+  bool on = 1;
+  uint64 turn_on_count = 2;
+}

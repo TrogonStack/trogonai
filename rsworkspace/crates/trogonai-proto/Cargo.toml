@@ -11,12 +11,16 @@ workspace = true
 [features]
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
-schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider-runtime", "chrono"]
+light = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider"]
+schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
+runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
+runtime-host = ["schedules", "dep:trogon-decider-runtime"]
 
 [dependencies]
 thiserror = { workspace = true }
 buffa = { workspace = true, optional = true }
 buffa-types = { workspace = true, optional = true }
-chrono = { version = "0.4", optional = true }
+chrono = { version = "0.4", optional = true, default-features = false, features = ["std"] }
 serde = { workspace = true, optional = true }
+trogon-decider = { version = "0.1.0", path = "../trogon-decider", optional = true }
 trogon-decider-runtime = { workspace = true, optional = true }

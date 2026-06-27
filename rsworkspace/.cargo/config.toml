@@ -6,3 +6,9 @@ cov = [
     "--ignore-filename-regex",
     "crates/(trogonai-proto|trogon-semconv)/src/gen/.*",
 ]
+
+[target.wasm32-wasip2]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+import "trogonai/scheduler/schedules/v1/delivery.proto";
+import "trogonai/scheduler/schedules/v1/message.proto";
+import "trogonai/scheduler/schedules/v1/schedule.proto";
+import "trogonai/scheduler/schedules/v1/schedule_status.proto";
+
+// Wire command to create a schedule stream.
+message CreateScheduleCommand {
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ScheduleStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+  Schedule schedule = 3 [features.field_presence = LEGACY_REQUIRED];
+  Delivery delivery = 4 [features.field_presence = LEGACY_REQUIRED];
+  Message message = 5 [features.field_presence = LEGACY_REQUIRED];
+}

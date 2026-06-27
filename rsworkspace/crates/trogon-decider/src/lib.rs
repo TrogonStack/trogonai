@@ -89,6 +89,7 @@
 
 mod act;
 mod decision;
+pub mod event;
 mod events;
 #[cfg(feature = "test-support")]
 pub mod testing;
@@ -100,6 +101,7 @@ pub use act::{ActChain, ActRun, First, Steps, Then};
 pub use decision::Decision;
 #[doc(hidden)]
 pub use decision::{DecisionFailure, DecisionResult, evaluate_decision};
+pub use event::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 pub use events::Events;
 #[cfg(feature = "test-support")]
 pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
