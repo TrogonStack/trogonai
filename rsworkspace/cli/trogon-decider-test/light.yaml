@@ -33,6 +33,17 @@ scenarios:
     then:
       rejected: true
 
+  - name: reject already on surfaces a distinct domain code
+    given:
+      - '@type': type.googleapis.com/trogonai.example.light.v1.LightTurnedOn
+        light_id: attic
+        turn_on_count: 1
+    when:
+      '@type': type.googleapis.com/trogonai.example.light.v1.TurnOn
+      light_id: attic
+    then:
+      error: already-on
+
   - name: second light independent stream
     given: []
     when:

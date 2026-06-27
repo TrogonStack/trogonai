@@ -50,4 +50,10 @@ impl Decider for TurnOnCommand {
             })),
         }))
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            TurnOnDecideError::AlreadyOn { .. } => "already-on",
+        }
+    }
 }

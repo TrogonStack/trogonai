@@ -109,7 +109,7 @@ where
 {
     let decision = C::decide(state, command).map_err(|source| {
         D::rejected(DomainErrorParts {
-            code: "rejected".to_string(),
+            code: C::decide_error_code(&source).to_string(),
             message: source.to_string(),
         })
     })?;
