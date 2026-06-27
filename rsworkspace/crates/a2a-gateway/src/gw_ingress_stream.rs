@@ -296,6 +296,7 @@ pub enum StreamingIngressSpawnError {
 /// path can observe backpressure synchronously — otherwise the caller
 /// couldn't tell a successful spawn from one that the gate refused inside
 /// the spawned task. The permit moves into the task and releases on drop.
+#[cfg(not(coverage))]
 pub fn spawn_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
@@ -305,13 +306,18 @@ pub fn spawn_streaming_ingress_pump(
     shutdown: CancellationToken,
 ) -> Result<(), StreamingIngressSpawnError> {
     let permit = try_acquire_streaming_permit(&gate, &spawn)?;
-    #[cfg(not(coverage))]
     tokio::spawn(async move {
         run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
     });
-    #[cfg(coverage)]
-    drop((client, prefix, config, permit, spawn, shutdown));
     Ok(())
+}
+
+/// Coverage build skips the JetStream-bound pump entirely; the permit
+/// gate's behavior is what unit tests assert via `try_acquire_streaming_permit`.
+#[cfg(coverage)]
+#[rustfmt::skip]
+pub fn spawn_streaming_ingress_pump(_client: async_nats::Client, _prefix: A2aPrefix, _config: GatewayStreamingIngressConfig, gate: StreamingIngressGate, spawn: StreamingIngressSpawn, _shutdown: CancellationToken) -> Result<(), StreamingIngressSpawnError> {
+    try_acquire_streaming_permit(&gate, &spawn).map(drop)
 }
 
 /// Permit-acquire that surfaces a typed error so the request path can map

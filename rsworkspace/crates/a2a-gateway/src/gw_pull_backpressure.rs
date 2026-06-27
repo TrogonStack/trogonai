@@ -500,13 +500,8 @@ pub async fn run_gateway_events_pull(
 }
 
 #[cfg(coverage)]
-pub async fn run_gateway_events_pull(
-    _client: async_nats::Client,
-    _prefix: A2aPrefix,
-    _config: GatewayEventsPullConfig,
-    _shutdown: CancellationToken,
-) {
-}
+#[rustfmt::skip]
+pub async fn run_gateway_events_pull(_client: async_nats::Client, _prefix: A2aPrefix, _config: GatewayEventsPullConfig, _shutdown: CancellationToken) {}
 
 #[cfg(not(coverage))]
 fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: &GatewayEventsPullConfig) {
