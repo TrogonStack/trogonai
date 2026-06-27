@@ -251,3 +251,66 @@ pattern = "not-a-window"
         }
     ));
 }
+
+#[test]
+fn non_directory_bundle_path_fails_fast() {
+    // An existing path that is not a directory previously returned an
+    // empty bundle, which silently default-allowed every request. Surface
+    // a typed error so the gateway fails fast at boot instead.
+    let file = tempfile::NamedTempFile::new().expect("tempfile");
+    let err = Tier1DeclarativeBundle::load_from_dir(file.path()).expect_err("non-dir rejected");
+    assert!(matches!(err, Tier1DeclarativeLoadError::NotDirectory { .. }));
+}
+
+#[test]
+fn read_file_error_preserves_io_source() {
+    // The error chain must carry the underlying io::Error so audit/logs
+    // can serialize the OS-level cause separately from the variant tag.
+    use std::error::Error as _;
+    let err = Tier1DeclarativeLoadError::ReadFile {
+        path: std::path::PathBuf::from("/nope"),
+        source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
+    };
+    assert!(err.source().is_some(), "io::Error source chain must thread through");
+}
+
+#[test]
+fn bundle_paths_load_in_sorted_order() {
+    // `read_dir` order is filesystem-dependent; sorting paths before
+    // parsing makes rule evaluation reproducible across hosts even when
+    // multiple bundle files contribute equal-priority rules.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_bundle(
+        dir.path(),
+        "z-last.tier1.toml",
+        r#"
+[[rule]]
+id = "from-z"
+priority = 50
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
+"#,
+    );
+    write_bundle(
+        dir.path(),
+        "a-first.tier1.toml",
+        r#"
+[[rule]]
+id = "from-a"
+priority = 50
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
+"#,
+    );
+    let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load");
+    // Both rules have priority=50; the secondary id sort wins regardless
+    // of which file was read first, so `from-a` precedes `from-z`.
+    let ids: Vec<_> = bundle.rules().iter().map(|rule| rule.id.as_str()).collect();
+    assert_eq!(ids, vec!["from-a", "from-z"]);
+}

@@ -130,6 +130,15 @@ fn rule_matches_all(ctx: &Tier1DeclarativeContext, rule: &Tier1DeclarativeRule, 
 fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock: &dyn Tier1Clock) -> bool {
     let matched = match item.kind {
         Tier1ResourceKind::TimeOfDay => time_of_day_pattern_matches(&item.pattern, clock.now()).unwrap_or(false),
+        // `caller_subject = "*"` must not match an unauthenticated
+        // request — without this branch `None` becomes `""`, and
+        // `pattern_matches("*", "")` is true, so a rule intended for
+        // any authenticated caller would also fire on requests with no
+        // caller identity at all.
+        Tier1ResourceKind::CallerSubject => ctx
+            .caller_subject
+            .as_ref()
+            .is_some_and(|subject| pattern_matches(&item.pattern, subject.as_str())),
         kind => {
             let value = field_value(ctx, kind);
             pattern_matches(&item.pattern, &value)
@@ -142,12 +151,10 @@ fn field_value(ctx: &Tier1DeclarativeContext, kind: Tier1ResourceKind) -> String
     match kind {
         Tier1ResourceKind::AgentMethod => ctx.agent_method.as_str().to_owned(),
         Tier1ResourceKind::AgentId => ctx.agent_id.as_str().to_owned(),
-        Tier1ResourceKind::CallerSubject => ctx
-            .caller_subject
-            .as_ref()
-            .map(SpiceDbSubject::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+        // CallerSubject is handled directly in `match_hits` to keep the
+        // "unauthenticated requests never match" invariant local to the
+        // matcher; this arm is unreachable for that kind.
+        Tier1ResourceKind::CallerSubject => String::new(),
         Tier1ResourceKind::NatsSubjectPattern => ctx.nats_subject.clone(),
         Tier1ResourceKind::TimeOfDay => String::new(),
     }
@@ -188,12 +195,21 @@ fn glob_match(pattern: &[u8], value: &[u8]) -> bool {
     false
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Tier1DeclarativeBuildError {
-    #[error("invalid tier-1 declarative bundle dir: {0}")]
-    InvalidBundleDir(String),
+    #[error("{ENV_TIER1_BUNDLE_DIR} must not be empty / whitespace-only")]
+    BundleDirEmpty,
+    #[error("{ENV_TIER1_BUNDLE_DIR} contains non-UTF-8 bytes")]
+    BundleDirNotUnicode,
     #[error("{ENV_TIER1_DECLARATIVE_ENABLED}=on requires {ENV_TIER1_BUNDLE_DIR}")]
     MissingBundleDir,
+    /// `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` was set to something other
+    /// than a recognized boolean value. Without surfacing this, an
+    /// operator typo like `=treu` would silently disable the policy.
+    #[error(
+        "{ENV_TIER1_DECLARATIVE_ENABLED}={value:?} is not a recognized boolean (accepted: 1/0, true/false, yes/no, on/off)"
+    )]
+    EnablementNotBoolean { value: String },
     #[error(transparent)]
     Load(#[from] Tier1DeclarativeLoadError),
 }
@@ -214,7 +230,7 @@ pub struct Tier1DeclarativeConfig;
 
 impl Tier1DeclarativeConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> Result<GatewayTier1DeclarativeLayer, Tier1DeclarativeBuildError> {
-        if !tier1_declarative_enabled(env) {
+        if !tier1_declarative_enabled(env)? {
             return Ok(GatewayTier1DeclarativeLayer {
                 gate: Arc::new(NoopTier1DeclarativeGate),
             });
@@ -222,27 +238,32 @@ impl Tier1DeclarativeConfig {
 
         let bundle_dir = match env.var(ENV_TIER1_BUNDLE_DIR) {
             Ok(value) if !value.trim().is_empty() => value,
-            Ok(_) => return Err(Tier1DeclarativeBuildError::InvalidBundleDir(String::new())),
+            Ok(_) => return Err(Tier1DeclarativeBuildError::BundleDirEmpty),
             Err(std::env::VarError::NotPresent) => return Err(Tier1DeclarativeBuildError::MissingBundleDir),
-            Err(std::env::VarError::NotUnicode(_)) => {
-                return Err(Tier1DeclarativeBuildError::InvalidBundleDir(
-                    ENV_TIER1_BUNDLE_DIR.into(),
-                ));
-            }
+            Err(std::env::VarError::NotUnicode(_)) => return Err(Tier1DeclarativeBuildError::BundleDirNotUnicode),
         };
 
-        let bundle = Tier1DeclarativeBundle::load_from_dir(&bundle_dir).map_err(Tier1DeclarativeBuildError::Load)?;
+        let bundle = Tier1DeclarativeBundle::load_from_dir(&bundle_dir)?;
         Ok(GatewayTier1DeclarativeLayer {
             gate: Arc::new(RealTier1DeclarativeGate::new(bundle)),
         })
     }
 }
 
-fn tier1_declarative_enabled<E: ReadEnv>(env: &E) -> bool {
+/// Resolve the enable flag. Returns `Err` for any value the parser
+/// doesn't recognize so an operator typo (e.g. `=treu`) fails loudly
+/// instead of being silently treated as "disabled".
+fn tier1_declarative_enabled<E: ReadEnv>(env: &E) -> Result<bool, Tier1DeclarativeBuildError> {
     match env.var(ENV_TIER1_DECLARATIVE_ENABLED) {
-        Ok(raw) => matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(std::env::VarError::NotPresent) => false,
-        Err(std::env::VarError::NotUnicode(_)) => false,
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" | "" => Ok(false),
+            _ => Err(Tier1DeclarativeBuildError::EnablementNotBoolean { value: raw }),
+        },
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Err(std::env::VarError::NotUnicode(_)) => Err(Tier1DeclarativeBuildError::EnablementNotBoolean {
+            value: ENV_TIER1_DECLARATIVE_ENABLED.into(),
+        }),
     }
 }
 

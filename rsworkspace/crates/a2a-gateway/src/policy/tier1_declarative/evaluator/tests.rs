@@ -14,6 +14,14 @@ fn ctx(method: A2aMethod, agent: &str, caller: Option<&str>, subject: &str) -> T
     )
 }
 
+fn rid(id: &str) -> Tier1DeclarativeRuleId {
+    Tier1DeclarativeRuleId::new(id).expect("test rule id non-empty")
+}
+
+fn m(kind: Tier1ResourceKind, pattern: &str, negate: bool) -> Tier1DeclarativeMatch {
+    Tier1DeclarativeMatch::new(kind, pattern, negate).expect("test match pattern valid")
+}
+
 fn rule(
     id: &str,
     priority: u32,
@@ -21,7 +29,7 @@ fn rule(
     matches: Vec<Tier1DeclarativeMatch>,
 ) -> Tier1DeclarativeRule {
     Tier1DeclarativeRule {
-        id: Tier1DeclarativeRuleId::new(id),
+        id: rid(id),
         matches,
         effect,
         priority,
@@ -35,8 +43,8 @@ fn matching_rule_returns_effect() {
         100,
         Tier1DeclarativeEffect::Deny,
         vec![
-            Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false),
-            Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentMethod, "message/send", false),
+            m(Tier1ResourceKind::AgentId, "planner", false),
+            m(Tier1ResourceKind::AgentMethod, "message/send", false),
         ],
     )]));
 
@@ -49,7 +57,7 @@ fn matching_rule_returns_effect() {
     assert_eq!(
         decision,
         Tier1DeclarativeDecision::Deny {
-            rule: Tier1DeclarativeRuleId::new("deny-planner")
+            rule: rid("deny-planner")
         }
     );
 }
@@ -61,13 +69,13 @@ fn partial_match_tries_next_rule() {
             "deny-planner",
             100,
             Tier1DeclarativeEffect::Deny,
-            vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "other", false)],
+            vec![m(Tier1ResourceKind::AgentId, "other", false)],
         ),
         rule(
             "allow-planner",
             50,
             Tier1DeclarativeEffect::Allow,
-            vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
+            vec![m(Tier1ResourceKind::AgentId, "planner", false)],
         ),
     ]));
 
@@ -80,7 +88,7 @@ fn partial_match_tries_next_rule() {
     assert_eq!(
         decision,
         Tier1DeclarativeDecision::Allow {
-            rule: Some(Tier1DeclarativeRuleId::new("allow-planner"))
+            rule: Some(rid("allow-planner"))
         }
     );
 }
@@ -92,13 +100,13 @@ fn priority_order_is_respected() {
             "allow-low",
             10,
             Tier1DeclarativeEffect::Allow,
-            vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
+            vec![m(Tier1ResourceKind::AgentId, "planner", false)],
         ),
         rule(
             "deny-high",
             100,
             Tier1DeclarativeEffect::Deny,
-            vec![Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "planner", false)],
+            vec![m(Tier1ResourceKind::AgentId, "planner", false)],
         ),
     ]));
 
@@ -108,12 +116,7 @@ fn priority_order_is_respected() {
         None,
         "a2a.gateway.planner.message.send",
     ));
-    assert_eq!(
-        decision,
-        Tier1DeclarativeDecision::Deny {
-            rule: Tier1DeclarativeRuleId::new("deny-high")
-        }
-    );
+    assert_eq!(decision, Tier1DeclarativeDecision::Deny { rule: rid("deny-high") });
 }
 
 #[test]
@@ -137,11 +140,7 @@ fn negate_inverts_match() {
         "deny-non-alice",
         100,
         Tier1DeclarativeEffect::Deny,
-        vec![Tier1DeclarativeMatch::new(
-            Tier1ResourceKind::CallerSubject,
-            "user/alice",
-            true,
-        )],
+        vec![m(Tier1ResourceKind::CallerSubject, "user/alice", true)],
     )]));
 
     let denied = gate.evaluate(&ctx(
@@ -153,7 +152,7 @@ fn negate_inverts_match() {
     assert_eq!(
         denied,
         Tier1DeclarativeDecision::Deny {
-            rule: Tier1DeclarativeRuleId::new("deny-non-alice")
+            rule: rid("deny-non-alice")
         }
     );
 
@@ -164,6 +163,41 @@ fn negate_inverts_match() {
         "a2a.gateway.planner.message.send",
     ));
     assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
+}
+
+#[test]
+fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
+    // `caller_subject = "*"` must only match when the request actually
+    // carries a caller identity. Without this, `None.unwrap_or_default()`
+    // becomes `""` and the wildcard pattern would silently allow/deny
+    // unauthenticated traffic the rule was meant to scope by caller.
+    let gate = RealTier1DeclarativeGate::new(Tier1DeclarativeBundle::new(vec![rule(
+        "deny-any-caller",
+        100,
+        Tier1DeclarativeEffect::Deny,
+        vec![m(Tier1ResourceKind::CallerSubject, "*", false)],
+    )]));
+
+    let unauthenticated = gate.evaluate(&ctx(
+        A2aMethod::MessageSend,
+        "planner",
+        None,
+        "a2a.gateway.planner.message.send",
+    ));
+    assert_eq!(unauthenticated, Tier1DeclarativeDecision::Allow { rule: None });
+
+    let authenticated = gate.evaluate(&ctx(
+        A2aMethod::MessageSend,
+        "planner",
+        Some("user/alice"),
+        "a2a.gateway.planner.message.send",
+    ));
+    assert_eq!(
+        authenticated,
+        Tier1DeclarativeDecision::Deny {
+            rule: rid("deny-any-caller")
+        }
+    );
 }
 
 #[test]
@@ -188,15 +222,11 @@ fn audit_rule_fired_labels_cover_every_decision_variant() {
         "gateway.tier1.declarative.no_match_default_allow"
     );
     assert_eq!(
-        tier1_declarative_audit_rule_fired(&Tier1DeclarativeDecision::Allow {
-            rule: Some(Tier1DeclarativeRuleId::new("ok"))
-        }),
+        tier1_declarative_audit_rule_fired(&Tier1DeclarativeDecision::Allow { rule: Some(rid("ok")) }),
         "gateway.tier1.declarative.allowed.ok"
     );
     assert_eq!(
-        tier1_declarative_audit_rule_fired(&Tier1DeclarativeDecision::Deny {
-            rule: Tier1DeclarativeRuleId::new("blocked")
-        }),
+        tier1_declarative_audit_rule_fired(&Tier1DeclarativeDecision::Deny { rule: rid("blocked") }),
         "gateway.tier1.declarative.denied.blocked"
     );
 }
@@ -222,7 +252,20 @@ fn from_env_empty_bundle_dir_is_invalid() {
     env.set(ENV_TIER1_DECLARATIVE_ENABLED, "1");
     env.set(ENV_TIER1_BUNDLE_DIR, "   ");
     let err = Tier1DeclarativeConfig::from_env(&env).expect_err("blank dir");
-    assert!(matches!(err, Tier1DeclarativeBuildError::InvalidBundleDir(_)));
+    assert!(matches!(err, Tier1DeclarativeBuildError::BundleDirEmpty));
+}
+
+#[test]
+fn from_env_unrecognized_enablement_value_is_typed_error() {
+    // Operator typos like `=treu` previously disabled the policy
+    // silently; the typed error now fails fast at boot.
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENV_TIER1_DECLARATIVE_ENABLED, "treu");
+    let err = Tier1DeclarativeConfig::from_env(&env).expect_err("typo rejected");
+    assert!(matches!(
+        err,
+        Tier1DeclarativeBuildError::EnablementNotBoolean { ref value } if value == "treu"
+    ));
 }
 
 #[test]
@@ -251,9 +294,36 @@ fn from_env_loads_bundle_from_valid_directory() {
 
 #[test]
 fn rule_id_display_round_trips_through_string() {
-    let id = Tier1DeclarativeRuleId::new("rule-1");
+    let id = rid("rule-1");
     assert_eq!(format!("{id}"), "rule-1");
     assert_eq!(id.as_str(), "rule-1");
+}
+
+#[test]
+fn rule_id_construction_rejects_empty_string() {
+    let err = Tier1DeclarativeRuleId::new("   ").unwrap_err();
+    assert!(matches!(
+        err,
+        crate::policy::tier1_declarative::Tier1DeclarativeSchemaError::EmptyRuleId
+    ));
+}
+
+#[test]
+fn match_construction_rejects_empty_pattern() {
+    let err = Tier1DeclarativeMatch::new(Tier1ResourceKind::AgentId, "   ", false).unwrap_err();
+    assert!(matches!(
+        err,
+        crate::policy::tier1_declarative::Tier1DeclarativeSchemaError::EmptyPattern
+    ));
+}
+
+#[test]
+fn match_construction_validates_time_of_day_pattern() {
+    let err = Tier1DeclarativeMatch::new(Tier1ResourceKind::TimeOfDay, "not-a-window", false).unwrap_err();
+    assert!(matches!(
+        err,
+        crate::policy::tier1_declarative::Tier1DeclarativeSchemaError::InvalidTimeOfDayPattern(_)
+    ));
 }
 
 #[test]

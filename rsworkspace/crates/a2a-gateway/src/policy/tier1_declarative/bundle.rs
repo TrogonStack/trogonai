@@ -22,20 +22,36 @@
 //! [[rule.matches]]
 //! kind = "nats_subject_pattern"
 //! pattern = "a2a.gateway.*.message.send"
+//!
+//! [[rule.matches]]
+//! kind = "time_of_day"
+//! pattern = "Mon-Fri|09:00-17:00|UTC"
 //! ```
 //!
-//! `kind` is one of `agent_method`, `agent_id`, `caller_subject`, `nats_subject_pattern`.
-//! `effect` is `allow` or `deny`. All `matches` on a rule must hit (AND). Rules are ordered by
-//! descending `priority`; the first fully matching rule wins. Unmatched requests default to allow.
+//! `kind` is one of `agent_method`, `agent_id`, `caller_subject`,
+//! `nats_subject_pattern`, or `time_of_day`. `effect` is `allow` or `deny`.
+//! All `matches` on a rule must hit (AND). Rules are ordered by descending
+//! `priority`, then by ascending `id` for a stable tie-breaker. The first
+//! fully matching rule wins. Unmatched requests default to allow.
 
 use std::fmt;
+
+use super::time_predicate::{TimeOfDayParseError, TimeOfDayWindow};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Tier1DeclarativeRuleId(String);
 
 impl Tier1DeclarativeRuleId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+    /// Construct a validated rule id. Rejects empty / whitespace-only ids
+    /// at construction so an invalid `Tier1DeclarativeRuleId` value can't
+    /// exist in memory; the loader and any direct caller share the same
+    /// validation path.
+    pub fn new(id: impl Into<String>) -> Result<Self, Tier1DeclarativeSchemaError> {
+        let raw = id.into();
+        if raw.trim().is_empty() {
+            return Err(Tier1DeclarativeSchemaError::EmptyRuleId);
+        }
+        Ok(Self(raw))
     }
 
     pub fn as_str(&self) -> &str {
@@ -79,12 +95,22 @@ pub struct Tier1DeclarativeMatch {
 }
 
 impl Tier1DeclarativeMatch {
-    pub fn new(kind: Tier1ResourceKind, pattern: impl Into<String>, negate: bool) -> Self {
-        Self {
-            kind,
-            pattern: pattern.into(),
-            negate,
+    /// Construct a validated match. Rejects empty patterns and, for
+    /// `TimeOfDay` matches, requires the pattern to parse — so invalid
+    /// matches can't reach the evaluator regardless of how they're built.
+    pub fn new(
+        kind: Tier1ResourceKind,
+        pattern: impl Into<String>,
+        negate: bool,
+    ) -> Result<Self, Tier1DeclarativeSchemaError> {
+        let pattern = pattern.into();
+        if pattern.trim().is_empty() {
+            return Err(Tier1DeclarativeSchemaError::EmptyPattern);
         }
+        if kind == Tier1ResourceKind::TimeOfDay {
+            TimeOfDayWindow::parse(pattern.trim()).map_err(Tier1DeclarativeSchemaError::InvalidTimeOfDayPattern)?;
+        }
+        Ok(Self { kind, pattern, negate })
     }
 }
 
@@ -158,8 +184,11 @@ pub enum Tier1DeclarativeSchemaError {
     UnknownKind(String),
     #[error("unknown rule effect `{0}`")]
     UnknownEffect(String),
-    #[error("invalid time_of_day pattern: {0}")]
-    InvalidTimeOfDayPattern(String),
+    /// Carries the typed `TimeOfDayParseError` so callers can route on the
+    /// specific parse failure (empty, segment count, weekday, time
+    /// window, timezone) instead of pattern-matching error strings.
+    #[error("invalid time_of_day pattern")]
+    InvalidTimeOfDayPattern(#[from] TimeOfDayParseError),
     #[error(
         "rule `{0}` must declare at least one match — a rule with no `[[rule.matches]]` would fire on every request"
     )]
