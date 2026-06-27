@@ -145,12 +145,12 @@ fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &S
             };
             scenario.run(instance).map_err(|error| anyhow::anyhow!(error))
         }
-        Then::Error { .. } => SimScenario::new()
+        Then::Error { error } => SimScenario::new()
             .given(given)
             .when(when)
-            .then_rejected()
+            .then_error(error.clone())
             .run(instance)
-            .map_err(|error| anyhow::anyhow!(error)),
+            .map_err(|err| anyhow::anyhow!(err)),
     }
 }
 

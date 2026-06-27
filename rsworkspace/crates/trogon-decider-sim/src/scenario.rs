@@ -10,6 +10,7 @@ pub struct SimScenario {
     expect_events: Option<Vec<host::AnyEnvelope>>,
     expect_rejected: bool,
     expect_accepted: bool,
+    expect_error: Option<String>,
 }
 
 impl SimScenario {
@@ -20,6 +21,7 @@ impl SimScenario {
             expect_events: None,
             expect_rejected: false,
             expect_accepted: false,
+            expect_error: None,
         }
     }
 
@@ -37,6 +39,7 @@ impl SimScenario {
         self.expect_events = Some(events.into_iter().collect());
         self.expect_rejected = false;
         self.expect_accepted = false;
+        self.expect_error = None;
         self
     }
 
@@ -44,6 +47,7 @@ impl SimScenario {
         self.expect_events = None;
         self.expect_rejected = true;
         self.expect_accepted = false;
+        self.expect_error = None;
         self
     }
 
@@ -53,6 +57,17 @@ impl SimScenario {
         self.expect_events = None;
         self.expect_rejected = false;
         self.expect_accepted = true;
+        self.expect_error = None;
+        self
+    }
+
+    /// Expect the command to error (rejected or faulted) with the given code or
+    /// message. Matches the decode/decide outcome's `code` or `message` exactly.
+    pub fn then_error(mut self, expected: impl Into<String>) -> Self {
+        self.expect_events = None;
+        self.expect_rejected = false;
+        self.expect_accepted = false;
+        self.expect_error = Some(expected.into());
         self
     }
 
@@ -70,7 +85,21 @@ impl SimScenario {
 
         let outcome = session.decide(&command).map_err(|err| err.to_string())?;
 
-        if self.expect_rejected {
+        if let Some(expected) = self.expect_error {
+            let matches = |err: &host::DomainError| err.code == expected || err.message == expected;
+            match outcome {
+                Err(host::DecideError::Rejected(err)) | Err(host::DecideError::Faulted(err)) if matches(&err) => Ok(()),
+                Err(host::DecideError::Rejected(err)) => Err(format!(
+                    "expected error '{expected}', got rejection: {} — {}",
+                    err.code, err.message
+                )),
+                Err(host::DecideError::Faulted(err)) => Err(format!(
+                    "expected error '{expected}', got fault: {} — {}",
+                    err.code, err.message
+                )),
+                Ok(events) => Err(format!("expected error '{expected}', got {} event(s)", events.len())),
+            }
+        } else if self.expect_rejected {
             match outcome {
                 Err(host::DecideError::Rejected(_)) => Ok(()),
                 Ok(events) => Err(format!("expected rejection, got {} event(s)", events.len())),

@@ -76,3 +76,31 @@ fn snapshot_round_trip_preserves_state() {
     let events = restored.decide(&turn_on_command("kitchen")).unwrap().unwrap_err();
     assert!(matches!(events, host::DecideError::Rejected(_)));
 }
+
+#[test]
+fn invalid_snapshot_traps_instead_of_loading_empty_state() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // A corrupt snapshot frame must surface as a trap, not silently degrade to
+    // empty state (which would let a host decide on incomplete state).
+    let result = instance.open_session(Some(b"not a valid snapshot frame"));
+    assert!(
+        result.is_err(),
+        "a corrupt snapshot must trap, not silently load empty initial state"
+    );
+}
+
+#[test]
+fn then_error_matches_rejection() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // Business rejections surface through the guest bridge with code "rejected".
+    SimScenario::new()
+        .given([light_turned_on_event("kitchen", 1)])
+        .when(turn_on_command("kitchen"))
+        .then_error("rejected")
+        .run(&mut instance)
+        .unwrap();
+}

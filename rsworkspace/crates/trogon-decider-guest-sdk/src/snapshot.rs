@@ -1,13 +1,26 @@
 use crate::bridge::DomainErrorParts;
 
 /// Load guest state from an optional snapshot frame or fall back to [`C::initial_state`](trogon_decider::Decider::initial_state).
+///
+/// When `snapshot` is `None` the decider starts from its initial state. When a snapshot
+/// frame is supplied it must decode and match `schema_version`: a corrupt frame or schema
+/// mismatch traps rather than silently degrading to empty state, because the WIT session
+/// constructor has no error channel and a host applying only a post-snapshot event suffix
+/// would otherwise `decide` on incomplete state while believing the snapshot loaded.
+#[allow(
+    clippy::panic,
+    reason = "guest session constructor cannot return an error; trap so the host observes a failed snapshot load instead of silently running on empty state"
+)]
 pub fn load_or_initial<C, S>(snapshot: Option<Vec<u8>>, schema_version: &str) -> C::State
 where
     C: trogon_decider::Decider<State = S>,
     S: buffa::Message,
 {
     match snapshot {
-        Some(bytes) => decode_snapshot::<S>(&bytes, schema_version).unwrap_or_else(|_| C::initial_state()),
+        Some(bytes) => match decode_snapshot::<S>(&bytes, schema_version) {
+            Ok(state) => state,
+            Err(error) => panic!("failed to load decider snapshot ({}): {}", error.code, error.message),
+        },
         None => C::initial_state(),
     }
 }
