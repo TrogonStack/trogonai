@@ -119,7 +119,17 @@ pub struct Tier1DeclarativeBundle {
 
 impl Tier1DeclarativeBundle {
     pub fn new(mut rules: Vec<Tier1DeclarativeRule>) -> Self {
-        rules.sort_by_key(|rule| std::cmp::Reverse(rule.priority));
+        // Primary sort: priority descending (high priority wins first).
+        // Secondary sort: rule id ascending — without a deterministic
+        // tie-breaker, equal-priority rules would resolve based on
+        // `read_dir` order, which differs by filesystem and across
+        // restarts; ingress decisions would flip for identical traffic.
+        rules.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| left.id.as_str().cmp(right.id.as_str()))
+        });
         Self { rules }
     }
 
@@ -150,4 +160,8 @@ pub enum Tier1DeclarativeSchemaError {
     UnknownEffect(String),
     #[error("invalid time_of_day pattern: {0}")]
     InvalidTimeOfDayPattern(String),
+    #[error(
+        "rule `{0}` must declare at least one match — a rule with no `[[rule.matches]]` would fire on every request"
+    )]
+    NoMatches(String),
 }

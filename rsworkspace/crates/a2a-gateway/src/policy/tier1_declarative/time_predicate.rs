@@ -58,7 +58,19 @@ impl TimeOfDayWindow {
             return false;
         }
         let clock = local.time();
-        clock >= self.start && clock < self.end
+        if self.start <= self.end {
+            // Same-day window: `09:00-17:00` covers 09:00 through 17:00
+            // inclusive at both ends so a rule labeled "closes at 17:00"
+            // doesn't silently exclude the labeled instant.
+            clock >= self.start && clock <= self.end
+        } else {
+            // Overnight wrap-around: `22:00-06:00` covers 22:00 through
+            // midnight AND 00:00 through 06:00 on the configured
+            // weekday. Without this branch an overnight pattern parses
+            // successfully but `clock >= start && clock <= end` is
+            // unsatisfiable for any clock value.
+            clock >= self.start || clock <= self.end
+        }
     }
 }
 

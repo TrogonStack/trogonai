@@ -17,10 +17,18 @@ id = "low"
 priority = 10
 effect = "allow"
 
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
+
 [[rule]]
 id = "high"
 priority = 100
 effect = "deny"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
 "#,
     );
 
@@ -28,6 +36,63 @@ effect = "deny"
     let ids: Vec<_> = bundle.rules().iter().map(|rule| rule.id.as_str()).collect();
     assert_eq!(ids, vec!["high", "low"]);
     assert_eq!(bundle.rules()[0].effect, Tier1DeclarativeEffect::Deny);
+}
+
+#[test]
+fn rule_without_matches_rejected_at_load() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_bundle(
+        dir.path(),
+        "no-matches.tier1.toml",
+        r#"
+[[rule]]
+id = "fires-on-everything"
+priority = 100
+effect = "deny"
+"#,
+    );
+    let err = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect_err("no matches");
+    assert!(matches!(
+        err,
+        Tier1DeclarativeLoadError::Schema {
+            error: Tier1DeclarativeSchemaError::NoMatches(_),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn equal_priority_rules_sort_alphabetically_for_stable_ordering() {
+    // Without a deterministic tie-breaker on `id`, equal-priority rules
+    // would resolve based on read_dir order — flipping decisions for
+    // identical traffic across hosts or restarts.
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_bundle(
+        dir.path(),
+        "tied.tier1.toml",
+        r#"
+[[rule]]
+id = "zeta"
+priority = 50
+effect = "allow"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
+
+[[rule]]
+id = "alpha"
+priority = 50
+effect = "deny"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
+"#,
+    );
+    let bundle = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect("load bundle");
+    let ids: Vec<_> = bundle.rules().iter().map(|rule| rule.id.as_str()).collect();
+    assert_eq!(ids, vec!["alpha", "zeta"]);
 }
 
 #[test]
@@ -144,6 +209,10 @@ fn unknown_effect_returns_schema_error() {
 id = "x"
 priority = 1
 effect = "maybe"
+
+[[rule.matches]]
+kind = "agent_id"
+pattern = "*"
 "#,
     );
     let err = Tier1DeclarativeBundle::load_from_dir(dir.path()).expect_err("bad effect");

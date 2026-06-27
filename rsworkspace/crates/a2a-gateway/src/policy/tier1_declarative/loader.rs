@@ -110,6 +110,18 @@ fn convert_rule(path: &Path, rule: RuleToml) -> Result<Tier1DeclarativeRule, Tie
         .map(|item| convert_match(path, item))
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Reject rules with no `[[rule.matches]]` block at load time so a
+    // typo or partial config can't apply a high-priority deny or allow
+    // to every request — `iter().all()` returns true for an empty
+    // iterator, which would make a match-less rule fire on every
+    // ingress request without any matcher.
+    if matches.is_empty() {
+        return Err(Tier1DeclarativeLoadError::Schema {
+            path: path.to_path_buf(),
+            error: Tier1DeclarativeSchemaError::NoMatches(rule.id.clone()),
+        });
+    }
+
     let effect =
         Tier1DeclarativeEffect::parse(rule.effect.trim()).map_err(|error| Tier1DeclarativeLoadError::Schema {
             path: path.to_path_buf(),

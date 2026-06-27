@@ -29,6 +29,30 @@ fn pattern_helper_matches() {
 }
 
 #[test]
+fn end_instant_is_included_in_window() {
+    // A rule labeled "closes at 17:00" should match a request fired
+    // exactly at 17:00:00 — operators reading the config would not
+    // expect the labeled endpoint to fall outside the window.
+    let window = TimeOfDayWindow::parse("Mon-Fri|09:00-17:00|UTC").unwrap();
+    let exactly_at_end = instant_utc(2026, 5, 25, 17, 0);
+    assert!(window.contains(exactly_at_end));
+}
+
+#[test]
+fn overnight_window_wraps_across_midnight() {
+    // `22:00-06:00` should match late-evening (22:30) AND early-morning
+    // (05:00) instants on the configured weekday — without wrap-around
+    // logic an overnight pattern parses successfully but never matches.
+    let window = TimeOfDayWindow::parse("Mon-Sun|22:00-06:00|UTC").unwrap();
+    let late_night = instant_utc(2026, 5, 25, 22, 30);
+    let early_morning = instant_utc(2026, 5, 25, 5, 0);
+    let midday = instant_utc(2026, 5, 25, 12, 0);
+    assert!(window.contains(late_night));
+    assert!(window.contains(early_morning));
+    assert!(!window.contains(midday));
+}
+
+#[test]
 fn empty_pattern_returns_typed_error() {
     assert!(matches!(TimeOfDayWindow::parse("   "), Err(TimeOfDayParseError::Empty)));
 }
