@@ -4,6 +4,7 @@ use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::{Client, ErrorCode, KillTerminalRequest, KillTerminalResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_TERMINAL_KILL;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalKillError {
@@ -27,7 +28,7 @@ pub fn error_code_and_message(e: &TerminalKillError) -> (ErrorCode, String) {
     }
 }
 
-#[instrument(name = "acp.client.terminal.kill", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_TERMINAL_KILL, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

@@ -5,10 +5,11 @@ use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, Result, ResumeSessionRequest, ResumeSessionResponse};
 use tracing::{info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
+use trogon_semconv::span::ACP_SESSION_RESUME;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.resume",
+    name = ACP_SESSION_RESUME,
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]

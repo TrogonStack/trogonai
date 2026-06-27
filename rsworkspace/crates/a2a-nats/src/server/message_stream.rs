@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::JetStreamPublisher;
+use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::jsonrpc::JsonRpcId;
@@ -22,7 +23,7 @@ const METHOD: &str = "message/stream";
 /// audit emission, and terminal push-notification dispatch are wired in by the Bridge
 /// PR that follows.
 #[instrument(
-    name = "a2a.server.message_stream",
+    name = A2A_SERVER_MESSAGE_STREAM,
     skip(handler, headers, payload, reply_subject, nats, js, prefix)
 )]
 pub async fn handle<H, N, J>(

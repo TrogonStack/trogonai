@@ -4,6 +4,7 @@ use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_FS_READ_TEXT_FILE;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FsReadTextFileError {
@@ -21,7 +22,7 @@ pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
 }
 
 /// Handles read_text_file: decodes wire request params, calls client, and publishes a wire-encoded reply.
-#[instrument(name = "acp.client.fs.read_text_file", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_FS_READ_TEXT_FILE, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

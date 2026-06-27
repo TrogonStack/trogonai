@@ -1,8 +1,9 @@
 use agent_client_protocol::{Client, SessionNotification};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_SESSION_UPDATE;
 
-#[instrument(name = "acp.client.session.update", skip(headers, payload, client))]
+#[instrument(name = ACP_CLIENT_SESSION_UPDATE, skip(headers, payload, client))]
 pub async fn handle<C: Client>(headers: &HeaderMap, payload: &[u8], client: &C, has_reply: bool) {
     if has_reply {
         warn!("Unexpected reply subject on notification request");

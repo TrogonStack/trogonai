@@ -3,9 +3,10 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::{ListSessionsRequest, ListSessionsResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_SESSION_LIST;
 use trogon_std::time::GetElapsed;
 
-#[instrument(name = "acp.session.list", skip(bridge, args))]
+#[instrument(name = ACP_SESSION_LIST, skip(bridge, args))]
 pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     bridge: &Bridge<N, C, J>,
     args: ListSessionsRequest,

@@ -8,6 +8,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::time::Duration;
 use tracing::{Span, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use trogon_semconv::span::NATS_PUBLISH;
+use trogon_semconv::span::NATS_REQUEST;
 
 use crate::constants::{DEFAULT_TIMEOUT, REQ_ID_HEADER};
 
@@ -38,7 +40,7 @@ pub fn build_request_headers() -> HeaderMap {
     headers
 }
 
-#[instrument(name = "nats.request", skip(client, request), fields(subject = %subject))]
+#[instrument(name = NATS_REQUEST, skip(client, request), fields(subject = %subject))]
 pub async fn request_with_timeout<N: RequestClient, Req, Res>(
     client: &N,
     subject: &str,
@@ -258,7 +260,7 @@ impl PublishOptionsBuilder {
     }
 }
 
-#[instrument(name = "nats.publish", skip(client, request, options), fields(subject = %subject))]
+#[instrument(name = NATS_PUBLISH, skip(client, request, options), fields(subject = %subject))]
 pub async fn publish<N: PublishClient + FlushClient, Req>(
     client: &N,
     subject: &str,

@@ -4,10 +4,11 @@ use crate::ext_method_name::ExtMethodName;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::{Error, ErrorCode, ExtRequest, ExtResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_EXT;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.ext",
+    name = ACP_EXT,
     skip(bridge, args),
     fields(method = %args.method)
 )]

@@ -26,3 +26,6 @@ templates:
   - pattern: metric.rs.j2
     filter: semconv_grouped_metrics($params)
     application_mode: single
+  - pattern: span.rs.j2
+    filter: '{ spans: [.groups[] | select(.type == "span")] | sort_by(.id) }'
+    application_mode: single

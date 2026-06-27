@@ -19,6 +19,7 @@ tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
 jsonrpc-nats = { workspace = true }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 

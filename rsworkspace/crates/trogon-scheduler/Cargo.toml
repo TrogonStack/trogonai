@@ -27,6 +27,7 @@ tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-decider-runtime = { workspace = true }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 trogonai-proto = { path = "../trogonai-proto", features = ["schedules"] }

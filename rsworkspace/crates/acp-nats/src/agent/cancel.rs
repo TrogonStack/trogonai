@@ -4,6 +4,7 @@ use crate::session_id::AcpSessionId;
 use crate::wire::encode_notification;
 use agent_client_protocol::{CancelNotification, Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::ACP_SESSION_CANCEL;
 use trogon_std::time::GetElapsed;
 
 /// Handles cancel notification requests.
@@ -12,7 +13,7 @@ use trogon_std::time::GetElapsed;
 /// The backend owns session state and will respond to the in-flight prompt with `stopReason: cancelled`.
 /// Publish failure is logged and recorded in metrics but does not propagate to the caller.
 #[instrument(
-    name = "acp.session.cancel",
+    name = ACP_SESSION_CANCEL,
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]

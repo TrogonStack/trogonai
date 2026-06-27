@@ -14,6 +14,8 @@ use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
 use trogon_nats::{DottedNatsToken, NatsToken};
+use trogon_semconv::span::TWITTER_CRC;
+use trogon_semconv::span::TWITTER_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use super::config::{TwitterConfig, TwitterConsumerSecret};
@@ -156,7 +158,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
-#[instrument(name = "twitter.crc", skip_all)]
+#[instrument(name = TWITTER_CRC, skip_all)]
 async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     Query(query): Query<CrcQuery>,
@@ -172,7 +174,7 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "twitter.webhook",
+    name = TWITTER_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,
@@ -227,9 +229,9 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     let span = tracing::Span::current();
-    span.record("event_type", event_type.as_str());
-    span.record("payload_kind", payload_kind.as_str());
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
+    span.record(trogon_semconv::attribute::PAYLOAD_KIND, payload_kind.as_str());
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());

@@ -8,6 +8,7 @@ use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
 };
+use trogon_semconv::span::ACP_SESSION_PROMPT;
 
 use crate::agent::Bridge;
 use crate::constants::SESSION_ID_HEADER;
@@ -21,7 +22,7 @@ use crate::wire::{WireError, decode_notification_params, decode_response, encode
 pub use trogon_nats::REQ_ID_HEADER;
 
 #[instrument(
-    name = "acp.session.prompt",
+    name = ACP_SESSION_PROMPT,
     skip(bridge, args),
     fields(session_id = %args.session_id)
 )]

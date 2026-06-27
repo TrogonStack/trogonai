@@ -142,6 +142,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
  "url",
  "uuid",
@@ -260,6 +261,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
  "uuid",
 ]
@@ -3041,6 +3043,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
 ]
 
@@ -3446,12 +3449,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -5723,6 +5720,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
@@ -5748,7 +5746,6 @@ dependencies = [
  "bytes",
  "futures",
  "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5757,6 +5754,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-semconv",
  "trogon-std",
  "uuid",
 ]
@@ -5790,6 +5788,7 @@ dependencies = [
  "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
  "trogonai-proto",
  "uuid",
@@ -5817,7 +5816,6 @@ dependencies = [
  "bytesize",
  "clap",
  "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5826,6 +5824,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
+ "trogon-semconv",
  "uuid",
 ]
 
@@ -5842,6 +5841,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-semconv",
  "trogon-std",
 ]
 

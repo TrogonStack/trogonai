@@ -3,10 +3,11 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::{InitializeRequest, InitializeResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_INITIALIZE;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.initialize",
+    name = ACP_INITIALIZE,
     skip(bridge, args),
     fields(protocol_version = ?args.protocol_version)
 )]

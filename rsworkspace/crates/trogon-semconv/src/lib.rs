@@ -9,4 +9,4 @@
 #[allow(clippy::all)]
 mod r#gen;
 
-pub use r#gen::{attribute, metric};
+pub use r#gen::{attribute, metric, span};

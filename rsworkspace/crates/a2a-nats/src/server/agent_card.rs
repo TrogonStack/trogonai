@@ -1,5 +1,6 @@
 use a2a_pack::{AgentCardSource, accept_agent_card_on_read};
 use tracing::{instrument, warn};
+use trogon_semconv::span::A2A_SERVER_AGENT_CARD;
 
 use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{
@@ -8,7 +9,7 @@ use crate::server::wire::{
 
 const METHOD: &str = "agent/getAuthenticatedExtendedCard";
 
-#[instrument(name = "a2a.server.agent_card", skip(handler, headers, payload, reply_subject, nats))]
+#[instrument(name = A2A_SERVER_AGENT_CARD, skip(handler, headers, payload, reply_subject, nats))]
 pub async fn handle<H, N>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,

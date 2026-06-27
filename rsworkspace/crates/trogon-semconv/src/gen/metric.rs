@@ -7,6 +7,21 @@
 //! are documented in the attached doc comment and are authoritative in the
 //! registry under `otel/semconv/`.
 
+/// Total number of ACP errors by operation and reason
+///
+/// Instrument: `counter`. Unit: `{error}`.
+pub const ACP_ERRORS: &str = "acp.errors";
+
+/// Duration of ACP requests
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const ACP_REQUEST_DURATION: &str = "acp.request.duration";
+
+/// Total number of ACP requests
+///
+/// Instrument: `counter`. Unit: `{request}`.
+pub const ACP_REQUESTS: &str = "acp.requests";
+
 /// Execution schedule messages published
 ///
 /// Instrument: `counter`. Unit: `{message}`.

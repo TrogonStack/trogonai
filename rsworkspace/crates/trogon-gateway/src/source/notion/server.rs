@@ -9,6 +9,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecret, NonZeroDuration};
 
 use super::NotionEventType;
@@ -197,7 +198,7 @@ fn parse_verification_request(body: &[u8]) -> Result<Option<VerificationRequest>
 }
 
 #[instrument(
-    name = "notion.webhook",
+    name = NOTION_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,
@@ -224,8 +225,8 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
             }
 
             let subject = verification_subject(&state.subject_prefix);
-            span.record("event_type", "subscription.verification");
-            span.record("subject", &subject);
+            span.record(trogon_semconv::attribute::EVENT_TYPE, "subscription.verification");
+            span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
             return publish_verification(&state.publisher, &state.subject_prefix, body, state.nats_ack_timeout).await;
         }
@@ -296,13 +297,16 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     };
 
     let subject = format!("{}.{}", state.subject_prefix, event_type);
-    span.record("event_type", event_type.as_str());
-    span.record("event_id", metadata.event_id.as_deref().unwrap_or("unknown"));
+    span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
     span.record(
-        "subscription_id",
+        trogon_semconv::attribute::EVENT_ID,
+        metadata.event_id.as_deref().unwrap_or("unknown"),
+    );
+    span.record(
+        trogon_semconv::attribute::SUBSCRIPTION_ID,
         metadata.subscription_id.as_deref().unwrap_or("unknown"),
     );
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     metadata.apply_headers(&mut nats_headers);
