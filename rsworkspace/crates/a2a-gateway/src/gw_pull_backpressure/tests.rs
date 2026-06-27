@@ -137,7 +137,7 @@ fn config_from_env_applies_overrides() {
     let cfg = GatewayEventsPullConfig::from_env(&env);
     assert_eq!(cfg.max_ack_pending().as_usize(), 512);
     assert_eq!(cfg.fetch_batch().as_usize(), 4);
-    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(10));
+    assert_eq!(cfg.fetch_heartbeat().as_duration(), Duration::from_secs(10));
     assert_eq!(cfg.max_inflight_per_caller().as_usize(), 8);
 }
 
@@ -147,7 +147,10 @@ fn config_from_env_uses_documented_defaults() {
     let cfg = GatewayEventsPullConfig::from_env(&env);
     assert_eq!(cfg.max_ack_pending().as_usize(), DEFAULT_MAX_ACK_PENDING);
     assert_eq!(cfg.fetch_batch().as_usize(), DEFAULT_FETCH_BATCH);
-    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(DEFAULT_FETCH_HEARTBEAT_SECS));
+    assert_eq!(
+        cfg.fetch_heartbeat().as_duration(),
+        Duration::from_secs(DEFAULT_FETCH_HEARTBEAT_SECS)
+    );
     assert_eq!(
         cfg.max_inflight_per_caller().as_usize(),
         DEFAULT_MAX_INFLIGHT_PER_CALLER
@@ -160,7 +163,7 @@ fn config_from_env_clamps_zero_heartbeat() {
     env.set(ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS, "0");
     let cfg = GatewayEventsPullConfig::from_env(&env);
     // Zero would mean "no heartbeat" — JetStream needs a positive value.
-    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(1));
+    assert_eq!(cfg.fetch_heartbeat().as_duration(), Duration::from_secs(1));
 }
 
 #[test]
@@ -208,13 +211,25 @@ fn pull_config_new_round_trips_value_objects() {
     let cfg = GatewayEventsPullConfig::new(
         GatewayEventsMaxAckPending::new(99),
         GatewayEventsFetchBatch::new(7),
-        Duration::from_secs(11),
+        GatewayEventsFetchHeartbeat::new(Duration::from_secs(11)),
         GatewayEventsMaxInflightPerCaller::new(3),
     );
     assert_eq!(cfg.max_ack_pending().as_usize(), 99);
     assert_eq!(cfg.fetch_batch().as_usize(), 7);
-    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(11));
+    assert_eq!(cfg.fetch_heartbeat().as_duration(), Duration::from_secs(11));
     assert_eq!(cfg.max_inflight_per_caller().as_usize(), 3);
+}
+
+#[test]
+fn fetch_heartbeat_floors_at_one_second() {
+    assert_eq!(
+        GatewayEventsFetchHeartbeat::new(Duration::ZERO).as_duration(),
+        Duration::from_secs(1)
+    );
+    assert_eq!(
+        GatewayEventsFetchHeartbeat::new(Duration::from_secs(5)).as_duration(),
+        Duration::from_secs(5)
+    );
 }
 
 #[test]

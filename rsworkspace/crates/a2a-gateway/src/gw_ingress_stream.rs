@@ -183,7 +183,7 @@ impl StreamingIngressSpawn {
     }
 
     fn method_label(&self) -> &'static str {
-        match self.kind {
+        match &self.kind {
             StreamingIngressKind::MessageStream { .. } => "message_stream",
             StreamingIngressKind::TasksResubscribe { .. } => "tasks_resubscribe",
         }

@@ -113,6 +113,23 @@ impl GatewayEventsMaxInflightPerCaller {
     }
 }
 
+/// Pull-consumer fetch heartbeat. Floored at one second so a config carrying
+/// `Duration::ZERO` can't disable JetStream's heartbeat-driven liveness
+/// detection, which would silently turn fetch errors into hangs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GatewayEventsFetchHeartbeat(Duration);
+
+impl GatewayEventsFetchHeartbeat {
+    #[must_use]
+    pub fn new(value: Duration) -> Self {
+        Self(value.max(Duration::from_secs(1)))
+    }
+
+    pub fn as_duration(self) -> Duration {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PullConsumerHints {
     pub max_ack_pending: usize,
@@ -228,7 +245,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
 pub struct GatewayEventsPullConfig {
     max_ack_pending: GatewayEventsMaxAckPending,
     fetch_batch: GatewayEventsFetchBatch,
-    fetch_heartbeat: Duration,
+    fetch_heartbeat: GatewayEventsFetchHeartbeat,
     max_inflight_per_caller: GatewayEventsMaxInflightPerCaller,
 }
 
@@ -237,7 +254,7 @@ impl GatewayEventsPullConfig {
     pub fn new(
         max_ack_pending: GatewayEventsMaxAckPending,
         fetch_batch: GatewayEventsFetchBatch,
-        fetch_heartbeat: Duration,
+        fetch_heartbeat: GatewayEventsFetchHeartbeat,
         max_inflight_per_caller: GatewayEventsMaxInflightPerCaller,
     ) -> Self {
         Self {
@@ -256,7 +273,7 @@ impl GatewayEventsPullConfig {
         self.fetch_batch
     }
 
-    pub fn fetch_heartbeat(&self) -> Duration {
+    pub fn fetch_heartbeat(&self) -> GatewayEventsFetchHeartbeat {
         self.fetch_heartbeat
     }
 
@@ -279,8 +296,7 @@ impl GatewayEventsPullConfig {
             .var(ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS)
             .ok()
             .and_then(|raw| raw.trim().parse::<u64>().ok())
-            .unwrap_or(DEFAULT_FETCH_HEARTBEAT_SECS)
-            .max(1);
+            .unwrap_or(DEFAULT_FETCH_HEARTBEAT_SECS);
         let max_inflight_per_caller = env
             .var(ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER)
             .ok()
@@ -290,7 +306,7 @@ impl GatewayEventsPullConfig {
         Self {
             max_ack_pending: GatewayEventsMaxAckPending::new(max_ack_pending),
             fetch_batch: GatewayEventsFetchBatch::new(fetch_batch),
-            fetch_heartbeat: Duration::from_secs(fetch_heartbeat_secs),
+            fetch_heartbeat: GatewayEventsFetchHeartbeat::new(Duration::from_secs(fetch_heartbeat_secs)),
             max_inflight_per_caller: GatewayEventsMaxInflightPerCaller::new(max_inflight_per_caller),
         }
     }
@@ -430,7 +446,6 @@ pub async fn run_gateway_events_pull(
     shutdown: CancellationToken,
 ) {
     let planner = BaselineTaskEventsEgressPlanner::new();
-    let hints = planner.pull_hints();
     let durable = EventsConsumerDurable::for_prefix(&prefix);
     let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller().as_usize()));
     let mut backoff = INITIAL_BACKOFF;
@@ -445,7 +460,7 @@ pub async fn run_gateway_events_pull(
             &planner,
             &config,
             Arc::clone(&inflight_gate),
-            hints,
+            shutdown.clone(),
         )
         .await;
 
@@ -491,7 +506,7 @@ fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: 
         durable = %durable.as_str(),
         max_ack_pending = config.max_ack_pending().as_usize(),
         fetch_batch = config.fetch_batch().as_usize(),
-        fetch_heartbeat_secs = config.fetch_heartbeat().as_secs(),
+        fetch_heartbeat_secs = config.fetch_heartbeat().as_duration().as_secs(),
         max_inflight_per_caller = config.max_inflight_per_caller().as_usize(),
         "gateway events pull consumer started"
     );
@@ -505,7 +520,7 @@ async fn run_fetch_cycle(
     planner: &BaselineTaskEventsEgressPlanner,
     config: &GatewayEventsPullConfig,
     inflight_gate: Arc<CallerInflightGate>,
-    hints: PullConsumerHints,
+    shutdown: CancellationToken,
 ) -> Result<(), PullCycleError> {
     let jetstream = jetstream::new(client.clone());
     let stream_name = events_stream_name(prefix);
@@ -530,7 +545,7 @@ async fn run_fetch_cycle(
         .fetch()
         .max_messages(config.fetch_batch().as_usize())
         .expires(FETCH_EXPIRES)
-        .heartbeat(config.fetch_heartbeat())
+        .heartbeat(config.fetch_heartbeat().as_duration())
         .messages()
         .await
         .map_err(|source| PullCycleError::FetchMessages {
@@ -562,27 +577,30 @@ async fn run_fetch_cycle(
         // is absent (legacy publisher or stripped en route) we fall back to
         // `req_id` so the gate degrades gracefully instead of opening up.
         let caller_key = caller_key_from_message_headers(&message).unwrap_or_else(|| req_id.as_str().to_string());
-        let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller_key) else {
-            message
-                .ack_with(AckKind::Nak(None))
-                .await
-                .map_err(|source| PullCycleError::Ack {
-                    subject: subject.to_owned(),
-                    source,
-                })?;
-            continue;
-        };
-
-        // Spawn forward+ack so multiple permits per caller can coexist —
-        // running this work inline serializes the loop, which would make
-        // `max_inflight_per_caller` a no-op (at most one permit per caller
-        // would ever exist). JetStream's `max_ack_pending` still bounds
-        // total inflight, so this can't run away.
         let client_handle = client.clone();
         let prefix_handle = prefix.clone();
         let planner_handle = *planner;
         let subject_owned = subject.to_owned();
+        let gate_handle = Arc::clone(&inflight_gate);
+        let shutdown_handle = shutdown.clone();
+        // Wait for a permit INSIDE the spawn so a gate-full state doesn't
+        // NAK the message: NAK'ing here would tick JetStream's `delivered`
+        // counter, and the planner uses that counter as the forward retry
+        // budget. A caller at the inflight cap would burn the 3-attempt
+        // budget on gate retries before `forward_task_event` ever ran, then
+        // Term on the first publish failure. By waiting for the permit
+        // before NAK'ing, `delivered` reflects actual forward attempts.
+        // JetStream's `max_ack_pending` still bounds total inflight.
         tokio::spawn(async move {
+            let permit = match acquire_permit_with_shutdown(gate_handle, &caller_key, &shutdown_handle).await {
+                Some(permit) => permit,
+                None => {
+                    // Shutdown observed while waiting — NAK so the message
+                    // is redelivered to the next process owner.
+                    let _ = message.ack_with(AckKind::Nak(None)).await;
+                    return;
+                }
+            };
             let _permit = permit;
             // JetStream tracks per-message delivery attempts; carry that count
             // into the planner so persistently undeliverable events get Term'd
@@ -628,8 +646,28 @@ async fn run_fetch_cycle(
         });
     }
 
-    let _ = hints;
     Ok(())
+}
+
+/// Block on the per-caller gate until a permit is available or shutdown
+/// fires. Returns `None` only on shutdown. Yields between attempts so the
+/// task doesn't spin while permits are held by other forwards.
+#[cfg(not(coverage))]
+async fn acquire_permit_with_shutdown(
+    gate: Arc<CallerInflightGate>,
+    caller_key: &str,
+    shutdown: &CancellationToken,
+) -> Option<CallerInflightPermit> {
+    const GATE_WAIT_BACKOFF: Duration = Duration::from_millis(50);
+    loop {
+        if let Some(permit) = Arc::clone(&gate).try_acquire(caller_key) {
+            return Some(permit);
+        }
+        tokio::select! {
+            () = shutdown.cancelled() => return None,
+            () = tokio::time::sleep(GATE_WAIT_BACKOFF) => {}
+        }
+    }
 }
 
 #[cfg(not(coverage))]
