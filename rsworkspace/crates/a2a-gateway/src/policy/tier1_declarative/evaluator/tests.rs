@@ -386,3 +386,31 @@ impl trogon_std::env::ReadEnv for NotUnicodeForEnableFlag {
         Err(std::env::VarError::NotPresent)
     }
 }
+
+#[test]
+fn from_env_trims_bundle_dir_whitespace_before_load() {
+    // Operators routinely set env vars from shell scripts that leave
+    // trailing whitespace; without trimming, the loader would `exists()`
+    // a path like `/path/to/dir ` and silently return an empty bundle.
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("allow.tier1.toml"),
+        r#"
+            [[rule]]
+            id = "always-allow"
+            priority = 1
+            effect = "allow"
+
+            [[rule.matches]]
+            kind = "agent_id"
+            pattern = "*"
+        "#,
+    )
+    .expect("write bundle");
+    let padded = format!("  {}  ", dir.path().to_str().expect("path utf8"));
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENV_TIER1_DECLARATIVE_ENABLED, "on");
+    env.set(ENV_TIER1_BUNDLE_DIR, padded);
+    let layer = Tier1DeclarativeConfig::from_env(&env).expect("padded path resolves");
+    assert!(layer.gate.is_enabled());
+}
