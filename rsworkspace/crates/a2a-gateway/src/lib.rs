@@ -44,17 +44,6 @@ pub use runtime::RuntimeError;
 /// runtime's terminal error if one fires. The binary calls this directly so
 /// `main.rs` stays a thin shim and integration tests can inject a fake env
 /// through [`runtime::run_with_args`].
-///
-/// Under `cfg(coverage)` this collapses to a stub that returns `Ok(())`
-/// matching the `main.rs` coverage stub. The real env-resolution path is
-/// exercised through `runtime::run_with_args` directly under the normal
-/// test profile, so coverage doesn't depend on running a tokio runtime.
-#[cfg(not(coverage))]
 pub async fn run(args: Args) -> Result<(), RuntimeError> {
     runtime::run_with_args(args, &trogon_std::env::SystemEnv).await
-}
-
-#[cfg(coverage)]
-pub async fn run(_args: Args) -> Result<(), RuntimeError> {
-    Ok(())
 }
