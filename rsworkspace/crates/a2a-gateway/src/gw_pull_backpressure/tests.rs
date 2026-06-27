@@ -37,6 +37,12 @@ fn fetch_batch_floors_at_one() {
 }
 
 #[test]
+fn max_inflight_per_caller_floors_at_one() {
+    assert_eq!(GatewayEventsMaxInflightPerCaller::new(0).as_usize(), 1);
+    assert_eq!(GatewayEventsMaxInflightPerCaller::new(8).as_usize(), 8);
+}
+
+#[test]
 fn pull_consumer_hints_baseline_uses_documented_defaults() {
     let hints = PullConsumerHints::gateway_baseline();
     assert_eq!(hints.max_ack_pending, DEFAULT_MAX_ACK_PENDING);
@@ -55,17 +61,25 @@ fn pull_consumer_hints_default_matches_baseline() {
 
 #[test]
 fn parse_task_events_subject_extracts_ids() {
-    let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.task.t1.events.r1").expect("parsed");
+    // JetStream task event subjects use the plural `tasks` segment, not
+    // `task` — regression test for the wrong-prefix bug.
+    let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.tasks.t1.events.r1").expect("parsed");
     assert_eq!(task_id.as_str(), "t1");
     assert_eq!(req_id.as_str(), "r1");
 }
 
 #[test]
+fn parse_task_events_subject_rejects_singular_task_segment() {
+    // Anti-regression: the wrong prefix Term'd every pulled message.
+    assert!(parse_task_events_subject("a2a", "a2a.task.t1.events.r1").is_none());
+}
+
+#[test]
 fn parse_task_events_subject_rejects_unrelated() {
     assert!(parse_task_events_subject("a2a", "a2a.gateway.bot.message.send").is_none());
-    assert!(parse_task_events_subject("a2a", "other.task.t1.events.r1").is_none());
+    assert!(parse_task_events_subject("a2a", "other.tasks.t1.events.r1").is_none());
     // Missing the `.events.` infix.
-    assert!(parse_task_events_subject("a2a", "a2a.task.t1.r1").is_none());
+    assert!(parse_task_events_subject("a2a", "a2a.tasks.t1.r1").is_none());
 }
 
 #[test]
@@ -85,7 +99,7 @@ fn planner_message_stream_plan_filters_by_req_id() {
     let plan = planner
         .plan_message_stream(&prefix(), &ReqId::from_header("req-1"))
         .expect("plan");
-    assert_eq!(plan.filter_subject, "a2a.task.*.events.req-1");
+    assert_eq!(plan.filter_subject, "a2a.tasks.*.events.req-1");
 }
 
 #[test]
@@ -93,7 +107,7 @@ fn planner_resubscribe_plan_filters_by_task_id_and_advances_seq() {
     let planner = BaselineTaskEventsEgressPlanner::new();
     let task_id = A2aTaskId::new("task-9").expect("task");
     let plan = planner.plan_resubscribe(&prefix(), &task_id, 41).expect("plan");
-    assert_eq!(plan.filter_subject, "a2a.task.task-9.events.*");
+    assert_eq!(plan.filter_subject, "a2a.tasks.task-9.events.*");
     assert_eq!(plan.start_sequence, 42);
 }
 
@@ -121,20 +135,23 @@ fn config_from_env_applies_overrides() {
     env.set(ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS, "10");
     env.set(ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER, "8");
     let cfg = GatewayEventsPullConfig::from_env(&env);
-    assert_eq!(cfg.max_ack_pending.as_usize(), 512);
-    assert_eq!(cfg.fetch_batch.as_usize(), 4);
-    assert_eq!(cfg.fetch_heartbeat, Duration::from_secs(10));
-    assert_eq!(cfg.max_inflight_per_caller, 8);
+    assert_eq!(cfg.max_ack_pending().as_usize(), 512);
+    assert_eq!(cfg.fetch_batch().as_usize(), 4);
+    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(10));
+    assert_eq!(cfg.max_inflight_per_caller().as_usize(), 8);
 }
 
 #[test]
 fn config_from_env_uses_documented_defaults() {
     let env = InMemoryEnv::new();
     let cfg = GatewayEventsPullConfig::from_env(&env);
-    assert_eq!(cfg.max_ack_pending.as_usize(), DEFAULT_MAX_ACK_PENDING);
-    assert_eq!(cfg.fetch_batch.as_usize(), DEFAULT_FETCH_BATCH);
-    assert_eq!(cfg.fetch_heartbeat, Duration::from_secs(DEFAULT_FETCH_HEARTBEAT_SECS));
-    assert_eq!(cfg.max_inflight_per_caller, DEFAULT_MAX_INFLIGHT_PER_CALLER);
+    assert_eq!(cfg.max_ack_pending().as_usize(), DEFAULT_MAX_ACK_PENDING);
+    assert_eq!(cfg.fetch_batch().as_usize(), DEFAULT_FETCH_BATCH);
+    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(DEFAULT_FETCH_HEARTBEAT_SECS));
+    assert_eq!(
+        cfg.max_inflight_per_caller().as_usize(),
+        DEFAULT_MAX_INFLIGHT_PER_CALLER
+    );
 }
 
 #[test]
@@ -143,7 +160,16 @@ fn config_from_env_clamps_zero_heartbeat() {
     env.set(ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS, "0");
     let cfg = GatewayEventsPullConfig::from_env(&env);
     // Zero would mean "no heartbeat" — JetStream needs a positive value.
-    assert_eq!(cfg.fetch_heartbeat, Duration::from_secs(1));
+    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(1));
+}
+
+#[test]
+fn config_from_env_clamps_zero_max_inflight() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER, "0");
+    let cfg = GatewayEventsPullConfig::from_env(&env);
+    // Zero would NAK every message into a tight loop.
+    assert_eq!(cfg.max_inflight_per_caller().as_usize(), 1);
 }
 
 #[test]

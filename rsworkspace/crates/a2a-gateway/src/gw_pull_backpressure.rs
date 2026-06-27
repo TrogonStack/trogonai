@@ -98,6 +98,23 @@ impl GatewayEventsFetchBatch {
     }
 }
 
+/// Per-caller concurrent in-flight cap for the gateway events pump. Floored
+/// at 1 so the gate always lets at least one message through per caller —
+/// a config carrying `0` would NAK every message into a tight loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GatewayEventsMaxInflightPerCaller(usize);
+
+impl GatewayEventsMaxInflightPerCaller {
+    #[must_use]
+    pub fn new(value: usize) -> Self {
+        Self(value.max(1))
+    }
+
+    pub fn as_usize(self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PullConsumerHints {
     pub max_ack_pending: usize,
@@ -183,7 +200,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
 
     fn plan_message_stream(&self, prefix: &A2aPrefix, req_id: &ReqId) -> Result<MessageStreamEgressPlan, Self::Error> {
         Ok(MessageStreamEgressPlan {
-            filter_subject: format!("{}.task.*.events.{req_id}", prefix.as_str()),
+            filter_subject: format!("{}.tasks.*.events.{req_id}", prefix.as_str()),
             hints: self.hints,
         })
     }
@@ -195,7 +212,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
         last_seq: u64,
     ) -> Result<ResubscribeEgressPlan, Self::Error> {
         Ok(ResubscribeEgressPlan {
-            filter_subject: format!("{}.task.{task_id}.events.*", prefix.as_str()),
+            filter_subject: format!("{}.tasks.{task_id}.events.*", prefix.as_str()),
             start_sequence: last_seq.saturating_add(1),
         })
     }
@@ -211,13 +228,44 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GatewayEventsPullConfig {
-    pub max_ack_pending: GatewayEventsMaxAckPending,
-    pub fetch_batch: GatewayEventsFetchBatch,
-    pub fetch_heartbeat: Duration,
-    pub max_inflight_per_caller: usize,
+    max_ack_pending: GatewayEventsMaxAckPending,
+    fetch_batch: GatewayEventsFetchBatch,
+    fetch_heartbeat: Duration,
+    max_inflight_per_caller: GatewayEventsMaxInflightPerCaller,
 }
 
 impl GatewayEventsPullConfig {
+    #[must_use]
+    pub fn new(
+        max_ack_pending: GatewayEventsMaxAckPending,
+        fetch_batch: GatewayEventsFetchBatch,
+        fetch_heartbeat: Duration,
+        max_inflight_per_caller: GatewayEventsMaxInflightPerCaller,
+    ) -> Self {
+        Self {
+            max_ack_pending,
+            fetch_batch,
+            fetch_heartbeat,
+            max_inflight_per_caller,
+        }
+    }
+
+    pub fn max_ack_pending(&self) -> GatewayEventsMaxAckPending {
+        self.max_ack_pending
+    }
+
+    pub fn fetch_batch(&self) -> GatewayEventsFetchBatch {
+        self.fetch_batch
+    }
+
+    pub fn fetch_heartbeat(&self) -> Duration {
+        self.fetch_heartbeat
+    }
+
+    pub fn max_inflight_per_caller(&self) -> GatewayEventsMaxInflightPerCaller {
+        self.max_inflight_per_caller
+    }
+
     pub fn from_env<E: ReadEnv>(env: &E) -> Self {
         let max_ack_pending = env
             .var(ENV_GATEWAY_EVENTS_MAX_ACK_PENDING)
@@ -239,14 +287,13 @@ impl GatewayEventsPullConfig {
             .var(ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER)
             .ok()
             .and_then(|raw| raw.trim().parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_INFLIGHT_PER_CALLER)
-            .max(1);
+            .unwrap_or(DEFAULT_MAX_INFLIGHT_PER_CALLER);
 
         Self {
             max_ack_pending: GatewayEventsMaxAckPending::new(max_ack_pending),
             fetch_batch: GatewayEventsFetchBatch::new(fetch_batch),
             fetch_heartbeat: Duration::from_secs(fetch_heartbeat_secs),
-            max_inflight_per_caller,
+            max_inflight_per_caller: GatewayEventsMaxInflightPerCaller::new(max_inflight_per_caller),
         }
     }
 }
@@ -263,7 +310,11 @@ pub fn gateway_egress_subject(prefix: &A2aPrefix, req_id: &ReqId) -> String {
 }
 
 pub fn parse_task_events_subject(prefix: &str, subject: &str) -> Option<(A2aTaskId, ReqId)> {
-    let expected = format!("{prefix}.task.");
+    // JetStream task event subjects are `{prefix}.tasks.{task_id}.events.{req_id}`.
+    // Earlier versions of this helper stripped `.task.` (singular) and
+    // dropped every pulled message via Term — coverage above hits both
+    // happy and reject paths now.
+    let expected = format!("{prefix}.tasks.");
     let rest = subject.strip_prefix(&expected)?;
     let (task_id, req_id) = rest.split_once(".events.")?;
     Some((A2aTaskId::new(task_id).ok()?, ReqId::from_header(req_id)))
@@ -324,6 +375,45 @@ impl Drop for CallerInflightPermit<'_> {
     }
 }
 
+/// Typed failure surface for the pull-cycle loop. Replaces the previous
+/// `Result<(), String>` so structured source errors (jetstream binding,
+/// consumer provisioning, fetch, ack) survive across the loop instead of
+/// being flattened into a Display string.
+#[derive(Debug, thiserror::Error)]
+#[cfg_attr(coverage, allow(dead_code))]
+pub enum PullCycleError {
+    #[error("bind events stream {stream}")]
+    BindStream {
+        stream: String,
+        #[source]
+        source: async_nats::jetstream::context::GetStreamError,
+    },
+    #[error("provision pull consumer {durable}")]
+    ProvisionConsumer {
+        durable: String,
+        #[source]
+        source: async_nats::jetstream::stream::ConsumerError,
+    },
+    #[error("fetch messages from {durable}")]
+    FetchMessages {
+        durable: String,
+        #[source]
+        source: async_nats::jetstream::consumer::pull::BatchError,
+    },
+    #[error("fetch yielded an error item on {subject}")]
+    FetchItem {
+        subject: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("ack {subject}")]
+    Ack {
+        subject: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
 /// Run the gateway egress pull-consumer loop. Gated behind
 /// `cfg(not(coverage))` because it binds a real JetStream context; the pure
 /// planning + parsing helpers are exercised by unit tests under all builds.
@@ -337,7 +427,7 @@ pub async fn run_gateway_events_pull(
     let planner = BaselineTaskEventsEgressPlanner::new();
     let hints = planner.pull_hints();
     let durable = EventsConsumerDurable::for_prefix(&prefix);
-    let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller));
+    let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller.as_usize()));
     let mut backoff = INITIAL_BACKOFF;
 
     info_span_start(&prefix, &durable, &config);
@@ -366,7 +456,12 @@ pub async fn run_gateway_events_pull(
                     backoff_ms = backoff.as_millis(),
                     "gateway events pull cycle failed; backing off"
                 );
-                tokio::time::sleep(backoff).await;
+                // Observe shutdown during the backoff sleep so cancellation
+                // isn't blocked for up to MAX_BACKOFF after a fetch storm.
+                tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    () = tokio::time::sleep(backoff) => {}
+                }
                 backoff = (backoff * 2).min(MAX_BACKOFF);
             }
         }
@@ -392,7 +487,7 @@ fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: 
         max_ack_pending = config.max_ack_pending.as_usize(),
         fetch_batch = config.fetch_batch.as_usize(),
         fetch_heartbeat_secs = config.fetch_heartbeat.as_secs(),
-        max_inflight_per_caller = config.max_inflight_per_caller,
+        max_inflight_per_caller = config.max_inflight_per_caller.as_usize(),
         "gateway events pull consumer started"
     );
 }
@@ -406,19 +501,25 @@ async fn run_fetch_cycle(
     config: &GatewayEventsPullConfig,
     inflight_gate: &CallerInflightGate,
     hints: PullConsumerHints,
-) -> Result<(), String> {
+) -> Result<(), PullCycleError> {
     let jetstream = jetstream::new(client.clone());
     let stream_name = events_stream_name(prefix);
     let stream = jetstream
         .get_stream(&stream_name)
         .await
-        .map_err(|e| format!("get_stream {stream_name}: {e}"))?;
+        .map_err(|source| PullCycleError::BindStream {
+            stream: stream_name.clone(),
+            source,
+        })?;
 
     let consumer_config = gateway_events_consumer(prefix, durable.as_str(), config.max_ack_pending.as_i64());
     let consumer = stream
         .get_or_create_consumer(durable.as_str(), consumer_config)
         .await
-        .map_err(|e| format!("get_or_create_consumer {}: {e}", durable.as_str()))?;
+        .map_err(|source| PullCycleError::ProvisionConsumer {
+            durable: durable.as_str().to_owned(),
+            source,
+        })?;
 
     let mut batch = consumer
         .fetch()
@@ -427,16 +528,25 @@ async fn run_fetch_cycle(
         .heartbeat(config.fetch_heartbeat)
         .messages()
         .await
-        .map_err(|e| format!("fetch.messages: {e}"))?;
+        .map_err(|source| PullCycleError::FetchMessages {
+            durable: durable.as_str().to_owned(),
+            source,
+        })?;
 
     while let Some(item) = batch.next().await {
-        let message = item.map_err(|e| format!("fetch item: {e}"))?;
+        let message = item.map_err(|source| PullCycleError::FetchItem {
+            subject: String::new(),
+            source,
+        })?;
         let subject = message.subject.as_str();
         let Some((_task_id, req_id)) = parse_task_events_subject(prefix.as_str(), subject) else {
             message
                 .ack_with(AckKind::Term)
                 .await
-                .map_err(|e| format!("term unparseable subject {subject}: {e}"))?;
+                .map_err(|source| PullCycleError::Ack {
+                    subject: subject.to_owned(),
+                    source,
+                })?;
             continue;
         };
 
@@ -445,7 +555,10 @@ async fn run_fetch_cycle(
             message
                 .ack_with(AckKind::Nak(None))
                 .await
-                .map_err(|e| format!("nak inflight limit {subject}: {e}"))?;
+                .map_err(|source| PullCycleError::Ack {
+                    subject: subject.to_owned(),
+                    source,
+                })?;
             continue;
         };
 
@@ -456,19 +569,28 @@ async fn run_fetch_cycle(
         let forward_result = forward_task_event(client, prefix, &req_id, &message.payload).await;
         match planner.forward_disposition(attempt, forward_result.err().as_deref()) {
             EgressAckDisposition::Ack => {
-                message.ack().await.map_err(|e| format!("ack {subject}: {e}"))?;
+                message.ack().await.map_err(|source| PullCycleError::Ack {
+                    subject: subject.to_owned(),
+                    source,
+                })?;
             }
             EgressAckDisposition::Nak { delay } => {
                 message
                     .ack_with(AckKind::Nak(delay))
                     .await
-                    .map_err(|e| format!("nak {subject}: {e}"))?;
+                    .map_err(|source| PullCycleError::Ack {
+                        subject: subject.to_owned(),
+                        source,
+                    })?;
             }
             EgressAckDisposition::Term => {
                 message
                     .ack_with(AckKind::Term)
                     .await
-                    .map_err(|e| format!("term {subject}: {e}"))?;
+                    .map_err(|source| PullCycleError::Ack {
+                        subject: subject.to_owned(),
+                        source,
+                    })?;
             }
         }
     }
