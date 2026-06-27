@@ -5,6 +5,7 @@ use agent_client_protocol::{Client, CreateTerminalRequest, CreateTerminalRespons
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_TERMINAL_CREATE;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalCreateError {
@@ -24,7 +25,7 @@ pub fn error_code_and_message(e: &TerminalCreateError) -> (ErrorCode, String) {
     }
 }
 
-#[instrument(name = "acp.client.terminal.create", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_TERMINAL_CREATE, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

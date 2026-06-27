@@ -27,6 +27,8 @@ use futures::StreamExt;
 use std::cell::Cell;
 use std::rc::Rc;
 use tracing::{Span, error, info, instrument, warn};
+use trogon_semconv::attribute::SESSION_ID;
+use trogon_semconv::span::DISPATCH_CLIENT_METHOD;
 
 async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
     nats: &N,
@@ -159,7 +161,7 @@ where
     bridge: &'a Bridge<N, C, J>,
 }
 
-#[instrument(skip(headers, payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
+#[instrument(name = DISPATCH_CLIENT_METHOD, skip(headers, payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: Client,
@@ -173,7 +175,7 @@ async fn dispatch_client_method<
     reply: Option<String>,
     ctx: &DispatchContext<'_, N, Cl, C, J>,
 ) {
-    Span::current().record("session_id", parsed.session_id.as_str());
+    Span::current().record(SESSION_ID, parsed.session_id.as_str());
 
     match parsed.method {
         ClientMethod::FsReadTextFile => {

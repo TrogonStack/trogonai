@@ -1,4 +1,5 @@
 use tracing::{instrument, warn};
+use trogon_semconv::span::A2A_SERVER_PUSH_DELETE;
 
 use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{
@@ -8,7 +9,7 @@ use crate::server::wire::{
 const METHOD: &str = "tasks/pushNotificationConfig/delete";
 
 #[instrument(
-    name = "a2a.server.push_delete",
+    name = A2A_SERVER_PUSH_DELETE,
     skip(handler, headers, payload, reply_subject, nats)
 )]
 pub async fn handle<H, N>(

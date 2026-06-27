@@ -28,6 +28,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-scheduler-domain = { path = "../trogon-scheduler-domain", features = ["runtime-snapshot"] }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 trogonai-proto = { path = "../trogonai-proto", features = ["schedules", "runtime-host"] }

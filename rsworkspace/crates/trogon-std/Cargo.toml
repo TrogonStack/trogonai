@@ -15,7 +15,7 @@ signal = ["dep:tokio", "dep:tracing"]
 telemetry-http = [
     "dep:axum",
     "dep:opentelemetry",
-    "dep:opentelemetry-semantic-conventions",
+    "dep:trogon-semconv",
     "dep:tower-http",
     "dep:tracing",
     "dep:tracing-opentelemetry",
@@ -27,7 +27,7 @@ axum = { workspace = true, optional = true }
 bytesize = "2.3.1"
 clap = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
-opentelemetry-semantic-conventions = { workspace = true, optional = true }
+trogon-semconv = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["macros", "signal"] }

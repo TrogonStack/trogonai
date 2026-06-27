@@ -15,6 +15,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +126,7 @@ fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "linear.webhook",
+    name = LINEAR_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,
@@ -258,11 +259,11 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}.{}", state.subject_prefix, event_type, action);
 
     let span = tracing::Span::current();
-    span.record("event_type", event_type.as_str());
-    span.record("action", action.as_str());
-    span.record("webhook_id", &webhook_id);
-    span.record("subject", &subject);
-    span.record("messaging.message.body.size", body.len());
+    span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
+    span.record(trogon_semconv::attribute::ACTION, action.as_str());
+    span.record(trogon_semconv::attribute::WEBHOOK_ID, &webhook_id);
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
+    span.record(trogon_semconv::attribute::MESSAGING_MESSAGE_BODY_SIZE, body.len());
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert("Nats-Msg-Id", webhook_id.as_str());

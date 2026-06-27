@@ -4,8 +4,9 @@ use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::{Client, ErrorCode, TerminalOutputRequest};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_TERMINAL_OUTPUT;
 
-#[instrument(name = "acp.client.terminal.output", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_TERMINAL_OUTPUT, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

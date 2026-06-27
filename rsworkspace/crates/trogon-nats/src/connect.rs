@@ -3,6 +3,7 @@ use crate::constants::MAX_RECONNECT_DELAY;
 use async_nats::{Client, ConnectOptions, Event};
 use std::time::Duration;
 use tracing::{info, instrument, warn};
+use trogon_semconv::span::NATS_CONNECT;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -45,7 +46,7 @@ fn apply_reconnect_options(opts: ConnectOptions, connection_timeout: Duration) -
         .event_callback(|event| async move { handle_event(event).await })
 }
 
-#[instrument(name = "nats.connect", skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
+#[instrument(name = NATS_CONNECT, skip(config), fields(servers = ?config.servers, auth = %config.auth.description(), timeout_secs = ?connection_timeout.as_secs()))]
 pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Result<Client, ConnectError> {
     info!(
         servers = ?config.servers,

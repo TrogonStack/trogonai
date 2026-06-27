@@ -17,6 +17,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::SENTRY_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 #[derive(Deserialize)]
@@ -129,7 +130,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 }
 
 #[instrument(
-    name = "sentry.webhook",
+    name = SENTRY_WEBHOOK,
     skip_all,
     fields(
         resource = tracing::field::Empty,
@@ -192,10 +193,10 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let subject = format!("{}.{}.{}", state.subject_prefix, resource.as_str(), action_token);
     let span = tracing::Span::current();
-    span.record("resource", resource.as_str());
-    span.record("action", &payload.action);
-    span.record("request_id", &request_id);
-    span.record("subject", &subject);
+    span.record(trogon_semconv::attribute::RESOURCE, resource.as_str());
+    span.record(trogon_semconv::attribute::ACTION, &payload.action);
+    span.record(trogon_semconv::attribute::REQUEST_ID, &request_id);
+    span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(NATS_HEADER_RESOURCE, resource.as_str());

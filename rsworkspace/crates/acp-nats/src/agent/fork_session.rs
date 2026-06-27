@@ -5,10 +5,12 @@ use crate::session_id::AcpSessionId;
 use agent_client_protocol::{Error, ErrorCode, ForkSessionRequest, ForkSessionResponse, Result};
 use tracing::{Span, info, instrument};
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
+use trogon_semconv::attribute::NEW_SESSION_ID;
+use trogon_semconv::span::ACP_SESSION_FORK;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.session.fork",
+    name = ACP_SESSION_FORK,
     skip(bridge, args),
     fields(session_id = %args.session_id, new_session_id = tracing::field::Empty)
 )]
@@ -44,7 +46,7 @@ where
         .await;
 
     if let Ok(ref response) = result {
-        Span::current().record("new_session_id", response.session_id.to_string().as_str());
+        Span::current().record(NEW_SESSION_ID, response.session_id.to_string().as_str());
         info!(new_session_id = %response.session_id, "Session forked");
 
         bridge.schedule_session_ready(response.session_id.clone());

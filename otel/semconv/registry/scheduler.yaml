@@ -1,0 +1,130 @@
+groups:
+  # trogon-scheduler: reconciliation consumer (meter "trogon-scheduler").
+  - id: registry.trogonai.scheduler
+    type: attribute_group
+    display_name: Scheduler Attributes
+    brief: Attributes emitted by the trogon-scheduler reconciliation pipeline today.
+    attributes:
+      - id: outcome
+        type:
+          members:
+            - id: published
+              value: "published"
+              brief: An execution schedule message was published.
+              stability: development
+            - id: purged
+              value: "purged"
+              brief: An execution schedule subject was purged.
+              stability: development
+            - id: stored_paused
+              value: "stored_paused"
+              brief: The schedule was stored in a paused state.
+              stability: development
+            - id: unsupported
+              value: "unsupported"
+              brief: The schedule event type is not supported.
+              stability: development
+            - id: expired
+              value: "expired"
+              brief: The schedule had already expired.
+              stability: development
+            - id: resumed_expired
+              value: "resumed_expired"
+              brief: An expired schedule was resumed.
+              stability: development
+            - id: duplicate_stale
+              value: "duplicate_stale"
+              brief: A duplicate or stale record was observed.
+              stability: development
+            - id: skipped_foreign
+              value: "skipped_foreign"
+              brief: A record owned by another partition was skipped.
+              stability: development
+            - id: durable_failure
+              value: "durable_failure"
+              brief: A durable failure was recorded for the schedule.
+              stability: development
+        stability: development
+        brief: Reconciliation outcome for a processed schedule event record.
+        examples: ["published", "purged"]
+      - id: stream_id
+        type: string
+        stability: development
+        brief: Identifier of the event stream the schedule record belongs to.
+      - id: stream_position
+        type: string
+        stability: development
+        brief: Position of the processed record within its event stream (recorded as a string today).
+      - id: schedule_key
+        type: string
+        stability: development
+        brief: Key uniquely identifying the schedule the record applies to.
+
+  - id: metric.scheduler.processor.records
+    type: metric
+    metric_name: scheduler.processor.records
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Schedule event records processed, by reconciliation outcome.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{record}"
+    stability: development
+    attributes:
+      - ref: outcome
+        requirement_level: required
+
+  - id: metric.scheduler.processor.execution_publishes
+    type: metric
+    metric_name: scheduler.processor.execution_publishes
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Execution schedule messages published.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{message}"
+    stability: development
+
+  - id: metric.scheduler.processor.execution_purges
+    type: metric
+    metric_name: scheduler.processor.execution_purges
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Execution schedule subjects purged.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{subject}"
+    stability: development
+
+  - id: metric.scheduler.processor.redeliveries
+    type: metric
+    metric_name: scheduler.processor.redeliveries
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Schedule event records observed as NATS redeliveries.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{record}"
+    stability: development
+
+  - id: span.scheduler.process_schedule_event
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Processing of a single schedule event record by the reconciliation consumer.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+      - ref: stream_position
+        requirement_level: recommended
+      - ref: schedule_key
+        requirement_level: recommended
+      - ref: event_type
+        requirement_level: recommended
+      - ref: outcome
+        requirement_level:
+          conditionally_required: When processing completes without an error.

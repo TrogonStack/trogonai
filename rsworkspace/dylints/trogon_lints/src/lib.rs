@@ -3,6 +3,7 @@
 extern crate rustc_ast;
 extern crate rustc_hir;
 extern crate rustc_lint;
+extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
 
@@ -11,6 +12,7 @@ mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
 mod redundant_module_path;
+mod telemetry_attribute_literal;
 mod test_module_naming;
 
 use rustc_hir::{Expr, Item, LetStmt, Stmt};
@@ -27,6 +29,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         INLINE_MODULE_BLOCK,
         MANUAL_ERROR_IMPL,
         REDUNDANT_MODULE_PATH,
+        TELEMETRY_ATTRIBUTE_LITERAL,
         TEST_MODULE_NAMING,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
@@ -264,10 +267,45 @@ rustc_session::declare_lint! {
     "name a module of tests `tests` or `*_tests`",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a string literal passed as the field-name argument to
+    /// `tracing::Span::record`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Telemetry identifiers are a contract shared with dashboards, alerts, and
+    /// trace correlation. The semantic-convention registry is the single source
+    /// of truth for that contract, and `trogon-semconv` generates a constant for
+    /// every attribute key. Spelling a key inline as `"session_id"` forks that
+    /// contract: a registry rename no longer reaches the call site, and a typo
+    /// silently records onto a field nobody queries. Recording through the
+    /// generated constant keeps every emitted key tied to the registry.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// tracing::Span::current().record("session_id", id.as_str());
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// use trogon_semconv::attribute::SESSION_ID;
+    ///
+    /// tracing::Span::current().record(SESSION_ID, id.as_str());
+    /// ```
+    pub TELEMETRY_ATTRIBUTE_LITERAL,
+    Deny,
+    "record telemetry fields with a generated `trogon_semconv` constant, not an inline string literal",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
     function_local_use: function_local_use::FunctionLocalUse,
+    telemetry_attribute_literal: telemetry_attribute_literal::TelemetryAttributeLiteral,
 }
 
 impl<'tcx> LateLintPass<'tcx> for TrogonLints {
@@ -277,6 +315,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         self.error_string_comparison.check_expr(cx, expr);
+        self.telemetry_attribute_literal.check_expr(cx, expr);
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
@@ -295,6 +334,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,
+    TELEMETRY_ATTRIBUTE_LITERAL,
     TEST_MODULE_NAMING,
 ]);
 
@@ -303,4 +343,12 @@ rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [RE
 #[test]
 fn ui() {
     dylint_testing::ui_test(env!("CARGO_PKG_NAME"), "ui");
+}
+
+// `telemetry_attribute_literal` gates on the real `tracing::Span` type, so its
+// fixture lives as an example target where it can depend on `tracing`; the
+// dependency-free `ui` directory cannot.
+#[test]
+fn ui_telemetry_attribute_literal() {
+    dylint_testing::ui_test_example(env!("CARGO_PKG_NAME"), "telemetry_attribute_literal");
 }

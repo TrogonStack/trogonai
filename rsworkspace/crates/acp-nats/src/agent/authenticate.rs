@@ -3,10 +3,11 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
 use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_AUTHENTICATE;
 use trogon_std::time::GetElapsed;
 
 #[instrument(
-    name = "acp.authenticate",
+    name = ACP_AUTHENTICATE,
     skip(bridge, args),
     fields(method_id = %args.method_id)
 )]

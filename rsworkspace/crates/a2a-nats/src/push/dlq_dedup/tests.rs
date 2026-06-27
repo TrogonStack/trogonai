@@ -104,6 +104,40 @@ fn default_uses_built_in_lru_size() {
 }
 
 #[test]
+fn release_allows_reacquire_of_the_same_key() {
+    // Callers (push DLQ mirror) acquire before publish; if the publish
+    // fails they release so a redelivery isn't silently dedup-suppressed.
+    let gate = PushDlqDedupGate::with_capacity(8);
+    let key = dlq_key("task-1", "failed", "https://example.com/hook");
+
+    assert!(gate.try_acquire(&key));
+    assert!(!gate.try_acquire(&key), "second acquire blocked while reserved");
+    assert!(gate.release(&key), "release removes the reservation");
+    assert!(gate.try_acquire(&key), "after release the key is acquirable again");
+}
+
+#[test]
+fn release_returns_false_for_unknown_key() {
+    let gate = PushDlqDedupGate::with_capacity(8);
+    let key = dlq_key("task-1", "failed", "https://example.com/hook");
+    assert!(!gate.release(&key), "release of never-acquired key is a no-op");
+}
+
+#[test]
+fn release_keeps_lru_bounded() {
+    let gate = PushDlqDedupGate::with_capacity(2);
+    let k1 = dlq_key("t1", "failed", "https://a.example/hook");
+    let k2 = dlq_key("t2", "failed", "https://b.example/hook");
+    assert!(gate.try_acquire(&k1));
+    assert!(gate.try_acquire(&k2));
+    assert!(gate.release(&k1));
+    // Capacity restored: a new key fits without forcing eviction of k2.
+    let k3 = dlq_key("t3", "failed", "https://c.example/hook");
+    assert!(gate.try_acquire(&k3));
+    assert!(!gate.try_acquire(&k2), "k2 should still be reserved (not evicted)");
+}
+
+#[test]
 fn lru_eviction_allows_reacquire_after_capacity() {
     let gate = PushDlqDedupGate::with_capacity(2);
     let k1 = dlq_key("t1", "failed", "https://a.example/hook");

@@ -6,6 +6,7 @@ use async_nats::header::HeaderMap;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_TERMINAL_WAIT_FOR_EXIT;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TerminalWaitForExitError {
@@ -36,7 +37,7 @@ pub fn error_code_and_message(e: &TerminalWaitForExitError) -> (ErrorCode, Strin
 }
 
 #[instrument(
-    name = "acp.client.terminal.wait_for_exit",
+    name = ACP_CLIENT_TERMINAL_WAIT_FOR_EXIT,
     skip(headers, payload, client, nats),
     fields(session_id = %expected_session_id)
 )]

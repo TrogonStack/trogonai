@@ -61,6 +61,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2a-gateway"
+version = "0.1.0"
+dependencies = [
+ "a2a-auth-callout",
+ "a2a-nats",
+ "a2a-pack",
+ "async-nats",
+ "base64 0.22.1",
+ "bytes",
+ "clap",
+ "futures",
+ "jsonwebtoken 10.4.0",
+ "nkeys",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "trogon-nats",
+ "trogon-std",
+]
+
+[[package]]
 name = "a2a-identity-types"
 version = "0.1.0"
 dependencies = [
@@ -112,6 +142,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
  "url",
  "uuid",
@@ -230,6 +261,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
  "uuid",
 ]
@@ -3298,6 +3330,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-std",
 ]
 
@@ -3730,12 +3763,6 @@ dependencies = [
  "tonic",
  "tonic-prost",
 ]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_sdk"
@@ -6218,6 +6245,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-semconv",
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
@@ -6253,7 +6281,6 @@ dependencies = [
  "bytes",
  "futures",
  "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -6262,6 +6289,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-semconv",
  "trogon-std",
  "uuid",
 ]
@@ -6296,6 +6324,7 @@ dependencies = [
  "trogon-decider-runtime",
  "trogon-nats",
  "trogon-scheduler-domain",
+ "trogon-semconv",
  "trogon-std",
  "trogonai-proto",
  "uuid",
@@ -6332,6 +6361,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-semconv"
+version = "0.1.0"
+
+[[package]]
 name = "trogon-service-config"
 version = "0.1.0"
 dependencies = [
@@ -6349,7 +6382,6 @@ dependencies = [
  "bytesize",
  "clap",
  "opentelemetry",
- "opentelemetry-semantic-conventions",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -6358,6 +6390,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-opentelemetry",
+ "trogon-semconv",
  "uuid",
 ]
 
@@ -6374,6 +6407,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "trogon-semconv",
  "trogon-std",
 ]
 

@@ -24,6 +24,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_semconv::span::SLACK_WEBHOOK;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
@@ -151,9 +152,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         let subject = format!("{}.event.{}", self.subject_prefix, event_type);
 
         let span = tracing::Span::current();
-        span.record("event_type", &event_type);
-        span.record("event_id", &event_id);
-        span.record("subject", &subject);
+        span.record(trogon_semconv::attribute::EVENT_TYPE, &event_type);
+        span.record(trogon_semconv::attribute::EVENT_ID, &event_id);
+        span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
         let mut nats_headers = async_nats::HeaderMap::new();
         nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, event_id.as_str());
@@ -237,9 +238,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         let subject = format!("{}.interaction.{}", self.subject_prefix, interaction_type);
 
         let span = tracing::Span::current();
-        span.record("event_type", &interaction_type);
-        span.record("event_id", &trigger_id);
-        span.record("subject", &subject);
+        span.record(trogon_semconv::attribute::EVENT_TYPE, &interaction_type);
+        span.record(trogon_semconv::attribute::EVENT_ID, &trigger_id);
+        span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
         info!(interaction_type, "Received Slack interaction");
 
@@ -301,9 +302,9 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> SlackBridge<P, S> {
         let subject = format!("{}.command.{}", self.subject_prefix, command_name);
 
         let span = tracing::Span::current();
-        span.record("event_type", command);
-        span.record("event_id", trigger_id);
-        span.record("subject", &subject);
+        span.record(trogon_semconv::attribute::EVENT_TYPE, command);
+        span.record(trogon_semconv::attribute::EVENT_ID, trigger_id);
+        span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
         info!(command, "Received Slack slash command");
 
@@ -373,7 +374,7 @@ fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut, C: EpochClock>(
 }
 
 #[instrument(
-    name = "slack.webhook",
+    name = SLACK_WEBHOOK,
     skip_all,
     fields(
         event_type = tracing::field::Empty,

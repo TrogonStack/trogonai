@@ -5,6 +5,7 @@ use agent_client_protocol::{Client, ErrorCode, RequestPermissionRequest, Request
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
+use trogon_semconv::span::ACP_CLIENT_SESSION_REQUEST_PERMISSION;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RequestPermissionError {
@@ -26,7 +27,7 @@ pub fn error_code_and_message(e: &RequestPermissionError) -> (ErrorCode, String)
 
 /// Handles session/request_permission: decodes wire request params, calls client, and publishes
 /// a wire-encoded reply. Reply is required (request-reply pattern).
-#[instrument(name = "acp.client.session.request_permission", skip(headers, payload, client, nats))]
+#[instrument(name = ACP_CLIENT_SESSION_REQUEST_PERMISSION, skip(headers, payload, client, nats))]
 pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     headers: &HeaderMap,
     payload: &[u8],

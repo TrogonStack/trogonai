@@ -1,0 +1,386 @@
+groups:
+  # acp-nats: ACP-over-NATS agent and client. Span group ids are `span.` + the
+  # emitted span name, except where noted. The shared `method` and `subject`
+  # attributes are defined in common.yaml.
+  - id: registry.trogonai.acp
+    type: attribute_group
+    display_name: ACP Attributes
+    brief: Attributes emitted by the acp-nats crate today.
+    attributes:
+      - id: success
+        type: boolean
+        stability: development
+        brief: Whether the ACP request succeeded.
+      - id: operation
+        type:
+          members:
+            - id: prompt
+              value: "prompt"
+              brief: Prompt operation.
+              stability: development
+            - id: cancel
+              value: "cancel"
+              brief: Cancel operation.
+              stability: development
+            - id: ext_method
+              value: "ext_method"
+              brief: Extension method operation.
+              stability: development
+            - id: ext_notification
+              value: "ext_notification"
+              brief: Extension notification operation.
+              stability: development
+            - id: session_validate
+              value: "session_validate"
+              brief: Session validation.
+              stability: development
+            - id: session_ready
+              value: "session_ready"
+              brief: Session readiness signal.
+              stability: development
+            - id: client
+              value: "client"
+              brief: Client-directed operation.
+              stability: development
+            - id: client_ext_session_prompt_response
+              value: "client.ext.session.prompt_response"
+              brief: Client extension prompt-response operation.
+              stability: development
+        stability: development
+        brief: ACP operation where an error occurred.
+      - id: reason
+        type:
+          members:
+            - id: invalid_session_id
+              value: "invalid_session_id"
+              brief: Session id was invalid.
+              stability: development
+            - id: invalid_method_name
+              value: "invalid_method_name"
+              brief: Method name was invalid.
+              stability: development
+            - id: cancel_publish_failed
+              value: "cancel_publish_failed"
+              brief: Publishing the cancel failed.
+              stability: development
+            - id: ext_notification_publish_failed
+              value: "ext_notification_publish_failed"
+              brief: Publishing the extension notification failed.
+              stability: development
+            - id: notification_stream_closed
+              value: "notification_stream_closed"
+              brief: Notification stream closed.
+              stability: development
+            - id: notification_consumer_error
+              value: "notification_consumer_error"
+              brief: Notification consumer errored.
+              stability: development
+            - id: bad_response_payload
+              value: "bad_response_payload"
+              brief: Response payload was malformed.
+              stability: development
+            - id: response_consumer_error
+              value: "response_consumer_error"
+              brief: Response consumer errored.
+              stability: development
+            - id: response_stream_closed
+              value: "response_stream_closed"
+              brief: Response stream closed.
+              stability: development
+            - id: prompt_timeout
+              value: "prompt_timeout"
+              brief: Prompt timed out.
+              stability: development
+            - id: session_ready_publish_failed
+              value: "session_ready_publish_failed"
+              brief: Publishing session readiness failed.
+              stability: development
+            - id: client_backpressure_rejected
+              value: "client_backpressure_rejected"
+              brief: Rejected due to client backpressure.
+              stability: development
+            - id: missing_prompt_id
+              value: "missing_prompt_id"
+              brief: Prompt id was missing.
+              stability: development
+            - id: prompt_response_parse_failed
+              value: "prompt_response_parse_failed"
+              brief: Parsing the prompt response failed.
+              stability: development
+        stability: development
+        brief: Reason code for the ACP error.
+      - id: session_id
+        type: string
+        stability: development
+        brief: ACP session identifier; set on many session-scoped spans.
+      - id: new_session_id
+        type: string
+        stability: development
+        brief: Session id of the newly forked ACP session.
+      - id: model_id
+        type: string
+        stability: development
+        brief: Model id being set on an ACP session.
+      - id: mode_id
+        type: string
+        stability: development
+        brief: Mode id being set on an ACP session.
+      - id: config_id
+        type: string
+        stability: development
+        brief: Config option id being set on an ACP session.
+      - id: method_id
+        type: string
+        stability: development
+        brief: Authentication method identifier.
+      - id: ext_method
+        type: string
+        stability: development
+        brief: Extension method name on the acp.client.ext span.
+      - id: protocol_version
+        type: string
+        stability: development
+        brief: ACP protocol version negotiated on initialize.
+      - id: cwd
+        type: string
+        stability: development
+        brief: Working directory for a new ACP session.
+      - id: mcp_servers
+        type: string
+        stability: development
+        brief: MCP servers configured for a new ACP session.
+
+  - id: metric.acp.requests
+    type: metric
+    metric_name: acp.requests
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Total number of ACP requests.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{request}"
+    stability: development
+    attributes:
+      - ref: method
+        requirement_level: required
+      - ref: success
+        requirement_level: required
+
+  - id: metric.acp.request.duration
+    type: metric
+    metric_name: acp.request.duration
+    annotations:
+      code_generation:
+        metric_value_type: double
+    brief: Duration of ACP requests.
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: method
+        requirement_level: required
+      - ref: success
+        requirement_level: required
+
+  - id: metric.acp.errors
+    type: metric
+    metric_name: acp.errors
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Total number of ACP errors by operation and reason.
+    note: The code does not set a unit on this counter today.
+    instrument: counter
+    unit: "{error}"
+    stability: development
+    attributes:
+      - ref: operation
+        requirement_level: required
+      - ref: reason
+        requirement_level: required
+
+  - id: span.acp.initialize
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP initialize handling.
+    attributes:
+      - ref: protocol_version
+  - id: span.acp.authenticate
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP authenticate handling.
+    attributes:
+      - ref: method_id
+  - id: span.acp.logout
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP logout handling.
+  - id: span.acp.session.new
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP new_session handling.
+    attributes:
+      - ref: cwd
+      - ref: mcp_servers
+      - ref: session_id
+  - id: span.acp.session.load
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP load_session handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.session.fork
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP fork_session handling.
+    attributes:
+      - ref: session_id
+      - ref: new_session_id
+  - id: span.acp.session.close
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP close_session handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.session.resume
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP resume_session handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.session.list
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP list_sessions handling.
+  - id: span.acp.session.prompt
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP prompt handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.session.cancel
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP cancel handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.session.set_model
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP set_session_model handling.
+    attributes:
+      - ref: session_id
+      - ref: model_id
+  - id: span.acp.session.set_mode
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP set_session_mode handling.
+    attributes:
+      - ref: session_id
+      - ref: mode_id
+  - id: span.acp.session.set_config_option
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP set_session_config_option handling.
+    attributes:
+      - ref: session_id
+      - ref: config_id
+  - id: span.acp.ext
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP extension method handling.
+    attributes:
+      - ref: method
+  - id: span.acp.ext.notification
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP extension notification handling.
+    attributes:
+      - ref: method
+
+  - id: span.acp.client.fs.read_text_file
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client fs/read_text_file call.
+  - id: span.acp.client.fs.write_text_file
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client fs/write_text_file call.
+  - id: span.acp.client.session.request_permission
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client session/request_permission call.
+  - id: span.acp.client.session.update
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client session/update notification.
+  - id: span.acp.client.terminal.create
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client terminal/create call.
+  - id: span.acp.client.terminal.kill
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client terminal/kill call.
+  - id: span.acp.client.terminal.release
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client terminal/release call.
+  - id: span.acp.client.terminal.output
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client terminal/output call.
+  - id: span.acp.client.terminal.wait_for_exit
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client terminal/wait_for_exit call.
+    attributes:
+      - ref: session_id
+  - id: span.acp.client.ext
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client extension call.
+    attributes:
+      - ref: ext_method
+  - id: span.acp.client.ext.session.prompt_response
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client extension session prompt-response handling.
+    attributes:
+      - ref: session_id
+  - id: span.dispatch_client_method
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP client method dispatch. Span name is `dispatch_client_method` (no namespace) today.
+    attributes:
+      - ref: subject
+      - ref: session_id

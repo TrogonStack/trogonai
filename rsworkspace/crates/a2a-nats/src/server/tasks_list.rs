@@ -1,4 +1,5 @@
 use tracing::{instrument, warn};
+use trogon_semconv::span::A2A_SERVER_TASKS_LIST;
 
 use crate::server::handler::{A2aError, A2aExecutor};
 use crate::server::wire::{
@@ -7,7 +8,7 @@ use crate::server::wire::{
 
 const METHOD: &str = "tasks/list";
 
-#[instrument(name = "a2a.server.tasks_list", skip(handler, headers, payload, reply_subject, nats))]
+#[instrument(name = A2A_SERVER_TASKS_LIST, skip(handler, headers, payload, reply_subject, nats))]
 pub async fn handle<H, N>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,
