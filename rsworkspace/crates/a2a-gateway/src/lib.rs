@@ -17,6 +17,10 @@
 //! - [`caller_jwt_header`] — re-exports the wire-level header constants from
 //!   `a2a-auth-callout` so callers only depend on this crate.
 //! - [`config`] — clap-derived [`Args`] + env-resolved [`Config`].
+//! - [`gw_ingress_stream`] — gateway-owned JetStream pull pipe for
+//!   streaming ingress (`message/stream`, `tasks/resubscribe`).
+//! - [`gw_pull_backpressure`] — pull consumer for task-event egress
+//!   (`A2A_EVENTS`) with JetStream flow control + per-caller inflight cap.
 //! - [`jwt_caller_identity`] — resolves a verified caller identity from a
 //!   minted NATS User JWT carried on the inbound message, with a
 //!   labs-only header-trust fallback gated behind an env flag.
@@ -33,6 +37,8 @@ pub mod aauth;
 pub mod agent_card_surface;
 pub mod caller_jwt_header;
 pub mod config;
+pub mod gw_ingress_stream;
+pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;
 pub mod push_dlq_mirror;
 pub mod runtime;
