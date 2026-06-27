@@ -1,3 +1,5 @@
+use std::error::Error as _;
+
 use super::*;
 use crate::policy::tier1_declarative::bundle::Tier1DeclarativeEffect;
 
@@ -266,7 +268,6 @@ fn non_directory_bundle_path_fails_fast() {
 fn read_file_error_preserves_io_source() {
     // The error chain must carry the underlying io::Error so audit/logs
     // can serialize the OS-level cause separately from the variant tag.
-    use std::error::Error as _;
     let err = Tier1DeclarativeLoadError::ReadFile {
         path: std::path::PathBuf::from("/nope"),
         source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
