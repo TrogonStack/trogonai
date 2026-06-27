@@ -479,6 +479,15 @@ fn twin_converts_paused_status_and_delivery_with_source() {
 }
 
 #[test]
+fn schedule_projection_converts_to_present_stream_state() {
+    let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
+    assert_eq!(
+        ScheduleStreamState::from(view.clone()),
+        ScheduleStreamState::Present(view)
+    );
+}
+
+#[test]
 fn stream_state_and_change_debug_render_ids() {
     let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
     assert_eq!(format!("{:?}", ScheduleStreamState::Initial), "Initial");
