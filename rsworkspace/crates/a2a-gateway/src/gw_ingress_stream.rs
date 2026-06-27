@@ -165,7 +165,7 @@ pub struct StreamingIngressSpawn {
     pub caller_key: CallerKey,
 }
 
-#[cfg_attr(coverage, allow(dead_code))]
+#[cfg(not(coverage))]
 impl StreamingIngressSpawn {
     fn req_id(&self) -> &ReqId {
         match &self.kind {
@@ -284,7 +284,6 @@ pub enum StreamingIngressSpawnError {
 /// path can observe backpressure synchronously — otherwise the caller
 /// couldn't tell a successful spawn from one that the gate refused inside
 /// the spawned task. The permit moves into the task and releases on drop.
-#[cfg(not(coverage))]
 pub fn spawn_streaming_ingress_pump(
     client: async_nats::Client,
     prefix: A2aPrefix,
@@ -298,26 +297,12 @@ pub fn spawn_streaming_ingress_pump(
         .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
             caller: spawn.caller_key.as_str().to_owned(),
         })?;
+    #[cfg(not(coverage))]
     tokio::spawn(async move {
         run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
     });
-    Ok(())
-}
-
-#[cfg(coverage)]
-pub fn spawn_streaming_ingress_pump(
-    _client: async_nats::Client,
-    _prefix: A2aPrefix,
-    _config: GatewayStreamingIngressConfig,
-    gate: StreamingIngressGate,
-    spawn: StreamingIngressSpawn,
-    _shutdown: CancellationToken,
-) -> Result<(), StreamingIngressSpawnError> {
-    let _permit = gate
-        .try_acquire(&spawn.caller_key)
-        .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
-            caller: spawn.caller_key.as_str().to_owned(),
-        })?;
+    #[cfg(coverage)]
+    drop((client, prefix, config, permit, spawn, shutdown));
     Ok(())
 }
 

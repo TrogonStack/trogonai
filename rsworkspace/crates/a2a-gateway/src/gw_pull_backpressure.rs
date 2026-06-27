@@ -414,8 +414,8 @@ pub enum PullCycleError {
     },
 }
 
-/// Run the gateway egress pull-consumer loop. Gated behind
-/// `cfg(not(coverage))` because it binds a real JetStream context; the pure
+/// Run the gateway egress pull-consumer loop. The body that binds a real
+/// JetStream context is gated behind `cfg(not(coverage))`; the pure
 /// planning + parsing helpers are exercised by unit tests under all builds.
 #[cfg(not(coverage))]
 pub async fn run_gateway_events_pull(
@@ -427,7 +427,7 @@ pub async fn run_gateway_events_pull(
     let planner = BaselineTaskEventsEgressPlanner::new();
     let hints = planner.pull_hints();
     let durable = EventsConsumerDurable::for_prefix(&prefix);
-    let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller.as_usize()));
+    let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller().as_usize()));
     let mut backoff = INITIAL_BACKOFF;
 
     info_span_start(&prefix, &durable, &config);

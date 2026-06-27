@@ -176,3 +176,19 @@ fn streaming_ingress_spawn_error_carries_caller() {
     let err = StreamingIngressSpawnError::PerCallerLimit { caller: "bot".into() };
     assert!(format!("{err}").contains("bot"));
 }
+
+#[test]
+fn caller_inflight_gate_recovers_from_poisoned_lock() {
+    let gate = std::sync::Arc::new(CallerInflightGate::new(2));
+    let gate_clone = std::sync::Arc::clone(&gate);
+    let _ = std::thread::spawn(move || {
+        let _guard = gate_clone.inflight.lock().unwrap();
+        panic!("poison the lock on purpose");
+    })
+    .join();
+    let caller = CallerKey::new("caller-a").unwrap();
+    // The poison-recovery branch returns the inner guard so the gate keeps
+    // serving instead of cascading the panic to every caller.
+    let permit = gate.try_acquire(&caller).expect("recovers from poison");
+    drop(permit);
+}

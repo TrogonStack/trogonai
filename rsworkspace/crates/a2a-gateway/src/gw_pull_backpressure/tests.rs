@@ -196,3 +196,47 @@ fn caller_inflight_gate_tracks_callers_independently() {
     assert!(gate.try_acquire("caller-a").is_none());
     assert!(gate.try_acquire("caller-b").is_none());
 }
+
+#[test]
+fn pull_hints_planner_returns_baseline() {
+    let hints = BaselineTaskEventsEgressPlanner::new().pull_hints();
+    assert_eq!(hints, PullConsumerHints::gateway_baseline());
+}
+
+#[test]
+fn pull_config_new_round_trips_value_objects() {
+    let cfg = GatewayEventsPullConfig::new(
+        GatewayEventsMaxAckPending::new(99),
+        GatewayEventsFetchBatch::new(7),
+        Duration::from_secs(11),
+        GatewayEventsMaxInflightPerCaller::new(3),
+    );
+    assert_eq!(cfg.max_ack_pending().as_usize(), 99);
+    assert_eq!(cfg.fetch_batch().as_usize(), 7);
+    assert_eq!(cfg.fetch_heartbeat(), Duration::from_secs(11));
+    assert_eq!(cfg.max_inflight_per_caller().as_usize(), 3);
+}
+
+#[test]
+fn caller_inflight_gate_recovers_from_poisoned_lock() {
+    let gate = std::sync::Arc::new(CallerInflightGate::new(2));
+    let gate_clone = std::sync::Arc::clone(&gate);
+    let _ = std::thread::spawn(move || {
+        let _guard = gate_clone.inflight.lock().unwrap();
+        panic!("poison the lock on purpose");
+    })
+    .join();
+    // The poison-recovery branch returns the inner guard so the gate keeps
+    // serving instead of cascading the panic to every caller.
+    let permit = gate.try_acquire("caller-a").expect("recovers from poison");
+    drop(permit);
+}
+
+#[test]
+fn pull_cycle_error_display_carries_subject() {
+    let err = PullCycleError::Ack {
+        subject: "a2a.tasks.t.events.r".to_string(),
+        source: "boom".into(),
+    };
+    assert!(format!("{err}").contains("a2a.tasks.t.events.r"));
+}
