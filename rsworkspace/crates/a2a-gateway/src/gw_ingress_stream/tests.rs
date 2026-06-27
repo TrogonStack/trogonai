@@ -192,3 +192,48 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
     let permit = gate.try_acquire(&caller).expect("recovers from poison");
     drop(permit);
 }
+
+#[test]
+fn try_acquire_streaming_permit_passes_when_capacity_available() {
+    let cfg =
+        GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(16), StreamingMaxInflightPerCaller::new(2));
+    let gate = StreamingIngressGate::new(cfg);
+    let spawn = StreamingIngressSpawn {
+        kind: StreamingIngressKind::MessageStream {
+            req_id: ReqId::from_header("r-1"),
+        },
+        reply: async_nats::Subject::from_static("reply.x"),
+        caller_key: CallerKey::new("bot").unwrap(),
+    };
+    let permit = try_acquire_streaming_permit(&gate, &spawn).expect("first permit");
+    drop(permit);
+}
+
+#[test]
+fn try_acquire_streaming_permit_returns_per_caller_limit_when_full() {
+    let cfg =
+        GatewayStreamingIngressConfig::new(StreamingMaxAckPending::new(16), StreamingMaxInflightPerCaller::new(1));
+    let gate = StreamingIngressGate::new(cfg);
+    let spawn = StreamingIngressSpawn {
+        kind: StreamingIngressKind::MessageStream {
+            req_id: ReqId::from_header("r-1"),
+        },
+        reply: async_nats::Subject::from_static("reply.x"),
+        caller_key: CallerKey::new("bot").unwrap(),
+    };
+    let _held = try_acquire_streaming_permit(&gate, &spawn).expect("first");
+    let err = try_acquire_streaming_permit(&gate, &spawn).expect_err("second");
+    assert!(matches!(err, StreamingIngressSpawnError::PerCallerLimit { ref caller } if caller == "bot"));
+}
+
+#[test]
+fn caller_inflight_gate_drop_removes_empty_bucket() {
+    // Once a caller drops back to zero permits, the bucket key is removed —
+    // important to avoid an unbounded HashMap grow under churn.
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let caller = CallerKey::new("bot").unwrap();
+    let permit = gate.clone().try_acquire(&caller).expect("permit");
+    assert!(gate.inflight.lock().unwrap().contains_key("bot"));
+    drop(permit);
+    assert!(!gate.inflight.lock().unwrap().contains_key("bot"));
+}

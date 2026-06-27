@@ -255,3 +255,36 @@ fn pull_cycle_error_display_carries_subject() {
     };
     assert!(format!("{err}").contains("a2a.tasks.t.events.r"));
 }
+
+#[test]
+fn caller_inflight_gate_drop_removes_empty_bucket() {
+    // Once a caller drops back to zero permits, the bucket key is removed —
+    // important to avoid an unbounded HashMap grow under churn.
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let permit = gate.clone().try_acquire("caller-a").expect("permit");
+    assert!(gate.inflight.lock().unwrap().contains_key("caller-a"));
+    drop(permit);
+    assert!(!gate.inflight.lock().unwrap().contains_key("caller-a"));
+}
+
+#[tokio::test]
+async fn acquire_permit_with_shutdown_returns_immediately_when_capacity_free() {
+    let gate = std::sync::Arc::new(CallerInflightGate::new(2));
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let permit = acquire_permit_with_shutdown(gate.clone(), "caller-a", &shutdown).await;
+    assert!(permit.is_some(), "permit available immediately");
+}
+
+#[tokio::test]
+async fn acquire_permit_with_shutdown_returns_none_when_cancelled_while_waiting() {
+    // Saturate the gate so the next acquire has to wait, then cancel and
+    // confirm the helper returns None instead of holding a permit. Without
+    // this branch, shutdown would never unblock the waiting forward and
+    // the pump would hang on graceful stop.
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let _held = gate.clone().try_acquire("caller-a").expect("hold cap");
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    shutdown.cancel();
+    let result = acquire_permit_with_shutdown(gate.clone(), "caller-a", &shutdown).await;
+    assert!(result.is_none(), "shutdown returns None even mid-wait");
+}

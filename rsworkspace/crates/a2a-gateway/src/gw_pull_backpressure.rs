@@ -652,7 +652,7 @@ async fn run_fetch_cycle(
 /// Block on the per-caller gate until a permit is available or shutdown
 /// fires. Returns `None` only on shutdown. Yields between attempts so the
 /// task doesn't spin while permits are held by other forwards.
-#[cfg(not(coverage))]
+#[cfg_attr(coverage, allow(dead_code))]
 async fn acquire_permit_with_shutdown(
     gate: Arc<CallerInflightGate>,
     caller_key: &str,

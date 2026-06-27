@@ -215,6 +215,7 @@ impl StreamingIngressGate {
     }
 }
 
+#[derive(Debug)]
 struct CallerInflightGate {
     limit: usize,
     inflight: Mutex<HashMap<String, usize>>,
@@ -254,6 +255,7 @@ impl CallerInflightGate {
     }
 }
 
+#[derive(Debug)]
 pub struct CallerInflightPermit {
     gate: std::sync::Arc<CallerInflightGate>,
     caller_key: String,
@@ -299,11 +301,7 @@ pub fn spawn_streaming_ingress_pump(
     spawn: StreamingIngressSpawn,
     shutdown: CancellationToken,
 ) -> Result<(), StreamingIngressSpawnError> {
-    let permit = gate
-        .try_acquire(&spawn.caller_key)
-        .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
-            caller: spawn.caller_key.as_str().to_owned(),
-        })?;
+    let permit = try_acquire_streaming_permit(&gate, &spawn)?;
     #[cfg(not(coverage))]
     tokio::spawn(async move {
         run_streaming_ingress_pump(client, prefix, config, permit, spawn, shutdown).await;
@@ -311,6 +309,20 @@ pub fn spawn_streaming_ingress_pump(
     #[cfg(coverage)]
     drop((client, prefix, config, permit, spawn, shutdown));
     Ok(())
+}
+
+/// Permit-acquire that surfaces a typed error so the request path can map
+/// gate-full to a 429-style response synchronously. Split out from
+/// `spawn_streaming_ingress_pump` so the permit gate's behavior is unit
+/// testable without needing a real `async_nats::Client`.
+fn try_acquire_streaming_permit(
+    gate: &StreamingIngressGate,
+    spawn: &StreamingIngressSpawn,
+) -> Result<CallerInflightPermit, StreamingIngressSpawnError> {
+    gate.try_acquire(&spawn.caller_key)
+        .ok_or_else(|| StreamingIngressSpawnError::PerCallerLimit {
+            caller: spawn.caller_key.as_str().to_owned(),
+        })
 }
 
 #[cfg(not(coverage))]
