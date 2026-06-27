@@ -1,0 +1,11 @@
+error: metric instrument name written as an inline string literal
+  --> $DIR/telemetry_metric_name_literal.rs:10:38
+   |
+LL |     let _counter = meter.u64_counter("acp.requests").build();
+   |                                      ^^^^^^^^^^^^^^
+   |
+   = help: name the instrument with a generated `trogon_semconv::metric` constant instead of an inline string
+   = note: `#[deny(telemetry_metric_name_literal)]` on by default
+
+error: aborting due to 1 previous error
+

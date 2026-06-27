@@ -13,6 +13,10 @@ mod inline_module_block;
 mod manual_error_impl;
 mod redundant_module_path;
 mod telemetry_attribute_literal;
+mod telemetry_key_value_literal;
+mod telemetry_literal;
+mod telemetry_metric_name_literal;
+mod telemetry_span_name_literal;
 mod test_module_naming;
 
 use rustc_hir::{Expr, Item, LetStmt, Stmt};
@@ -30,6 +34,9 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         MANUAL_ERROR_IMPL,
         REDUNDANT_MODULE_PATH,
         TELEMETRY_ATTRIBUTE_LITERAL,
+        TELEMETRY_KEY_VALUE_LITERAL,
+        TELEMETRY_METRIC_NAME_LITERAL,
+        TELEMETRY_SPAN_NAME_LITERAL,
         TEST_MODULE_NAMING,
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
@@ -301,11 +308,118 @@ rustc_session::declare_lint! {
     "record telemetry fields with a generated `trogon_semconv` constant, not an inline string literal",
 }
 
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a string literal passed as the key argument to
+    /// `opentelemetry::KeyValue::new`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A `KeyValue` key is a telemetry attribute identifier, the same contract
+    /// that `tracing::Span::record` carries (see `telemetry_attribute_literal`).
+    /// The semantic-convention registry is the single source of truth for that
+    /// contract, and `trogon-semconv` generates a constant for every attribute
+    /// key. Spelling the key inline as `"messaging.system"` forks the contract:
+    /// a registry rename no longer reaches the call site, and a typo silently
+    /// emits onto an attribute nobody queries.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// KeyValue::new("messaging.system", "nats");
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// use trogon_semconv::attribute::MESSAGING_SYSTEM;
+    ///
+    /// KeyValue::new(MESSAGING_SYSTEM, "nats");
+    /// ```
+    pub TELEMETRY_KEY_VALUE_LITERAL,
+    Deny,
+    "build `KeyValue` keys from a generated `trogon_semconv` constant, not an inline string literal",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a string literal passed as the instrument-name argument to an
+    /// `opentelemetry` `Meter` builder (`u64_counter`, `f64_histogram`, the
+    /// gauge and up-down-counter variants, and their observable forms).
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A metric name is a telemetry contract shared with dashboards and alerts.
+    /// The semantic-convention registry is the single source of truth, and
+    /// `trogon-semconv` generates a constant for every metric. Spelling the name
+    /// inline as `"acp.requests"` forks that contract: a registry rename no
+    /// longer reaches the call site, and a typo silently creates a second,
+    /// unqueried instrument.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// meter.u64_counter("acp.requests");
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// use trogon_semconv::metric::ACP_REQUESTS;
+    ///
+    /// meter.u64_counter(ACP_REQUESTS);
+    /// ```
+    pub TELEMETRY_METRIC_NAME_LITERAL,
+    Deny,
+    "name metric instruments with a generated `trogon_semconv` constant, not an inline string literal",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a string literal used as the span name in a `tracing`
+    /// span-construction macro (`info_span!`, `span!`, and the other level
+    /// variants) or in `#[instrument(name = "...")]`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A span name is a telemetry contract shared with trace search and
+    /// dashboards. The semantic-convention registry is the single source of
+    /// truth, and `trogon-semconv` generates a constant for every span name.
+    /// Spelling the name inline as `"http.server.request"` forks that contract:
+    /// a registry rename no longer reaches the call site, and a typo silently
+    /// produces a span nobody correlates on. Field names inside the macro are
+    /// left alone; `tracing` requires those to be bare identifiers, so they
+    /// cannot reference a constant.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// tracing::info_span!("http.server.request", method = %method);
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// use trogon_semconv::span::HTTP_SERVER_REQUEST;
+    ///
+    /// tracing::info_span!(HTTP_SERVER_REQUEST, method = %method);
+    /// ```
+    pub TELEMETRY_SPAN_NAME_LITERAL,
+    Deny,
+    "name spans with a generated `trogon_semconv` constant, not an inline string literal",
+}
+
 #[derive(Default)]
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
     function_local_use: function_local_use::FunctionLocalUse,
     telemetry_attribute_literal: telemetry_attribute_literal::TelemetryAttributeLiteral,
+    telemetry_key_value_literal: telemetry_key_value_literal::TelemetryKeyValueLiteral,
+    telemetry_metric_name_literal: telemetry_metric_name_literal::TelemetryMetricNameLiteral,
+    telemetry_span_name_literal: telemetry_span_name_literal::TelemetrySpanNameLiteral,
 }
 
 impl<'tcx> LateLintPass<'tcx> for TrogonLints {
@@ -316,6 +430,9 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         self.error_string_comparison.check_expr(cx, expr);
         self.telemetry_attribute_literal.check_expr(cx, expr);
+        self.telemetry_key_value_literal.check_expr(cx, expr);
+        self.telemetry_metric_name_literal.check_expr(cx, expr);
+        self.telemetry_span_name_literal.check_expr(cx, expr);
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
@@ -335,6 +452,9 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,
     TELEMETRY_ATTRIBUTE_LITERAL,
+    TELEMETRY_KEY_VALUE_LITERAL,
+    TELEMETRY_METRIC_NAME_LITERAL,
+    TELEMETRY_SPAN_NAME_LITERAL,
     TEST_MODULE_NAMING,
 ]);
 
@@ -345,10 +465,12 @@ fn ui() {
     dylint_testing::ui_test(env!("CARGO_PKG_NAME"), "ui");
 }
 
-// `telemetry_attribute_literal` gates on the real `tracing::Span` type, so its
-// fixture lives as an example target where it can depend on `tracing`; the
-// dependency-free `ui` directory cannot.
+// The telemetry lints gate on real `tracing` / `opentelemetry` types, so their
+// fixtures live as example targets where they can depend on those crates; the
+// dependency-free `ui` directory cannot. All examples run under a single test:
+// the compiletest harness mutates process-global state, so concurrent example
+// runs race.
 #[test]
-fn ui_telemetry_attribute_literal() {
-    dylint_testing::ui_test_example(env!("CARGO_PKG_NAME"), "telemetry_attribute_literal");
+fn ui_examples() {
+    dylint_testing::ui_test_examples(env!("CARGO_PKG_NAME"));
 }

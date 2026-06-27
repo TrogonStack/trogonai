@@ -1,5 +1,6 @@
 use super::*;
 use crate::telemetry::metrics::Metrics;
+use trogon_semconv::metric;
 
 #[test]
 fn has_request_metric_matches_correct_method_and_success() {
@@ -49,7 +50,10 @@ fn has_request_metric_returns_false_when_empty() {
 fn has_request_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
-    let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
+    let histogram = meter
+        .f64_histogram(metric::ACP_REQUESTS)
+        .with_description("test")
+        .build();
     histogram.record(1.0, &[]);
 
     let finished = flush_metrics(&provider, &exporter);
@@ -97,7 +101,10 @@ fn has_error_metric_rejects_wrong_reason() {
 fn has_error_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
-    let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
+    let histogram = meter
+        .f64_histogram(metric::ACP_ERRORS)
+        .with_description("test")
+        .build();
     histogram.record(1.0, &[]);
 
     let finished = flush_metrics(&provider, &exporter);

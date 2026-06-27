@@ -1,10 +1,9 @@
 use clippy_utils::diagnostics::span_lint_and_then;
-use rustc_ast::LitKind;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
-use rustc_middle::ty;
 
 use crate::TELEMETRY_ATTRIBUTE_LITERAL;
+use crate::telemetry_literal::{receiver_is_type, string_literal_span};
 
 #[derive(Default)]
 pub(crate) struct TelemetryAttributeLiteral;
@@ -23,7 +22,7 @@ impl TelemetryAttributeLiteral {
         let Some(key_span) = string_literal_span(key) else {
             return;
         };
-        if !receiver_is_tracing_span(cx, receiver) {
+        if !receiver_is_type(cx, receiver, "tracing", "Span") {
             return;
         }
 
@@ -37,20 +36,4 @@ impl TelemetryAttributeLiteral {
             },
         );
     }
-}
-
-fn string_literal_span(expr: &Expr<'_>) -> Option<rustc_span::Span> {
-    match expr.kind {
-        ExprKind::Lit(lit) if matches!(lit.node, LitKind::Str(..)) => Some(lit.span),
-        _ => None,
-    }
-}
-
-fn receiver_is_tracing_span<'tcx>(cx: &LateContext<'tcx>, receiver: &'tcx Expr<'tcx>) -> bool {
-    let ty = cx.typeck_results().expr_ty_adjusted(receiver).peel_refs();
-    let ty::Adt(adt, _) = ty.kind() else {
-        return false;
-    };
-    let did = adt.did();
-    cx.tcx.crate_name(did.krate).as_str() == "tracing" && cx.tcx.item_name(did).as_str() == "Span"
 }
