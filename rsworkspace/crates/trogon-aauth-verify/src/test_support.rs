@@ -49,9 +49,7 @@ pub fn p256_fixture(kid: &str) -> EcFixture {
     let point = verifying.to_encoded_point(false);
     let x = URL_SAFE_NO_PAD.encode(point.x().expect("x"));
     let y = URL_SAFE_NO_PAD.encode(point.y().expect("y"));
-    let pem = native
-        .to_pkcs8_pem(p256::pkcs8::LineEnding::LF)
-        .expect("pkcs8 pem");
+    let pem = native.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).expect("pkcs8 pem");
     let signing = EncodingKey::from_ec_pem(pem.as_bytes()).expect("encoding key");
     let jwk = Jwk {
         common: CommonParameters {
@@ -99,9 +97,7 @@ pub fn ed25519_fixture(kid: &str) -> EdFixture {
 
     let signing = ed25519_dalek::SigningKey::generate(&mut OsRng);
     let x = URL_SAFE_NO_PAD.encode(signing.verifying_key().as_bytes());
-    let pem = signing
-        .to_pkcs8_pem(pkcs8::LineEnding::LF)
-        .expect("pkcs8 pem");
+    let pem = signing.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("pkcs8 pem");
     let encoding = EncodingKey::from_ed_pem(pem.as_bytes()).expect("encoding key");
     let jwk = Jwk {
         common: CommonParameters {
@@ -136,10 +132,5 @@ pub fn sign_p384_pop(base: &[u8]) -> String {
 }
 
 pub fn jwks_with_key(issuer: &str, key: Jwk) -> crate::jwks::StaticJwks {
-    crate::jwks::StaticJwks::new().with(
-        issuer,
-        JwkSet {
-            keys: vec![key],
-        },
-    )
+    crate::jwks::StaticJwks::new().with(issuer, JwkSet { keys: vec![key] })
 }
