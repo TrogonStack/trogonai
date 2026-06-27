@@ -5,7 +5,7 @@
 //! [`../../../../docs/a2a/how-to/operators/streaming-backpressure.md`](../../../../docs/a2a/how-to/operators/streaming-backpressure.md).
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
@@ -25,8 +25,6 @@ use async_nats::jetstream::{self, AckKind};
 use bytes::Bytes;
 #[cfg(not(coverage))]
 use futures::StreamExt;
-#[cfg(not(coverage))]
-use std::sync::Arc;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
 
@@ -335,32 +333,39 @@ impl CallerInflightGate {
         }
     }
 
-    fn try_acquire(&self, caller_key: &str) -> Option<CallerInflightPermit<'_>> {
+    /// Take a permit. The permit owns an `Arc` back to the gate so it can
+    /// move into a spawned task and release on drop — without that, the
+    /// fetch loop could only hand out borrowed permits and the per-caller
+    /// limit would only ever bind one message at a time per caller (i.e. a
+    /// no-op once forward work is spawned off the loop).
+    fn try_acquire(self: Arc<Self>, caller_key: &str) -> Option<CallerInflightPermit> {
         // Recover from a poisoned lock — see the matching note in
         // `gw_ingress_stream::CallerInflightGate`.
+        let key = caller_key.to_string();
         let mut guard = match self.inflight.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        let count = guard.entry(caller_key.to_string()).or_insert(0);
+        let count = guard.entry(key.clone()).or_insert(0);
         if *count >= self.limit {
             return None;
         }
         *count += 1;
+        drop(guard);
         Some(CallerInflightPermit {
             gate: self,
-            caller_key: caller_key.to_string(),
+            caller_key: key,
         })
     }
 }
 
 #[cfg_attr(coverage, allow(dead_code))]
-struct CallerInflightPermit<'a> {
-    gate: &'a CallerInflightGate,
+struct CallerInflightPermit {
+    gate: Arc<CallerInflightGate>,
     caller_key: String,
 }
 
-impl Drop for CallerInflightPermit<'_> {
+impl Drop for CallerInflightPermit {
     fn drop(&mut self) {
         let mut guard = match self.gate.inflight.lock() {
             Ok(g) => g,
@@ -439,7 +444,7 @@ pub async fn run_gateway_events_pull(
             &durable,
             &planner,
             &config,
-            inflight_gate.as_ref(),
+            Arc::clone(&inflight_gate),
             hints,
         )
         .await;
@@ -484,10 +489,10 @@ fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: 
     tracing::info!(
         prefix = %prefix,
         durable = %durable.as_str(),
-        max_ack_pending = config.max_ack_pending.as_usize(),
-        fetch_batch = config.fetch_batch.as_usize(),
-        fetch_heartbeat_secs = config.fetch_heartbeat.as_secs(),
-        max_inflight_per_caller = config.max_inflight_per_caller.as_usize(),
+        max_ack_pending = config.max_ack_pending().as_usize(),
+        fetch_batch = config.fetch_batch().as_usize(),
+        fetch_heartbeat_secs = config.fetch_heartbeat().as_secs(),
+        max_inflight_per_caller = config.max_inflight_per_caller().as_usize(),
         "gateway events pull consumer started"
     );
 }
@@ -499,7 +504,7 @@ async fn run_fetch_cycle(
     durable: &EventsConsumerDurable,
     planner: &BaselineTaskEventsEgressPlanner,
     config: &GatewayEventsPullConfig,
-    inflight_gate: &CallerInflightGate,
+    inflight_gate: Arc<CallerInflightGate>,
     hints: PullConsumerHints,
 ) -> Result<(), PullCycleError> {
     let jetstream = jetstream::new(client.clone());
@@ -512,7 +517,7 @@ async fn run_fetch_cycle(
             source,
         })?;
 
-    let consumer_config = gateway_events_consumer(prefix, durable.as_str(), config.max_ack_pending.as_i64());
+    let consumer_config = gateway_events_consumer(prefix, durable.as_str(), config.max_ack_pending().as_i64());
     let consumer = stream
         .get_or_create_consumer(durable.as_str(), consumer_config)
         .await
@@ -523,9 +528,9 @@ async fn run_fetch_cycle(
 
     let mut batch = consumer
         .fetch()
-        .max_messages(config.fetch_batch.as_usize())
+        .max_messages(config.fetch_batch().as_usize())
         .expires(FETCH_EXPIRES)
-        .heartbeat(config.fetch_heartbeat)
+        .heartbeat(config.fetch_heartbeat())
         .messages()
         .await
         .map_err(|source| PullCycleError::FetchMessages {
@@ -551,7 +556,7 @@ async fn run_fetch_cycle(
         };
 
         let caller_key = req_id.as_str().to_string();
-        let Some(_permit) = inflight_gate.try_acquire(&caller_key) else {
+        let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller_key) else {
             message
                 .ack_with(AckKind::Nak(None))
                 .await
@@ -562,37 +567,36 @@ async fn run_fetch_cycle(
             continue;
         };
 
-        // JetStream tracks per-message delivery attempts; carry that count
-        // into the planner so persistently undeliverable events get Term'd
-        // after the configured retry budget instead of NAK-looping forever.
-        let attempt = u32::try_from(message.info().map(|i| i.delivered).unwrap_or(1)).unwrap_or(u32::MAX);
-        let forward_result = forward_task_event(client, prefix, &req_id, &message.payload).await;
-        match planner.forward_disposition(attempt, forward_result.err().as_deref()) {
-            EgressAckDisposition::Ack => {
-                message.ack().await.map_err(|source| PullCycleError::Ack {
-                    subject: subject.to_owned(),
-                    source,
-                })?;
+        // Spawn forward+ack so multiple permits per caller can coexist —
+        // running this work inline serializes the loop, which would make
+        // `max_inflight_per_caller` a no-op (at most one permit per caller
+        // would ever exist). JetStream's `max_ack_pending` still bounds
+        // total inflight, so this can't run away.
+        let client_handle = client.clone();
+        let prefix_handle = prefix.clone();
+        let planner_handle = *planner;
+        let subject_owned = subject.to_owned();
+        tokio::spawn(async move {
+            let _permit = permit;
+            // JetStream tracks per-message delivery attempts; carry that count
+            // into the planner so persistently undeliverable events get Term'd
+            // after the configured retry budget instead of NAK-looping forever.
+            let attempt = u32::try_from(message.info().map(|i| i.delivered).unwrap_or(1)).unwrap_or(u32::MAX);
+            let forward_result = forward_task_event(&client_handle, &prefix_handle, &req_id, &message.payload).await;
+            let disposition = planner_handle.forward_disposition(attempt, forward_result.err().as_deref());
+            let ack_outcome = match disposition {
+                EgressAckDisposition::Ack => message.ack().await,
+                EgressAckDisposition::Nak { delay } => message.ack_with(AckKind::Nak(delay)).await,
+                EgressAckDisposition::Term => message.ack_with(AckKind::Term).await,
+            };
+            if let Err(error) = ack_outcome {
+                warn!(
+                    subject = %subject_owned,
+                    error = %error,
+                    "gateway events pull ack failed; jetstream will redeliver"
+                );
             }
-            EgressAckDisposition::Nak { delay } => {
-                message
-                    .ack_with(AckKind::Nak(delay))
-                    .await
-                    .map_err(|source| PullCycleError::Ack {
-                        subject: subject.to_owned(),
-                        source,
-                    })?;
-            }
-            EgressAckDisposition::Term => {
-                message
-                    .ack_with(AckKind::Term)
-                    .await
-                    .map_err(|source| PullCycleError::Ack {
-                        subject: subject.to_owned(),
-                        source,
-                    })?;
-            }
-        }
+        });
     }
 
     let _ = hints;

@@ -31,6 +31,13 @@ pub const ENV_GATEWAY_STREAMING_MAX_INFLIGHT: &str = "A2A_GATEWAY_STREAMING_MAX_
 pub const DEFAULT_STREAMING_MAX_ACK_PENDING: i64 = 32;
 pub const DEFAULT_STREAMING_MAX_INFLIGHT: usize = 32;
 
+/// Cap on JetStream redelivery attempts before the streaming ingress pump
+/// Term's a message that the caller reply persistently rejects. Mirrors the
+/// 3-attempt budget the egress planner uses so the two pumps behave the
+/// same under a permanently broken reply subject (bad ACL, closed inbox).
+#[cfg(not(coverage))]
+const STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS: i64 = 3;
+
 /// JetStream max-ack-pending for a streaming pump. Floored at 1 so a config
 /// can't construct a value that stalls the consumer with zero unacked slots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,18 +390,39 @@ async fn run_streaming_ingress_pump(
             }
         };
 
+        // JetStream tracks per-message delivery attempts; carry that count
+        // so a permanently failing publish (bad reply subject, ACL, etc.)
+        // doesn't NAK-loop forever — match the egress path's 3-attempt
+        // budget before Term'ing.
+        let attempt = message.info().map(|i| i.delivered).unwrap_or(1);
         if let Err(error) = client.publish(spawn.reply.clone(), message.payload.clone()).await {
+            let disposition = if attempt >= STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS {
+                AckKind::Term
+            } else {
+                AckKind::Nak(None)
+            };
             warn!(
                 reply = %spawn.reply,
                 error = %error,
+                attempt,
+                ?disposition,
                 "gateway streaming ingress forward to caller reply failed",
             );
-            let _ = message.ack_with(AckKind::Nak(None)).await;
+            let _ = message.ack_with(disposition).await;
             continue;
         }
 
-        if let Err(error) = message.ack().await {
-            warn!(error = %error, "gateway streaming ingress ack failed");
+        // `double_ack` waits for the JetStream server to confirm the ack so
+        // a dropped ack doesn't trigger redelivery + duplicate publish to
+        // the caller. On persistent ack failure we Term the message: the
+        // payload already shipped to the caller, and another redelivery
+        // would publish a duplicate.
+        if let Err(error) = message.double_ack().await {
+            warn!(
+                error = %error,
+                "gateway streaming ingress double-ack failed; terminating to avoid duplicate publish",
+            );
+            let _ = message.ack_with(AckKind::Term).await;
         }
     }
 

@@ -180,21 +180,21 @@ fn gateway_egress_subject_includes_req_id() {
 
 #[test]
 fn caller_inflight_gate_enforces_limit() {
-    let gate = CallerInflightGate::new(1);
-    let first = gate.try_acquire("caller-a");
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let first = gate.clone().try_acquire("caller-a");
     assert!(first.is_some());
-    assert!(gate.try_acquire("caller-a").is_none());
+    assert!(gate.clone().try_acquire("caller-a").is_none());
     drop(first);
-    assert!(gate.try_acquire("caller-a").is_some());
+    assert!(gate.clone().try_acquire("caller-a").is_some());
 }
 
 #[test]
 fn caller_inflight_gate_tracks_callers_independently() {
-    let gate = CallerInflightGate::new(1);
-    let _a = gate.try_acquire("caller-a").expect("a");
-    let _b = gate.try_acquire("caller-b").expect("b");
-    assert!(gate.try_acquire("caller-a").is_none());
-    assert!(gate.try_acquire("caller-b").is_none());
+    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
+    let _a = gate.clone().try_acquire("caller-a").expect("a");
+    let _b = gate.clone().try_acquire("caller-b").expect("b");
+    assert!(gate.clone().try_acquire("caller-a").is_none());
+    assert!(gate.clone().try_acquire("caller-b").is_none());
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
     .join();
     // The poison-recovery branch returns the inner guard so the gate keeps
     // serving instead of cascading the panic to every caller.
-    let permit = gate.try_acquire("caller-a").expect("recovers from poison");
+    let permit = gate.clone().try_acquire("caller-a").expect("recovers from poison");
     drop(permit);
 }
 
