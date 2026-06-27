@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum ImportCheckError {
     #[error("component declares import '{module}/{name}'")]
     ImportPresent { module: String, name: String },
-    #[error("world root declares import: {line}")]
+    #[error("component WIT declares import: {line}")]
     WorldImport { line: String },
     #[error("failed to parse wasm module: {0}")]
     Parse(String),
@@ -48,22 +48,17 @@ fn assert_zero_imports_via_wasm_tools(bytes: &[u8]) -> Result<(), ImportCheckErr
     }
 
     let wit = String::from_utf8_lossy(&output.stdout);
-    let mut in_root_world = false;
+    // Mirror the CI guard (`grep -E '^[[:space:]]*import '`): a zero-import
+    // component must not declare any `import` anywhere in its WIT. Scoping the
+    // scan to a single `world root {` block missed imports listed under a
+    // differently named world (the contract defines `world decider`) or outside
+    // that block entirely.
     for line in wit.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("world root {") {
-            in_root_world = true;
-            continue;
-        }
-        if in_root_world {
-            if trimmed == "}" {
-                break;
-            }
-            if trimmed.starts_with("import ") {
-                return Err(ImportCheckError::WorldImport {
-                    line: trimmed.to_string(),
-                });
-            }
+        if trimmed.starts_with("import ") {
+            return Err(ImportCheckError::WorldImport {
+                line: trimmed.to_string(),
+            });
         }
     }
     Ok(())
