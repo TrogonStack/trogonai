@@ -3,6 +3,7 @@ use super::rpc_call::jsonrpc_call;
 use crate::nats::{FlushClient, PublishClient, RequestClient, global};
 use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
 use tracing::{Span, info, instrument};
+use trogon_semconv::attribute::SESSION_ID;
 use trogon_semconv::span::ACP_SESSION_NEW;
 use trogon_std::time::GetElapsed;
 
@@ -31,7 +32,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     .await;
 
     if let Ok(ref response) = result {
-        Span::current().record("session_id", response.session_id.to_string().as_str());
+        Span::current().record(SESSION_ID, response.session_id.to_string().as_str());
         info!(session_id = %response.session_id, "Session created");
 
         bridge.schedule_session_ready(response.session_id.clone());

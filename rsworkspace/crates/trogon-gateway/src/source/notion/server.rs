@@ -303,7 +303,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         metadata.event_id.as_deref().unwrap_or("unknown"),
     );
     span.record(
-        "subscription_id",
+        trogon_semconv::attribute::SUBSCRIPTION_ID,
         metadata.subscription_id.as_deref().unwrap_or("unknown"),
     );
     span.record(trogon_semconv::attribute::SUBJECT, &subject);
