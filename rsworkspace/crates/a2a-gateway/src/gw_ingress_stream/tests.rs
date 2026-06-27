@@ -226,6 +226,27 @@ fn try_acquire_streaming_permit_returns_per_caller_limit_when_full() {
     assert!(matches!(err, StreamingIngressSpawnError::PerCallerLimit { ref caller } if caller == "bot"));
 }
 
+#[tokio::test]
+async fn publish_to_caller_reply_routes_payload_to_reply_subject() {
+    let mock = trogon_nats::AdvancedMockNatsClient::new();
+    let reply = async_nats::Subject::from_static("inbox.r");
+    let payload = bytes::Bytes::from_static(b"chunk");
+    publish_to_caller_reply(&mock, &reply, payload.clone())
+        .await
+        .expect("publish ok");
+    assert_eq!(mock.published_messages(), vec!["inbox.r"]);
+    assert_eq!(mock.published_payloads(), vec![payload]);
+}
+
+#[tokio::test]
+async fn publish_to_caller_reply_surfaces_publish_error() {
+    let mock = trogon_nats::AdvancedMockNatsClient::new();
+    mock.fail_next_publish();
+    publish_to_caller_reply(&mock, &async_nats::Subject::from_static("x"), bytes::Bytes::new())
+        .await
+        .expect_err("publish fails");
+}
+
 #[test]
 fn caller_inflight_gate_drop_removes_empty_bucket() {
     // Once a caller drops back to zero permits, the bucket key is removed —

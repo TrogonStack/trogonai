@@ -673,16 +673,22 @@ async fn acquire_permit_with_shutdown(
     }
 }
 
-#[cfg(not(coverage))]
-async fn forward_task_event(
-    client: &async_nats::Client,
+/// Forward a JetStream task event to the caller's gateway-egress subject.
+///
+/// Generic over `trogon_nats::PublishClient` so the unit tests can drive
+/// this through `MockNatsClient` without standing up a NATS server. The
+/// production pump passes the concrete `async_nats::Client` which already
+/// implements the trait.
+#[cfg_attr(coverage, allow(dead_code))]
+async fn forward_task_event<C: trogon_nats::PublishClient>(
+    client: &C,
     prefix: &A2aPrefix,
     req_id: &ReqId,
-    payload: &Bytes,
+    payload: &bytes::Bytes,
 ) -> Result<(), String> {
     let subject = gateway_egress_subject(prefix, req_id);
     client
-        .publish(subject, payload.clone())
+        .publish_with_headers(subject, async_nats::HeaderMap::new(), payload.clone())
         .await
         .map_err(|e| e.to_string())
 }

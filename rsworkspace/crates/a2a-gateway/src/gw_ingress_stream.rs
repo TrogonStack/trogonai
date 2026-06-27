@@ -328,6 +328,23 @@ fn try_acquire_streaming_permit(
         })
 }
 
+/// Publish a JetStream-delivered payload to the caller's reply subject.
+///
+/// Generic over `trogon_nats::PublishClient` so the unit tests can drive
+/// this through `MockNatsClient` without standing up NATS. The pump itself
+/// keeps its concrete `async_nats::Client` because JetStream binding still
+/// uses the concrete type — only the forward step is mockable.
+#[cfg_attr(coverage, allow(dead_code))]
+async fn publish_to_caller_reply<C: trogon_nats::PublishClient>(
+    client: &C,
+    reply: &async_nats::Subject,
+    payload: bytes::Bytes,
+) -> Result<(), C::PublishError> {
+    client
+        .publish_with_headers(reply.clone(), async_nats::HeaderMap::new(), payload)
+        .await
+}
+
 #[cfg(not(coverage))]
 async fn run_streaming_ingress_pump(
     client: async_nats::Client,
@@ -410,7 +427,7 @@ async fn run_streaming_ingress_pump(
         // doesn't NAK-loop forever — match the egress path's 3-attempt
         // budget before Term'ing.
         let attempt = message.info().map(|i| i.delivered).unwrap_or(1);
-        if let Err(error) = client.publish(spawn.reply.clone(), message.payload.clone()).await {
+        if let Err(error) = publish_to_caller_reply(&client, &spawn.reply, message.payload.clone()).await {
             let disposition = if attempt >= STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS {
                 AckKind::Term
             } else {

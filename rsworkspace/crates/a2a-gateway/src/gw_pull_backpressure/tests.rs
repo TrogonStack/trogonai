@@ -276,6 +276,31 @@ async fn acquire_permit_with_shutdown_returns_immediately_when_capacity_free() {
 }
 
 #[tokio::test]
+async fn forward_task_event_publishes_to_gateway_egress_subject() {
+    let mock = trogon_nats::AdvancedMockNatsClient::new();
+    let prefix = prefix();
+    let req_id = ReqId::from_header("req-9");
+    let payload = bytes::Bytes::from_static(b"event-payload");
+    forward_task_event(&mock, &prefix, &req_id, &payload)
+        .await
+        .expect("publish succeeds");
+    let subjects = mock.published_messages();
+    assert_eq!(subjects, vec!["a2a.gateway.egress.req-9"]);
+    let payloads = mock.published_payloads();
+    assert_eq!(payloads, vec![payload]);
+}
+
+#[tokio::test]
+async fn forward_task_event_surfaces_publish_failure_as_string() {
+    let mock = trogon_nats::AdvancedMockNatsClient::new();
+    mock.fail_next_publish();
+    let err = forward_task_event(&mock, &prefix(), &ReqId::from_header("r"), &bytes::Bytes::new())
+        .await
+        .expect_err("publish fails");
+    assert!(!err.is_empty(), "error string is non-empty for log surface");
+}
+
+#[tokio::test]
 async fn acquire_permit_with_shutdown_returns_none_when_cancelled_while_waiting() {
     // Saturate the gate so the next acquire has to wait, then cancel and
     // confirm the helper returns None instead of holding a permit. Without
