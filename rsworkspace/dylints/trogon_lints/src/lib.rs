@@ -15,6 +15,7 @@ mod redundant_module_path;
 mod telemetry_attribute_literal;
 mod telemetry_key_value_literal;
 mod telemetry_literal;
+mod telemetry_metric_construction;
 mod telemetry_metric_name_literal;
 mod telemetry_span_name_literal;
 mod test_module_naming;
@@ -35,6 +36,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         REDUNDANT_MODULE_PATH,
         TELEMETRY_ATTRIBUTE_LITERAL,
         TELEMETRY_KEY_VALUE_LITERAL,
+        TELEMETRY_METRIC_CONSTRUCTION,
         TELEMETRY_METRIC_NAME_LITERAL,
         TELEMETRY_SPAN_NAME_LITERAL,
         TEST_MODULE_NAMING,
@@ -379,6 +381,42 @@ rustc_session::declare_lint! {
 rustc_session::declare_lint! {
     /// ### What it does
     ///
+    /// Detects an `opentelemetry` `Meter` instrument builder (`u64_counter`,
+    /// `f64_histogram`, the gauge and up-down-counter variants, and their
+    /// observable forms) opened anywhere outside the `trogon-semconv` crate.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A metric is a contract of name, description, and unit, all defined once in
+    /// the semantic-convention registry. `trogon-semconv` generates a `build_*`
+    /// constructor per metric that bakes those three together. Opening the
+    /// builder inline at a call site restates the description and unit by hand,
+    /// where they drift from the registry (a renamed metric, a reworded
+    /// description, or a dropped unit goes unnoticed). Routing every instrument
+    /// through its generated constructor keeps the whole contract single-sourced.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// let requests = meter
+    ///     .u64_counter(metric::ACP_REQUESTS)
+    ///     .with_description("Total number of ACP requests")
+    ///     .build();
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// let requests = trogon_semconv::metric::build_acp_requests(&meter);
+    /// ```
+    pub TELEMETRY_METRIC_CONSTRUCTION,
+    Deny,
+    "construct metric instruments through a generated `trogon_semconv::metric::build_*` constructor",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
     /// Detects a string literal used as the span name in a `tracing`
     /// span-construction macro (`info_span!`, `span!`, and the other level
     /// variants) or in `#[instrument(name = "...")]`.
@@ -418,6 +456,7 @@ struct TrogonLints {
     function_local_use: function_local_use::FunctionLocalUse,
     telemetry_attribute_literal: telemetry_attribute_literal::TelemetryAttributeLiteral,
     telemetry_key_value_literal: telemetry_key_value_literal::TelemetryKeyValueLiteral,
+    telemetry_metric_construction: telemetry_metric_construction::TelemetryMetricConstruction,
     telemetry_metric_name_literal: telemetry_metric_name_literal::TelemetryMetricNameLiteral,
     telemetry_span_name_literal: telemetry_span_name_literal::TelemetrySpanNameLiteral,
 }
@@ -431,6 +470,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
         self.error_string_comparison.check_expr(cx, expr);
         self.telemetry_attribute_literal.check_expr(cx, expr);
         self.telemetry_key_value_literal.check_expr(cx, expr);
+        self.telemetry_metric_construction.check_expr(cx, expr);
         self.telemetry_metric_name_literal.check_expr(cx, expr);
         self.telemetry_span_name_literal.check_expr(cx, expr);
     }
@@ -453,6 +493,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     MANUAL_ERROR_IMPL,
     TELEMETRY_ATTRIBUTE_LITERAL,
     TELEMETRY_KEY_VALUE_LITERAL,
+    TELEMETRY_METRIC_CONSTRUCTION,
     TELEMETRY_METRIC_NAME_LITERAL,
     TELEMETRY_SPAN_NAME_LITERAL,
     TEST_MODULE_NAMING,

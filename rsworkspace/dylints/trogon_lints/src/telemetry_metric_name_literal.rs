@@ -3,28 +3,7 @@ use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
 
 use crate::TELEMETRY_METRIC_NAME_LITERAL;
-use crate::telemetry_literal::{receiver_is_type, string_literal_span};
-
-/// Every `Meter` method that takes an instrument name as its first argument.
-const INSTRUMENT_BUILDERS: &[&str] = &[
-    "u64_counter",
-    "f64_counter",
-    "u64_observable_counter",
-    "f64_observable_counter",
-    "i64_up_down_counter",
-    "f64_up_down_counter",
-    "i64_observable_up_down_counter",
-    "f64_observable_up_down_counter",
-    "u64_histogram",
-    "f64_histogram",
-    "i64_histogram",
-    "u64_gauge",
-    "i64_gauge",
-    "f64_gauge",
-    "u64_observable_gauge",
-    "i64_observable_gauge",
-    "f64_observable_gauge",
-];
+use crate::telemetry_literal::{INSTRUMENT_BUILDERS, receiver_is_type, string_literal_span};
 
 #[derive(Default)]
 pub(crate) struct TelemetryMetricNameLiteral;
