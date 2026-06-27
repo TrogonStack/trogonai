@@ -1,6 +1,6 @@
 use super::*;
 use crate::jwks::StaticJwks;
-use crate::test_crypto::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
+use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
 use crate::time_source::SystemTimeSource;
 use std::sync::Arc;
 

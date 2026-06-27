@@ -159,14 +159,14 @@ async fn verify_returns_invalid_header_value_for_unparseable_created() {
 
 #[test]
 fn verify_signature_with_jwk_accepts_es384_key() {
-    let fixture = crate::test_crypto::p384_fixture();
-    let sig = crate::test_crypto::sign_p384_pop(b"canonical-base");
+    let fixture = crate::test_support::p384_fixture();
+    let sig = crate::test_support::sign_p384_pop(b"canonical-base");
     verify_signature_with_jwk(&fixture.jwk_json, b"canonical-base", &sig).expect("ES384 pop verifies");
 }
 
 #[test]
 fn verify_signature_with_jwk_accepts_ed25519_key() {
-    let fixture = crate::test_crypto::ed25519_fixture("agent-ed");
+    let fixture = crate::test_support::ed25519_fixture("agent-ed");
     let sig = fixture.sign_pop_base(b"canonical-base");
     verify_signature_with_jwk(&fixture.jwk_json, b"canonical-base", &sig).expect("EdDSA pop verifies");
 }
