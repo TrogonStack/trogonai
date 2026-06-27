@@ -1,8 +1,8 @@
 //! End-to-end smoke test for the `run` shim.
 //!
 //! Drives the public `a2a_gateway::run` entrypoint with valid defaults so
-//! both the production thin shim and its `cfg(coverage)` stub are exercised
-//! through the same call path the binary uses.
+//! the production thin shim is exercised through the same call path the
+//! binary uses.
 
 #![allow(clippy::expect_used)]
 

@@ -1,106 +1,116 @@
-# Plan: Adopt ADR 0011 — JSON-RPC over NATS Binding
+# Plan: Honest Coverage — Remove `cfg(coverage)` Gating and Add Real Tests
 
-Implements [ADR 0011](./docs/adr/0011-jsonrpc-over-nats-binding.md) across the
-Rust workspace: one shared, protocol-agnostic codec that binds any JSON-RPC 2.0
-protocol (ACP, MCP, A2A) onto NATS in **binary content mode** — control and
-correlation fields project to the subject and `Jsonrpc-*` headers, the payload
-stays in the body, and success-versus-error is decided by the presence of the
-`Jsonrpc-Error-Code` header, never by structural deserialization.
+## Why
 
-## Completed
+CI gates Rust coverage at 95% (`/.github/workflows/ci-rust.yml`, `coverage-action`,
+`threshold: 95`, `fail: true`). That number is currently inflated. Two mechanisms
+shrink the measured surface:
 
-- **Codec crate `jsonrpc-nats`** with `encode`/`decode`, the `Jsonrpc-Id` JSON
-  literal codec, the `Jsonrpc-Error-Code` discriminator, edge reconstruction
-  (`to_json_value`/`from_json_value`), and the `decode(encode(m)) == m`
-  round-trip property tests. Unsupported/absent `jsonrpc` version fails hard
-  (`CodecError::UnsupportedVersion`).
-- **MCP** runs on the shared codec end to end (`mcp-nats/src/transport.rs`,
-  `wire.rs`); canonical JSON-RPC is reconstructed only at the stdio and
-  Streamable-HTTP/SSE edges.
-- **ACP** runs on the codec: global core req/reply handlers, all JetStream
-  session commands including `prompt` (`handle_js`), the `cancel` notification,
-  and the full agent→client callback path (`rpc_reply` content-mode replies).
-  The `authenticate` error-loss bug is fixed — structured agent errors survive
-  via the header discriminator instead of collapsing to `-32603`.
-- **A2A headers**: `a2a-nats/src/{client,server}/wire.rs` project `id` →
-  `Jsonrpc-Id` and `error.code` → `Jsonrpc-Error-Code` through the shared codec;
-  subject-based dispatch (`A2aMethod::from_subject`) retained. Redaction is
-  unaffected (`result`/`message`/`data`/`params` stay in the body).
-- **Shared transport** (`jsonrpc-nats/src/transport.rs`): ACP and MCP both run
-  on the shared `merge_jsonrpc_headers`, `jsonrpc_request_raw` (byte-level
-  request/reply with timeout), and `jsonrpc_publish[_with_timeout]`. A2A's
-  duplicated header-merge now delegates to the shared one too. This resolves the
-  ADR "Open Implementation Questions": the shared seam owns header projection +
-  request/publish + timeouts, while the **typed decode** stays in the domain
-  crate (ACP decodes the generic `Message`; MCP decodes rmcp's
-  `RxJsonRpcMessage`). MCP keeps a thin `rmcp::Transport` (Sink/Stream) adapter
-  over those shared primitives because rmcp fixes its transport shape and its
-  server-initiated streaming + JetStream keepalive ack are domain concerns that
-  do not belong in the shared core.
-- **Edges**: canonical JSON-RPC is reconstructed at the protocol edges and the
-  `jsonrpc == "2.0"` invariant is enforced there. Batch unbundling is not
-  applicable to our edges — the A2A HTTP edge is one envelope per call and the
-  MCP HTTP edge's batching is handled by the rmcp SDK — so no backbone message
-  ever carries a JSON-RPC array.
+1. **`--ignore-filename-regex`** in `rsworkspace/.cargo/config.toml` excludes
+   generated code (`trogonai-proto`, `trogon-semconv` `src/gen/`). This is
+   legitimate and stays.
+2. **A `#[cfg(not(coverage))]` / `#[cfg(coverage)]` dual-cfg trick** — 175 gates
+   across 41 files. The real implementation lives behind `cfg(not(coverage))`; a
+   parallel `cfg(coverage)` twin returns `coverage_unavailable(...)` or collapses
+   a match. Under coverage builds the real code disappears, so untested branches,
+   loops, and helpers never count against the gate.
 
-The JSON-RPC over NATS binding (ADR 0011) is complete: ACP, MCP, and A2A all run
-on the shared content-mode codec and transport, with the invariants enforced and
-the round-trip property test gating the codec.
+The goal is to make the 95% honest: test the gated code, then delete the gates so
+the real implementation re-enters measurement.
 
-## Deferred (later, non-blocking)
+## The per-item loop
 
-- **Centralize edge reconstruction through the codec.** Edges today rebuild
-  canonical JSON-RPC with local `serde_json` builders rather than the codec's
-  `to_json_value`/`from_json_value` (currently exercised only in tests). Behavior
-  is already correct and the invariant holds; routing every edge through the
-  shared reconstruction is a consistency cleanup to fold into the broader
-  refactor, not part of closing out this binding.
+For every gated item:
 
-## Out of Scope (not JSON-RPC binding work)
+1. Write the test that exercises the real code path.
+2. Delete the `#[cfg(not(coverage))]` attribute **and** its `#[cfg(coverage)]`
+   stub twin (including any `coverage_unavailable` helper left unused).
+3. Run `cargo cov nextest` (from `rsworkspace/`) and confirm the gate stays green
+   with the code now measured.
+4. Remove `unexpected_cfgs` `check-cfg = ['cfg(coverage)']` entries from a crate's
+   `Cargo.toml` only once that crate has zero remaining `cfg(coverage)` uses.
 
-- **Per-message A2A signing.** JSON-RPC defines no signing; message signing is an
-  A2A *security* concern that belongs to A2A's own design, not this binding. It
-  is also not implemented today — A2A does not sign request/response traffic
-  (the only signing in the repo is the offline skill-*bundle* signer in
-  `a2a-redaction/src/signed_bundle/`). The only carryover this binding owes that
-  future work is a one-line constraint: because content mode moved `id` and
-  `error.code` into the `Jsonrpc-Id`/`Jsonrpc-Error-Code` headers, any future
-  per-message signing must cover those headers, not just the body. The guardrail
-  for that already lives in code — `a2a-nats/src/wire.rs` keeps signed A2A paths
-  disabled until such a scheme exists — so nothing here is blocked on it.
+## Scope inventory
 
-## Invariants to Enforce (ADR "Invariants")
-- `decode(encode(m)) == m` for every valid message, id type included.
-- `jsonrpc` is constant `"2.0"`, re-injected on decode; an edge rejects any
-  reconstructed envelope whose `jsonrpc` is absent or not `"2.0"` (hard fail,
-  `CodecError::UnsupportedVersion`) rather than coercing it.
-- Response is an error iff `Jsonrpc-Error-Code` (integer) is present; error has a
-  `message` body, success has a `result` body.
-- Response with neither `result` body nor `Jsonrpc-Error-Code` = protocol error.
-- `Jsonrpc-Id` is the id's JSON literal; absent = notification (request) or
-  `null` (response), told apart by direction. Requests use a non-null id.
-- Method carried by the subject.
-- The JSON-RPC `id` is **not** the transport correlation key; correlation
-  (`X-Req-Id`, reply inbox, JetStream response consumer) stays a transport
-  concern outside the codec.
+41 files, grouped by how they should be handled. Counts are
+`#[cfg(not(coverage))]` gates per file.
 
-## Risks & Open Questions
-1. **Header-dependent interpretation.** The body alone is no longer
-   interpretable; consumers must read headers. Verify every consumer (error
-   counters, dead-letter routers, id indexes) reads headers and that nothing
-   replays raw bodies.
-2. **Per-subject cutover discipline.** A subject must never carry both encodings
-   simultaneously. Sequence any remaining migrations and gate each on tests.
+### Tier 1 — Pure logic swept under the gate (no infra, highest ROI)
+
+Unit-testable today; no NATS/JetStream needed.
+
+- [x] `trogon-aauth-verify/src/token.rs` — `jwk_compatible_with_alg` ES384/EdDSA
+      arms (stub collapses to ES256)
+- [x] `trogon-aauth-verify/src/nats_pop.rs`
+- [x] `a2a-nats-stdio/src/io_loop.rs` — `writer_task_err` (pure `Result` mapper)
+- [x] `trogon-scheduler/src/projections/schedules/mod.rs` — pure
+      `From<ScheduleProjection> for ScheduleStreamState` and pure fold helpers
+- [x] `a2a-gateway/src/lib.rs`
+- [ ] `trogon-scheduler/src/lib.rs`
+
+### Tier 2 — KV / JetStream-bound logic (needs integration harness)
+
+Real coverage value; `trogon-scheduler/tests/integration.rs` already provides a
+NATS-backed harness to build on (ADR 0010 testcontainers pattern).
+
+- [ ] `trogon-scheduler/src/queries/{get,list,mod}.rs`
+- [ ] `trogon-scheduler/src/store/{event_store,connect}.rs`
+- [ ] `trogon-scheduler/src/kv.rs`
+- [ ] `trogon-scheduler/src/nats.rs`
+- [ ] `trogon-scheduler/src/projections/{mod,schedules/storage}.rs`
+- [ ] `trogon-decider-nats/src/store.rs`
+- [ ] `trogon-nats/src/jetstream/{mod,object_store,traits}.rs`
+
+### Tier 3 — I/O loops and runtimes (timing-dependent + live infra)
+
+Hardest: `tokio::select!` arms with writer-died / shutdown races plus
+unreachable defenses. Need mock transports or testcontainers.
+
+- [ ] `a2a-nats-stdio/src/{runtime,io_loop}.rs` (+ gated `*/tests.rs`)
+- [ ] `a2a-nats-http/src/runtime.rs`
+- [ ] `a2a-nats-server/src/runtime.rs`
+- [ ] `a2a-gateway/src/push_dlq_mirror.rs`
+- [ ] `trogon-gateway/src/source/{discord/mod,slack/socket_mode}.rs`
+
+### Tier 4 — Binary entry points (`main.rs` / `bin/`)
+
+Mostly bootstrap wiring; lowest value. Either accept exclusion under a documented
+policy, or extract a testable `run()` from `main()` and add thin smoke tests.
+
+- [ ] `trogon-gateway/src/main.rs` (15 — largest)
+- [ ] `a2a-nats-server/src/main.rs` (11)
+- [ ] `a2a-auth-callout/src/main.rs` (9)
+- [ ] `a2a-bridge/src/main.rs` (9)
+- [ ] `a2a-redaction/src/bin/sign-bundle.rs` (7)
+- [ ] `mcp-nats-stdio/src/main.rs` (5)
+- [ ] `a2a-gateway/src/main.rs` (4)
+- [ ] `acp-nats-server/src/main.rs`, `acp-nats-stdio/src/main.rs`,
+      `mcp-nats-server/src/main.rs`, `a2a-nats-http/src/main.rs`,
+      `a2a-nats-stdio/src/main.rs`
+
+## Sequencing
+
+1. **Tier 1 first** — pure functions, immediate honest coverage, and it proves
+   the test → remove-both-twins → gate-stays-green loop end to end.
+2. **Tier 2** — the scheduler integration harness already exists.
+3. **Tier 3** — invest in mock transports / testcontainers as needed.
+4. **Tier 4** — decide policy (smoke-test vs. documented exclusion) last.
+
+## Keep excluded (out of scope)
+
+- Generated code via `--ignore-filename-regex` (`trogonai-proto`,
+  `trogon-semconv` `src/gen/`). Do not test generated output.
 
 ## Validation
-- `mise exec -- cargo test` per crate, plus the dylint module-policy lints.
-- Testcontainers-backed integration tests for real NATS paths (ADR 0010) on the
-  migrated subjects.
-- Per-handler regression tests proving structured errors survive (the
-  `authenticate` case is the canonical one).
+
+- `cargo cov nextest --cobertura --output-path coverage.xml` from `rsworkspace/`,
+  matching CI.
+- Each PR keeps the 95% gate green with strictly more real code measured (no use
+  of the `rust:coverage-baseline-reset` label as a shortcut).
+- Track progress by checking off the boxes above as gates are removed.
 
 ## References
-- [ADR 0011: JSON-RPC over NATS Binding](./docs/adr/0011-jsonrpc-over-nats-binding.md)
-- [ADR 0003: AI Protocol Transport Taxonomy](./docs/adr/0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./docs/adr/0004-protocol-and-transport-layering.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./docs/adr/0009-protocol-buffers-wire-contracts.md)
+
+- `/.github/workflows/ci-rust.yml` — coverage gate
+- `rsworkspace/.cargo/config.toml` — `cov` alias and ignore-regex
+- `docs/adr/0010-*` — testcontainers / real-NATS integration testing

@@ -41,4 +41,7 @@ pub enum VerifyError {
 }
 
 #[cfg(test)]
+pub(crate) mod test_crypto;
+
+#[cfg(test)]
 mod tests;

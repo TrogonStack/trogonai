@@ -1,5 +1,6 @@
 use super::*;
 use crate::jwks::StaticJwks;
+use crate::test_crypto::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
 use crate::time_source::SystemTimeSource;
 use std::sync::Arc;
 
@@ -11,6 +12,81 @@ fn freshness_clock(value: Arc<std::sync::atomic::AtomicI64>) -> impl TimeSource 
         }
     }
     C(value)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resource_accepts_es384_jwk() {
+    let fixture = p384_fixture();
+    let jwks = jwks_with_key("iss.example", fixture.jwk);
+    let mut header = jsonwebtoken::Header::new(fixture.alg);
+    header.typ = Some(TYP_RESOURCE.into());
+    header.kid = Some("p384-k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_resource(&jwt, "ps.example")
+        .await
+        .expect("ES384 resource token verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resource_accepts_eddsa_jwk() {
+    let fixture = ed25519_fixture("ed-k1");
+    let jwks = jwks_with_key("iss.example", fixture.jwk);
+    let mut header = jsonwebtoken::Header::new(Algorithm::EdDSA);
+    header.typ = Some(TYP_RESOURCE.into());
+    header.kid = Some("ed-k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.encoding).expect("encode");
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    v.verify_resource(&jwt, "ps.example")
+        .await
+        .expect("EdDSA resource token verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn pick_jwk_rejects_incompatible_curve_in_set() {
+    let es384 = p384_fixture();
+    let p256 = p256_fixture("p256-only");
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES384);
+    header.typ = Some(TYP_RESOURCE.into());
+    header.kid = Some("p384-k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &es384.signing).expect("encode");
+    let jwks = jwks_with_key("iss.example", p256.jwk);
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let err = v.verify_resource(&jwt, "ps.example").await.unwrap_err();
+    assert!(matches!(err, TokenError::NoCompatibleJwk), "got {err:?}");
 }
 
 #[tokio::test(flavor = "current_thread")]

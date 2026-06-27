@@ -313,23 +313,10 @@ pub fn content_digest_sha256(payload: &[u8]) -> String {
 fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), NatsPopError> {
     let jwk: Jwk = serde_json::from_value(jwk_val.clone())
         .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(source)))?;
-    // ES384 and EdDSA require real P-384 / Ed25519 fixtures to exercise.
-    // Unit tests here only carry ES256 material, so the extra arms collapse
-    // to a cfg(coverage) stub matching the pattern used in `token::jwk_compatible_with_alg`.
-    #[cfg(not(coverage))]
     let alg = match &jwk.algorithm {
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Algorithm::ES256,
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P384 => Algorithm::ES384,
         AlgorithmParameters::OctetKeyPair(okp) if okp.curve == EllipticCurve::Ed25519 => Algorithm::EdDSA,
-        _ => {
-            return Err(NatsPopError::InvalidConfirmationKey(
-                InvalidConfirmationKey::UnsupportedAlgorithm,
-            ));
-        }
-    };
-    #[cfg(coverage)]
-    let alg = match &jwk.algorithm {
-        AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Algorithm::ES256,
         _ => {
             return Err(NatsPopError::InvalidConfirmationKey(
                 InvalidConfirmationKey::UnsupportedAlgorithm,

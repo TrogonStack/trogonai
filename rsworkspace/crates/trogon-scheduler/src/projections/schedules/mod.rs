@@ -281,7 +281,6 @@ fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) 
     }
 }
 
-#[cfg(not(coverage))]
 impl From<projections_v1::ScheduleProjection> for ScheduleStreamState {
     fn from(view: projections_v1::ScheduleProjection) -> Self {
         Self::Present(view)
