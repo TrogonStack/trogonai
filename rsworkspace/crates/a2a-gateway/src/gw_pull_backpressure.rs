@@ -555,7 +555,13 @@ async fn run_fetch_cycle(
             continue;
         };
 
-        let caller_key = req_id.as_str().to_string();
+        // Gate on the originating caller's identity (carried on the event
+        // headers), not on `req_id`. Keying by `req_id` would let one caller
+        // open many concurrent streams (distinct `req_id`s) and consume the
+        // limit per stream, defeating the per-caller cap. When the header
+        // is absent (legacy publisher or stripped en route) we fall back to
+        // `req_id` so the gate degrades gracefully instead of opening up.
+        let caller_key = caller_key_from_message_headers(&message).unwrap_or_else(|| req_id.as_str().to_string());
         let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller_key) else {
             message
                 .ack_with(AckKind::Nak(None))
@@ -638,6 +644,25 @@ async fn forward_task_event(
         .publish(subject, payload.clone())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Extract the originating caller identity from a JetStream task-event
+/// message. Reads `X-A2a-Caller-Id` (preferred — set by the bridge ingress
+/// path and propagated through the agent backend) and falls back to the
+/// principal header so the per-caller inflight cap can't be circumvented
+/// just by stripping one header. Returns `None` when neither is present;
+/// callers should fall back to `req_id` to keep the gate non-bypassable
+/// rather than opening up to unlimited concurrency on missing headers.
+#[cfg(not(coverage))]
+fn caller_key_from_message_headers(message: &async_nats::jetstream::Message) -> Option<String> {
+    let headers = message.message.headers.as_ref()?;
+    let read = |name| {
+        headers
+            .get(name)
+            .map(|v| v.as_str().trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    read(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER).or_else(|| read(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER))
 }
 
 #[cfg(test)]
