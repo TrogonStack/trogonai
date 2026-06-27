@@ -2,13 +2,14 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use ed25519_dalek::Signer as _;
 use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
     JwkSet, OctetKeyPairParameters, OctetKeyPairType, PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, EncodingKey};
 use p256::ecdsa::SigningKey as P256SigningKey;
-use p256::pkcs8::EncodePrivateKey as _;
+use pkcs8::EncodePrivateKey as _;
 use rand_core::OsRng;
 
 const P384_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDBRfxviTDonWX6aS/fj\nZQ5uj7QiwHx2HpCzR1nxJYLtcaMOOqhYM2zxJqu0rW3a+n+hZANiAAS+3cPsTGpv\nQ8xFfyqnTXHTF5e07BSpwnK7t2GdF+KyDyr9TTmsb9JbHoEaqE+k3cB/KYDrC+on\nQDspxD+EYcbcqLuUV9yv/5fEaWhal28ILO1UEKhml1x6NfXENjhr09U=\n-----END PRIVATE KEY-----\n";
@@ -38,7 +39,6 @@ pub struct EdFixture {
 
 impl EdFixture {
     pub fn sign_pop_base(&self, base: &[u8]) -> String {
-        use ed25519_dalek::Signer;
         URL_SAFE_NO_PAD.encode(self.signing.sign(base).to_bytes())
     }
 }
@@ -93,8 +93,6 @@ pub fn p384_fixture() -> EcFixture {
 }
 
 pub fn ed25519_fixture(kid: &str) -> EdFixture {
-    use ed25519_dalek::pkcs8::EncodePrivateKey as _;
-
     let signing = ed25519_dalek::SigningKey::generate(&mut OsRng);
     let x = URL_SAFE_NO_PAD.encode(signing.verifying_key().as_bytes());
     let pem = signing.to_pkcs8_pem(pkcs8::LineEnding::LF).expect("pkcs8 pem");

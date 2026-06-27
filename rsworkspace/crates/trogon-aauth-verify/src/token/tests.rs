@@ -89,6 +89,12 @@ async fn pick_jwk_rejects_incompatible_curve_in_set() {
     assert!(matches!(err, TokenError::NoCompatibleJwk), "got {err:?}");
 }
 
+#[test]
+fn jwk_compatible_with_alg_rejects_mismatched_family() {
+    let ec = p256_fixture("p256-k1");
+    assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::EdDSA));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn assert_freshness_uses_supplied_clock() {
     let now = Arc::new(std::sync::atomic::AtomicI64::new(1000));
