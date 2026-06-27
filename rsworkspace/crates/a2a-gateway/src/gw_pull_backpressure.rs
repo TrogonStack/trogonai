@@ -44,6 +44,12 @@ const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 #[cfg(not(coverage))]
 const FETCH_EXPIRES: Duration = Duration::from_secs(30);
+/// Delay applied when the per-caller inflight gate is full. Keeps the
+/// JetStream redelivery rate bounded while the offending caller's other
+/// in-flight forwards drain — without a delay JetStream would re-deliver
+/// immediately and the pump would burn CPU on rejected messages.
+#[cfg(not(coverage))]
+const GATE_NAK_DELAY: Duration = Duration::from_millis(500);
 
 /// JetStream durable name for the gateway task-event egress consumer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +455,7 @@ pub async fn run_gateway_events_pull(
     let planner = BaselineTaskEventsEgressPlanner::new();
     let durable = EventsConsumerDurable::for_prefix(&prefix);
     let inflight_gate = Arc::new(CallerInflightGate::new(config.max_inflight_per_caller().as_usize()));
+    let forward_attempts = Arc::new(ForwardAttempts::new());
     let mut backoff = INITIAL_BACKOFF;
 
     info_span_start(&prefix, &durable, &config);
@@ -461,6 +468,7 @@ pub async fn run_gateway_events_pull(
             &planner,
             &config,
             Arc::clone(&inflight_gate),
+            Arc::clone(&forward_attempts),
             shutdown.clone(),
         )
         .await;
@@ -514,6 +522,7 @@ fn info_span_start(prefix: &A2aPrefix, durable: &EventsConsumerDurable, config: 
 }
 
 #[cfg(not(coverage))]
+#[allow(clippy::too_many_arguments)]
 async fn run_fetch_cycle(
     client: &async_nats::Client,
     prefix: &A2aPrefix,
@@ -521,6 +530,7 @@ async fn run_fetch_cycle(
     planner: &BaselineTaskEventsEgressPlanner,
     config: &GatewayEventsPullConfig,
     inflight_gate: Arc<CallerInflightGate>,
+    forward_attempts: Arc<ForwardAttempts>,
     shutdown: CancellationToken,
 ) -> Result<(), PullCycleError> {
     let jetstream = jetstream::new(client.clone());
@@ -554,7 +564,16 @@ async fn run_fetch_cycle(
             source,
         })?;
 
-    while let Some(item) = batch.next().await {
+    loop {
+        // Race the fetch poll against shutdown so a draining batch can't
+        // keep us blocked for up to FETCH_EXPIRES (30s) after cancel, and
+        // so we stop spawning new forwards once the runtime is going down.
+        let item = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => break,
+            next = batch.next() => next,
+        };
+        let Some(item) = item else { break };
         let message = item.map_err(|source| PullCycleError::FetchItem {
             subject: String::new(),
             source,
@@ -578,36 +597,44 @@ async fn run_fetch_cycle(
         // is absent (legacy publisher or stripped en route) we fall back to
         // `req_id` so the gate degrades gracefully instead of opening up.
         let caller_key = caller_key_from_message_headers(&message).unwrap_or_else(|| req_id.as_str().to_string());
+        // `try_acquire` (not wait): when the per-caller gate is full, NAK
+        // immediately with a short delay so the JetStream ack-pending slot
+        // is freed for other callers. Waiting inside a spawned task would
+        // let a single caller fill the shared `max_ack_pending` budget with
+        // permit-waiting tasks, starving every other caller. The forward
+        // retry budget is tracked separately (see `forward_attempts`) so
+        // gate redeliveries never tick the planner's attempt counter.
+        let Some(permit) = Arc::clone(&inflight_gate).try_acquire(&caller_key) else {
+            message
+                .ack_with(AckKind::Nak(Some(GATE_NAK_DELAY)))
+                .await
+                .map_err(|source| PullCycleError::Ack {
+                    subject: subject.to_owned(),
+                    source,
+                })?;
+            continue;
+        };
+
         let client_handle = client.clone();
         let prefix_handle = prefix.clone();
         let planner_handle = *planner;
         let subject_owned = subject.to_owned();
-        let gate_handle = Arc::clone(&inflight_gate);
-        let shutdown_handle = shutdown.clone();
-        // Wait for a permit INSIDE the spawn so a gate-full state doesn't
-        // NAK the message: NAK'ing here would tick JetStream's `delivered`
-        // counter, and the planner uses that counter as the forward retry
-        // budget. A caller at the inflight cap would burn the 3-attempt
-        // budget on gate retries before `forward_task_event` ever ran, then
-        // Term on the first publish failure. By waiting for the permit
-        // before NAK'ing, `delivered` reflects actual forward attempts.
-        // JetStream's `max_ack_pending` still bounds total inflight.
+        let attempts_handle = Arc::clone(&forward_attempts);
+        // Spawn forward+ack so multiple permits per caller can coexist —
+        // running this work inline serializes the loop, which would make
+        // `max_inflight_per_caller` a no-op (at most one permit per caller
+        // would ever exist).
         tokio::spawn(async move {
-            let permit = match acquire_permit_with_shutdown(gate_handle, &caller_key, &shutdown_handle).await {
-                Some(permit) => permit,
-                None => {
-                    // Shutdown observed while waiting — NAK so the message
-                    // is redelivered to the next process owner.
-                    let _ = message.ack_with(AckKind::Nak(None)).await;
-                    return;
-                }
-            };
             let _permit = permit;
-            // JetStream tracks per-message delivery attempts; carry that count
-            // into the planner so persistently undeliverable events get Term'd
-            // after the configured retry budget instead of NAK-looping forever.
-            let attempt = u32::try_from(message.info().map(|i| i.delivered).unwrap_or(1)).unwrap_or(u32::MAX);
+            // Identify this logical message across redeliveries so gate-NAK
+            // redeliveries don't tick the forward attempt counter.
+            let sequence = message.info().map(|i| i.stream_sequence).unwrap_or(0);
             let forward_result = forward_task_event(&client_handle, &prefix_handle, &req_id, &message.payload).await;
+            let attempt = if forward_result.is_err() {
+                attempts_handle.record_attempt(sequence)
+            } else {
+                0
+            };
             let disposition = planner_handle.forward_disposition(attempt, forward_result.err().as_deref());
             match disposition {
                 EgressAckDisposition::Ack => {
@@ -624,6 +651,7 @@ async fn run_fetch_cycle(
                         );
                         let _ = message.ack_with(AckKind::Term).await;
                     }
+                    attempts_handle.clear(sequence);
                 }
                 EgressAckDisposition::Nak { delay } => {
                     if let Err(error) = message.ack_with(AckKind::Nak(delay)).await {
@@ -633,6 +661,8 @@ async fn run_fetch_cycle(
                             "gateway events pull nak failed; jetstream will redeliver"
                         );
                     }
+                    // Keep the forward-attempt count so the next redelivery
+                    // sees the same `attempt` number and the budget retires.
                 }
                 EgressAckDisposition::Term => {
                     if let Err(error) = message.ack_with(AckKind::Term).await {
@@ -642,6 +672,7 @@ async fn run_fetch_cycle(
                             "gateway events pull term failed; jetstream will redeliver"
                         );
                     }
+                    attempts_handle.clear(sequence);
                 }
             }
         });
@@ -650,24 +681,47 @@ async fn run_fetch_cycle(
     Ok(())
 }
 
-/// Block on the per-caller gate until a permit is available or shutdown
-/// fires. Returns `None` only on shutdown. Yields between attempts so the
-/// task doesn't spin while permits are held by other forwards.
+/// Forward-attempt counter keyed by JetStream stream sequence.
+///
+/// JetStream's per-message `delivered` count ticks on every redelivery,
+/// including ones we triggered ourselves by NAK'ing on gate-full. If the
+/// planner used `delivered` as the forward retry budget, gate redeliveries
+/// would burn the budget before `forward_task_event` ever ran — see the
+/// "Gate NAKs consume forward retries" review thread. This in-process map
+/// tracks attempts only when the actual publish to `gateway.egress` fails,
+/// so the budget reflects real forward failures.
 #[cfg_attr(coverage, allow(dead_code))]
-async fn acquire_permit_with_shutdown(
-    gate: Arc<CallerInflightGate>,
-    caller_key: &str,
-    shutdown: &CancellationToken,
-) -> Option<CallerInflightPermit> {
-    const GATE_WAIT_BACKOFF: Duration = Duration::from_millis(50);
-    loop {
-        if let Some(permit) = Arc::clone(&gate).try_acquire(caller_key) {
-            return Some(permit);
-        }
-        tokio::select! {
-            () = shutdown.cancelled() => return None,
-            () = tokio::time::sleep(GATE_WAIT_BACKOFF) => {}
-        }
+#[derive(Default)]
+struct ForwardAttempts {
+    by_sequence: Mutex<HashMap<u64, u32>>,
+}
+
+#[cfg_attr(coverage, allow(dead_code))]
+impl ForwardAttempts {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record one failed forward attempt and return the new count.
+    fn record_attempt(&self, sequence: u64) -> u32 {
+        let mut guard = match self.by_sequence.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let count = guard.entry(sequence).or_insert(0);
+        *count = count.saturating_add(1);
+        *count
+    }
+
+    /// Drop the per-sequence counter once the message reaches a terminal
+    /// disposition (Ack or Term). Keeps the map's memory footprint bounded
+    /// over long-lived runs.
+    fn clear(&self, sequence: u64) {
+        let mut guard = match self.by_sequence.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.remove(&sequence);
     }
 }
 

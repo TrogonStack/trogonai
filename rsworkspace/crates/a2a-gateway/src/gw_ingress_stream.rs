@@ -469,8 +469,19 @@ async fn run_streaming_ingress_pump(
 pub struct ResubscribeParamsWire {
     #[serde(alias = "task_id", alias = "taskId")]
     pub id: Option<String>,
-    #[serde(default, alias = "lastSeq")]
+    #[serde(default, alias = "lastSeq", alias = "lastSequence", alias = "last_sequence")]
     pub last_seq: Option<u64>,
+    /// SSE-style `metadata.lastEventId` envelope used by bridge/SDK clients
+    /// that resume from a stored event-id cursor. Treated as a fallback —
+    /// the explicit `last_seq` aliases win when both are present.
+    #[serde(default)]
+    pub metadata: Option<ResubscribeMetadata>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ResubscribeMetadata {
+    #[serde(default, alias = "lastEventId", alias = "last_event_id")]
+    pub last_event_id: Option<serde_json::Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -486,12 +497,38 @@ pub enum ResubscribeParamsError {
 /// Parse `tasks/resubscribe` params into a typed shape. Returns the
 /// resolved task id plus the optional `last_seq` resume cursor (`0` when
 /// absent — the consumer starts from the beginning).
+///
+/// Accepted cursor aliases (in priority order):
+/// - `last_seq` / `lastSeq` / `lastSequence` / `last_sequence` — explicit u64
+/// - `metadata.lastEventId` / `metadata.last_event_id` — SSE-style envelope,
+///   parsed as u64 when the value is a number or a digit string
+///
+/// Without these aliases a resume-from-disconnect request would silently
+/// replay the whole stream from sequence 0 because bridge/SDK clients use
+/// non-snake_case cursor keys.
 pub fn parse_resubscribe_params(params: &serde_json::Value) -> Result<(A2aTaskId, u64), ResubscribeParamsError> {
     let wire: ResubscribeParamsWire =
         serde_json::from_value(params.clone()).map_err(ResubscribeParamsError::Deserialize)?;
     let raw = wire.id.ok_or(ResubscribeParamsError::MissingTaskId)?;
     let task_id = A2aTaskId::new(raw).map_err(ResubscribeParamsError::InvalidTaskId)?;
-    Ok((task_id, wire.last_seq.unwrap_or(0)))
+    let last_seq = wire.last_seq.or_else(|| {
+        wire.metadata
+            .and_then(|m| m.last_event_id)
+            .and_then(parse_last_event_id_as_u64)
+    });
+    Ok((task_id, last_seq.unwrap_or(0)))
+}
+
+/// Coerce an `SSE-style lastEventId` value into the JetStream sequence cursor.
+/// Accepts both numeric JSON values and digit strings so clients that store
+/// the cursor as a string round-trip without forcing the gateway to surface a
+/// parse error to a reconnect path.
+fn parse_last_event_id_as_u64(value: serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(n) => n.as_u64(),
+        serde_json::Value::String(s) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    }
 }
 
 pub fn req_id_from_headers_or_payload(headers: &async_nats::HeaderMap, payload: &[u8]) -> Option<ReqId> {

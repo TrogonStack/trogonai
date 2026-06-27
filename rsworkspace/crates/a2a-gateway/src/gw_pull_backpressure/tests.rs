@@ -267,12 +267,27 @@ fn caller_inflight_gate_drop_removes_empty_bucket() {
     assert!(!gate.inflight.lock().unwrap().contains_key("caller-a"));
 }
 
-#[tokio::test]
-async fn acquire_permit_with_shutdown_returns_immediately_when_capacity_free() {
-    let gate = std::sync::Arc::new(CallerInflightGate::new(2));
-    let shutdown = tokio_util::sync::CancellationToken::new();
-    let permit = acquire_permit_with_shutdown(gate.clone(), "caller-a", &shutdown).await;
-    assert!(permit.is_some(), "permit available immediately");
+#[test]
+fn forward_attempts_increment_per_sequence_independently() {
+    let attempts = ForwardAttempts::new();
+    assert_eq!(attempts.record_attempt(1), 1);
+    assert_eq!(attempts.record_attempt(1), 2);
+    assert_eq!(attempts.record_attempt(2), 1);
+    // Clearing one sequence doesn't touch others — terminal disposition
+    // on one message must not reset a sibling's retry budget.
+    attempts.clear(1);
+    assert_eq!(attempts.record_attempt(1), 1);
+    assert_eq!(attempts.record_attempt(2), 2);
+}
+
+#[test]
+fn forward_attempts_clear_is_idempotent() {
+    let attempts = ForwardAttempts::new();
+    attempts.clear(42);
+    assert_eq!(attempts.record_attempt(42), 1);
+    attempts.clear(42);
+    attempts.clear(42);
+    assert_eq!(attempts.record_attempt(42), 1);
 }
 
 #[tokio::test]
@@ -298,18 +313,4 @@ async fn forward_task_event_surfaces_publish_failure_as_string() {
         .await
         .expect_err("publish fails");
     assert!(!err.is_empty(), "error string is non-empty for log surface");
-}
-
-#[tokio::test]
-async fn acquire_permit_with_shutdown_returns_none_when_cancelled_while_waiting() {
-    // Saturate the gate so the next acquire has to wait, then cancel and
-    // confirm the helper returns None instead of holding a permit. Without
-    // this branch, shutdown would never unblock the waiting forward and
-    // the pump would hang on graceful stop.
-    let gate = std::sync::Arc::new(CallerInflightGate::new(1));
-    let _held = gate.clone().try_acquire("caller-a").expect("hold cap");
-    let shutdown = tokio_util::sync::CancellationToken::new();
-    shutdown.cancel();
-    let result = acquire_permit_with_shutdown(gate.clone(), "caller-a", &shutdown).await;
-    assert!(result.is_none(), "shutdown returns None even mid-wait");
 }

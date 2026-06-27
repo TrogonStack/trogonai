@@ -28,6 +28,48 @@ fn resubscribe_params_accept_camel_last_seq() {
 }
 
 #[test]
+fn resubscribe_params_accept_long_last_sequence_camel_alias() {
+    let params = serde_json::json!({"id": "task-1", "lastSequence": 42});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("camel long alias");
+    assert_eq!(last_seq, 42);
+}
+
+#[test]
+fn resubscribe_params_accept_snake_last_sequence_alias() {
+    let params = serde_json::json!({"id": "task-1", "last_sequence": 7});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("snake long alias");
+    assert_eq!(last_seq, 7);
+}
+
+#[test]
+fn resubscribe_params_fall_back_to_metadata_last_event_id_number() {
+    let params = serde_json::json!({"id": "task-1", "metadata": {"lastEventId": 11}});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("metadata numeric");
+    assert_eq!(last_seq, 11);
+}
+
+#[test]
+fn resubscribe_params_fall_back_to_metadata_last_event_id_string() {
+    let params = serde_json::json!({"id": "task-1", "metadata": {"last_event_id": "  13  "}});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("metadata digit string");
+    assert_eq!(last_seq, 13);
+}
+
+#[test]
+fn resubscribe_params_explicit_last_seq_wins_over_metadata() {
+    let params = serde_json::json!({"id": "task-1", "lastSeq": 5, "metadata": {"lastEventId": 999}});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("explicit wins");
+    assert_eq!(last_seq, 5);
+}
+
+#[test]
+fn resubscribe_params_metadata_non_numeric_falls_through_to_zero() {
+    let params = serde_json::json!({"id": "task-1", "metadata": {"lastEventId": "not-a-number"}});
+    let (_task_id, last_seq) = parse_resubscribe_params(&params).expect("non-numeric tolerated");
+    assert_eq!(last_seq, 0, "non-numeric defaults to start-from-zero");
+}
+
+#[test]
 fn resubscribe_params_missing_id_is_typed_error() {
     let params = serde_json::json!({});
     let err = parse_resubscribe_params(&params).unwrap_err();
