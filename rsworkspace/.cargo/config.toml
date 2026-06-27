@@ -1,10 +1,16 @@
 [alias]
+# Ignore generated proto and the WASM-guest decider pipeline. The guest pipeline
+# (guest SDK, the `export_decider!` macro output, the example/decider cdylib
+# crates, the light proto example, and the conformance CLI) executes inside the
+# wasm32 component and is verified by the dedicated `wasm-decider` CI job
+# (zero-import assertion + sim/YAML conformance suites); host llvm-cov cannot
+# instrument code that runs in the guest, so it is excluded from the host gate.
 cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*",
+    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*|crates/trogonai-proto/src/example/.*|crates/(trogon-decider-spike|trogon-decider-guest-sdk|trogon-decider-guest-macros|trogon-light-decider|trogon-schedules-decider)/.*|cli/trogon-decider-test/.*",
 ]
 
 [target.wasm32-wasip2]
