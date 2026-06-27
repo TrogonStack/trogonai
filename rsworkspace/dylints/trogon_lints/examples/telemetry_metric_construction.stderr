@@ -1,0 +1,11 @@
+error: metric instrument constructed outside `trogon_semconv`
+  --> $DIR/telemetry_metric_construction.rs:12:10
+   |
+LL |         .u64_counter(ACP_REQUESTS)
+   |          ^^^^^^^^^^^
+   |
+   = help: construct the instrument with a generated `trogon_semconv::metric::build_*` constructor instead of opening the builder inline
+   = note: `#[deny(telemetry_metric_construction)]` on by default
+
+error: aborting due to 1 previous error
+

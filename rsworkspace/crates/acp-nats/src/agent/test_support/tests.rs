@@ -1,5 +1,6 @@
 use super::*;
 use crate::telemetry::metrics::Metrics;
+use trogon_semconv::metric;
 
 #[test]
 fn has_request_metric_matches_correct_method_and_success() {
@@ -46,10 +47,17 @@ fn has_request_metric_returns_false_when_empty() {
 }
 
 #[test]
+// Builds a histogram under a counter's name to prove the lookup rejects the
+// wrong instrument kind; that mismatch is the point, so the generated
+// `build_acp_requests` (a counter) cannot stand in here.
+#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_metric_construction))]
 fn has_request_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
-    let histogram = meter.f64_histogram("acp.requests").with_description("test").build();
+    let histogram = meter
+        .f64_histogram(metric::ACP_REQUESTS)
+        .with_description("test")
+        .build();
     histogram.record(1.0, &[]);
 
     let finished = flush_metrics(&provider, &exporter);
@@ -94,10 +102,14 @@ fn has_error_metric_rejects_wrong_reason() {
 }
 
 #[test]
+// Builds a histogram under a counter's name to prove the lookup rejects the
+// wrong instrument kind; that mismatch is the point, so the generated
+// `build_acp_errors` (a counter) cannot stand in here.
+#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_metric_construction))]
 fn has_error_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
-    let histogram = meter.f64_histogram("acp.errors").with_description("test").build();
+    let histogram = meter.f64_histogram(metric::ACP_ERRORS).with_description("test").build();
     histogram.record(1.0, &[]);
 
     let finished = flush_metrics(&provider, &exporter);

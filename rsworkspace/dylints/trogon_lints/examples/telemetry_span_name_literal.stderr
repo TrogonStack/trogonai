@@ -1,0 +1,27 @@
+error: span name written as an inline string literal
+  --> $DIR/telemetry_span_name_literal.rs:10:37
+   |
+LL |     let _span = tracing::info_span!("http.server.request", method = "GET");
+   |                                     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: name the span with a generated `trogon_semconv::span` constant instead of an inline string
+   = note: `#[deny(telemetry_span_name_literal)]` on by default
+
+error: span name written as an inline string literal
+  --> $DIR/telemetry_span_name_literal.rs:18:56
+   |
+LL |     let _span = tracing::info_span!(target: "fixture", "http.server.request");
+   |                                                        ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: name the span with a generated `trogon_semconv::span` constant instead of an inline string
+
+error: span name written as an inline string literal
+  --> $DIR/telemetry_span_name_literal.rs:21:21
+   |
+LL | #[instrument(name = "http.server.request")]
+   |                     ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: name the span with a generated `trogon_semconv::span` constant instead of an inline string
+
+error: aborting due to 3 previous errors
+

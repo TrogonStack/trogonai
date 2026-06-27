@@ -12,19 +12,9 @@ pub struct Metrics {
 impl Metrics {
     pub fn new(meter: &Meter) -> Self {
         Self {
-            requests: meter
-                .u64_counter(metric::ACP_REQUESTS)
-                .with_description("Total number of ACP requests")
-                .build(),
-            request_duration: meter
-                .f64_histogram(metric::ACP_REQUEST_DURATION)
-                .with_description("Duration of ACP requests in seconds")
-                .with_unit("s")
-                .build(),
-            errors: meter
-                .u64_counter(metric::ACP_ERRORS)
-                .with_description("Total number of errors by operation and reason")
-                .build(),
+            requests: metric::build_acp_requests(meter),
+            request_duration: metric::build_acp_request_duration(meter),
+            errors: metric::build_acp_errors(meter),
         }
     }
 
