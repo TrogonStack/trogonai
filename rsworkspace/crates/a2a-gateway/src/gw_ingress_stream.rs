@@ -267,11 +267,14 @@ impl Drop for CallerInflightPermit {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if let Some(count) = guard.get_mut(&self.caller_key) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                guard.remove(&self.caller_key);
-            }
+        // `try_acquire` inserted + incremented this bucket and each permit
+        // decrements only its own key, so the entry is always present here.
+        // Use `entry().or_insert(0)` instead of `if let Some` to avoid a
+        // defensive branch that the type system already rules out.
+        let count = guard.entry(self.caller_key.clone()).or_insert(0);
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            guard.remove(&self.caller_key);
         }
     }
 }
