@@ -67,6 +67,7 @@ dependencies = [
  "a2a-auth-callout",
  "a2a-nats",
  "a2a-pack",
+ "a2a-redaction",
  "async-nats",
  "base64 0.22.1",
  "bytes",
