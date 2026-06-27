@@ -101,10 +101,7 @@ fn has_error_metric_rejects_wrong_reason() {
 fn has_error_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
-    let histogram = meter
-        .f64_histogram(metric::ACP_ERRORS)
-        .with_description("test")
-        .build();
+    let histogram = meter.f64_histogram(metric::ACP_ERRORS).with_description("test").build();
     histogram.record(1.0, &[]);
 
     let finished = flush_metrics(&provider, &exporter);
