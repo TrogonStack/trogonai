@@ -5790,6 +5790,7 @@ dependencies = [
  "trogon-nats",
  "trogon-semconv",
  "trogon-std",
+ "trogon-telemetry",
  "trogonai-proto",
  "uuid",
 ]

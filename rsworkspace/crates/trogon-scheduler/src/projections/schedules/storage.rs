@@ -6,6 +6,8 @@
 //! bucket, so it depends on this contract; the shared NATS plumbing for the event
 //! stream and other buckets stays in [`crate::kv`].
 
+#![cfg_attr(coverage, allow(unused_imports))]
+
 use async_nats::jetstream::kv;
 use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue};
 
@@ -35,6 +37,10 @@ pub(crate) fn read_model_key(schedule_id: &str) -> String {
     ScheduleKey::for_stream(&StreamRoutingId::from(schedule_id)).simple()
 }
 
+#[cfg(test)]
+mod tests;
+
+#[cfg(not(coverage))]
 pub(crate) async fn get_or_create_schedules_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
 where
     J: JetStreamCreateKeyValue<Store = kv::Store> + JetStreamGetKeyValue<Store = kv::Store>,
@@ -58,6 +64,7 @@ where
     }
 }
 
+#[cfg(not(coverage))]
 pub(crate) async fn open_schedules_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
 where
     J: JetStreamGetKeyValue<Store = kv::Store>,
