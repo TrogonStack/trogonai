@@ -96,11 +96,12 @@ fn then_error_matches_rejection() {
     let host = SimHost::load(&light_wasm()).unwrap();
     let mut instance = host.instantiate(()).unwrap();
 
-    // Business rejections surface through the guest bridge with code "rejected".
+    // Business rejections surface through the guest bridge with the decider's
+    // distinct domain code, not a generic "rejected" placeholder.
     SimScenario::new()
         .given([light_turned_on_event("kitchen", 1)])
         .when(turn_on_command("kitchen"))
-        .then_error("rejected")
+        .then_error("already-on")
         .run(&mut instance)
         .unwrap();
 }
