@@ -584,17 +584,40 @@ async fn run_fetch_cycle(
             let attempt = u32::try_from(message.info().map(|i| i.delivered).unwrap_or(1)).unwrap_or(u32::MAX);
             let forward_result = forward_task_event(&client_handle, &prefix_handle, &req_id, &message.payload).await;
             let disposition = planner_handle.forward_disposition(attempt, forward_result.err().as_deref());
-            let ack_outcome = match disposition {
-                EgressAckDisposition::Ack => message.ack().await,
-                EgressAckDisposition::Nak { delay } => message.ack_with(AckKind::Nak(delay)).await,
-                EgressAckDisposition::Term => message.ack_with(AckKind::Term).await,
-            };
-            if let Err(error) = ack_outcome {
-                warn!(
-                    subject = %subject_owned,
-                    error = %error,
-                    "gateway events pull ack failed; jetstream will redeliver"
-                );
+            match disposition {
+                EgressAckDisposition::Ack => {
+                    // `double_ack` waits for the server to confirm the ack so a
+                    // dropped ack doesn't trigger redelivery + duplicate publish
+                    // to `gateway.egress`. On persistent ack failure we Term:
+                    // the payload already shipped to the caller, and another
+                    // redelivery would re-publish the same event.
+                    if let Err(error) = message.double_ack().await {
+                        warn!(
+                            subject = %subject_owned,
+                            error = %error,
+                            "gateway events pull double-ack failed; terminating to avoid duplicate publish"
+                        );
+                        let _ = message.ack_with(AckKind::Term).await;
+                    }
+                }
+                EgressAckDisposition::Nak { delay } => {
+                    if let Err(error) = message.ack_with(AckKind::Nak(delay)).await {
+                        warn!(
+                            subject = %subject_owned,
+                            error = %error,
+                            "gateway events pull nak failed; jetstream will redeliver"
+                        );
+                    }
+                }
+                EgressAckDisposition::Term => {
+                    if let Err(error) = message.ack_with(AckKind::Term).await {
+                        warn!(
+                            subject = %subject_owned,
+                            error = %error,
+                            "gateway events pull term failed; jetstream will redeliver"
+                        );
+                    }
+                }
             }
         });
     }
