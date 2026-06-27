@@ -136,7 +136,16 @@ fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &S
                 .run(instance)
                 .map_err(|error| anyhow::anyhow!(error))
         }
-        Then::Rejected { .. } | Then::Error { .. } => SimScenario::new()
+        Then::Rejected { rejected } => {
+            let scenario = SimScenario::new().given(given).when(when);
+            let scenario = if *rejected {
+                scenario.then_rejected()
+            } else {
+                scenario.then_accepted()
+            };
+            scenario.run(instance).map_err(|error| anyhow::anyhow!(error))
+        }
+        Then::Error { .. } => SimScenario::new()
             .given(given)
             .when(when)
             .then_rejected()

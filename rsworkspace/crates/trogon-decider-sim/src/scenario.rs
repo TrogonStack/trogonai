@@ -9,6 +9,7 @@ pub struct SimScenario {
     when: Option<host::CommandEnvelope>,
     expect_events: Option<Vec<host::AnyEnvelope>>,
     expect_rejected: bool,
+    expect_accepted: bool,
 }
 
 impl SimScenario {
@@ -18,6 +19,7 @@ impl SimScenario {
             when: None,
             expect_events: None,
             expect_rejected: false,
+            expect_accepted: false,
         }
     }
 
@@ -34,12 +36,23 @@ impl SimScenario {
     pub fn then_events(mut self, events: impl IntoIterator<Item = host::AnyEnvelope>) -> Self {
         self.expect_events = Some(events.into_iter().collect());
         self.expect_rejected = false;
+        self.expect_accepted = false;
         self
     }
 
     pub fn then_rejected(mut self) -> Self {
         self.expect_events = None;
         self.expect_rejected = true;
+        self.expect_accepted = false;
+        self
+    }
+
+    /// Expect the command to be accepted (decide returns events), without
+    /// asserting which events. Used for scenarios that only assert "not rejected".
+    pub fn then_accepted(mut self) -> Self {
+        self.expect_events = None;
+        self.expect_rejected = false;
+        self.expect_accepted = true;
         self
     }
 
@@ -64,6 +77,18 @@ impl SimScenario {
                 Err(host::DecideError::Faulted(err)) => {
                     Err(format!("expected rejection, got fault: {} — {}", err.code, err.message))
                 }
+            }
+        } else if self.expect_accepted {
+            match outcome {
+                Ok(_) => Ok(()),
+                Err(host::DecideError::Rejected(err)) => Err(format!(
+                    "expected acceptance, got rejection: {} — {}",
+                    err.code, err.message
+                )),
+                Err(host::DecideError::Faulted(err)) => Err(format!(
+                    "expected acceptance, got fault: {} — {}",
+                    err.code, err.message
+                )),
             }
         } else {
             let expected = self
