@@ -22,6 +22,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Source-built mise tools (dylint-link, cargo-component, ...) fetch crates from
+  # crates.io during install; raise retry tolerance for spurious network errors.
+  CARGO_NET_RETRY: '10'
 
 permissions:
   contents: read
