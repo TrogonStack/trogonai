@@ -1,0 +1,11 @@
+error: telemetry attribute key written as an inline string literal
+  --> $DIR/telemetry_key_value_literal.rs:10:19
+   |
+LL |     KeyValue::new("messaging.system", "nats")
+   |                   ^^^^^^^^^^^^^^^^^^
+   |
+   = help: pass a generated `trogon_semconv::attribute` constant as the `KeyValue` key instead of an inline string
+   = note: `#[deny(telemetry_key_value_literal)]` on by default
+
+error: aborting due to 1 previous error
+

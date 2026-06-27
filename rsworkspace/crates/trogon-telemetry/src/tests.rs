@@ -105,6 +105,12 @@ fn service_name_reexported() {
 }
 
 #[test]
+// Exercises the meter factory with a throwaway instrument that has no
+// semantic-convention counterpart, so it builds the instrument inline.
+#[cfg_attr(
+    dylint_lib = "trogon_lints",
+    allow(telemetry_metric_construction, telemetry_metric_name_literal)
+)]
 fn meter_returns_named_meter() {
     let m = meter("coverage-test");
     let counter = m.u64_counter("c").build();
