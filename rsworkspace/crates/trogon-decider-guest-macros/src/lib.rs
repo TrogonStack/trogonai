@@ -104,7 +104,39 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         quote! { where #(#bounds)* }
     };
 
+    // Enforce the shared State/Event bundle constraint independently of the
+    // wit-bindgen output. The `bundle_bounds` above live on the generated
+    // `GuestSession` impl, so a wit-bindgen failure (e.g. an unresolved WIT path
+    // under trybuild) hides the mismatch. This standalone assertion surfaces it
+    // regardless, keeping the compile-fail guard meaningful.
+    let bundle_assert = if commands.len() == 1 {
+        quote! {}
+    } else {
+        let checks = commands.iter().skip(1).map(|command| {
+            let ty = &command.ty;
+            quote! {
+                __assert_bundle_shares_state_event::<#canonical_ty, #ty>();
+            }
+        });
+        quote! {
+            const _: fn() = || {
+                fn __assert_bundle_shares_state_event<Base, Bundled>()
+                where
+                    Base: ::trogon_decider::Decider,
+                    Bundled: ::trogon_decider::Decider<
+                        State = <Base as ::trogon_decider::Decider>::State,
+                        Event = <Base as ::trogon_decider::Decider>::Event,
+                    >,
+                {
+                }
+                #(#checks)*
+            };
+        }
+    };
+
     let expanded = quote! {
+        #bundle_assert
+
         #[doc(hidden)]
         mod __trogon_decider_bindings {
             wit_bindgen::generate!({

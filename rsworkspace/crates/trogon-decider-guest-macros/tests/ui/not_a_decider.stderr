@@ -1,49 +1,3 @@
-error: failed to read path for WIT [$WORKSPACE/target/tests/trybuild/trogon-decider-guest-macros/../trogon-decider-wit/wit]
-
-       Caused by:
-         No such file or directory (os error 2)
-  --> tests/ui/not_a_decider.rs:6:1
-   |
- 6 | / export_decider!(NotADecider {
- 7 | |     type_url = TURN_ON_TYPE_URL,
- 8 | |     proto = trogonai_proto::example::v1::TurnOn,
- 9 | |     module = "example.light",
-10 | |     version = "0.1.0",
-11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
-12 | | });
-   | |__^
-   |
-   = note: this error originates in the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0433]: cannot find module or crate `exports` in this scope
-  --> tests/ui/not_a_decider.rs:6:1
-   |
- 6 | / export_decider!(NotADecider {
- 7 | |     type_url = TURN_ON_TYPE_URL,
- 8 | |     proto = trogonai_proto::example::v1::TurnOn,
- 9 | |     module = "example.light",
-10 | |     version = "0.1.0",
-11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
-12 | | });
-   | |__^ use of unresolved module or unlinked crate `exports`
-   |
-   = help: if you wanted to use a crate named `exports`, use `cargo add exports` to add it to your `Cargo.toml`
-   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0433]: cannot find `export` in `__trogon_decider_bindings`
-  --> tests/ui/not_a_decider.rs:6:1
-   |
- 6 | / export_decider!(NotADecider {
- 7 | |     type_url = TURN_ON_TYPE_URL,
- 8 | |     proto = trogonai_proto::example::v1::TurnOn,
- 9 | |     module = "example.light",
-10 | |     version = "0.1.0",
-11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
-12 | | });
-   | |__^ could not find `export` in `__trogon_decider_bindings`
-   |
-   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
-
 warning: unused import: `TurnOnCommand`
  --> tests/ui/not_a_decider.rs:2:31
   |
@@ -75,3 +29,527 @@ help: the trait `Decider` is implemented for `TurnOnCommand`
    | impl Decider for TurnOnCommand {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by a bound in `Guest::Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by this bound in `Guest::Session`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider relaxing the implicit `Sized` restriction
+   |
+12 | }) + ?Sized;
+   |    ++++++++
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+   = note: the return type of a function must have a statically known size
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied
+ --> tests/ui/not_a_decider.rs:6:17
+  |
+6 | export_decider!(NotADecider {
+  |                 ^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Decider` is not implemented for `NotADecider`
+ --> tests/ui/not_a_decider.rs:4:1
+  |
+4 | struct NotADecider;
+  | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+ --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+  |
+  | impl Decider for TurnOnCommand {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `NotADecider: From<TurnOn>` is not satisfied
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: the trait `From<TurnOn>` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+   = note: required for `TurnOn` to implement `Into<NotADecider>`
+   = note: required for `NotADecider` to implement `TryFrom<TurnOn>`
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `Ref<'_, _>: buffa::message::Message` is not satisfied
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ the trait `buffa::message::Message` is not implemented for `Ref<'_, _>`
+   |
+   = help: the following other types implement trait `buffa::message::Message`:
+             LightEvent
+             State
+             TurnOn
+             buffa::__doctest_fixtures::Person
+             buffa_types::google::protobuf::Any
+             buffa_types::google::protobuf::BoolValue
+             buffa_types::google::protobuf::BytesValue
+             buffa_types::google::protobuf::DoubleValue
+           and $N others
+note: required by a bound in `encode_current`
+  --> $WORKSPACE/crates/trogon-decider-guest-sdk/src/snapshot.rs
+   |
+   | pub fn encode_current<S>(state: &S, schema_version: &str) -> Option<Vec<u8>>
+   |        -------------- required by a bound in this function
+   | where
+   |     S: buffa::Message,
+   |        ^^^^^^^^^^^^^^ required by this bound in `encode_current`
+   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `_export_constructor_session_cabi`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `_export_constructor_session_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `_export_method_session_evolve_cabi`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `_export_method_session_evolve_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `__post_return_method_session_evolve`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `__post_return_method_session_evolve`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `_export_method_session_decide_cabi`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `_export_method_session_decide_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `__post_return_method_session_decide`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `__post_return_method_session_decide`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `_export_method_session_snapshot_cabi`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `_export_method_session_snapshot_cabi`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `__post_return_method_session_snapshot`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `__post_return_method_session_snapshot`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Decider` is implemented for `TurnOnCommand`
+  --> $WORKSPACE/crates/trogonai-proto/src/example/light/decider.rs
+   |
+   | impl Decider for TurnOnCommand {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
+note: required by an implicit `Sized` bound in `handler::Session::dtor`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = TURN_ON_TYPE_URL,
+ 8 | |     proto = trogonai_proto::example::v1::TurnOn,
+ 9 | |     module = "example.light",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = LIGHT_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by the implicit `Sized` requirement on this type parameter in `Session::dtor`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
