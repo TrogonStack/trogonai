@@ -139,12 +139,51 @@ fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock
             .caller_subject
             .as_ref()
             .is_some_and(|subject| pattern_matches(&item.pattern, subject.as_str())),
+        // NATS subjects are dot-tokenized; `*` matches exactly one token
+        // and `>` matches the trailing tail. Without the NATS-aware
+        // matcher, a rule like `a2a.gateway.*.message.send` would also
+        // allow `a2a.gateway.tenant.x.message.send` because the generic
+        // `glob_match` lets `*` span dots.
+        Tier1ResourceKind::NatsSubjectPattern => nats_subject_matches(&item.pattern, &ctx.nats_subject),
         kind => {
             let value = field_value(ctx, kind);
             pattern_matches(&item.pattern, &value)
         }
     };
     if item.negate { !matched } else { matched }
+}
+
+/// NATS subject-style token matcher.
+///
+/// `*` matches a single dot-separated token; `>` (only valid as the
+/// final token) matches one or more trailing tokens. Anything else must
+/// match literally. This mirrors the matching rules JetStream itself
+/// uses, so a policy `nats_subject_pattern` doesn't drift from the
+/// publisher's wire-level interpretation of the same pattern.
+fn nats_subject_matches(pattern: &str, subject: &str) -> bool {
+    let pattern_tokens: Vec<&str> = pattern.split('.').collect();
+    let subject_tokens: Vec<&str> = subject.split('.').collect();
+    for (index, ptoken) in pattern_tokens.iter().enumerate() {
+        if *ptoken == ">" {
+            // `>` is valid only at the end and matches one or more
+            // remaining tokens; treat a non-final `>` as a literal
+            // (which won't match a real subject token).
+            if index + 1 != pattern_tokens.len() {
+                return false;
+            }
+            return subject_tokens.len() > index;
+        }
+        let Some(stoken) = subject_tokens.get(index) else {
+            return false;
+        };
+        if *ptoken == "*" {
+            continue;
+        }
+        if ptoken != stoken {
+            return false;
+        }
+    }
+    pattern_tokens.len() == subject_tokens.len()
 }
 
 fn field_value(ctx: &Tier1DeclarativeContext, kind: Tier1ResourceKind) -> String {
@@ -210,6 +249,13 @@ pub enum Tier1DeclarativeBuildError {
         "{ENV_TIER1_DECLARATIVE_ENABLED}={value:?} is not a recognized boolean (accepted: 1/0, true/false, yes/no, on/off)"
     )]
     EnablementNotBoolean { value: String },
+    /// `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` contains bytes that are
+    /// not valid UTF-8. Surfacing this as a distinct variant keeps the
+    /// error message accurate — without it the operator would see a
+    /// "not a recognized boolean" error that looked like a typo in the
+    /// flag name rather than an encoding problem with its value.
+    #[error("{ENV_TIER1_DECLARATIVE_ENABLED} contains non-UTF-8 bytes")]
+    EnablementNotUnicode,
     #[error(transparent)]
     Load(#[from] Tier1DeclarativeLoadError),
 }
@@ -261,9 +307,7 @@ fn tier1_declarative_enabled<E: ReadEnv>(env: &E) -> Result<bool, Tier1Declarati
             _ => Err(Tier1DeclarativeBuildError::EnablementNotBoolean { value: raw }),
         },
         Err(std::env::VarError::NotPresent) => Ok(false),
-        Err(std::env::VarError::NotUnicode(_)) => Err(Tier1DeclarativeBuildError::EnablementNotBoolean {
-            value: ENV_TIER1_DECLARATIVE_ENABLED.into(),
-        }),
+        Err(std::env::VarError::NotUnicode(_)) => Err(Tier1DeclarativeBuildError::EnablementNotUnicode),
     }
 }
 

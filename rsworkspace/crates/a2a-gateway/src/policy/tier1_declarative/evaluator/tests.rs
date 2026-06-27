@@ -332,3 +332,57 @@ fn fixed_clock_returns_configured_instant() {
     let clock = FixedTier1Clock::new(now);
     assert_eq!(clock.now(), now);
 }
+
+#[test]
+fn nats_star_matches_exactly_one_token() {
+    // NATS semantics: `*` matches one dot-separated token only. Without
+    // this, a generic glob would let `a2a.gateway.*.message.send` also
+    // match `a2a.gateway.tenant.x.message.send` and skew decisions.
+    assert!(nats_subject_matches(
+        "a2a.gateway.*.message.send",
+        "a2a.gateway.planner.message.send"
+    ));
+    assert!(!nats_subject_matches(
+        "a2a.gateway.*.message.send",
+        "a2a.gateway.tenant.planner.message.send"
+    ));
+    assert!(!nats_subject_matches("a2a.gateway.*", "a2a.gateway"));
+}
+
+#[test]
+fn nats_greater_than_matches_one_or_more_trailing_tokens() {
+    assert!(nats_subject_matches("a2a.gateway.>", "a2a.gateway.x.y"));
+    assert!(nats_subject_matches("a2a.gateway.>", "a2a.gateway.x"));
+    assert!(!nats_subject_matches("a2a.gateway.>", "a2a.gateway"));
+}
+
+#[test]
+fn nats_pattern_mid_subject_greater_than_is_literal() {
+    // `>` is only valid as the final token; a mid-pattern `>` should be
+    // treated as a literal so it doesn't accidentally match real
+    // subjects (no real subject token equals literal `>`).
+    assert!(!nats_subject_matches("a2a.>.send", "a2a.gateway.send"));
+}
+
+#[test]
+fn from_env_non_unicode_enable_flag_surfaces_typed_error() {
+    // Inject `VarError::NotUnicode` for the enable flag so the typed
+    // EnablementNotUnicode variant fires instead of being conflated with
+    // a typo'd boolean value. Without this variant, an operator would
+    // see a "not a recognized boolean" message that looked like a flag
+    // name typo rather than a value encoding problem.
+    let env = NotUnicodeForEnableFlag;
+    let err = Tier1DeclarativeConfig::from_env(&env).expect_err("non-unicode rejected");
+    assert!(matches!(err, Tier1DeclarativeBuildError::EnablementNotUnicode));
+}
+
+struct NotUnicodeForEnableFlag;
+
+impl trogon_std::env::ReadEnv for NotUnicodeForEnableFlag {
+    fn var(&self, name: &str) -> Result<String, std::env::VarError> {
+        if name == ENV_TIER1_DECLARATIVE_ENABLED {
+            return Err(std::env::VarError::NotUnicode(std::ffi::OsString::new()));
+        }
+        Err(std::env::VarError::NotPresent)
+    }
+}
