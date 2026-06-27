@@ -25,22 +25,10 @@ impl ProcessorMetrics {
     pub fn new() -> Self {
         let meter = global::meter(METER_NAME);
         Self {
-            records: meter
-                .u64_counter(metric::SCHEDULER_PROCESSOR_RECORDS)
-                .with_description("schedule event records processed, by reconciliation outcome")
-                .build(),
-            publishes: meter
-                .u64_counter(metric::SCHEDULER_PROCESSOR_EXECUTION_PUBLISHES)
-                .with_description("execution schedule messages published")
-                .build(),
-            purges: meter
-                .u64_counter(metric::SCHEDULER_PROCESSOR_EXECUTION_PURGES)
-                .with_description("execution schedule subjects purged")
-                .build(),
-            redeliveries: meter
-                .u64_counter(metric::SCHEDULER_PROCESSOR_REDELIVERIES)
-                .with_description("schedule event records observed as NATS redeliveries")
-                .build(),
+            records: metric::build_scheduler_processor_records(&meter),
+            publishes: metric::build_scheduler_processor_execution_publishes(&meter),
+            purges: metric::build_scheduler_processor_execution_purges(&meter),
+            redeliveries: metric::build_scheduler_processor_redeliveries(&meter),
         }
     }
 
