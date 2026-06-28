@@ -39,6 +39,19 @@ impl A2aMethod {
     /// `{prefix}.agents.{agent_id}` byte-length component.
     pub fn from_subject(subject: &str, prefix_len: usize) -> Option<Self> {
         let suffix = subject.get(prefix_len..)?.strip_prefix('.')?;
+        Self::from_dotted_suffix(suffix)
+    }
+
+    /// Resolve the method from the already-extracted dotted-suffix form
+    /// (e.g. `"message.send"`, `"tasks.get"`, `"card"`).
+    ///
+    /// Callers that have already split a subject into its
+    /// `{prefix}.agents.{agent_id}.{method_dots}` parts — for example,
+    /// [`crate::gateway_ingress::gateway_ingress_agent_and_method_dots`]
+    /// returns `method_dots` as a `&str` — should use this entry point
+    /// instead of rebuilding a full subject just to call
+    /// [`A2aMethod::from_subject`].
+    pub fn from_dotted_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "message.send" => Some(Self::MessageSend),
             "message.stream" => Some(Self::MessageStream),

@@ -116,6 +116,57 @@ fn too_short_subject_returns_none() {
 }
 
 #[test]
+fn from_dotted_suffix_resolves_each_variant() {
+    // Callers that have already extracted `method_dots` from a
+    // subject (e.g. via `gateway_ingress_agent_and_method_dots`)
+    // shouldn't have to rebuild a full subject + recompute
+    // `prefix_len` to reach the typed enum. Cover every suffix the
+    // gateway dispatches on.
+    let pairs = [
+        ("message.send", A2aMethod::MessageSend),
+        ("message.stream", A2aMethod::MessageStream),
+        ("tasks.get", A2aMethod::TasksGet),
+        ("tasks.list", A2aMethod::TasksList),
+        ("tasks.cancel", A2aMethod::TasksCancel),
+        ("tasks.resubscribe", A2aMethod::TasksResubscribe),
+        ("push.set", A2aMethod::PushNotificationSet),
+        ("push.get", A2aMethod::PushNotificationGet),
+        ("push.list", A2aMethod::PushNotificationList),
+        ("push.delete", A2aMethod::PushNotificationDelete),
+        ("card", A2aMethod::AgentCard),
+    ];
+    for (suffix, expected) in pairs {
+        assert_eq!(A2aMethod::from_dotted_suffix(suffix), Some(expected.clone()));
+    }
+}
+
+#[test]
+fn from_dotted_suffix_unknown_returns_none() {
+    assert_eq!(A2aMethod::from_dotted_suffix("unknown.method"), None);
+    assert_eq!(A2aMethod::from_dotted_suffix(""), None);
+}
+
+#[test]
+fn from_subject_and_from_dotted_suffix_agree() {
+    // Round-trip sanity: when both entry points see the same suffix,
+    // they must resolve to the same variant. Guards against drift
+    // between the two match tables.
+    let pl = prefix_len("a2a", "bot");
+    let cases = [
+        ("a2a.agents.bot.message.send", "message.send"),
+        ("a2a.agents.bot.tasks.get", "tasks.get"),
+        ("a2a.agents.bot.push.list", "push.list"),
+        ("a2a.agents.bot.card", "card"),
+    ];
+    for (subject, suffix) in cases {
+        assert_eq!(
+            A2aMethod::from_subject(subject, pl),
+            A2aMethod::from_dotted_suffix(suffix)
+        );
+    }
+}
+
+#[test]
 fn as_str_covers_every_variant() {
     let pairs = [
         (A2aMethod::MessageSend, "message/send"),
