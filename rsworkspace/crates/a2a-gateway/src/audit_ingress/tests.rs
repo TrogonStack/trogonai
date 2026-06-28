@@ -213,6 +213,22 @@ fn audit_envelope_serialization_preserves_value_object_shapes() {
 }
 
 #[test]
+fn value_object_accessors_round_trip_through_as_str() {
+    // `.as_str()` is the post-construction read path callers use to
+    // emit the validated value into logs, metrics, or downstream
+    // wire payloads. Cover every newtype so a future refactor that
+    // re-wraps the inner String can't silently truncate the view.
+    let r = AuditRequestId::new("req-7").expect("valid");
+    assert_eq!(r.as_str(), "req-7");
+    let t = AuditTenant::new("acme").expect("valid");
+    assert_eq!(t.as_str(), "acme");
+    let a = AuditAgent::new("planner").expect("valid");
+    assert_eq!(a.as_str(), "planner");
+    let tp = AuditTraceparent::new("00-aaa-bbb-01").expect("valid");
+    assert_eq!(tp.as_str(), "00-aaa-bbb-01");
+}
+
+#[test]
 fn resolved_rule_round_trip_shape() {
     // Compile-only check that ResolvedRule is reachable as part of
     // the public surface — audit consumers introspect on this for
