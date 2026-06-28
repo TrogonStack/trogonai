@@ -15,9 +15,12 @@ use trogon_scheduler::{
     ResumeSchedule, ScheduleEventCase, ScheduleEventSchedule, ScheduleEventStatus, ScheduleId, ScheduleNextOccurrence,
     commands::domain as command_domain, connect_store, get_schedule, list_schedules, state_v1, v1,
 };
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 fn test_url() -> String {
-    std::env::var("NATS_TEST_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string())
+    SystemEnv
+        .var("NATS_TEST_URL")
+        .unwrap_or_else(|_| "nats://localhost:4222".to_string())
 }
 
 fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
