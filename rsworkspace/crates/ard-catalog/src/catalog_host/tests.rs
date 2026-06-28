@@ -48,13 +48,27 @@ fn rejects_non_object() {
 }
 
 #[test]
-fn into_value_preserves_extra_fields() {
+fn rejects_unknown_field() {
+    assert!(matches!(
+        CatalogHost::new(json!({
+            "displayName": "Acme",
+            "extra": "rejected"
+        })),
+        Err(CatalogHostError::UnknownField(_))
+    ));
+}
+
+#[test]
+fn accepts_only_allowed_keys_and_round_trips() {
     let host = CatalogHost::new(json!({
         "displayName": "Acme",
-        "extra": "preserved"
+        "trustManifest": {
+            "identity": "did:web:acme.example",
+            "identityType": "did"
+        }
     }))
     .unwrap();
     let value = host.into_value();
     assert_eq!(value["displayName"], "Acme");
-    assert_eq!(value["extra"], "preserved");
+    assert_eq!(value["trustManifest"]["identity"], "did:web:acme.example");
 }

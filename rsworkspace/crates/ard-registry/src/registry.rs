@@ -8,6 +8,7 @@ use ard_catalog::{
 };
 
 use crate::explore_request::ValidatedExploreRequest;
+use crate::facet_field::FacetField;
 use crate::filters::{entry_matches_filters, entry_matches_query};
 use crate::lexical_rank::lexical_score;
 use crate::list_agents_request::ValidatedListAgentsQuery;
@@ -126,7 +127,7 @@ impl Registry {
         let mut facet_counts = BTreeMap::new();
         for facet in request.facet_fields() {
             facet_counts.insert(
-                facet.clone(),
+                facet.as_str().to_owned(),
                 ExploreFacetResultWire {
                     buckets: self.facet_values(facet, &filtered),
                     other_count: 0,
@@ -155,16 +156,16 @@ impl Registry {
         if referrals.is_empty() { None } else { Some(referrals) }
     }
 
-    fn facet_values(&self, facet: &str, entries: &[&CatalogEntry]) -> Vec<FacetCountWire> {
+    fn facet_values(&self, facet: &FacetField, entries: &[&CatalogEntry]) -> Vec<FacetCountWire> {
         let mut counts = BTreeMap::<String, u64>::new();
 
         match facet {
-            "type" => {
+            FacetField::Type => {
                 for entry in entries {
                     *counts.entry(entry.media_type().to_string()).or_default() += 1;
                 }
             }
-            "tags" => {
+            FacetField::Tags => {
                 for entry in entries {
                     if let Some(tags) = entry.tags() {
                         for tag in tags {
@@ -173,7 +174,7 @@ impl Registry {
                     }
                 }
             }
-            "capabilities" => {
+            FacetField::Capabilities => {
                 for entry in entries {
                     if let Some(capabilities) = entry.capabilities() {
                         for capability in capabilities {
@@ -182,7 +183,6 @@ impl Registry {
                     }
                 }
             }
-            _ => {}
         }
 
         counts

@@ -52,7 +52,8 @@ async fn post_explore(
     State(registry): State<Arc<Registry>>,
     ArdJson(wire): ArdJson<ExploreRequestWire>,
 ) -> Result<Json<ard_catalog::ExploreResponseWire>, RegistryHttpError> {
-    Ok(Json(registry.explore(ValidatedExploreRequest::from_wire(wire))))
+    let request = ValidatedExploreRequest::try_from_wire(wire)?;
+    Ok(Json(registry.explore(request)))
 }
 
 #[cfg(test)]

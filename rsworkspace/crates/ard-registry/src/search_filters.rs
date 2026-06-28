@@ -1,11 +1,13 @@
 //! Validated domain search filter value object.
 
-use ard_catalog::SearchFiltersWire;
+use ard_catalog::{MediaType, SearchFiltersWire};
+
+use crate::registry_error::RegistryError;
 
 /// Validated search filters derived from untrusted wire input.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchFilters {
-    media_types: Vec<String>,
+    media_types: Vec<MediaType>,
     tags: Vec<String>,
     capabilities: Vec<String>,
 }
@@ -13,19 +15,28 @@ pub struct SearchFilters {
 impl SearchFilters {
     /// Convert an optional wire filter into validated domain filters.
     ///
+    /// Returns an error if any media type string is invalid.
     /// Absent or `None` wire values become empty vectors.
-    pub fn from_wire(wire: Option<SearchFiltersWire>) -> Self {
+    pub fn try_from_wire(wire: Option<SearchFiltersWire>) -> Result<Self, RegistryError> {
         match wire {
-            None => Self::default(),
-            Some(w) => Self {
-                media_types: w.media_type.unwrap_or_default(),
-                tags: w.tags.unwrap_or_default(),
-                capabilities: w.capabilities.unwrap_or_default(),
-            },
+            None => Ok(Self::default()),
+            Some(w) => {
+                let media_types = w
+                    .media_type
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| MediaType::new(s).map_err(RegistryError::from))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Self {
+                    media_types,
+                    tags: w.tags.unwrap_or_default(),
+                    capabilities: w.capabilities.unwrap_or_default(),
+                })
+            }
         }
     }
 
-    pub fn media_types(&self) -> &[String] {
+    pub fn media_types(&self) -> &[MediaType] {
         &self.media_types
     }
 

@@ -1,4 +1,4 @@
-use ard_catalog::{CatalogEntry, CatalogEntryWire, SearchFiltersWire};
+use ard_catalog::{CatalogEntry, CatalogEntryWire, MediaType, SearchFiltersWire};
 
 use super::{entry_matches_filters, entry_matches_query};
 use crate::search_filters::SearchFilters;
@@ -26,18 +26,19 @@ fn sample_entry() -> CatalogEntry {
 #[test]
 fn filters_by_media_type() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
         media_type: Some(vec!["application/mcp-server-card+json".to_owned()]),
         tags: None,
         capabilities: None,
-    }));
+    }))
+    .unwrap();
     assert!(!entry_matches_filters(&entry, &filters));
 }
 
 #[test]
 fn matches_when_filters_empty() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(None);
+    let filters = SearchFilters::try_from_wire(None).unwrap();
     assert!(entry_matches_filters(&entry, &filters));
 }
 
@@ -51,44 +52,48 @@ fn filters_by_query() {
 #[test]
 fn tag_filter_matches_when_entry_has_tag() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
         media_type: None,
         tags: Some(vec!["demo".to_owned()]),
         capabilities: None,
-    }));
+    }))
+    .unwrap();
     assert!(entry_matches_filters(&entry, &filters));
 }
 
 #[test]
 fn tag_filter_rejects_when_entry_missing_tag() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
         media_type: None,
         tags: Some(vec!["nonexistent-tag".to_owned()]),
         capabilities: None,
-    }));
+    }))
+    .unwrap();
     assert!(!entry_matches_filters(&entry, &filters));
 }
 
 #[test]
 fn capability_filter_matches_when_entry_has_capability() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
         media_type: None,
         tags: None,
         capabilities: Some(vec!["chat".to_owned()]),
-    }));
+    }))
+    .unwrap();
     assert!(entry_matches_filters(&entry, &filters));
 }
 
 #[test]
 fn capability_filter_rejects_when_entry_missing_capability() {
     let entry = sample_entry();
-    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
         media_type: None,
         tags: None,
         capabilities: Some(vec!["nonexistent-capability".to_owned()]),
-    }));
+    }))
+    .unwrap();
     assert!(!entry_matches_filters(&entry, &filters));
 }
 
@@ -98,4 +103,17 @@ fn empty_query_always_matches() {
     assert!(entry_matches_query(&entry, None));
     assert!(entry_matches_query(&entry, Some("")));
     assert!(entry_matches_query(&entry, Some("   ")));
+}
+
+#[test]
+fn media_type_filter_matches_valid_type() {
+    let entry = sample_entry();
+    let media_type = MediaType::new("application/a2a-agent-card+json").unwrap();
+    let filters = SearchFilters::try_from_wire(Some(SearchFiltersWire {
+        media_type: Some(vec![media_type.as_str().to_owned()]),
+        tags: None,
+        capabilities: None,
+    }))
+    .unwrap();
+    assert!(entry_matches_filters(&entry, &filters));
 }

@@ -10,7 +10,7 @@ pub fn entry_matches_filters(entry: &CatalogEntry, filters: &SearchFilters) -> b
         && !filters
             .media_types()
             .iter()
-            .any(|media_type| entry.media_type().as_str() == media_type)
+            .any(|media_type| entry.media_type().as_str() == media_type.as_str())
     {
         return false;
     }

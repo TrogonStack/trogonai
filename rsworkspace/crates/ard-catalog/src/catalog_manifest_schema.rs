@@ -106,30 +106,10 @@ impl CatalogManifestValidateError {
             })
             .collect();
         violations.sort_by(|a, b| {
-            let a_line = if a.instance_path.is_empty() {
-                a.message.clone()
-            } else {
-                format!("{}: {}", a.instance_path, a.message)
-            };
-            let b_line = if b.instance_path.is_empty() {
-                b.message.clone()
-            } else {
-                format!("{}: {}", b.instance_path, b.message)
-            };
-            a_line.cmp(&b_line)
+            (&a.instance_path, &a.schema_path, &a.message).cmp(&(&b.instance_path, &b.schema_path, &b.message))
         });
         violations.dedup_by(|a, b| {
-            let a_line = if a.instance_path.is_empty() {
-                a.message.clone()
-            } else {
-                format!("{}: {}", a.instance_path, a.message)
-            };
-            let b_line = if b.instance_path.is_empty() {
-                b.message.clone()
-            } else {
-                format!("{}: {}", b.instance_path, b.message)
-            };
-            a_line == b_line
+            a.instance_path == b.instance_path && a.schema_path == b.schema_path && a.message == b.message
         });
         Self { violations }
     }

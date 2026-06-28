@@ -1,6 +1,7 @@
 use ard_catalog::{ArdIdentifier, CatalogEntryWire};
 
 use super::{CatalogEvent, CatalogEventWire};
+
 use crate::store::CatalogStoreError;
 
 fn entry() -> ard_catalog::CatalogEntry {
@@ -133,4 +134,68 @@ fn try_from_wire_indexed_bad_identifier_errors() {
     };
     let result = CatalogEvent::try_from(wire);
     assert!(matches!(result, Err(CatalogStoreError::Identifier(_))));
+}
+
+#[test]
+fn try_from_wire_deleted_storage_key_mismatch_errors() {
+    let wire = CatalogEventWire::Deleted {
+        storage_key: "wrong-key".to_owned(),
+        identifier: "urn:air:example.com:agent:assistant".to_owned(),
+    };
+    let result = CatalogEvent::try_from(wire);
+    assert!(matches!(result, Err(CatalogStoreError::StorageKeyMismatch)));
+}
+
+#[test]
+fn try_from_wire_validated_storage_key_mismatch_errors() {
+    let wire = CatalogEventWire::Validated {
+        storage_key: "wrong-key".to_owned(),
+        identifier: "urn:air:example.com:agent:assistant".to_owned(),
+    };
+    let result = CatalogEvent::try_from(wire);
+    assert!(matches!(result, Err(CatalogStoreError::StorageKeyMismatch)));
+}
+
+#[test]
+fn try_from_wire_indexed_storage_key_mismatch_errors() {
+    let wire = CatalogEventWire::Indexed {
+        storage_key: "wrong-key".to_owned(),
+        identifier: "urn:air:example.com:agent:assistant".to_owned(),
+    };
+    let result = CatalogEvent::try_from(wire);
+    assert!(matches!(result, Err(CatalogStoreError::StorageKeyMismatch)));
+}
+
+#[test]
+fn try_from_wire_upserted_storage_key_mismatch_errors() {
+    let valid_wire_entry = CatalogEntryWire {
+        identifier: "urn:air:example.com:agent:assistant".to_owned(),
+        display_name: "Assistant".to_owned(),
+        media_type: "application/a2a-agent-card+json".to_owned(),
+        url: Some("https://example.com/card.json".to_owned()),
+        data: None,
+        description: None,
+        representative_queries: None,
+        tags: None,
+        capabilities: None,
+        version: None,
+        updated_at: None,
+        metadata: None,
+        trust_manifest: None,
+    };
+    let wire = CatalogEventWire::Upserted {
+        storage_key: "wrong-key".to_owned(),
+        entry: Box::new(valid_wire_entry),
+    };
+    let result = CatalogEvent::try_from(wire);
+    assert!(matches!(result, Err(CatalogStoreError::StorageKeyMismatch)));
+}
+
+#[test]
+fn correctly_derived_storage_key_round_trips_ok() {
+    let id = identifier();
+    let event = CatalogEvent::deleted(&id);
+    let wire = event.into_wire();
+    let result = CatalogEvent::try_from(wire);
+    assert!(matches!(result, Ok(CatalogEvent::Deleted { .. })));
 }

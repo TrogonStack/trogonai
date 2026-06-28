@@ -49,7 +49,7 @@ impl ValidatedSearchRequest {
             limit,
             offset,
             federation: wire.federation,
-            filters: SearchFilters::from_wire(wire.query.filter),
+            filters: SearchFilters::try_from_wire(wire.query.filter)?,
         })
     }
 

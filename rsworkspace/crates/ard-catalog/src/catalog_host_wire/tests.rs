@@ -36,10 +36,15 @@ fn try_from_valid_host_ok() {
 }
 
 #[test]
-fn round_trip_preserves_unknown_extra_fields() {
+fn rejects_unknown_extra_fields() {
     let wire = CatalogHostWire(json!({"displayName": "X", "custom": "y"}));
+    assert!(matches!(wire.into_domain(), Err(CatalogHostError::UnknownField(_))));
+}
+
+#[test]
+fn round_trip_with_only_allowed_fields() {
+    let wire = CatalogHostWire(json!({"displayName": "X"}));
     let host = wire.clone().into_domain().unwrap();
     let back = CatalogHostWire(host.into_value());
     assert_eq!(back.0["displayName"], "X");
-    assert_eq!(back.0["custom"], "y");
 }

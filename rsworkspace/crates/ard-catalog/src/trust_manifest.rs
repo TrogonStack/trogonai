@@ -13,6 +13,8 @@ pub enum TrustManifestError {
     InvalidIdentity,
     #[error("trustManifest.identityType is not supported")]
     InvalidIdentityType,
+    #[error("trustManifest has unsupported field: {0}")]
+    UnknownField(String),
 }
 
 /// Preserved ARD trust metadata.
@@ -31,6 +33,19 @@ impl TrustManifest {
             match identity_type.as_str() {
                 Some("spiffe" | "did" | "https" | "other") => {}
                 _ => return Err(TrustManifestError::InvalidIdentityType),
+            }
+        }
+        const ALLOWED_KEYS: &[&str] = &[
+            "identity",
+            "identityType",
+            "trustSchema",
+            "attestations",
+            "provenance",
+            "signature",
+        ];
+        for key in object.keys() {
+            if !ALLOWED_KEYS.contains(&key.as_str()) {
+                return Err(TrustManifestError::UnknownField(key.clone()));
             }
         }
         Ok(Self(Value::Object(object.clone())))

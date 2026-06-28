@@ -63,19 +63,47 @@ impl TryFrom<CatalogEventWire> for CatalogEvent {
 
     fn try_from(wire: CatalogEventWire) -> Result<Self, Self::Error> {
         match wire {
-            CatalogEventWire::Upserted { entry, .. } => {
+            CatalogEventWire::Upserted { entry, storage_key } => {
                 let entry: CatalogEntry = (*entry).try_into()?;
+                let expected_key = ArdStorageKey::from_identifier(entry.identifier());
+                if expected_key.as_str() != storage_key {
+                    return Err(CatalogStoreError::StorageKeyMismatch);
+                }
                 Ok(Self::Upserted { entry: Box::new(entry) })
             }
-            CatalogEventWire::Deleted { identifier, .. } => Ok(Self::Deleted {
-                identifier: ArdIdentifier::new(identifier)?,
-            }),
-            CatalogEventWire::Validated { identifier, .. } => Ok(Self::Validated {
-                identifier: ArdIdentifier::new(identifier)?,
-            }),
-            CatalogEventWire::Indexed { identifier, .. } => Ok(Self::Indexed {
-                identifier: ArdIdentifier::new(identifier)?,
-            }),
+            CatalogEventWire::Deleted {
+                identifier,
+                storage_key,
+            } => {
+                let id = ArdIdentifier::new(identifier)?;
+                let expected_key = ArdStorageKey::from_identifier(&id);
+                if expected_key.as_str() != storage_key {
+                    return Err(CatalogStoreError::StorageKeyMismatch);
+                }
+                Ok(Self::Deleted { identifier: id })
+            }
+            CatalogEventWire::Validated {
+                identifier,
+                storage_key,
+            } => {
+                let id = ArdIdentifier::new(identifier)?;
+                let expected_key = ArdStorageKey::from_identifier(&id);
+                if expected_key.as_str() != storage_key {
+                    return Err(CatalogStoreError::StorageKeyMismatch);
+                }
+                Ok(Self::Validated { identifier: id })
+            }
+            CatalogEventWire::Indexed {
+                identifier,
+                storage_key,
+            } => {
+                let id = ArdIdentifier::new(identifier)?;
+                let expected_key = ArdStorageKey::from_identifier(&id);
+                if expected_key.as_str() != storage_key {
+                    return Err(CatalogStoreError::StorageKeyMismatch);
+                }
+                Ok(Self::Indexed { identifier: id })
+            }
         }
     }
 }

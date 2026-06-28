@@ -2,6 +2,8 @@
 
 use ard_catalog::ExploreRequestWire;
 
+use crate::facet_field::FacetField;
+use crate::registry_error::RegistryError;
 use crate::search_filters::SearchFilters;
 
 /// Validated explore request derived from untrusted wire input.
@@ -9,15 +11,14 @@ use crate::search_filters::SearchFilters;
 pub struct ValidatedExploreRequest {
     text: Option<String>,
     filters: SearchFilters,
-    facet_fields: Vec<String>,
+    facet_fields: Vec<FacetField>,
 }
 
 impl ValidatedExploreRequest {
     /// Convert an untrusted wire request into a validated domain request.
     ///
-    /// This conversion is infallible: whitespace-only text becomes `None`,
-    /// absent filters become empty, and facet fields are collected as-is.
-    pub fn from_wire(wire: ExploreRequestWire) -> Self {
+    /// Returns an error if any facet field or media type filter is invalid.
+    pub fn try_from_wire(wire: ExploreRequestWire) -> Result<Self, RegistryError> {
         let text = wire
             .query
             .as_ref()
@@ -26,15 +27,20 @@ impl ValidatedExploreRequest {
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
 
-        let filters = SearchFilters::from_wire(wire.query.and_then(|q| q.filter));
+        let filters = SearchFilters::try_from_wire(wire.query.and_then(|q| q.filter))?;
 
-        let facet_fields = wire.result_type.facets.into_iter().map(|f| f.field).collect();
+        let facet_fields = wire
+            .result_type
+            .facets
+            .into_iter()
+            .map(|f| FacetField::parse(&f.field).map_err(RegistryError::from))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Self {
+        Ok(Self {
             text,
             filters,
             facet_fields,
-        }
+        })
     }
 
     pub fn text(&self) -> Option<&str> {
@@ -45,7 +51,7 @@ impl ValidatedExploreRequest {
         &self.filters
     }
 
-    pub fn facet_fields(&self) -> &[String] {
+    pub fn facet_fields(&self) -> &[FacetField] {
         &self.facet_fields
     }
 }

@@ -100,19 +100,22 @@ fn list_agents_is_deterministic() {
 #[test]
 fn explore_returns_facet_counts() {
     let registry = registry();
-    let response = registry.explore(ValidatedExploreRequest::from_wire(ard_catalog::ExploreRequestWire {
-        query: None,
-        result_type: ExploreResultTypeWire {
-            facets: vec![
-                ExploreFacetRequestWire {
-                    field: "type".to_owned(),
-                },
-                ExploreFacetRequestWire {
-                    field: "tags".to_owned(),
-                },
-            ],
-        },
-    }));
+    let response = registry.explore(
+        ValidatedExploreRequest::try_from_wire(ard_catalog::ExploreRequestWire {
+            query: None,
+            result_type: ExploreResultTypeWire {
+                facets: vec![
+                    ExploreFacetRequestWire {
+                        field: "type".to_owned(),
+                    },
+                    ExploreFacetRequestWire {
+                        field: "tags".to_owned(),
+                    },
+                ],
+            },
+        })
+        .unwrap(),
+    );
 
     assert_eq!(response.total_count, Some(2));
     assert_eq!(response.facets["type"].buckets.len(), 2);
@@ -127,17 +130,20 @@ fn explore_returns_facet_counts() {
 #[test]
 fn explore_applies_query_filter() {
     let registry = registry();
-    let response = registry.explore(ValidatedExploreRequest::from_wire(ExploreRequestWire {
-        query: Some(ExploreQueryWire {
-            text: Some("alpha".to_owned()),
-            filter: None,
-        }),
-        result_type: ExploreResultTypeWire {
-            facets: vec![ExploreFacetRequestWire {
-                field: "type".to_owned(),
-            }],
-        },
-    }));
+    let response = registry.explore(
+        ValidatedExploreRequest::try_from_wire(ExploreRequestWire {
+            query: Some(ExploreQueryWire {
+                text: Some("alpha".to_owned()),
+                filter: None,
+            }),
+            result_type: ExploreResultTypeWire {
+                facets: vec![ExploreFacetRequestWire {
+                    field: "type".to_owned(),
+                }],
+            },
+        })
+        .unwrap(),
+    );
 
     assert_eq!(response.total_count, Some(1));
 }
@@ -201,14 +207,17 @@ fn config_accessor_returns_config() {
 #[test]
 fn explore_capabilities_facet() {
     let registry = registry();
-    let response = registry.explore(ValidatedExploreRequest::from_wire(ExploreRequestWire {
-        query: None,
-        result_type: ExploreResultTypeWire {
-            facets: vec![ExploreFacetRequestWire {
-                field: "capabilities".to_owned(),
-            }],
-        },
-    }));
+    let response = registry.explore(
+        ValidatedExploreRequest::try_from_wire(ExploreRequestWire {
+            query: None,
+            result_type: ExploreResultTypeWire {
+                facets: vec![ExploreFacetRequestWire {
+                    field: "capabilities".to_owned(),
+                }],
+            },
+        })
+        .unwrap(),
+    );
 
     assert_eq!(response.total_count, Some(2));
     let caps = &response.facets["capabilities"];

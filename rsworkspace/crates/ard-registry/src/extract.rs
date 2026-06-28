@@ -1,6 +1,5 @@
 //! Custom extractors that map deserialization failures to the ARD wire error shape.
 
-use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::request::Parts;
 use serde::de::DeserializeOwned;
@@ -21,7 +20,7 @@ where
         axum::Json::<T>::from_request(req, state)
             .await
             .map(|axum::Json(value)| ArdJson(value))
-            .map_err(|rejection: JsonRejection| RegistryHttpError::InvalidArgument(rejection.body_text()))
+            .map_err(RegistryHttpError::from)
     }
 }
 
@@ -39,6 +38,6 @@ where
         axum::extract::Query::<T>::from_request_parts(parts, state)
             .await
             .map(|axum::extract::Query(value)| ArdQuery(value))
-            .map_err(|rejection: QueryRejection| RegistryHttpError::InvalidArgument(rejection.body_text()))
+            .map_err(RegistryHttpError::from)
     }
 }

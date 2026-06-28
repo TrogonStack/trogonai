@@ -7,6 +7,10 @@ use std::sync::Arc;
 pub enum SourceUrlError {
     #[error("invalid url: {0}")]
     InvalidUrl(#[from] url::ParseError),
+    #[error("source url scheme must be http or https")]
+    UnsupportedScheme(String),
+    #[error("source url must be an http/https origin (no path, query, or fragment)")]
+    NotAnOrigin,
 }
 
 /// A validated URL that identifies the registry's own HTTP origin.
@@ -15,7 +19,24 @@ pub struct SourceUrl(Arc<str>);
 
 impl SourceUrl {
     pub fn parse(value: &str) -> Result<Self, SourceUrlError> {
-        url::Url::parse(value)?;
+        let url = url::Url::parse(value)?;
+        match url.scheme() {
+            "http" | "https" => {}
+            other => return Err(SourceUrlError::UnsupportedScheme(other.to_owned())),
+        }
+        if url.host().is_none() {
+            return Err(SourceUrlError::NotAnOrigin);
+        }
+        let path = url.path();
+        if !path.is_empty() && path != "/" {
+            return Err(SourceUrlError::NotAnOrigin);
+        }
+        if url.query().is_some() {
+            return Err(SourceUrlError::NotAnOrigin);
+        }
+        if url.fragment().is_some() {
+            return Err(SourceUrlError::NotAnOrigin);
+        }
         Ok(Self(Arc::from(value)))
     }
 

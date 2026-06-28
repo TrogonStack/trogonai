@@ -10,6 +10,8 @@ pub enum CatalogStoreError {
     CatalogEntry(#[from] ard_catalog::CatalogEntryWireError),
     #[error(transparent)]
     Identifier(#[from] ard_catalog::ArdIdentifierError),
+    #[error("catalog event storage_key does not match identifier")]
+    StorageKeyMismatch,
 }
 
 pub trait CatalogStore {

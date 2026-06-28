@@ -32,7 +32,7 @@ impl ValidatedListAgentsQuery {
         Ok(Self {
             page_size,
             offset,
-            filters: SearchFilters::from_wire(wire.filters),
+            filters: SearchFilters::try_from_wire(wire.filters)?,
         })
     }
 

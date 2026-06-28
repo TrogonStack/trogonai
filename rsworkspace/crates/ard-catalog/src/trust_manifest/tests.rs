@@ -28,3 +28,29 @@ fn rejects_unknown_identity_type() {
         Err(TrustManifestError::InvalidIdentityType)
     );
 }
+
+#[test]
+fn rejects_unknown_field() {
+    assert!(matches!(
+        TrustManifest::new(json!({
+            "identity": "did:web:example.com",
+            "unknownExtra": "rejected"
+        })),
+        Err(TrustManifestError::UnknownField(_))
+    ));
+}
+
+#[test]
+fn accepts_all_allowed_keys_and_round_trips() {
+    let trust = TrustManifest::new(json!({
+        "identity": "did:web:example.com",
+        "identityType": "did",
+        "trustSchema": "https://schema.example/v1",
+        "attestations": [],
+        "provenance": "https://prov.example",
+        "signature": "abc123"
+    }))
+    .unwrap();
+    assert_eq!(trust.as_value()["identity"], "did:web:example.com");
+    assert_eq!(trust.as_value()["identityType"], "did");
+}

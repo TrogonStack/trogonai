@@ -4,6 +4,7 @@
 
 pub mod explore_request;
 pub mod extract;
+pub mod facet_field;
 pub mod filters;
 pub mod http_error;
 pub mod lexical_rank;

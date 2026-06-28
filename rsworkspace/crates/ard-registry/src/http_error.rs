@@ -1,6 +1,7 @@
 //! Typed HTTP error mapping for the ARD registry edge.
 
 use axum::Json;
+use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
@@ -13,8 +14,10 @@ use crate::registry_error::RegistryError;
 pub enum RegistryHttpError {
     #[error(transparent)]
     Registry(#[from] RegistryError),
-    #[error("{0}")]
-    InvalidArgument(String),
+    #[error(transparent)]
+    Json(#[from] JsonRejection),
+    #[error(transparent)]
+    Query(#[from] QueryRejection),
 }
 
 impl RegistryHttpError {
@@ -23,9 +26,11 @@ impl RegistryHttpError {
             RegistryHttpError::Registry(error) => match error {
                 RegistryError::SearchRequest(_)
                 | RegistryError::PageToken(_)
-                | RegistryError::InvalidPageSize { .. } => StatusCode::BAD_REQUEST,
+                | RegistryError::InvalidPageSize { .. }
+                | RegistryError::Facet(_)
+                | RegistryError::Filter(_) => StatusCode::BAD_REQUEST,
             },
-            RegistryHttpError::InvalidArgument(_) => StatusCode::BAD_REQUEST,
+            RegistryHttpError::Json(_) | RegistryHttpError::Query(_) => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -34,19 +39,18 @@ impl RegistryHttpError {
             RegistryHttpError::Registry(error) => match error {
                 RegistryError::SearchRequest(_)
                 | RegistryError::PageToken(_)
-                | RegistryError::InvalidPageSize { .. } => "INVALID_ARGUMENT",
+                | RegistryError::InvalidPageSize { .. }
+                | RegistryError::Facet(_)
+                | RegistryError::Filter(_) => "INVALID_ARGUMENT",
             },
-            RegistryHttpError::InvalidArgument(_) => "INVALID_ARGUMENT",
+            RegistryHttpError::Json(_) | RegistryHttpError::Query(_) => "INVALID_ARGUMENT",
         }
     }
 }
 
 impl IntoResponse for RegistryHttpError {
     fn into_response(self) -> Response {
-        let message = match &self {
-            RegistryHttpError::Registry(error) => error.to_string(),
-            RegistryHttpError::InvalidArgument(msg) => msg.clone(),
-        };
+        let message = self.to_string();
         let body = RegistryErrorResponseWire::new(self.error_code(), message);
         (self.status_code(), Json(body)).into_response()
     }

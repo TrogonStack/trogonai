@@ -1,5 +1,6 @@
 //! Typed registry application errors.
 
+use crate::facet_field::FacetFieldError;
 use crate::page_token::PageTokenError;
 use crate::search_request::SearchRequestError;
 
@@ -12,4 +13,8 @@ pub enum RegistryError {
     PageToken(#[from] PageTokenError),
     #[error("page size must be between 1 and {max}")]
     InvalidPageSize { max: u32 },
+    #[error(transparent)]
+    Facet(#[from] FacetFieldError),
+    #[error(transparent)]
+    Filter(#[from] ard_catalog::MediaTypeError),
 }

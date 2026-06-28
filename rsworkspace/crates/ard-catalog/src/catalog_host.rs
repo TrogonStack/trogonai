@@ -15,6 +15,8 @@ pub enum CatalogHostError {
     InvalidDisplayName,
     #[error("host.trustManifest is invalid: {0}")]
     TrustManifest(#[from] TrustManifestError),
+    #[error("host has unsupported field: {0}")]
+    UnknownField(String),
 }
 
 /// Preserved ARD catalog publisher metadata.
@@ -31,6 +33,12 @@ impl CatalogHost {
         }
         if let Some(trust_manifest) = object.get("trustManifest") {
             TrustManifest::new(trust_manifest.clone())?;
+        }
+        const ALLOWED_KEYS: &[&str] = &["displayName", "identity", "trustManifest"];
+        for key in object.keys() {
+            if !ALLOWED_KEYS.contains(&key.as_str()) {
+                return Err(CatalogHostError::UnknownField(key.clone()));
+            }
         }
         Ok(Self(Value::Object(object.clone())))
     }
