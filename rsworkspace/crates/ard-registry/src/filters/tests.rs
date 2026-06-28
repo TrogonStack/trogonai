@@ -1,6 +1,7 @@
 use ard_catalog::{CatalogEntry, CatalogEntryWire, SearchFiltersWire};
 
 use super::{entry_matches_filters, entry_matches_query};
+use crate::search_filters::SearchFilters;
 
 fn sample_entry() -> CatalogEntry {
     CatalogEntryWire {
@@ -25,12 +26,19 @@ fn sample_entry() -> CatalogEntry {
 #[test]
 fn filters_by_media_type() {
     let entry = sample_entry();
-    let filters = SearchFiltersWire {
+    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
         media_type: Some(vec!["application/mcp-server-card+json".to_owned()]),
         tags: None,
         capabilities: None,
-    };
-    assert!(!entry_matches_filters(&entry, Some(&filters)));
+    }));
+    assert!(!entry_matches_filters(&entry, &filters));
+}
+
+#[test]
+fn matches_when_filters_empty() {
+    let entry = sample_entry();
+    let filters = SearchFilters::from_wire(None);
+    assert!(entry_matches_filters(&entry, &filters));
 }
 
 #[test]

@@ -10,9 +10,12 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use tower_http::trace::TraceLayer;
 
+use crate::explore_request::ValidatedExploreRequest;
 use crate::extract::{ArdJson, ArdQuery};
 use crate::http_error::RegistryHttpError;
+use crate::list_agents_request::ValidatedListAgentsQuery;
 use crate::registry::Registry;
+use crate::search_request::ValidatedSearchRequest;
 
 /// Build the ARD registry HTTP router.
 pub fn router(registry: Arc<Registry>) -> Router {
@@ -31,23 +34,25 @@ async fn get_manifest(State(registry): State<Arc<Registry>>) -> impl IntoRespons
 
 async fn post_search(
     State(registry): State<Arc<Registry>>,
-    ArdJson(request): ArdJson<SearchRequestWire>,
+    ArdJson(wire): ArdJson<SearchRequestWire>,
 ) -> Result<Json<ard_catalog::SearchResponseWire>, RegistryHttpError> {
-    registry.search(request).map(Json).map_err(RegistryHttpError::from)
+    let request = ValidatedSearchRequest::try_from_wire(wire)?;
+    Ok(Json(registry.search(request)))
 }
 
 async fn get_agents(
     State(registry): State<Arc<Registry>>,
-    ArdQuery(query): ArdQuery<ListAgentsQueryWire>,
+    ArdQuery(wire): ArdQuery<ListAgentsQueryWire>,
 ) -> Result<Json<ard_catalog::ListResponseWire>, RegistryHttpError> {
-    registry.list_agents(query).map(Json).map_err(RegistryHttpError::from)
+    let query = ValidatedListAgentsQuery::try_from_wire(wire)?;
+    Ok(Json(registry.list_agents(query)))
 }
 
 async fn post_explore(
     State(registry): State<Arc<Registry>>,
-    ArdJson(request): ArdJson<ExploreRequestWire>,
+    ArdJson(wire): ArdJson<ExploreRequestWire>,
 ) -> Result<Json<ard_catalog::ExploreResponseWire>, RegistryHttpError> {
-    registry.explore(request).map(Json).map_err(RegistryHttpError::from)
+    Ok(Json(registry.explore(ValidatedExploreRequest::from_wire(wire))))
 }
 
 #[cfg(test)]

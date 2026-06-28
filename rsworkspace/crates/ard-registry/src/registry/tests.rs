@@ -4,7 +4,10 @@ use ard_catalog::{
 };
 
 use super::Registry;
+use crate::explore_request::ValidatedExploreRequest;
+use crate::list_agents_request::ValidatedListAgentsQuery;
 use crate::registry_config::RegistryConfig;
+use crate::search_request::ValidatedSearchRequest;
 use crate::source_url::SourceUrl;
 
 fn sample_manifest() -> CatalogManifest {
@@ -59,8 +62,8 @@ fn registry() -> Registry {
 #[test]
 fn search_ranks_best_match_first() {
     let registry = registry();
-    let response = registry
-        .search(SearchRequestWire {
+    let response = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
             query: SearchQueryWire {
                 text: "alpha".to_owned(),
                 filter: None,
@@ -69,7 +72,8 @@ fn search_ranks_best_match_first() {
             page_token: None,
             federation: FederationMode::None,
         })
-        .unwrap();
+        .unwrap(),
+    );
 
     assert_eq!(response.results.len(), 1);
     assert_eq!(response.results[0].entry.identifier, "urn:air:example.com:agent:alpha");
@@ -79,13 +83,14 @@ fn search_ranks_best_match_first() {
 #[test]
 fn list_agents_is_deterministic() {
     let registry = registry();
-    let response = registry
-        .list_agents(ard_catalog::ListAgentsQueryWire {
+    let response = registry.list_agents(
+        ValidatedListAgentsQuery::try_from_wire(ard_catalog::ListAgentsQueryWire {
             page_size: Some(1),
             page_token: None,
             filters: None,
         })
-        .unwrap();
+        .unwrap(),
+    );
 
     assert_eq!(response.items.len(), 1);
     assert_eq!(response.items[0].identifier, "urn:air:example.com:agent:alpha");
@@ -95,21 +100,19 @@ fn list_agents_is_deterministic() {
 #[test]
 fn explore_returns_facet_counts() {
     let registry = registry();
-    let response = registry
-        .explore(ard_catalog::ExploreRequestWire {
-            query: None,
-            result_type: ExploreResultTypeWire {
-                facets: vec![
-                    ExploreFacetRequestWire {
-                        field: "type".to_owned(),
-                    },
-                    ExploreFacetRequestWire {
-                        field: "tags".to_owned(),
-                    },
-                ],
-            },
-        })
-        .unwrap();
+    let response = registry.explore(ValidatedExploreRequest::from_wire(ard_catalog::ExploreRequestWire {
+        query: None,
+        result_type: ExploreResultTypeWire {
+            facets: vec![
+                ExploreFacetRequestWire {
+                    field: "type".to_owned(),
+                },
+                ExploreFacetRequestWire {
+                    field: "tags".to_owned(),
+                },
+            ],
+        },
+    }));
 
     assert_eq!(response.total_count, Some(2));
     assert_eq!(response.facets["type"].buckets.len(), 2);
@@ -124,19 +127,17 @@ fn explore_returns_facet_counts() {
 #[test]
 fn explore_applies_query_filter() {
     let registry = registry();
-    let response = registry
-        .explore(ExploreRequestWire {
-            query: Some(ExploreQueryWire {
-                text: Some("alpha".to_owned()),
-                filter: None,
-            }),
-            result_type: ExploreResultTypeWire {
-                facets: vec![ExploreFacetRequestWire {
-                    field: "type".to_owned(),
-                }],
-            },
-        })
-        .unwrap();
+    let response = registry.explore(ValidatedExploreRequest::from_wire(ExploreRequestWire {
+        query: Some(ExploreQueryWire {
+            text: Some("alpha".to_owned()),
+            filter: None,
+        }),
+        result_type: ExploreResultTypeWire {
+            facets: vec![ExploreFacetRequestWire {
+                field: "type".to_owned(),
+            }],
+        },
+    }));
 
     assert_eq!(response.total_count, Some(1));
 }
@@ -173,8 +174,8 @@ fn auto_federation_returns_configured_referrals() {
         vec![referral],
     ));
 
-    let response = registry
-        .search(SearchRequestWire {
+    let response = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
             query: SearchQueryWire {
                 text: "anything".to_owned(),
                 filter: None,
@@ -183,7 +184,8 @@ fn auto_federation_returns_configured_referrals() {
             page_token: None,
             federation: FederationMode::Auto,
         })
-        .unwrap();
+        .unwrap(),
+    );
 
     assert_eq!(response.referrals.as_ref().map(Vec::len), Some(1));
 }
