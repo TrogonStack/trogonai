@@ -6,7 +6,7 @@ mod config;
 mod tests;
 
 pub use cache::{ImportGateCacheKey, ZedTokenCache, ZedTokenSnapshot};
-pub use client::BulkImportPermissionCheck;
+pub use client::{BulkImportPermissionCheck, LiveBulkImportPermissionClient};
 pub use config::{
     ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint,
     SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenTtl, optional_spicedb_credentials, zed_token_ttl_from_env,
