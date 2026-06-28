@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use ard_catalog::{
     ArdStorageKey, CatalogEntry, CatalogEntryWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError,
-    SearchResultWire, SPEC_VERSION,
+    SPEC_VERSION, SearchResultWire,
 };
 
 use crate::catalog_event::CatalogEvent;

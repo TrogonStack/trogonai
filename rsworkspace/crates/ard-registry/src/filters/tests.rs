@@ -47,3 +47,55 @@ fn filters_by_query() {
     assert!(entry_matches_query(&entry, Some("assistant")));
     assert!(!entry_matches_query(&entry, Some("missing")));
 }
+
+#[test]
+fn tag_filter_matches_when_entry_has_tag() {
+    let entry = sample_entry();
+    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+        media_type: None,
+        tags: Some(vec!["demo".to_owned()]),
+        capabilities: None,
+    }));
+    assert!(entry_matches_filters(&entry, &filters));
+}
+
+#[test]
+fn tag_filter_rejects_when_entry_missing_tag() {
+    let entry = sample_entry();
+    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+        media_type: None,
+        tags: Some(vec!["nonexistent-tag".to_owned()]),
+        capabilities: None,
+    }));
+    assert!(!entry_matches_filters(&entry, &filters));
+}
+
+#[test]
+fn capability_filter_matches_when_entry_has_capability() {
+    let entry = sample_entry();
+    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+        media_type: None,
+        tags: None,
+        capabilities: Some(vec!["chat".to_owned()]),
+    }));
+    assert!(entry_matches_filters(&entry, &filters));
+}
+
+#[test]
+fn capability_filter_rejects_when_entry_missing_capability() {
+    let entry = sample_entry();
+    let filters = SearchFilters::from_wire(Some(SearchFiltersWire {
+        media_type: None,
+        tags: None,
+        capabilities: Some(vec!["nonexistent-capability".to_owned()]),
+    }));
+    assert!(!entry_matches_filters(&entry, &filters));
+}
+
+#[test]
+fn empty_query_always_matches() {
+    let entry = sample_entry();
+    assert!(entry_matches_query(&entry, None));
+    assert!(entry_matches_query(&entry, Some("")));
+    assert!(entry_matches_query(&entry, Some("   ")));
+}

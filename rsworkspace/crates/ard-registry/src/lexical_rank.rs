@@ -104,4 +104,16 @@ mod tests {
         let entry = sample_entry();
         assert_eq!(lexical_score("nonexistent-term", &entry), 0);
     }
+
+    #[test]
+    fn returns_zero_for_empty_query() {
+        let entry = sample_entry();
+        assert_eq!(lexical_score("", &entry), 0);
+    }
+
+    #[test]
+    fn returns_zero_for_whitespace_only_query() {
+        let entry = sample_entry();
+        assert_eq!(lexical_score("   ", &entry), 0);
+    }
 }

@@ -31,3 +31,30 @@ fn rejects_invalid_trust_manifest() {
         Err(CatalogHostError::TrustManifest(TrustManifestError::MissingIdentity))
     );
 }
+
+#[test]
+fn rejects_non_string_display_name() {
+    assert_eq!(
+        CatalogHost::new(json!({"displayName": 42})),
+        Err(CatalogHostError::InvalidDisplayName)
+    );
+}
+
+#[test]
+fn rejects_non_object() {
+    assert_eq!(CatalogHost::new(json!("string")), Err(CatalogHostError::NotObject));
+    assert_eq!(CatalogHost::new(json!(null)), Err(CatalogHostError::NotObject));
+    assert_eq!(CatalogHost::new(json!([1, 2, 3])), Err(CatalogHostError::NotObject));
+}
+
+#[test]
+fn into_value_preserves_extra_fields() {
+    let host = CatalogHost::new(json!({
+        "displayName": "Acme",
+        "extra": "preserved"
+    }))
+    .unwrap();
+    let value = host.into_value();
+    assert_eq!(value["displayName"], "Acme");
+    assert_eq!(value["extra"], "preserved");
+}

@@ -31,3 +31,43 @@ fn rejects_missing_subtype_separator() {
     );
     assert_eq!(MediaType::new("/json"), Err(MediaTypeError::MissingSubtypeSeparator));
 }
+
+#[test]
+fn rejects_leading_whitespace() {
+    assert_eq!(
+        MediaType::new(" application/json"),
+        Err(MediaTypeError::ContainsWhitespace)
+    );
+}
+
+#[test]
+fn rejects_trailing_whitespace() {
+    assert_eq!(
+        MediaType::new("application/json "),
+        Err(MediaTypeError::ContainsWhitespace)
+    );
+}
+
+#[test]
+fn rejects_internal_whitespace() {
+    assert_eq!(
+        MediaType::new("application/ json"),
+        Err(MediaTypeError::ContainsWhitespace)
+    );
+}
+
+#[test]
+fn rejects_surrounding_whitespace() {
+    assert_eq!(
+        MediaType::new(" application/json "),
+        Err(MediaTypeError::ContainsWhitespace)
+    );
+}
+
+#[test]
+fn accepts_a2a_agent_card_media_type() {
+    assert_eq!(
+        MediaType::new("application/a2a-agent-card+json").unwrap().as_str(),
+        "application/a2a-agent-card+json"
+    );
+}

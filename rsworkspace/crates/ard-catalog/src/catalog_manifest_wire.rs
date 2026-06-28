@@ -1,10 +1,10 @@
 //! Untrusted ARD catalog manifest wire shape.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::catalog_entry_wire::{CatalogEntryWire, CatalogEntryWireError};
 use crate::catalog_host::CatalogHostError;
+use crate::catalog_host_wire::CatalogHostWire;
 
 /// Pinned ARD manifest spec version for this crate snapshot.
 pub const SPEC_VERSION: &str = "1.0";
@@ -30,7 +30,7 @@ pub enum CatalogManifestWireError {
 pub struct CatalogManifestWire {
     pub spec_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<Value>,
+    pub host: Option<CatalogHostWire>,
     pub entries: Vec<CatalogEntryWire>,
 }
 

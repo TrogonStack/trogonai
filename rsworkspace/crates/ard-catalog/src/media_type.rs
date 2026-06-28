@@ -7,6 +7,8 @@ use std::sync::Arc;
 pub enum MediaTypeError {
     #[error("media type must not be empty")]
     Empty,
+    #[error("media type must not contain whitespace")]
+    ContainsWhitespace,
     #[error("media type must contain a type and subtype separated by '/'")]
     MissingSubtypeSeparator,
 }
@@ -20,6 +22,9 @@ impl MediaType {
         let s = s.as_ref();
         if s.is_empty() {
             return Err(MediaTypeError::Empty);
+        }
+        if s.chars().any(char::is_whitespace) {
+            return Err(MediaTypeError::ContainsWhitespace);
         }
         let (type_part, subtype_part) = s.split_once('/').ok_or(MediaTypeError::MissingSubtypeSeparator)?;
         if type_part.is_empty() || subtype_part.is_empty() {

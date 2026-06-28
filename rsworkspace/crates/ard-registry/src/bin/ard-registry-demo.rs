@@ -1,7 +1,11 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use ard_catalog::{CatalogEntryWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
+use ard_catalog::{
+    CatalogEntryWire, CatalogHostWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION,
+};
 use ard_registry::{Registry, RegistryConfig, SourceUrl, router};
 use tokio::net::TcpListener;
 
@@ -33,9 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn demo_manifest() -> Result<CatalogManifest, CatalogManifestWireError> {
     CatalogManifestWire {
         spec_version: SPEC_VERSION.to_owned(),
-        host: Some(serde_json::json!({
+        host: Some(CatalogHostWire(serde_json::json!({
             "displayName": "Trogon ARD Demo Registry"
-        })),
+        }))),
         entries: vec![
             CatalogEntryWire {
                 identifier: "urn:air:trogon.ai:mcp:weather".to_owned(),
@@ -73,4 +77,25 @@ fn demo_manifest() -> Result<CatalogManifest, CatalogManifestWireError> {
         ],
     }
     .try_into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::demo_manifest;
+
+    #[test]
+    fn demo_manifest_builds_successfully() {
+        let manifest = demo_manifest().unwrap();
+        assert_eq!(manifest.entries().len(), 2);
+        assert!(manifest.host().is_some());
+    }
+
+    #[test]
+    fn demo_manifest_wire_serializes_to_json() {
+        let manifest = demo_manifest().unwrap();
+        let wire = manifest.into_wire();
+        let json = serde_json::to_string_pretty(&wire).unwrap();
+        assert!(json.contains("Trogon ARD Demo Registry"));
+        assert!(json.contains("urn:air:trogon.ai:mcp:weather"));
+    }
 }

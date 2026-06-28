@@ -28,9 +28,7 @@ impl CatalogEvent {
     pub fn identifier(&self) -> &ArdIdentifier {
         match self {
             Self::Upserted { entry } => entry.identifier(),
-            Self::Deleted { identifier }
-            | Self::Validated { identifier }
-            | Self::Indexed { identifier } => identifier,
+            Self::Deleted { identifier } | Self::Validated { identifier } | Self::Indexed { identifier } => identifier,
         }
     }
 
@@ -67,9 +65,7 @@ impl TryFrom<CatalogEventWire> for CatalogEvent {
         match wire {
             CatalogEventWire::Upserted { entry, .. } => {
                 let entry: CatalogEntry = (*entry).try_into()?;
-                Ok(Self::Upserted {
-                    entry: Box::new(entry),
-                })
+                Ok(Self::Upserted { entry: Box::new(entry) })
             }
             CatalogEventWire::Deleted { identifier, .. } => Ok(Self::Deleted {
                 identifier: ArdIdentifier::new(identifier)?,
@@ -108,9 +104,10 @@ pub enum CatalogEventWire {
 
 #[cfg(test)]
 mod tests {
-    use ard_catalog::CatalogEntryWire;
+    use ard_catalog::{ArdIdentifier, CatalogEntryWire};
 
     use super::{CatalogEvent, CatalogEventWire};
+    use crate::store::CatalogStoreError;
 
     fn entry() -> ard_catalog::CatalogEntry {
         CatalogEntryWire {
@@ -132,6 +129,10 @@ mod tests {
         .unwrap()
     }
 
+    fn identifier() -> ArdIdentifier {
+        ArdIdentifier::new("urn:air:example.com:agent:assistant").unwrap()
+    }
+
     #[test]
     fn event_round_trips_as_json() {
         let event = CatalogEvent::upserted(&entry());
@@ -148,5 +149,95 @@ mod tests {
         let json = serde_json::to_vec(&wire).unwrap();
         let decoded: CatalogEventWire = serde_json::from_slice(&json).unwrap();
         assert!(CatalogEvent::try_from(decoded).is_ok());
+    }
+
+    #[test]
+    fn deleted_identifier_and_storage_key() {
+        let id = identifier();
+        let event = CatalogEvent::deleted(&id);
+        assert_eq!(event.identifier().as_str(), id.as_str());
+        let key = event.storage_key();
+        assert!(!key.to_string().is_empty());
+    }
+
+    #[test]
+    fn deleted_into_wire_round_trips() {
+        let id = identifier();
+        let event = CatalogEvent::deleted(&id);
+        let wire = event.into_wire();
+        let json = serde_json::to_vec(&wire).unwrap();
+        let decoded: CatalogEventWire = serde_json::from_slice(&json).unwrap();
+        let domain = CatalogEvent::try_from(decoded).unwrap();
+        assert!(matches!(domain, CatalogEvent::Deleted { .. }));
+    }
+
+    #[test]
+    fn validated_identifier_and_storage_key() {
+        let id = identifier();
+        let event = CatalogEvent::Validated { identifier: id.clone() };
+        assert_eq!(event.identifier().as_str(), id.as_str());
+        let key = event.storage_key();
+        assert!(!key.to_string().is_empty());
+    }
+
+    #[test]
+    fn validated_into_wire_round_trips() {
+        let id = identifier();
+        let event = CatalogEvent::Validated { identifier: id };
+        let wire = event.into_wire();
+        let json = serde_json::to_vec(&wire).unwrap();
+        let decoded: CatalogEventWire = serde_json::from_slice(&json).unwrap();
+        let domain = CatalogEvent::try_from(decoded).unwrap();
+        assert!(matches!(domain, CatalogEvent::Validated { .. }));
+    }
+
+    #[test]
+    fn indexed_into_wire_round_trips() {
+        let id = identifier();
+        let event = CatalogEvent::Indexed { identifier: id };
+        let wire = event.into_wire();
+        let json = serde_json::to_vec(&wire).unwrap();
+        let decoded: CatalogEventWire = serde_json::from_slice(&json).unwrap();
+        let domain = CatalogEvent::try_from(decoded).unwrap();
+        assert!(matches!(domain, CatalogEvent::Indexed { .. }));
+    }
+
+    #[test]
+    fn upserted_identifier_and_storage_key() {
+        let e = entry();
+        let event = CatalogEvent::upserted(&e);
+        assert_eq!(event.identifier().as_str(), e.identifier().as_str());
+        let key = event.storage_key();
+        assert!(!key.to_string().is_empty());
+    }
+
+    #[test]
+    fn try_from_wire_deleted_bad_identifier_errors() {
+        let wire = CatalogEventWire::Deleted {
+            storage_key: "some/key".to_owned(),
+            identifier: "not-a-urn".to_owned(),
+        };
+        let result = CatalogEvent::try_from(wire);
+        assert!(matches!(result, Err(CatalogStoreError::Identifier(_))));
+    }
+
+    #[test]
+    fn try_from_wire_validated_bad_identifier_errors() {
+        let wire = CatalogEventWire::Validated {
+            storage_key: "some/key".to_owned(),
+            identifier: "not-a-urn".to_owned(),
+        };
+        let result = CatalogEvent::try_from(wire);
+        assert!(matches!(result, Err(CatalogStoreError::Identifier(_))));
+    }
+
+    #[test]
+    fn try_from_wire_indexed_bad_identifier_errors() {
+        let wire = CatalogEventWire::Indexed {
+            storage_key: "some/key".to_owned(),
+            identifier: "not-a-urn".to_owned(),
+        };
+        let result = CatalogEvent::try_from(wire);
+        assert!(matches!(result, Err(CatalogStoreError::Identifier(_))));
     }
 }

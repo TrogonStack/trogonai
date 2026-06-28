@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::catalog_entry_wire::CatalogEntryWire;
 use crate::catalog_host::CatalogHostError;
+use crate::catalog_host_wire::CatalogHostWire;
 use crate::catalog_manifest::CatalogManifest;
 use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
 
@@ -53,7 +54,7 @@ fn rejects_invalid_spec_version() {
 fn rejects_invalid_host_metadata() {
     let manifest = CatalogManifestWire {
         spec_version: SPEC_VERSION.to_owned(),
-        host: Some(json!({})),
+        host: Some(CatalogHostWire(json!({}))),
         entries: vec![sample_entry_wire()],
     };
 

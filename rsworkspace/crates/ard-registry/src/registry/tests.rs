@@ -189,3 +189,78 @@ fn auto_federation_returns_configured_referrals() {
 
     assert_eq!(response.referrals.as_ref().map(Vec::len), Some(1));
 }
+
+#[test]
+fn config_accessor_returns_config() {
+    let registry = registry();
+    let config = registry.config();
+    assert_eq!(config.source_url(), "https://registry.example.com");
+    assert_eq!(registry.entries().len(), 2);
+}
+
+#[test]
+fn explore_capabilities_facet() {
+    let registry = registry();
+    let response = registry.explore(ValidatedExploreRequest::from_wire(ExploreRequestWire {
+        query: None,
+        result_type: ExploreResultTypeWire {
+            facets: vec![ExploreFacetRequestWire {
+                field: "capabilities".to_owned(),
+            }],
+        },
+    }));
+
+    assert_eq!(response.total_count, Some(2));
+    let caps = &response.facets["capabilities"];
+    assert!(caps.buckets.iter().any(|b| b.value == "chat" || b.value == "tools"));
+}
+
+#[test]
+fn search_pagination_with_page_token() {
+    let registry = registry();
+
+    let first_page = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
+            query: SearchQueryWire {
+                text: "beta".to_owned(),
+                filter: None,
+            },
+            page_size: Some(1),
+            page_token: None,
+            federation: FederationMode::None,
+        })
+        .unwrap(),
+    );
+
+    assert_eq!(first_page.results.len(), 1);
+    assert!(first_page.page_token.is_none());
+}
+
+#[test]
+fn list_agents_page_token_advances_offset() {
+    let registry = registry();
+
+    let first = registry.list_agents(
+        ValidatedListAgentsQuery::try_from_wire(ard_catalog::ListAgentsQueryWire {
+            page_size: Some(1),
+            page_token: None,
+            filters: None,
+        })
+        .unwrap(),
+    );
+
+    assert!(first.page_token.is_some());
+
+    let second = registry.list_agents(
+        ValidatedListAgentsQuery::try_from_wire(ard_catalog::ListAgentsQueryWire {
+            page_size: Some(1),
+            page_token: first.page_token.clone(),
+            filters: None,
+        })
+        .unwrap(),
+    );
+
+    assert_eq!(second.items.len(), 1);
+    assert_ne!(first.items[0].identifier, second.items[0].identifier);
+    assert!(second.page_token.is_none());
+}

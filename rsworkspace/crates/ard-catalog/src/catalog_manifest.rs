@@ -3,6 +3,7 @@
 use crate::catalog_entry::CatalogEntry;
 use crate::catalog_entry_wire::CatalogEntryWire;
 use crate::catalog_host::CatalogHost;
+use crate::catalog_host_wire::CatalogHostWire;
 use crate::catalog_manifest_schema::{CatalogManifestValidateError, validate_ai_catalog_value};
 use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
 
@@ -36,10 +37,7 @@ impl CatalogManifest {
                     .map_err(|source| CatalogManifestWireError::Entry { index, source })?,
             );
         }
-        let host = match wire.host {
-            Some(host) => Some(CatalogHost::new(host)?),
-            None => None,
-        };
+        let host = wire.host.map(CatalogHostWire::into_domain).transpose()?;
         Ok(Self { host, entries })
     }
 
@@ -87,7 +85,7 @@ impl From<CatalogManifest> for CatalogManifestWire {
         let CatalogManifest { host, entries } = manifest;
         Self {
             spec_version: SPEC_VERSION.to_owned(),
-            host: host.map(CatalogHost::into_value),
+            host: host.map(|h| CatalogHostWire(h.into_value())),
             entries: entries.into_iter().map(CatalogEntryWire::from).collect(),
         }
     }

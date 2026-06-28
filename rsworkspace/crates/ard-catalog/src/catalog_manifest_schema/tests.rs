@@ -61,7 +61,11 @@ fn rejects_deprecated_collections_field() {
     let mut manifest = valid_manifest();
     manifest["collections"] = json!([]);
     let err = validate_ai_catalog_value(&manifest).unwrap_err();
-    assert!(err.violations().iter().any(|v| v.message().contains("collections") || v.instance_path().contains("collections")));
+    assert!(
+        err.violations()
+            .iter()
+            .any(|v| v.message().contains("collections") || v.instance_path().contains("collections"))
+    );
 }
 
 #[test]
@@ -69,7 +73,11 @@ fn rejects_invalid_urn_ai_identifier() {
     let mut manifest = valid_manifest();
     manifest["entries"][0]["identifier"] = json!("urn:ai:example.com:agent:assistant");
     let err = validate_ai_catalog_value(&manifest).unwrap_err();
-    assert!(err.violations().iter().any(|v| v.message().contains("identifier") || v.instance_path().contains("identifier")));
+    assert!(
+        err.violations()
+            .iter()
+            .any(|v| v.message().contains("identifier") || v.instance_path().contains("identifier"))
+    );
 }
 
 #[test]
