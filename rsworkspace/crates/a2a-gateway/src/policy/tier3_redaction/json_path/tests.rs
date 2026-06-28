@@ -57,3 +57,15 @@ fn unterminated_bracket_fails_resolution() {
     // now rejects unterminated brackets explicitly.
     assert!(to_json_pointer("$.params.parts[0").is_none());
 }
+
+#[test]
+fn whitespace_padded_segments_fail_resolution() {
+    // Padding whitespace inside or around a segment almost always
+    // means operator typo (e.g. `" params"` not `params`, `" 0 "`
+    // not `0`). Accepting them silently produced surprising
+    // pointers; the tokenizer now rejects them.
+    assert!(to_json_pointer("$. params.secret").is_none());
+    assert!(to_json_pointer("$.params.secret ").is_none());
+    assert!(to_json_pointer("$.params[ 0 ].text").is_none());
+    assert!(to_json_pointer("$.params[0 ].text").is_none());
+}

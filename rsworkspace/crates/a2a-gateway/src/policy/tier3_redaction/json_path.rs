@@ -1,10 +1,12 @@
 /// Tokenize a `$.`-prefixed JSONPath (with the leading `$.` already
 /// stripped) into reference tokens. Returns `None` when the input
 /// contains a malformed segment that would silently drop information
-/// — an empty bracket `[]`, an unterminated `[` (no closing `]`), or
-/// trailing whitespace — so callers fail-closed instead of mapping
-/// `$.parts[].text` to `parts/text` (which silently elides the
-/// intended array indexing and lets sensitive data through).
+/// — an empty bracket `[]`, an unterminated `[` (no closing `]`),
+/// padded brackets like `[ 0 ]`, or a token with leading/trailing
+/// whitespace — so callers fail-closed instead of mapping
+/// `$.parts[].text` or `$. params.x` to a surprising pointer (which
+/// silently elides the intended index or shifts the key, letting
+/// sensitive data through unredacted).
 fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -13,12 +15,20 @@ fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
         match ch {
             '.' => {
                 if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
+                    let segment = std::mem::take(&mut current);
+                    if !is_valid_segment(&segment) {
+                        return None;
+                    }
+                    tokens.push(segment);
                 }
             }
             '[' => {
                 if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
+                    let segment = std::mem::take(&mut current);
+                    if !is_valid_segment(&segment) {
+                        return None;
+                    }
+                    tokens.push(segment);
                 }
                 let mut index = String::new();
                 let mut closed = false;
@@ -29,7 +39,7 @@ fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
                     }
                     index.push(inner);
                 }
-                if !closed || index.is_empty() {
+                if !closed || index.is_empty() || !is_valid_segment(&index) {
                     return None;
                 }
                 tokens.push(index);
@@ -38,9 +48,22 @@ fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
         }
     }
     if !current.is_empty() {
+        if !is_valid_segment(&current) {
+            return None;
+        }
         tokens.push(current);
     }
     Some(tokens)
+}
+
+/// A segment is valid only when it has no surrounding whitespace.
+/// Internal whitespace is allowed because some JSON keys legitimately
+/// contain spaces, but a token like `" params"` or `" 0 "` almost
+/// always means the manifest author intended `params` / `0` and the
+/// padding is operator error. Failing closed surfaces the typo at
+/// config-load time instead of silently no-opping at runtime.
+fn is_valid_segment(segment: &str) -> bool {
+    segment == segment.trim()
 }
 
 pub fn to_json_pointer(path: &str) -> Option<String> {
