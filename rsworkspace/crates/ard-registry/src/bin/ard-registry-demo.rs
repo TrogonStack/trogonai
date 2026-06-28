@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use ard_catalog::{CatalogEntryWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
-use ard_registry::{Registry, RegistryConfig, router};
+use ard_registry::{Registry, RegistryConfig, SourceUrl, router};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", listener.local_addr()?);
 
     let registry = Arc::new(Registry::new(RegistryConfig::new(
-        "http://127.0.0.1",
+        SourceUrl::parse("http://127.0.0.1")?,
         demo_manifest()?,
         vec![],
     )));

@@ -5,6 +5,7 @@ use ard_catalog::{
 
 use super::Registry;
 use crate::registry_config::RegistryConfig;
+use crate::source_url::SourceUrl;
 
 fn sample_manifest() -> CatalogManifest {
     CatalogManifestWire {
@@ -49,7 +50,7 @@ fn sample_manifest() -> CatalogManifest {
 
 fn registry() -> Registry {
     Registry::new(RegistryConfig::new(
-        "https://registry.example.com",
+        SourceUrl::parse("https://registry.example.com").unwrap(),
         sample_manifest(),
         vec![],
     ))
@@ -161,7 +162,7 @@ fn auto_federation_returns_configured_referrals() {
     .unwrap();
 
     let registry = Registry::new(RegistryConfig::new(
-        "https://registry.example.com",
+        SourceUrl::parse("https://registry.example.com").unwrap(),
         CatalogManifestWire {
             spec_version: SPEC_VERSION.to_owned(),
             host: None,

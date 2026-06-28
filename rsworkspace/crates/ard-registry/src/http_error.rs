@@ -13,6 +13,8 @@ use crate::registry_error::RegistryError;
 pub enum RegistryHttpError {
     #[error(transparent)]
     Registry(#[from] RegistryError),
+    #[error("{0}")]
+    InvalidArgument(String),
 }
 
 impl RegistryHttpError {
@@ -23,6 +25,7 @@ impl RegistryHttpError {
                 | RegistryError::PageToken(_)
                 | RegistryError::InvalidPageSize { .. } => StatusCode::BAD_REQUEST,
             },
+            RegistryHttpError::InvalidArgument(_) => StatusCode::BAD_REQUEST,
         }
     }
 
@@ -33,6 +36,7 @@ impl RegistryHttpError {
                 | RegistryError::PageToken(_)
                 | RegistryError::InvalidPageSize { .. } => "INVALID_ARGUMENT",
             },
+            RegistryHttpError::InvalidArgument(_) => "INVALID_ARGUMENT",
         }
     }
 }
@@ -41,6 +45,7 @@ impl IntoResponse for RegistryHttpError {
     fn into_response(self) -> Response {
         let message = match &self {
             RegistryHttpError::Registry(error) => error.to_string(),
+            RegistryHttpError::InvalidArgument(msg) => msg.clone(),
         };
         let body = RegistryErrorResponseWire::new(self.error_code(), message);
         (self.status_code(), Json(body)).into_response()

@@ -8,6 +8,7 @@ use tower::ServiceExt;
 use super::router;
 use crate::registry::Registry;
 use crate::registry_config::RegistryConfig;
+use crate::source_url::SourceUrl;
 
 fn sample_registry() -> Arc<Registry> {
     let manifest: CatalogManifest = CatalogManifestWire {
@@ -33,7 +34,7 @@ fn sample_registry() -> Arc<Registry> {
     .unwrap();
 
     Arc::new(Registry::new(RegistryConfig::new(
-        "https://registry.example.com",
+        SourceUrl::parse("https://registry.example.com").unwrap(),
         manifest,
         vec![],
     )))
@@ -165,7 +166,7 @@ async fn search_includes_configured_referrals() {
     .unwrap();
 
     let registry = Arc::new(Registry::new(RegistryConfig::new(
-        "https://registry.example.com",
+        SourceUrl::parse("https://registry.example.com").unwrap(),
         manifest,
         vec![referral],
     )));
@@ -182,4 +183,34 @@ async fn search_includes_configured_referrals() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["referrals"].as_array().map(Vec::len), Some(1));
+}
+
+#[tokio::test]
+async fn malformed_json_body_returns_invalid_argument() {
+    let app = router(sample_registry());
+    let response = app.oneshot(post_json("/search", "{not json")).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENT");
+}
+
+#[tokio::test]
+async fn invalid_query_param_returns_invalid_argument() {
+    let app = router(sample_registry());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/agents?pageSize=abc")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "INVALID_ARGUMENT");
 }
