@@ -48,7 +48,7 @@ impl StdEnvAccess {
             func.span,
             "environment variable read directly through `std::env`",
             |diag| {
-                diag.help("read it through an injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv` in tests) instead");
+                diag.help("read it through the injected `trogon_std::env` abstraction (`ReadEnv`/`EnumerateEnv`, backed by `SystemEnv` in production and `InMemoryEnv` in tests) instead");
             },
         );
     }
