@@ -2,4 +2,3 @@
 channel = "1.96.0"
 profile = "minimal"
 components = ["rustfmt", "clippy", "llvm-tools-preview"]
-targets = ["wasm32-unknown-unknown"]

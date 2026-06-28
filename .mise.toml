@@ -51,9 +51,13 @@ run = "cargo fmt --all"
 description = "Generate FileDescriptorSet for the schedules decider test runner"
 run = "mkdir -p rsworkspace/target/wasm32-unknown-unknown/release && buf build -o rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb --as-file-descriptor-set --path proto/trogonai/scheduler/schedules"
 
+[tasks."rust:wasm-target"]
+description = "Ensure the wasm32-unknown-unknown Rust target is installed"
+run = "rustup target add wasm32-unknown-unknown"
+
 [tasks."artifacts:schedules-wasm"]
 description = "Build schedules decider WASM artifact to dist/decider/"
-depends = ["proto:schedules-descriptor-set"]
+depends = ["proto:schedules-descriptor-set", "rust:wasm-target"]
 run = "cd rsworkspace && cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release && mkdir -p dist/decider && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm dist/decider/schedules.wasm && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb dist/decider/schedules.binpb"
 
 [tasks."artifacts:decider-test"]
