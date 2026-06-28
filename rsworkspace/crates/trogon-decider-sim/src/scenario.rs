@@ -185,7 +185,10 @@ mod tests {
 
     #[test]
     fn unknown_types_fall_back_to_byte_comparison() {
-        assert!(events_match(&envelope("unknown.Type", b"raw"), &envelope("unknown.Type", b"raw")));
+        assert!(events_match(
+            &envelope("unknown.Type", b"raw"),
+            &envelope("unknown.Type", b"raw")
+        ));
         assert!(!events_match(
             &envelope("unknown.Type", b"raw"),
             &envelope("unknown.Type", b"different")

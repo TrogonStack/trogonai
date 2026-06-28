@@ -298,10 +298,7 @@ fn run_requires_a_command() {
     let host = SimHost::load(&light_wasm()).unwrap();
     let mut instance = host.instantiate(()).unwrap();
 
-    let error = SimScenario::new()
-        .then_rejected()
-        .run(&mut instance)
-        .unwrap_err();
+    let error = SimScenario::new().then_rejected().run(&mut instance).unwrap_err();
     assert!(error.contains("scenario missing .when(...)"), "{error}");
 }
 
