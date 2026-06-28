@@ -296,7 +296,14 @@ fn task_id_from_params(method: &str, params: &Value) -> Option<String> {
     };
     for key in order {
         if let Some(value) = params.get(*key).and_then(Value::as_str) {
-            return Some(value.to_owned());
+            // Skip empty/whitespace-only strings so they fall through
+            // to `MissingTaskId` rather than producing SpiceDb tuples
+            // like `agent:` that pass `Tier1ResourceId` validation but
+            // never match a real task.
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
         }
     }
     None

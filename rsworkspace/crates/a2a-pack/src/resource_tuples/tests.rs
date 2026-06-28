@@ -172,6 +172,40 @@ fn value_objects_reject_empty_and_whitespace() {
 }
 
 #[test]
+fn empty_string_task_id_falls_through_to_missing() {
+    // A wire payload with `id: ""` previously slipped past
+    // task_id_from_params and produced a SpiceDb tuple like
+    // `task#planner:` which would silently pass `Tier1ResourceId`
+    // validation but never match a real task. The helper now skips
+    // empty/whitespace values so derive() returns MissingTaskId.
+    for body in [
+        serde_json::json!({"id": ""}),
+        serde_json::json!({"id": "   "}),
+        serde_json::json!({"taskId": "\t\n"}),
+    ] {
+        let err = table()
+            .derive(&inputs("tasks/get", body.clone()))
+            .expect_err(&format!("blank task id must error, got body {body}"));
+        assert_eq!(err, Tier1DeriveError::MissingTaskId);
+    }
+}
+
+#[test]
+fn whitespace_in_task_id_is_trimmed() {
+    // Padding whitespace inside a JSON-RPC `id` is operator-error
+    // typically (shell heredoc, `.env` file). Trim so the SpiceDb
+    // tuple matches the canonical task id rather than splitting on
+    // the typo.
+    let inputs = Tier1DeriveInputs::from_jsonrpc_params(
+        slug("tasks/get"),
+        "planner",
+        "pub",
+        &serde_json::json!({"id": "  task-padded  "}),
+    );
+    assert_eq!(inputs.task_id.as_deref(), Some("task-padded"));
+}
+
+#[test]
 fn shape_for_returns_none_for_unknown_method() {
     assert!(table().shape_for(&slug("does/not/exist")).is_none());
 }
