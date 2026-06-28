@@ -16,7 +16,7 @@ dependencies = [
  "jsonwebtoken",
  "nats-jwt-rs",
  "nkeys",
- "rand 0.10.1",
+ "rand_core 0.6.4",
  "rcgen",
  "reqwest 0.12.28",
  "rsa",

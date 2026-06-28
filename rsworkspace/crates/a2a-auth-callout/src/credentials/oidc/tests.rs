@@ -8,7 +8,7 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk, KeyOperations,
     PublicKeyUse, RSAKeyParameters, RSAKeyType,
 };
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePrivateKey;
 use rsa::traits::PublicKeyParts;

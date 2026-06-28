@@ -33,7 +33,7 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType,
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType};
 use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePrivateKey;
