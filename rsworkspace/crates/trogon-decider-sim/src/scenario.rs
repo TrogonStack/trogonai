@@ -131,7 +131,7 @@ impl SimScenario {
                 return Err(format!("expected {} event(s), got {}", expected.len(), actual.len()));
             }
             for (index, (got, want)) in actual.iter().zip(expected.iter()).enumerate() {
-                if got.type_ != want.type_ || got.payload != want.payload {
+                if !events_match(got, want) {
                     return Err(format!(
                         "event {index} mismatch: got type={} payload={:?}, want type={} payload={:?}",
                         got.type_, got.payload, want.type_, want.payload
@@ -146,5 +146,49 @@ impl SimScenario {
 impl Default for SimScenario {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Compares two event envelopes by meaning rather than by raw wire bytes.
+///
+/// Protobuf encoding is not canonical, so semantically identical events can
+/// differ on the wire. When both payloads decode to known event types, compare
+/// their canonical JSON; otherwise fall back to an exact byte match.
+fn events_match(got: &host::AnyEnvelope, want: &host::AnyEnvelope) -> bool {
+    if got.type_ != want.type_ {
+        return false;
+    }
+    match (
+        trogonai_proto::decode_event_to_json(&got.type_, &got.payload),
+        trogonai_proto::decode_event_to_json(&want.type_, &want.payload),
+    ) {
+        (Some(got_json), Some(want_json)) => got_json == want_json,
+        _ => got.payload == want.payload,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn envelope(type_: &str, payload: &[u8]) -> host::AnyEnvelope {
+        host::AnyEnvelope {
+            type_: type_.to_string(),
+            payload: payload.to_vec(),
+        }
+    }
+
+    #[test]
+    fn events_with_different_types_never_match() {
+        assert!(!events_match(&envelope("a.Type", b"x"), &envelope("b.Type", b"x")));
+    }
+
+    #[test]
+    fn unknown_types_fall_back_to_byte_comparison() {
+        assert!(events_match(&envelope("unknown.Type", b"raw"), &envelope("unknown.Type", b"raw")));
+        assert!(!events_match(
+            &envelope("unknown.Type", b"raw"),
+            &envelope("unknown.Type", b"different")
+        ));
     }
 }

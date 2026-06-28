@@ -15,6 +15,7 @@ test-support = []
 tempfile = "3"
 thiserror = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
+trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["light", "schedules"] }
 wasmparser = "=0.227.0"
 wasmtime = { version = "=29.0.1", default-features = false, features = ["component-model", "runtime", "cranelift"] }
 
@@ -23,7 +24,6 @@ buffa = { workspace = true }
 buffa-types = { workspace = true }
 criterion = "0.5"
 trogon-decider-wit = { workspace = true, features = ["host"] }
-trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["light", "schedules"] }
 wasmtime = { version = "=29.0.1", default-features = false, features = ["component-model", "runtime", "cranelift"] }
 wat = "1"
 
