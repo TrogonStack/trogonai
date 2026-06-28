@@ -242,6 +242,137 @@ fn agent_view_gate_layer_noop_constructor() {
 }
 
 #[test]
+fn agent_view_gate_layer_with_gate_wraps_arbitrary_impl() {
+    let gate: Arc<dyn AgentViewGate> = Arc::new(NoopAgentViewGate);
+    let layer = AgentViewGateLayer::with_gate(gate.clone());
+    assert!(!layer.gate.is_enabled());
+}
+
+#[tokio::test]
+async fn live_gate_is_enabled() {
+    let client = std::sync::Arc::new(FakeBulkClient::new(vec![]));
+    let gate = LiveAgentViewGate::new(client, SpiceDbSessionCache::new(ZedTokenTtl::from_secs(60)));
+    assert!(gate.is_enabled());
+}
+
+#[tokio::test]
+async fn session_cache_evicts_stale_entry_on_read() {
+    // ZedTokenTtl clamps to a 1-second minimum, so the stale-eviction
+    // branch needs at least one second of wall-clock to fire. Worth
+    // covering once because losing this branch would make the cache
+    // silently serve unbounded-stale tokens.
+    let cache = SpiceDbSessionCache::new(ZedTokenTtl::from_secs(1));
+    let key = SpiceDbSessionKey::new("alice", "acme");
+    cache.insert(key.clone(), "tok".into()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    assert!(cache.get(&key).await.is_none(), "stale entry must be evicted on read");
+    assert!(cache.get(&key).await.is_none());
+}
+
+#[tokio::test]
+async fn default_bulk_check_falls_back_to_per_agent_fanout() {
+    // The default trait impl loops `check_agent_view` per item.
+    // Cover it by exercising NoopAgentViewGate's default path
+    // (Noop overrides only `check_agent_view`, inherits the
+    // default bulk impl).
+    let gate = NoopAgentViewGate;
+    let session = SpiceDbSessionKey::new("alice", "acme");
+    let principal = principal_with_subject("user:alice");
+    let outcomes = gate
+        .bulk_check_agent_view(&session, &principal, &[agent("a1"), agent("a2"), agent("a3")])
+        .await;
+    assert_eq!(outcomes.len(), 3);
+    assert!(outcomes.iter().all(|o| *o == AgentViewCheckOutcome::Allowed));
+}
+
+#[tokio::test]
+async fn live_gate_pair_with_no_response_maps_to_denied() {
+    // A pair with `response: None` must surface as `Denied`, not
+    // TransportError. Covers the `None` arm of `pair_is_allowed`
+    // alongside the Item-not-HasPermission case. The Error arm
+    // takes a generated `google::rpc::Status` that isn't reachable
+    // outside the spicedb-grpc-tonic crate, so the test exercises
+    // the `None` neighbour instead -- the two arms share the same
+    // `false` mapping in `pair_is_allowed`.
+    struct NoResponsePairClient;
+    #[async_trait]
+    impl BulkImportPermissionCheck for NoResponsePairClient {
+        async fn check_bulk_permissions(
+            &self,
+            request: authzed::v1::CheckBulkPermissionsRequest,
+        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+            let pairs = request
+                .items
+                .into_iter()
+                .map(|_| CheckBulkPermissionsPair {
+                    request: None,
+                    response: None,
+                })
+                .collect();
+            Ok(CheckBulkPermissionsResponse {
+                checked_at: Some(ZedToken { token: "zed".into() }),
+                pairs,
+            })
+        }
+
+        async fn write_relationships(
+            &self,
+            _request: WriteRelationshipsRequest,
+        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+            unimplemented!()
+        }
+    }
+    let gate = LiveAgentViewGate::new(
+        std::sync::Arc::new(NoResponsePairClient),
+        SpiceDbSessionCache::new(ZedTokenTtl::from_secs(60)),
+    );
+    let session = SpiceDbSessionKey::new("alice", "acme");
+    let principal = principal_with_subject("user:alice");
+    let outcomes = gate.bulk_check_agent_view(&session, &principal, &[agent("a1")]).await;
+    assert_eq!(outcomes, vec![AgentViewCheckOutcome::Denied]);
+}
+
+#[tokio::test]
+async fn live_gate_transport_error_returns_transport_error_per_agent() {
+    // gRPC failure (timeout, connection refused, etc.) must
+    // surface as TransportError -- distinct from a policy Denied
+    // -- so audit consumers can tell 'we couldn't ask' from
+    // 'policy said no'.
+    struct ErrClient;
+    #[async_trait]
+    impl BulkImportPermissionCheck for ErrClient {
+        async fn check_bulk_permissions(
+            &self,
+            _request: authzed::v1::CheckBulkPermissionsRequest,
+        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+            Err(tonic::Status::unavailable("backend unreachable"))
+        }
+        async fn write_relationships(
+            &self,
+            _request: WriteRelationshipsRequest,
+        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+            unimplemented!()
+        }
+    }
+    let gate = LiveAgentViewGate::new(
+        std::sync::Arc::new(ErrClient),
+        SpiceDbSessionCache::new(ZedTokenTtl::from_secs(60)),
+    );
+    let session = SpiceDbSessionKey::new("alice", "acme");
+    let principal = principal_with_subject("user:alice");
+    let outcomes = gate
+        .bulk_check_agent_view(&session, &principal, &[agent("a1"), agent("a2")])
+        .await;
+    assert_eq!(
+        outcomes,
+        vec![
+            AgentViewCheckOutcome::TransportError,
+            AgentViewCheckOutcome::TransportError
+        ]
+    );
+}
+
+#[test]
 fn parse_subject_id_strips_slash_and_colon_prefixes() {
     assert_eq!(parse_subject_id("user/alice"), Some("alice".to_owned()));
     assert_eq!(parse_subject_id("user:alice"), Some("alice".to_owned()));
