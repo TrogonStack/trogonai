@@ -23,7 +23,8 @@ use authzed::v1::{
 use crate::agent_id::A2aAgentId;
 use crate::catalog::agent_view::{AgentViewCheckOutcome, SpiceDbSessionKey};
 use crate::catalog::import_gate::{
-    BulkImportPermissionCheck, SpiceDbImportGateBuildError, SpiceDbPrincipal, ZedTokenSnapshot, ZedTokenTtl,
+    BulkImportPermissionCheck, LiveBulkImportPermissionClient, SpiceDbEndpoint, SpiceDbImportGateBuildError,
+    SpiceDbPrincipal, SpiceDbToken, ZedTokenSnapshot, ZedTokenTtl,
     spicedb_subject_from_principal as import_gate_spicedb_subject_from_principal,
 };
 
@@ -146,9 +147,32 @@ pub struct LiveAgentViewGate {
     session_cache: SpiceDbSessionCache,
 }
 
+impl std::fmt::Debug for LiveAgentViewGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Tonic client and cache contents aren't Debug; emit a
+        // constructed-marker so callers can format the gate
+        // without leaking the bearer token or cached zed tokens.
+        f.debug_struct("LiveAgentViewGate").finish_non_exhaustive()
+    }
+}
+
 impl LiveAgentViewGate {
     pub fn new(client: Arc<dyn BulkImportPermissionCheck>, session_cache: SpiceDbSessionCache) -> Self {
         Self { client, session_cache }
+    }
+
+    /// Connect a tonic-backed bulk-permission client at the given
+    /// SpiceDB endpoint and wrap it as a `LiveAgentViewGate`.
+    /// Construction is async because the underlying gRPC channel
+    /// dials eagerly so callers get the endpoint/token validation
+    /// errors at boot rather than on first request.
+    pub async fn connect(
+        endpoint: &SpiceDbEndpoint,
+        token: &SpiceDbToken,
+        ttl: ZedTokenTtl,
+    ) -> Result<Self, SpiceDbImportGateBuildError> {
+        let client = LiveBulkImportPermissionClient::connect(endpoint, token).await?;
+        Ok(Self::new(Arc::new(client), SpiceDbSessionCache::new(ttl)))
     }
 }
 
@@ -312,6 +336,14 @@ pub struct AgentViewGateLayer {
     pub gate: Arc<dyn AgentViewGate>,
 }
 
+impl std::fmt::Debug for AgentViewGateLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentViewGateLayer")
+            .field("gate_is_enabled", &self.gate.is_enabled())
+            .finish()
+    }
+}
+
 impl AgentViewGateLayer {
     pub fn noop() -> Self {
         Self {
@@ -321,6 +353,58 @@ impl AgentViewGateLayer {
 
     pub fn with_gate(gate: Arc<dyn AgentViewGate>) -> Self {
         Self { gate }
+    }
+
+    /// Resolve a layer from environment. Returns a Noop layer when
+    /// the gate is disabled; fails closed when an operator
+    /// enables the gate without providing both endpoint and
+    /// token, and surfaces transport errors at boot rather than
+    /// at first request.
+    pub async fn from_env<E: trogon_std::env::ReadEnv>(env: &E) -> Result<Self, SpiceDbImportGateBuildError> {
+        let ttl = tier1_zed_token_ttl(env)?;
+        if !tier1_enabled(env) {
+            return Ok(Self::noop());
+        }
+        let Some((endpoint, token)) = optional_tier1_credentials(env)? else {
+            return Err(SpiceDbImportGateBuildError::Connect(format!(
+                "{ENV_TIER1_SPICEDB_ENABLED}=on requires {ENV_TIER1_SPICEDB_ENDPOINT} and {ENV_TIER1_SPICEDB_TOKEN}"
+            )));
+        };
+        let gate = LiveAgentViewGate::connect(&endpoint, &token, ttl).await?;
+        Ok(Self::with_gate(Arc::new(gate)))
+    }
+}
+
+fn optional_tier1_credentials<E: trogon_std::env::ReadEnv>(
+    env: &E,
+) -> Result<Option<(SpiceDbEndpoint, SpiceDbToken)>, SpiceDbImportGateBuildError> {
+    let endpoint_raw = match env.var(ENV_TIER1_SPICEDB_ENDPOINT) {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(SpiceDbImportGateBuildError::InvalidEndpoint(
+                ENV_TIER1_SPICEDB_ENDPOINT.into(),
+            ));
+        }
+    };
+    let token_raw = match env.var(ENV_TIER1_SPICEDB_TOKEN) {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(SpiceDbImportGateBuildError::InvalidToken(
+                ENV_TIER1_SPICEDB_TOKEN.into(),
+            ));
+        }
+    };
+    match (endpoint_raw, token_raw) {
+        (None, None) => Ok(None),
+        (Some(endpoint), Some(token)) => Ok(Some((SpiceDbEndpoint::parse(endpoint)?, SpiceDbToken::parse(token)?))),
+        (Some(_), None) => Err(SpiceDbImportGateBuildError::Connect(format!(
+            "{ENV_TIER1_SPICEDB_TOKEN} is required when {ENV_TIER1_SPICEDB_ENDPOINT} is set"
+        ))),
+        (None, Some(_)) => Err(SpiceDbImportGateBuildError::Connect(format!(
+            "{ENV_TIER1_SPICEDB_ENDPOINT} is required when {ENV_TIER1_SPICEDB_TOKEN} is set"
+        ))),
     }
 }
 

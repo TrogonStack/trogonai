@@ -568,7 +568,7 @@ version = "0.1.0"
 dependencies = [
  "ard-catalog",
  "axum",
- "base64 0.22.1",
+ "base64",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
