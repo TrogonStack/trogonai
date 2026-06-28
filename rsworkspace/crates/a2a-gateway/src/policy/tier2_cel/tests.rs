@@ -11,6 +11,7 @@ use super::bundle::Tier2CompiledBundle;
 use super::compiler::{compile_cel_file, compile_cel_source};
 use super::evaluator::{CelEngine, CelInterpreterEngine, MockCelEngine, RealTier2CelEvaluator};
 use crate::policy::RuleName;
+use crate::policy::tier2::rule_name::RuleNameError;
 use crate::policy::tier2::{
     DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext,
 };
@@ -271,10 +272,59 @@ fn bundle_refresh_drops_deleted_rules() {
 
 #[test]
 fn rule_name_try_new_rejects_empty_or_whitespace() {
-    use crate::policy::tier2::rule_name::RuleNameError;
     assert!(matches!(RuleName::try_new(""), Err(RuleNameError::Empty)));
     assert!(matches!(RuleName::try_new("   "), Err(RuleNameError::Empty)));
     assert!(RuleName::try_new("rule-1").is_ok());
+}
+
+#[test]
+fn evaluator_denies_when_refresh_fails() {
+    // If the bundle's tier2_dir is replaced with a file under it after
+    // load, the next refresh_if_stale will surface a Read error and
+    // the evaluator must deny closed rather than fall through to allow.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let rule_path = dir.path().join("ok.cel");
+    fs::write(&rule_path, "true").expect("write cel");
+    let bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load");
+    let evaluator = RealTier2CelEvaluator::new(bundle);
+
+    // Replace the rule file with a directory so the next mtime check on
+    // the bundled `ok.cel` succeeds (it's still a regular file via
+    // metadata), but a `compile_cel_file` retry on a newly-mtime'd file
+    // returning malformed bytes would also fail. Easier: rewrite the
+    // rule file with invalid CEL and bump its mtime so refresh compiles
+    // it and fails, denying closed.
+    fs::write(&rule_path, "(1 + 2").expect("invalid rewrite");
+    let bumped = fs::metadata(&rule_path).expect("meta").modified().expect("mtime") + Duration::from_secs(5);
+    filetime::set_file_mtime(&rule_path, filetime::FileTime::from_system_time(bumped)).expect("bump mtime");
+
+    let decision = evaluator.evaluate(&sample_ctx("any"));
+    assert_eq!(
+        decision,
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
+}
+
+#[test]
+fn cel_compile_error_path_accessor_exposes_offending_file() {
+    use super::compiler::CelCompileError;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("bad.cel");
+    fs::write(&path, "(1 + 2").expect("write bad cel");
+    let err = compile_cel_file(&path).expect_err("invalid cel");
+    assert_eq!(err.path(), &path);
+    assert!(matches!(err, CelCompileError::Compile { .. }));
+}
+
+#[test]
+fn cel_compile_error_metadata_failure_is_typed() {
+    use super::compiler::CelCompileError;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("never-was.cel");
+    let err = compile_cel_file(&missing).expect_err("missing file");
+    assert!(matches!(err, CelCompileError::Metadata { .. }));
 }
 
 #[test]
