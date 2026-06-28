@@ -8,9 +8,10 @@ use a2a_nats::server::A2aMethod;
 use a2a_nats::{A2aAgentId, A2aTaskId};
 
 use super::bundle::Tier2CompiledBundle;
-use super::compiler::{compile_cel_file, compile_cel_source};
+use super::compiler::{CelCompileError, compile_cel_file, compile_cel_source};
 use super::evaluator::{CelEngine, CelInterpreterEngine, MockCelEngine, RealTier2CelEvaluator};
 use crate::policy::RuleName;
+use crate::policy::error::Tier2EvalError;
 use crate::policy::tier2::rule_name::RuleNameError;
 use crate::policy::tier2::{
     DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext,
@@ -309,7 +310,6 @@ fn evaluator_denies_when_refresh_fails() {
 
 #[test]
 fn cel_compile_error_path_accessor_exposes_offending_file() {
-    use super::compiler::CelCompileError;
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("bad.cel");
     fs::write(&path, "(1 + 2").expect("write bad cel");
@@ -320,7 +320,6 @@ fn cel_compile_error_path_accessor_exposes_offending_file() {
 
 #[test]
 fn cel_compile_error_metadata_failure_is_typed() {
-    use super::compiler::CelCompileError;
     let dir = tempfile::tempdir().expect("tempdir");
     let missing = dir.path().join("never-was.cel");
     let err = compile_cel_file(&missing).expect_err("missing file");
@@ -369,4 +368,22 @@ fn cel_engine_non_bool_result_is_eval_error() {
     // (yet). Cheaply assert it's the right error class via Debug, not
     // Display — Display is for human logs, not control flow.
     let _ = format!("{err:?}");
+}
+
+#[test]
+fn mock_engine_propagates_engine_error_as_deny() {
+    // Cover the MockCelEngine error-branch: when the mock is configured
+    // to fail a rule with an interpreter error, the evaluator must
+    // surface that as a deny tagged `evaluation_error` rather than
+    // letting the error bubble up to the caller.
+    let mut outcomes = BTreeMap::new();
+    outcomes.insert(RuleName::new("crashes"), Err(Tier2EvalError::execution("boom")));
+    let (_dir, bundle) = bundle_with_rule("crashes", "true");
+    let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
 }
