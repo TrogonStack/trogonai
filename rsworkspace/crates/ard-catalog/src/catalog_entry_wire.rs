@@ -20,6 +20,8 @@ pub enum CatalogEntryWireError {
     MissingDisplayName,
     #[error("type is required")]
     MissingMediaType,
+    #[error("updatedAt must be an RFC 3339 date-time")]
+    InvalidUpdatedAt,
     #[error(transparent)]
     Identifier(#[from] ArdIdentifierError),
     #[error(transparent)]

@@ -54,6 +54,11 @@ impl CatalogEntry {
             Some(metadata) => Some(Metadata::new(metadata)?),
             None => None,
         };
+        if let Some(updated_at) = wire.updated_at.as_deref()
+            && time::OffsetDateTime::parse(updated_at, &time::format_description::well_known::Rfc3339).is_err()
+        {
+            return Err(CatalogEntryWireError::InvalidUpdatedAt);
+        }
 
         Ok(Self {
             identifier,

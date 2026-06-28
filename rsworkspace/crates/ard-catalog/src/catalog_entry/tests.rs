@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::catalog_entry::CatalogEntry;
-use crate::catalog_entry_wire::CatalogEntryWire;
+use crate::catalog_entry_wire::{CatalogEntryWire, CatalogEntryWireError};
 
 fn sample_entry_wire() -> CatalogEntryWire {
     CatalogEntryWire {
@@ -19,6 +19,31 @@ fn sample_entry_wire() -> CatalogEntryWire {
         metadata: None,
         trust_manifest: None,
     }
+}
+
+#[test]
+fn rejects_invalid_updated_at() {
+    let mut wire = sample_entry_wire();
+    wire.updated_at = Some("not-a-timestamp".to_owned());
+    assert_eq!(
+        CatalogEntry::try_from_wire(wire),
+        Err(CatalogEntryWireError::InvalidUpdatedAt)
+    );
+
+    let mut wire = sample_entry_wire();
+    wire.updated_at = Some("2025-01-15".to_owned());
+    assert_eq!(
+        CatalogEntry::try_from_wire(wire),
+        Err(CatalogEntryWireError::InvalidUpdatedAt)
+    );
+}
+
+#[test]
+fn accepts_rfc3339_updated_at() {
+    let mut wire = sample_entry_wire();
+    wire.updated_at = Some("2025-01-15T08:30:00Z".to_owned());
+    let entry = CatalogEntry::try_from_wire(wire).unwrap();
+    assert_eq!(entry.updated_at(), Some("2025-01-15T08:30:00Z"));
 }
 
 #[test]
