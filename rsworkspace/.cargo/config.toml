@@ -1,16 +1,13 @@
 [alias]
-# Ignore generated proto and the WASM-guest decider pipeline. The guest pipeline
-# (guest SDK, the `export_decider!` macro output, and the conformance CLI)
-# executes inside the wasm32 component and is verified by the dedicated
-# `wasm-decider` CI job (zero-import assertion + sim/YAML conformance suites);
-# host llvm-cov cannot instrument code that runs in the guest, so it is excluded
-# from the host gate.
+# Ignore generated sources. Codegen output (proto/semconv `src/gen`) is not
+# authored by hand and is not meaningfully covered by host tests, so it is
+# excluded from the host coverage gate.
 cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*|crates/(trogon-decider-guest-sdk|trogon-decider-guest-macros)/.*|cli/trogon-decider-test/.*",
+    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*",
 ]
 
 [target.wasm32-wasip2]
