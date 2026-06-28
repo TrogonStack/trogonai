@@ -116,7 +116,7 @@ uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 # Auth callout
 hex = "=0.4.3"
 hmac = "=0.12.1"
-jsonwebtoken = "=9.3.0"
+jsonwebtoken = "=10.3.0"
 nats-jwt-rs = "=0.1.1"
 nkeys = { version = "=0.4.5", features = ["xkeys"] }
 rand = "=0.8.5"
