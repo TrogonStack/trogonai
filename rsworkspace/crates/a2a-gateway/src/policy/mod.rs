@@ -11,12 +11,17 @@
 //! the runtime keeps a single audit surface across tiers.
 
 pub mod error;
+pub mod per_skill;
 pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
 pub mod tier3_redaction;
 
 pub use error::{PolicyError, Tier2EvalError};
+pub use per_skill::{
+    PerSkillDecision, PerSkillPolicy, PerSkillPolicyConfig, PerSkillRequest, ResolvedRule, SkillEffect, SkillRule,
+    SkillScope,
+};
 pub use tier1_declarative::{
     ENV_TIER1_BUNDLE_DIR, ENV_TIER1_DECLARATIVE_ENABLED, FixedTier1Clock, GatewayTier1DeclarativeLayer,
     NoopTier1DeclarativeGate, RealTier1DeclarativeGate, SystemTier1Clock, TIER1_BUNDLE_EXTENSION, Tier1Clock,
