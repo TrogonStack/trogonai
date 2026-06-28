@@ -81,7 +81,10 @@ fn test_in_memory_env_vars() {
 
     let mut vars = env.vars();
     vars.sort();
-    assert_eq!(vars, vec![("A".to_string(), "1".to_string()), ("B".to_string(), "2".to_string())]);
+    assert_eq!(
+        vars,
+        vec![("A".to_string(), "1".to_string()), ("B".to_string(), "2".to_string())]
+    );
 }
 
 #[test]

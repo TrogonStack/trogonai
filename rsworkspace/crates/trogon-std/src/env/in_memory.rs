@@ -60,7 +60,11 @@ impl ReadEnv for InMemoryEnv {
 #[cfg(any(test, feature = "test-support"))]
 impl EnumerateEnv for InMemoryEnv {
     fn vars(&self) -> Vec<(String, String)> {
-        self.vars.borrow().iter().map(|(key, value)| (key.clone(), value.clone())).collect()
+        self.vars
+            .borrow()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
     }
 }
 
