@@ -44,13 +44,30 @@ pub struct RedactionRewrite {
     kind: RewriteKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RedactionRewriteError {
+    #[error("redaction rewrite path must not be empty")]
+    EmptyPath,
+}
+
 impl RedactionRewrite {
-    pub fn new(skill_id: SkillId, path_jsonpath: impl Into<String>, kind: RewriteKind) -> Self {
-        Self {
-            skill_id,
-            path_jsonpath: path_jsonpath.into(),
-            kind,
+    /// Construct an audit-bound redaction rewrite. Rejects empty paths
+    /// so a malformed entry can't land in the audit subject and silently
+    /// stand in for a real rewrite.
+    pub fn new(
+        skill_id: SkillId,
+        path_jsonpath: impl Into<String>,
+        kind: RewriteKind,
+    ) -> Result<Self, RedactionRewriteError> {
+        let path_jsonpath = path_jsonpath.into();
+        if path_jsonpath.trim().is_empty() {
+            return Err(RedactionRewriteError::EmptyPath);
         }
+        Ok(Self {
+            skill_id,
+            path_jsonpath,
+            kind,
+        })
     }
 
     pub fn skill_id(&self) -> &SkillId {

@@ -33,6 +33,7 @@ fn manifest_for(skill: &str, path: &str) -> Tier3SkillManifest {
         path,
         RewriteKind::Masked,
     )
+    .expect("valid test manifest path")
 }
 
 #[test]
@@ -166,7 +167,8 @@ fn dispatch_path_tier3_allow_then_forward_payload_bytes() {
     let gate = RealTier3RedactionGate::new(invoker);
 
     let raw = br#"{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"parts":[{"text":"open"}]}}}"#;
-    let mut ctx = Tier3EvaluationContext::from_json_rpc_payload("message/send", Some("caller".into()), raw, manifests);
+    let mut ctx = Tier3EvaluationContext::from_json_rpc_payload("message/send", Some("caller".into()), raw, manifests)
+        .expect("valid test json payload");
 
     let decision = gate.redact(&mut ctx);
     assert!(decision.is_allow());
@@ -179,18 +181,17 @@ fn dispatch_path_tier3_allow_then_forward_payload_bytes() {
 fn refusal_reason_round_trips_through_sentinel_tag() {
     assert_eq!(
         Tier3RefusalReason::from_sentinel_tag("UnauthorizedDataCategory"),
-        Tier3RefusalReason::UnauthorizedDataCategory
+        Some(Tier3RefusalReason::UnauthorizedDataCategory)
     );
     assert_eq!(
         Tier3RefusalReason::from_sentinel_tag("InvalidPayloadShape"),
-        Tier3RefusalReason::InvalidPayloadShape
+        Some(Tier3RefusalReason::InvalidPayloadShape)
     );
-    // Unknown tags fall through to SkillPolicyDeniedPart so a guest can't
-    // suppress the audit by emitting a novel reason string.
-    assert_eq!(
-        Tier3RefusalReason::from_sentinel_tag("anything-else"),
-        Tier3RefusalReason::SkillPolicyDeniedPart
-    );
+    // Unknown tags return None so the caller can decide whether to fall
+    // through to SkillPolicyDeniedPart or surface the unknown tag —
+    // returning a default here would let a guest suppress the audit by
+    // emitting an unrecognized reason string.
+    assert_eq!(Tier3RefusalReason::from_sentinel_tag("anything-else"), None);
     assert_eq!(
         Tier3RefusalReason::SkillPolicyDeniedPart.as_str(),
         "SkillPolicyDeniedPart"
@@ -251,7 +252,8 @@ fn redaction_rewrite_display_renders_skill_kind_path() {
         SkillId::new("pii-email").expect("skill"),
         "$.params.message",
         RewriteKind::Masked,
-    );
+    )
+    .expect("non-empty path");
     assert_eq!(format!("{rewrite}"), "pii-email:Masked@$.params.message");
     assert_eq!(rewrite.skill_id().as_str(), "pii-email");
     assert_eq!(rewrite.path_jsonpath(), "$.params.message");
@@ -266,7 +268,8 @@ fn audit_rewrites_returns_none_for_empty() {
 #[test]
 fn audit_rewrites_serializes_each_rewrite() {
     let rewrite =
-        super::rewrite::RedactionRewrite::new(SkillId::new("pii").expect("skill"), "$.x", RewriteKind::Removed);
+        super::rewrite::RedactionRewrite::new(SkillId::new("pii").expect("skill"), "$.x", RewriteKind::Removed)
+            .expect("non-empty path");
     let value = super::tier3_redaction_audit_rewrites(&[rewrite]).expect("some");
     let array = value.as_array().expect("array");
     assert_eq!(array.len(), 1);
@@ -306,14 +309,17 @@ fn manifest_parse_rejects_missing_or_empty_json_path() {
 }
 
 #[test]
-fn manifest_parse_warns_on_skill_id_mismatch_but_uses_manifest_value() {
-    // When the manifest carries a different skill_id than the file
-    // stem, we trust the manifest value but log a warning so the audit
-    // surface can flag the inconsistency.
+fn manifest_parse_pins_skill_id_to_file_stem_and_warns_on_mismatch() {
+    // The wasm module is registered under the bundle file stem, so
+    // when the manifest carries a divergent `skill_id` field we must
+    // keep the file-stem identity (so the host's wasm lookup hits)
+    // and surface the inconsistency as a warning rather than letting
+    // the manifest override silently produce a "no module found"
+    // passthrough-allow at runtime.
     let file_skill = SkillId::new("pii").expect("skill");
     let raw = serde_json::json!({"json_path": "$.x", "skill_id": "pii-override"});
-    let manifest = Tier3SkillManifest::parse(file_skill, &raw).expect("parsed");
-    assert_eq!(manifest.skill_id().as_str(), "pii-override");
+    let manifest = Tier3SkillManifest::parse(file_skill.clone(), &raw).expect("parsed");
+    assert_eq!(manifest.skill_id(), &file_skill);
 }
 
 #[test]
@@ -375,23 +381,35 @@ fn real_gate_missing_path_skips_skill_without_error() {
 #[test]
 fn merge_forward_audit_rewrites_with_only_tier3_returns_tier3_array() {
     let rewrite =
-        super::rewrite::RedactionRewrite::new(SkillId::new("pii").expect("skill"), "$.x", RewriteKind::Masked);
+        super::rewrite::RedactionRewrite::new(SkillId::new("pii").expect("skill"), "$.x", RewriteKind::Masked)
+            .expect("non-empty path");
     let agent_id = a2a_nats::A2aAgentId::new("planner").expect("agent");
-    let (audit, stream_consumer) = super::merge_forward_audit_rewrites(
+    let (audit, _stream_consumer) = super::merge_forward_audit_rewrites(
         &[rewrite],
         "a2a.gateway.bot.message.send",
         "a2a.agent.planner.message.send",
         &agent_id,
         "message.send",
     );
-    assert!(audit.is_some());
-    let _ = stream_consumer;
+    // Stronger assertion: the merged audit value must carry the
+    // formatted tier-3 rewrite label as one of its entries — not just
+    // `Some(_)` — so a regression that returned a placeholder object
+    // or dropped the tier-3 contribution while keeping the route
+    // rewrite would still fail this check.
+    let array = audit.as_ref().expect("audit some").as_array().expect("audit array");
+    assert!(
+        array.iter().any(|v| v.as_str() == Some("pii:Masked@$.x")),
+        "expected formatted tier-3 rewrite label in merged audit array, got {array:?}",
+    );
 }
 
 #[test]
-fn evaluation_context_from_json_rpc_payload_handles_invalid_bytes() {
-    let ctx = Tier3EvaluationContext::from_json_rpc_payload("m", None, b"not-json", BTreeMap::new());
-    assert_eq!(*ctx.payload(), serde_json::Value::Null);
+fn evaluation_context_from_json_rpc_payload_returns_err_on_invalid_bytes() {
+    // Fail-closed contract: malformed payload bytes must surface as a
+    // typed serde error so the gateway can map them to a denial, not
+    // silently coerce to `Value::Null` and miss every json_path.
+    let result = Tier3EvaluationContext::from_json_rpc_payload("m", None, b"not-json", BTreeMap::new());
+    assert!(result.is_err());
 }
 
 #[test]
@@ -400,7 +418,7 @@ fn evaluation_context_accessors_round_trip() {
     let skill = SkillId::new("pii").expect("skill");
     manifests.insert(
         skill.clone(),
-        Tier3SkillManifest::new(skill, "$.x", RewriteKind::Masked),
+        Tier3SkillManifest::new(skill, "$.x", RewriteKind::Masked).expect("valid path"),
     );
     let ctx = Tier3EvaluationContext::new("m", Some("c".into()), serde_json::json!({"a":1}), manifests.clone());
     assert_eq!(ctx.method(), "m");
@@ -481,6 +499,82 @@ fn real_gate_maps_wasm_engine_error_to_wasm_abi() {
             kind: Tier3EngineError::WasmAbi,
         }
     );
+}
+
+#[test]
+fn real_gate_refusal_error_from_invoker_returns_refuse_with_reason() {
+    // On main, `WasmRedactorHost::redact_part_bytes` converts the
+    // refusal sentinel into `RedactionError::Tier3Refusal(Some(tag))`
+    // before returning. The gate must route that into a `Refuse`
+    // decision with the parsed reason, not a `Error { kind: InvalidPayload }`.
+    let skill = SkillId::new("typed-refusal").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        skill.clone(),
+        manifest_for("typed-refusal", "/params/message/parts/0/text"),
+    );
+    let invoker = MockTier3PartInvoker::with_error(
+        skill.clone(),
+        RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into())),
+    );
+    let gate = RealTier3RedactionGate::new(invoker);
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, sample_payload(), manifests);
+    assert_eq!(
+        gate.redact(&mut ctx),
+        Tier3RedactionDecision::Refuse {
+            reason: Tier3RefusalReason::UnauthorizedDataCategory,
+            rule: skill,
+        }
+    );
+}
+
+#[test]
+fn real_gate_refusal_error_with_unknown_tag_falls_back_to_skill_policy_denied() {
+    let skill = SkillId::new("unknown-refusal").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        skill.clone(),
+        manifest_for("unknown-refusal", "/params/message/parts/0/text"),
+    );
+    let invoker = MockTier3PartInvoker::with_error(
+        skill.clone(),
+        RedactionError::Tier3Refusal(Some("MysteryReason".into())),
+    );
+    let gate = RealTier3RedactionGate::new(invoker);
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, sample_payload(), manifests);
+    assert_eq!(
+        gate.redact(&mut ctx),
+        Tier3RedactionDecision::Refuse {
+            reason: Tier3RefusalReason::SkillPolicyDeniedPart,
+            rule: skill,
+        }
+    );
+}
+
+#[test]
+fn tier3_skill_manifest_new_rejects_empty_and_unrecognized_paths() {
+    let skill = SkillId::new("pii").expect("skill");
+    assert!(matches!(
+        Tier3SkillManifest::new(skill.clone(), "", RewriteKind::Masked),
+        Err(super::manifest::Tier3SkillManifestError::EmptyJsonPath)
+    ));
+    assert!(matches!(
+        Tier3SkillManifest::new(skill.clone(), "   ", RewriteKind::Masked),
+        Err(super::manifest::Tier3SkillManifestError::EmptyJsonPath)
+    ));
+    assert!(matches!(
+        Tier3SkillManifest::new(skill, "params.message", RewriteKind::Masked),
+        Err(super::manifest::Tier3SkillManifestError::InvalidJsonPath(_))
+    ));
+}
+
+#[test]
+fn redaction_rewrite_new_rejects_empty_path() {
+    let skill = SkillId::new("pii").expect("skill");
+    assert!(matches!(
+        super::rewrite::RedactionRewrite::new(skill, "  ", RewriteKind::Masked),
+        Err(super::rewrite::RedactionRewriteError::EmptyPath)
+    ));
 }
 
 #[test]

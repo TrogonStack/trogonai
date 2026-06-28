@@ -27,14 +27,20 @@ impl Tier3EvaluationContext {
         }
     }
 
+    /// Build a context from a JSON-RPC wire payload. Returns the typed
+    /// serde error if the payload doesn't deserialize — without this
+    /// fail-closed surface, an unparseable payload would become a
+    /// `Value::Null` context, every manifest json_path would miss, and
+    /// the gate would silently fall through to `Allow { rewrites: [] }`,
+    /// letting malformed input bypass Tier-3 instead of failing closed.
     pub fn from_json_rpc_payload(
         method: impl Into<String>,
         caller_id: Option<String>,
         raw_payload: &[u8],
         skill_manifests: BTreeMap<SkillId, Tier3SkillManifest>,
-    ) -> Self {
-        let payload = serde_json::from_slice(raw_payload).unwrap_or(serde_json::Value::Null);
-        Self::new(method, caller_id, payload, skill_manifests)
+    ) -> Result<Self, serde_json::Error> {
+        let payload = serde_json::from_slice(raw_payload)?;
+        Ok(Self::new(method, caller_id, payload, skill_manifests))
     }
 
     pub fn method(&self) -> &str {

@@ -10,11 +10,20 @@ pub enum Tier3RefusalReason {
 }
 
 impl Tier3RefusalReason {
-    pub fn from_sentinel_tag(tag: &str) -> Self {
+    /// Convert a sentinel-emitted reason tag into the typed enum.
+    ///
+    /// Returns `None` for unknown tags — the caller decides whether to
+    /// treat the unknown sentinel as `SkillPolicyDeniedPart`, route it
+    /// as an engine error, or otherwise. Without this fallible boundary,
+    /// any typo or new sentinel tag would silently map to
+    /// `SkillPolicyDeniedPart` and mask engine/manifest mismatches as
+    /// legitimate policy denials.
+    pub fn from_sentinel_tag(tag: &str) -> Option<Self> {
         match tag {
-            "InvalidPayloadShape" => Self::InvalidPayloadShape,
-            "UnauthorizedDataCategory" => Self::UnauthorizedDataCategory,
-            _ => Self::SkillPolicyDeniedPart,
+            "SkillPolicyDeniedPart" => Some(Self::SkillPolicyDeniedPart),
+            "InvalidPayloadShape" => Some(Self::InvalidPayloadShape),
+            "UnauthorizedDataCategory" => Some(Self::UnauthorizedDataCategory),
+            _ => None,
         }
     }
 
@@ -27,10 +36,13 @@ impl Tier3RefusalReason {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum Tier3EngineError {
+    #[error("WasmTrap")]
     WasmTrap,
+    #[error("WasmAbi")]
     WasmAbi,
+    #[error("InvalidPayload")]
     InvalidPayload,
 }
 
