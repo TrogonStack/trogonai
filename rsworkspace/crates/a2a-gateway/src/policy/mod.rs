@@ -16,6 +16,7 @@ pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
 pub mod tier3_redaction;
+pub mod wasmtime_substrate;
 
 pub use error::{PolicyError, Tier2EvalError};
 pub use per_skill::{
@@ -42,3 +43,4 @@ pub use tier3_redaction::{
     gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, merge_forward_audit_rewrites,
     tier3_redaction_audit_rewrites,
 };
+pub use wasmtime_substrate::WasmtimeSubstrate;
