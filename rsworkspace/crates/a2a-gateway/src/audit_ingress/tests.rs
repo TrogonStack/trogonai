@@ -17,10 +17,14 @@ fn tenant(s: &str) -> AuditTenant {
     AuditTenant::new(s).expect("non-empty test tenant")
 }
 
+fn make_subject(prefix: &str, outcome: IngressAuditOutcome, skill: &SkillId) -> String {
+    ingress_audit_subject(prefix, outcome, skill).expect("valid test audit subject")
+}
+
 #[test]
 fn subject_segments_skill_with_dots() {
     // `.` escapes to `_d` so the skill segment is one NATS token.
-    let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
+    let subject = make_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
     assert_eq!(subject, "a2a.a2a.audit.allow.ingress.docs_dsearch");
 }
 
@@ -28,7 +32,7 @@ fn subject_segments_skill_with_dots() {
 fn subject_replaces_each_nats_unsafe_char() {
     // `.`, `*`, `>` each split or wildcard a subject; reversible
     // escapes `_d`/`_s`/`_g` keep the segment a single token.
-    let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Deny, &skill("a.b*c>d"));
+    let subject = make_subject("a2a", IngressAuditOutcome::Deny, &skill("a.b*c>d"));
     assert_eq!(subject, "a2a.a2a.audit.deny.ingress.a_db_sc_gd");
 }
 
@@ -39,7 +43,7 @@ fn subject_normalizes_plain_ascii_space() {
     // normalizes the broader `is_whitespace` class as
     // defense-in-depth, but the path actually exercised in
     // production goes through this case.
-    let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("a b c"));
+    let subject = make_subject("a2a", IngressAuditOutcome::Allow, &skill("a b c"));
     assert_eq!(subject, "a2a.a2a.audit.allow.ingress.a_wb_wc");
 }
 
@@ -49,8 +53,8 @@ fn skill_token_avoids_underscore_collision() {
     // collide on the same audit subject because both mapped to
     // `_`. The reversible escape (`_` → `__`, `.` → `_d`) keeps
     // them distinguishable.
-    let dotted = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
-    let underscored = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs_search"));
+    let dotted = make_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
+    let underscored = make_subject("a2a", IngressAuditOutcome::Allow, &skill("docs_search"));
     assert_ne!(
         dotted, underscored,
         "`docs.search` and `docs_search` must publish to different subjects",
@@ -242,6 +246,30 @@ fn value_object_accessors_round_trip_through_as_str() {
     assert_eq!(a.as_str(), "planner");
     let tp = AuditTraceparent::new("00-aaa-bbb-01").expect("valid");
     assert_eq!(tp.as_str(), "00-aaa-bbb-01");
+}
+
+#[test]
+fn skill_token_escapes_non_ascii() {
+    // SkillId allows non-ASCII text (e.g. emoji, accented chars),
+    // but NatsToken is ASCII-only. The helper escapes each non-
+    // ASCII char to `_u<hex>` so the produced subject remains
+    // publishable.
+    let subject = make_subject("a2a", IngressAuditOutcome::Allow, &skill("café"));
+    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.caf_u0000e9");
+}
+
+#[test]
+fn ingress_audit_subject_rejects_overlong_segment() {
+    // After escaping, the skill segment can exceed the NATS
+    // per-token length cap (128 chars). We surface that via
+    // `InvalidSkillSegment` rather than emitting a subject the
+    // publisher would reject.
+    let long = "a".repeat(200);
+    let err = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill(&long)).expect_err("overlong must error");
+    assert!(matches!(
+        err,
+        IngressAuditSubjectError::InvalidSkillSegment(SubjectTokenViolation::TooLong(_))
+    ));
 }
 
 #[test]

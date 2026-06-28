@@ -8,6 +8,7 @@
 
 use a2a_redaction::SkillId;
 use serde::{Deserialize, Deserializer, Serialize};
+use trogon_nats::{NatsToken, SubjectTokenViolation};
 
 use crate::policy::per_skill::PerSkillDecision;
 
@@ -215,11 +216,36 @@ fn classify_decision(decision: &PerSkillDecision, shadow_so_far: bool) -> (Ingre
     }
 }
 
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum IngressAuditSubjectError {
+    /// The escaped skill segment failed `NatsToken` validation —
+    /// usually because the skill id contained non-ASCII or its
+    /// escape expansion overran the per-token length cap. Fail
+    /// closed here rather than emitting a subject the publisher
+    /// would later reject.
+    #[error("encoded skill segment is not a valid NATS token: {0}")]
+    InvalidSkillSegment(#[source] SubjectTokenViolation),
+}
+
 /// Build the audit publish subject for an outcome + skill.
-#[must_use]
-pub fn ingress_audit_subject(prefix: &str, outcome: IngressAuditOutcome, skill: &SkillId) -> String {
+///
+/// Returns `Err(IngressAuditSubjectError::InvalidSkillSegment)`
+/// when the escaped skill segment fails `NatsToken` validation
+/// (non-ASCII characters, or the escape expansion overran the
+/// per-token length cap). Failing closed prevents the gateway
+/// from publishing on a subject the NATS server would later
+/// reject as malformed.
+pub fn ingress_audit_subject(
+    prefix: &str,
+    outcome: IngressAuditOutcome,
+    skill: &SkillId,
+) -> Result<String, IngressAuditSubjectError> {
     let token = skill_subject_token(skill.as_str());
-    format!("{prefix}.a2a.audit.{}.ingress.{token}", outcome.as_str())
+    // Validate the produced segment against the same `NatsToken`
+    // grammar used by the rest of the stack so we can't emit a
+    // subject the publisher would reject.
+    NatsToken::new(&token).map_err(IngressAuditSubjectError::InvalidSkillSegment)?;
+    Ok(format!("{prefix}.a2a.audit.{}.ingress.{token}", outcome.as_str()))
 }
 
 /// Reversible escape for NATS-unsafe characters in a skill id.
@@ -230,9 +256,13 @@ pub fn ingress_audit_subject(prefix: &str, outcome: IngressAuditOutcome, skill: 
 /// double-up, `docs.search` and `docs_search` would both publish to
 /// `…ingress.docs_search`, silently aliasing two different skills.
 ///
+/// Non-ASCII characters are escaped to `_u<hex>` so the produced
+/// token stays inside the ASCII-only `NatsToken` grammar. Length is
+/// not bounded here; callers go through [`ingress_audit_subject`]
+/// which validates the result against [`NatsToken`].
+///
 /// `SkillId::new` already rejects ASCII control characters (`\t`,
-/// `\n`, …) and the path separators `/`, `\\`, `\0`, so this helper
-/// only has to handle the SkillId-reachable subject-breaking chars.
+/// `\n`, …) and the path separators `/`, `\\`, `\0`.
 fn skill_subject_token(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for c in raw.chars() {
@@ -242,6 +272,11 @@ fn skill_subject_token(raw: &str) -> String {
             '*' => out.push_str("_s"),
             '>' => out.push_str("_g"),
             c if c.is_whitespace() => out.push_str("_w"),
+            c if !c.is_ascii() => {
+                // Pad the hex with zeros so different code points
+                // can't share a prefix that aliases on truncation.
+                out.push_str(&format!("_u{:06x}", c as u32));
+            }
             c => out.push(c),
         }
     }
