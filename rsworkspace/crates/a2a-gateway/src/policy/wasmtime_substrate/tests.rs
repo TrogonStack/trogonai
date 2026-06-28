@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use a2a::types::{Artifact, PartContent, Role};
 use a2a_nats::A2aMethod;
-use a2a_redaction::{SkillId, WasmBundlePath};
+use a2a_redaction::{RedactionError, SkillId, WasmBundlePath};
 
 use super::*;
-use crate::policy::tier2::{Tier2Decision, Tier2EvaluationContext};
+use crate::policy::tier2::{NoopTier2Evaluator, Tier2Decision, Tier2EvaluationContext};
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../a2a-redaction/tests/fixtures/identity_redact_part.wasm")
@@ -67,6 +67,24 @@ fn register_redaction_skill_round_trips_fixture() {
 }
 
 #[test]
+fn preload_redaction_skill_surfaces_missing_bundle_as_policy_error() {
+    // The substrate maps `RedactionError::WasmModule` (filesystem
+    // read failure on the bundle) into `PolicyError::Redaction`.
+    // Assert the typed variant so a future refactor that loses the
+    // `?`-propagation or swaps the error mapping fails this test
+    // instead of silently morphing the audit shape.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let substrate = WasmtimeSubstrate::try_new(WasmBundlePath::new(dir.path())).expect("wasmtime substrate");
+    let err = substrate
+        .preload_redaction_skill(SkillId::new("does-not-exist").expect("non-empty"))
+        .expect_err("missing bundle must error");
+    assert!(
+        matches!(err, PolicyError::Redaction(RedactionError::WasmModule(_))),
+        "expected PolicyError::Redaction(WasmModule), got {err:?}",
+    );
+}
+
+#[test]
 fn noop_tier2_evaluator_returns_allow() {
     let evaluator = NoopTier2Evaluator;
     let ctx = Tier2EvaluationContext::new(
@@ -81,28 +99,40 @@ fn noop_tier2_evaluator_returns_allow() {
 }
 
 #[test]
-fn preload_redaction_skill_surfaces_missing_bundle_as_policy_error() {
-    // Smoke-cover the preload entry point so a future refactor that
-    // accidentally drops the `?`-propagation would surface in CI
-    // instead of silently swallowing the bundle-load failure. We
-    // point at an empty temp dir so the host's filesystem read
-    // fails with `WasmModule`, which the substrate maps into
-    // `PolicyError`.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let substrate = WasmtimeSubstrate::try_new(WasmBundlePath::new(dir.path())).expect("wasmtime substrate");
-    let result = substrate.preload_redaction_skill(SkillId::new("does-not-exist").expect("non-empty"));
+fn try_new_defaults_tier2_to_inactive() {
+    let dir = WasmBundlePath::new(std::env::temp_dir());
+    let substrate = WasmtimeSubstrate::try_new(dir).expect("wasmtime substrate");
     assert!(
-        result.is_err(),
-        "missing bundle file must surface as PolicyError, got {result:?}",
+        !substrate.tier2.is_active(),
+        "default Tier-2 wiring must start inactive so the cel engine isn't paid for unless explicitly enabled",
+    );
+    assert!(
+        substrate.tier2.evaluator().is_none(),
+        "an inactive Tier-2 state must not expose an evaluator — callers should branch on the typed state",
     );
 }
 
 #[test]
-fn try_new_defaults_tier2_to_noop_inactive() {
+fn try_new_with_tier2_active_exposes_evaluator() {
+    // Active Tier-2 carries its evaluator inside the variant — the
+    // typed state is the single source of truth for both "is CEL
+    // turned on?" and "which evaluator runs".
     let dir = WasmBundlePath::new(std::env::temp_dir());
-    let substrate = WasmtimeSubstrate::try_new(dir).expect("wasmtime substrate");
+    let substrate = WasmtimeSubstrate::try_new_with_tier2(dir, Tier2State::Active(Box::new(NoopTier2Evaluator)), None)
+        .expect("wasmtime substrate");
+    assert!(substrate.tier2.is_active());
     assert!(
-        !substrate.tier2_cel_active,
-        "default Tier-2 wiring must start inactive so the cel engine isn't paid for unless explicitly enabled",
+        substrate.tier2.evaluator().is_some(),
+        "Tier2State::Active must surface the contained evaluator",
     );
+}
+
+#[test]
+fn tier2_state_inactive_yields_no_evaluator() {
+    // Construction of `Tier2State::Inactive` can't smuggle in a
+    // dangling evaluator — there's no field to hold one. Pin the
+    // shape so a future variant addition surfaces here.
+    let state = Tier2State::Inactive;
+    assert!(!state.is_active());
+    assert!(state.evaluator().is_none());
 }
