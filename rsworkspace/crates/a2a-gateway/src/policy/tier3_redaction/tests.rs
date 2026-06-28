@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use a2a_nats::ingress_gateway_policy_denied_response_bytes;
 use a2a_nats::ingress_gateway_tier3_refused_response_bytes;
-use a2a_redaction::{RedactionError, SkillId, TIER3_REFUSE_SENTINEL};
+use a2a_redaction::{RedactionError, SkillId, TIER3_REFUSE_SENTINEL, WasmBundlePath};
 use trogon_std::env::InMemoryEnv;
 
 use super::context::Tier3EvaluationContext;
@@ -318,7 +318,6 @@ fn manifest_parse_warns_on_skill_id_mismatch_but_uses_manifest_value() {
 
 #[test]
 fn load_tier3_manifests_skips_missing_files() {
-    use a2a_redaction::WasmBundlePath;
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = WasmBundlePath::new(dir.path());
     let manifests = super::load_tier3_manifests_from_bundle(&bundle, &[SkillId::new("missing").expect("skill")]);
@@ -417,7 +416,6 @@ fn load_tier3_manifests_reads_valid_bundle() {
     // resolves to so the loader picks it up. Verifies the happy-path
     // file-read + parse + insert chain rather than just the
     // missing-file branch.
-    use a2a_redaction::WasmBundlePath;
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = WasmBundlePath::new(dir.path());
     let skill = SkillId::new("email-redactor").expect("skill");
@@ -439,7 +437,6 @@ fn load_tier3_manifests_reads_valid_bundle() {
 
 #[test]
 fn load_tier3_manifests_skips_invalid_json() {
-    use a2a_redaction::WasmBundlePath;
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = WasmBundlePath::new(dir.path());
     let skill = SkillId::new("broken").expect("skill");
@@ -454,7 +451,6 @@ fn load_tier3_manifests_skips_invalid_json() {
 
 #[test]
 fn load_tier3_manifests_skips_manifest_missing_json_path() {
-    use a2a_redaction::WasmBundlePath;
     let dir = tempfile::tempdir().expect("tempdir");
     let bundle = WasmBundlePath::new(dir.path());
     let skill = SkillId::new("no-path").expect("skill");
