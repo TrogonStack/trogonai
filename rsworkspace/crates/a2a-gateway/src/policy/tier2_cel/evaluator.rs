@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use a2a_nats::A2aAgentId;
+use a2a_auth_callout::SpiceDbSubject;
+use a2a_nats::server::A2aMethod;
+use a2a_nats::{A2aAgentId, A2aTaskId};
 use async_nats::HeaderMap;
 use cel_interpreter::{Context, Value, to_value};
 use tracing::warn;
@@ -109,14 +111,14 @@ impl Tier2CelEvaluator for RealTier2CelEvaluator {
 
 fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) -> Result<(), Tier2EvalError> {
     let request = to_value(serde_json::json!({
-        "method": ctx.request_method(),
+        "method": ctx.request_method().as_str(),
         "params": ctx.request_params(),
     }))
     .map_err(|err| Tier2EvalError::binding("request", err.to_string()))?;
     cel_ctx.add_variable_from_value("request", request);
 
     let caller = to_value(serde_json::json!({
-        "id": ctx.caller_id(),
+        "id": ctx.caller_id().map(SpiceDbSubject::as_str),
     }))
     .map_err(|err| Tier2EvalError::binding("caller", err.to_string()))?;
     cel_ctx.add_variable_from_value("caller", caller);
@@ -128,7 +130,7 @@ fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) 
     cel_ctx.add_variable_from_value("agent", agent);
 
     let task = to_value(serde_json::json!({
-        "id": ctx.task_id(),
+        "id": ctx.task_id().map(A2aTaskId::as_str),
     }))
     .map_err(|err| Tier2EvalError::binding("task", err.to_string()))?;
     cel_ctx.add_variable_from_value("task", task);
@@ -140,26 +142,33 @@ fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) 
     Ok(())
 }
 
+/// Build a [`Tier2EvaluationContext`] from validated ingress inputs.
+///
+/// All identity-typed args (method, caller, agent) flow in as their
+/// value-object form so callers can't bypass validation. The task-id is
+/// parsed from the JSON-RPC params and wrapped in `A2aTaskId`; an
+/// unparseable id silently becomes `None` (the rule can still fire on
+/// other matchers).
 pub fn tier2_evaluation_context_from_ingress(
-    method_slashes: &str,
+    method: A2aMethod,
     agent_id: &A2aAgentId,
-    caller_id: Option<&str>,
+    caller_id: Option<&SpiceDbSubject>,
     headers: &HeaderMap,
     payload: &[u8],
 ) -> Tier2EvaluationContext {
     let (params, task_id) = parse_json_rpc_params(payload);
     let header_map = headers_to_map(headers);
     Tier2EvaluationContext::new(
-        method_slashes,
+        method,
         params,
-        caller_id.map(str::to_owned),
+        caller_id.cloned(),
         agent_id.clone(),
         task_id,
         header_map,
     )
 }
 
-fn parse_json_rpc_params(payload: &[u8]) -> (serde_json::Value, Option<String>) {
+fn parse_json_rpc_params(payload: &[u8]) -> (serde_json::Value, Option<A2aTaskId>) {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
         return (serde_json::Value::Null, None);
     };
@@ -168,7 +177,7 @@ fn parse_json_rpc_params(payload: &[u8]) -> (serde_json::Value, Option<String>) 
         .get("taskId")
         .or_else(|| params.get("task_id"))
         .and_then(|v| v.as_str())
-        .map(str::to_owned);
+        .and_then(|raw| A2aTaskId::new(raw).ok());
     (params, task_id)
 }
 

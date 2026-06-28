@@ -3,7 +3,9 @@ use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 
-use a2a_nats::A2aAgentId;
+use a2a_auth_callout::SpiceDbSubject;
+use a2a_nats::server::A2aMethod;
+use a2a_nats::{A2aAgentId, A2aTaskId};
 
 use super::bundle::Tier2CompiledBundle;
 use super::compiler::{compile_cel_file, compile_cel_source};
@@ -13,11 +15,11 @@ use crate::policy::tier2::{
     DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext,
 };
 
-fn sample_ctx(method: &str) -> Tier2EvaluationContext {
+fn sample_ctx(_method_label: &str) -> Tier2EvaluationContext {
     Tier2EvaluationContext::new(
-        method,
+        A2aMethod::MessageSend,
         serde_json::json!({}),
-        Some("caller-1".into()),
+        Some(SpiceDbSubject::new("caller-1")),
         A2aAgentId::new("planner").expect("agent id"),
         None,
         BTreeMap::new(),
@@ -169,16 +171,17 @@ fn evaluation_context_from_ingress_parses_json_rpc_params() {
     let mut headers = async_nats::HeaderMap::new();
     headers.insert("x-tenant-id", "acme");
     let payload = br#"{"jsonrpc":"2.0","id":"r-1","method":"message/send","params":{"taskId":"t-9","echo":1}}"#;
+    let caller = SpiceDbSubject::new("caller-1");
     let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
-        "message/send",
+        A2aMethod::MessageSend,
         &A2aAgentId::new("planner").expect("agent"),
-        Some("caller-1"),
+        Some(&caller),
         &headers,
         payload,
     );
-    assert_eq!(ctx.request_method(), "message/send");
-    assert_eq!(ctx.task_id(), Some("t-9"));
-    assert_eq!(ctx.caller_id(), Some("caller-1"));
+    assert_eq!(ctx.request_method().as_str(), "message/send");
+    assert_eq!(ctx.task_id().map(A2aTaskId::as_str), Some("t-9"));
+    assert_eq!(ctx.caller_id().map(SpiceDbSubject::as_str), Some("caller-1"));
     assert_eq!(ctx.agent_id().as_str(), "planner");
     assert_eq!(ctx.headers().get("x-tenant-id").map(String::as_str), Some("acme"));
     assert_eq!(ctx.request_params().get("echo"), Some(&serde_json::json!(1)));
@@ -188,27 +191,27 @@ fn evaluation_context_from_ingress_parses_json_rpc_params() {
 fn evaluation_context_from_ingress_accepts_snake_case_task_id() {
     let payload = br#"{"params":{"task_id":"snake-id"}}"#;
     let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
-        "x",
+        A2aMethod::MessageSend,
         &A2aAgentId::new("planner").expect("agent"),
         None,
         &async_nats::HeaderMap::new(),
         payload,
     );
-    assert_eq!(ctx.task_id(), Some("snake-id"));
+    assert_eq!(ctx.task_id().map(A2aTaskId::as_str), Some("snake-id"));
 }
 
 #[test]
 fn evaluation_context_from_ingress_handles_invalid_json() {
     let payload = b"not-json";
     let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
-        "x",
+        A2aMethod::MessageSend,
         &A2aAgentId::new("planner").expect("agent"),
         None,
         &async_nats::HeaderMap::new(),
         payload,
     );
     assert_eq!(*ctx.request_params(), serde_json::Value::Null);
-    assert_eq!(ctx.task_id(), None);
+    assert!(ctx.task_id().is_none());
 }
 
 #[test]
@@ -216,18 +219,18 @@ fn evaluation_context_accessors_round_trip_constructor_args() {
     let mut headers = BTreeMap::new();
     headers.insert("h".to_string(), "v".to_string());
     let ctx = Tier2EvaluationContext::new(
-        "method/x",
+        A2aMethod::MessageStream,
         serde_json::json!({"a":1}),
-        Some("user/alice".to_string()),
+        Some(SpiceDbSubject::new("user/alice")),
         A2aAgentId::new("planner").expect("agent"),
-        Some("task-1".to_string()),
+        Some(A2aTaskId::new("task-1").expect("task id")),
         headers.clone(),
     );
-    assert_eq!(ctx.request_method(), "method/x");
+    assert_eq!(ctx.request_method().as_str(), "message/stream");
     assert_eq!(*ctx.request_params(), serde_json::json!({"a":1}));
-    assert_eq!(ctx.caller_id(), Some("user/alice"));
+    assert_eq!(ctx.caller_id().map(SpiceDbSubject::as_str), Some("user/alice"));
     assert_eq!(ctx.agent_id().as_str(), "planner");
-    assert_eq!(ctx.task_id(), Some("task-1"));
+    assert_eq!(ctx.task_id().map(A2aTaskId::as_str), Some("task-1"));
     assert_eq!(ctx.headers(), &headers);
 }
 
