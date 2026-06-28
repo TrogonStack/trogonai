@@ -250,16 +250,21 @@ pub fn ingress_audit_subject(
 
 /// Reversible escape for NATS-unsafe characters in a skill id.
 ///
-/// Maps the small set of subject-breaking chars to `_<tag>`
-/// sequences and escapes existing `_` to `__` so distinct skill ids
-/// can't collide on the same audit subject. Without the underscore
-/// double-up, `docs.search` and `docs_search` would both publish to
-/// `…ingress.docs_search`, silently aliasing two different skills.
+/// Maps the three unique ASCII subject-breakers to short tags
+/// (`_d`/`_s`/`_g`) and escapes existing `_` to `__` so distinct
+/// skill ids can't collide on the same audit subject. Without the
+/// underscore double-up, `docs.search` and `docs_search` would
+/// both publish to `…ingress.docs_search`, silently aliasing two
+/// different skills.
 ///
-/// Non-ASCII characters are escaped to `_u<hex>` so the produced
-/// token stays inside the ASCII-only `NatsToken` grammar. Length is
-/// not bounded here; callers go through [`ingress_audit_subject`]
-/// which validates the result against [`NatsToken`].
+/// Every whitespace and non-ASCII character is escaped as
+/// `_u<hex>` (6-digit zero-padded codepoint). A single `_w` shared
+/// across all whitespace forms would alias distinct Unicode
+/// whitespace code points (ordinary space vs no-break space) on
+/// the same subject — the codepoint encoding keeps each escape
+/// unique. Length is not bounded here; callers go through
+/// [`ingress_audit_subject`] which validates the result against
+/// [`NatsToken`].
 ///
 /// `SkillId::new` already rejects ASCII control characters (`\t`,
 /// `\n`, …) and the path separators `/`, `\\`, `\0`.
@@ -271,10 +276,7 @@ fn skill_subject_token(raw: &str) -> String {
             '.' => out.push_str("_d"),
             '*' => out.push_str("_s"),
             '>' => out.push_str("_g"),
-            c if c.is_whitespace() => out.push_str("_w"),
-            c if !c.is_ascii() => {
-                // Pad the hex with zeros so different code points
-                // can't share a prefix that aliases on truncation.
+            c if c.is_whitespace() || !c.is_ascii() => {
                 out.push_str(&format!("_u{:06x}", c as u32));
             }
             c => out.push(c),

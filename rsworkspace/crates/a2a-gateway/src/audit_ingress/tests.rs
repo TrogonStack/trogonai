@@ -37,14 +37,30 @@ fn subject_replaces_each_nats_unsafe_char() {
 }
 
 #[test]
-fn subject_normalizes_plain_ascii_space() {
-    // ASCII space is the only whitespace character that survives
-    // `SkillId::new` (which rejects control chars). The helper still
-    // normalizes the broader `is_whitespace` class as
-    // defense-in-depth, but the path actually exercised in
-    // production goes through this case.
+fn subject_encodes_ascii_space_as_hex_codepoint() {
+    // Whitespace escapes to `_u<hex>` (per-codepoint) so distinct
+    // whitespace code points (ordinary space, no-break space, …)
+    // can't alias on the same subject. ASCII space is the only
+    // whitespace SkillId actually allows, but the encoding is
+    // identical to any other codepoint that lands here.
     let subject = make_subject("a2a", IngressAuditOutcome::Allow, &skill("a b c"));
-    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.a_wb_wc");
+    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.a_u000020b_u000020c");
+}
+
+#[test]
+fn skill_token_distinguishes_unicode_whitespace_codepoints() {
+    // Ordinary space (U+0020) and no-break space (U+00A0) are both
+    // `is_whitespace()` true and both reachable via SkillId, so a
+    // shared `_w` escape would alias them. Per-codepoint hex keeps
+    // them distinguishable on the audit subject.
+    let space = make_subject("a2a", IngressAuditOutcome::Allow, &skill("a b"));
+    let nbsp = make_subject("a2a", IngressAuditOutcome::Allow, &skill("a\u{00a0}b"));
+    assert_ne!(
+        space, nbsp,
+        "different whitespace codepoints must produce different subjects"
+    );
+    assert!(space.contains("_u000020"));
+    assert!(nbsp.contains("_u0000a0"));
 }
 
 #[test]
