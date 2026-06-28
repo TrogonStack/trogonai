@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use a2a_nats::ingress_error_response_wire;
 use a2a_nats::ingress_gateway_policy_denied_response_bytes;
 use a2a_nats::ingress_gateway_tier3_refused_response_bytes;
 use a2a_redaction::{RedactionError, SkillId, TIER3_REFUSE_SENTINEL, WasmBundlePath};
@@ -128,11 +129,12 @@ fn real_gate_trap_maps_to_error() {
 
 #[test]
 fn tier3_refused_response_uses_32802_and_rule_data() {
-    // Wire shape on main: error code lives in headers under
-    // `Jsonrpc-Error-Code` (jsonrpc-nats encoding splits code from the
-    // body), and the body carries `message` + optional `data`. The
-    // assertions below match that shape rather than the legacy JSON-RPC
-    // wire form that nested everything under an `error` field.
+    // Wire shape on main: jsonrpc-nats splits the JSON-RPC error code
+    // into the NATS header `Jsonrpc-Error-Code` and leaves only
+    // `message` + `data` in the body. Assert both halves so a
+    // regression that flipped the code header would still fail —
+    // checking the body alone would not catch a -32801 leak into the
+    // tier-3 refusal path.
     let payload = br#"{"jsonrpc":"2.0","id":"x","method":"message/send","params":{}}"#;
     let headers = async_nats::HeaderMap::new();
     let bytes =
@@ -141,6 +143,19 @@ fn tier3_refused_response_uses_32802_and_rule_data() {
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["message"], "tier-3 skill refused part");
     assert_eq!(value["data"]["rule"], "deny-part");
+
+    let wire = ingress_error_response_wire(
+        &headers,
+        payload,
+        -32_802,
+        "tier-3 skill refused part",
+        Some(serde_json::json!({ "rule": "deny-part" })),
+    )
+    .unwrap();
+    assert_eq!(
+        wire.headers.get("Jsonrpc-Error-Code").map(|v| v.as_str().to_owned()),
+        Some("-32802".to_owned())
+    );
 }
 
 #[test]
@@ -151,6 +166,12 @@ fn tier3_engine_error_response_uses_32801() {
         ingress_gateway_policy_denied_response_bytes(&headers, payload, "tier-3 redaction engine error").unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(value["message"], "tier-3 redaction engine error");
+
+    let wire = ingress_error_response_wire(&headers, payload, -32_801, "tier-3 redaction engine error", None).unwrap();
+    assert_eq!(
+        wire.headers.get("Jsonrpc-Error-Code").map(|v| v.as_str().to_owned()),
+        Some("-32801".to_owned())
+    );
 }
 
 fn value_at_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
