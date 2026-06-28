@@ -65,6 +65,17 @@ impl RealTier2CelEvaluator {
             engine,
         }
     }
+
+    /// Test-only hook that deliberately poisons the bundle mutex so the
+    /// fail-closed lock-poisoned branch in `evaluate` can be exercised
+    /// without depending on a racy thread panic.
+    #[cfg(test)]
+    pub(crate) fn poison_bundle_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.bundle.lock().expect("bundle lock");
+            panic!("intentional poison");
+        }));
+    }
 }
 
 impl Tier2CelEvaluator for RealTier2CelEvaluator {

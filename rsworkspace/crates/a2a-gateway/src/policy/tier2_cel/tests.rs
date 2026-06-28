@@ -387,3 +387,21 @@ fn mock_engine_propagates_engine_error_as_deny() {
         }
     );
 }
+
+#[test]
+fn evaluator_denies_when_bundle_lock_poisoned() {
+    // The bundle mutex is private to RealTier2CelEvaluator, so we lean
+    // on a test-only hook to poison it deterministically. Without the
+    // fail-closed branch, an unrelated panic somewhere in the runtime
+    // would leave the policy layer wide open by silently allowing on
+    // every subsequent evaluation.
+    let (_dir, bundle) = bundle_with_rule("allow", "true");
+    let evaluator = RealTier2CelEvaluator::new(bundle);
+    evaluator.poison_bundle_for_test();
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
+}
