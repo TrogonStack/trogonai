@@ -128,3 +128,31 @@ fn round_trips_wire_json() {
     let round_trip_json = serde_json::to_string(&round_trip).unwrap();
     assert_eq!(json, round_trip_json);
 }
+
+#[test]
+fn into_domain_returns_entry_with_correct_display_name() {
+    let wire = sample_entry_wire();
+    let entry = wire.into_domain().unwrap();
+    assert_eq!(entry.display_name(), "Assistant");
+}
+
+#[test]
+fn into_domain_exposes_identifier() {
+    let wire = sample_entry_wire();
+    let entry = wire.into_domain().unwrap();
+    assert_eq!(entry.identifier().as_str(), "urn:air:example.com:agent:assistant");
+}
+
+#[test]
+fn into_domain_exposes_media_type() {
+    let wire = sample_entry_wire();
+    let entry = wire.into_domain().unwrap();
+    assert_eq!(entry.media_type().as_str(), "application/a2a-agent-card+json");
+}
+
+#[test]
+fn into_domain_returns_err_for_blank_identifier() {
+    let mut wire = sample_entry_wire();
+    wire.identifier = "  ".to_owned();
+    assert_eq!(wire.into_domain(), Err(CatalogEntryWireError::MissingIdentifier));
+}

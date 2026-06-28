@@ -25,6 +25,18 @@ fn valid_manifest() -> serde_json::Value {
     })
 }
 
+fn invalid_manifest() -> serde_json::Value {
+    json!({
+        "specVersion": "1.0",
+        "entries": [{
+            "identifier": "not-a-valid-urn",
+            "displayName": "Bad",
+            "type": "application/a2a-agent-card+json",
+            "url": "https://example.com/card.json"
+        }]
+    })
+}
+
 #[test]
 fn accepts_valid_manifest_json() {
     validate_ai_catalog_value(&valid_manifest()).expect("manifest should validate");
@@ -93,4 +105,98 @@ fn rejects_unknown_top_level_entry_field() {
     let mut manifest = valid_manifest();
     manifest["entries"][0]["somethingUnknown"] = json!("x");
     assert!(validate_ai_catalog_value(&manifest).is_err());
+}
+
+#[test]
+fn schema_violation_schema_path_and_message_accessors() {
+    let err = validate_ai_catalog_value(&invalid_manifest()).unwrap_err();
+    let violations = err.violations();
+    assert!(!violations.is_empty());
+    let first = &violations[0];
+    assert!(!first.schema_path().is_empty(), "schema_path should be non-empty");
+    assert!(!first.message().is_empty(), "message should be non-empty");
+    assert!(!first.instance_path().is_empty() || !first.message().is_empty());
+}
+
+#[test]
+fn display_with_empty_instance_path_omits_prefix() {
+    let violations = vec![SchemaViolation {
+        instance_path: String::new(),
+        schema_path: "#/required".to_owned(),
+        message: "specVersion is required".to_owned(),
+    }];
+    let err = CatalogManifestValidateError { violations };
+    let text = err.to_string();
+    assert_eq!(text, "specVersion is required");
+    assert!(!text.contains(':'));
+}
+
+#[test]
+fn display_with_non_empty_instance_path_formats_path_colon_message() {
+    let violations = vec![SchemaViolation {
+        instance_path: "/entries/0/identifier".to_owned(),
+        schema_path: "#/properties/entries/items/properties/identifier".to_owned(),
+        message: "invalid identifier format".to_owned(),
+    }];
+    let err = CatalogManifestValidateError { violations };
+    let text = err.to_string();
+    assert_eq!(text, "/entries/0/identifier: invalid identifier format");
+}
+
+#[test]
+fn display_deduplicates_and_sorts_violations() {
+    let violations = vec![
+        SchemaViolation {
+            instance_path: "/b".to_owned(),
+            schema_path: "#/b".to_owned(),
+            message: "b error".to_owned(),
+        },
+        SchemaViolation {
+            instance_path: "/a".to_owned(),
+            schema_path: "#/a".to_owned(),
+            message: "a error".to_owned(),
+        },
+        SchemaViolation {
+            instance_path: "/b".to_owned(),
+            schema_path: "#/b".to_owned(),
+            message: "b error".to_owned(),
+        },
+    ];
+    let err = CatalogManifestValidateError { violations };
+    let text = err.to_string();
+    assert_eq!(text, "/a: a error; /b: b error");
+}
+
+#[test]
+fn validate_ai_catalog_value_returns_ok_for_valid_manifest() {
+    let result = validate_ai_catalog_value(&valid_manifest());
+    assert!(result.is_ok(), "valid manifest should pass validation");
+}
+
+#[test]
+fn bundled_schema_validates_valid_manifest() {
+    let schema = AiCatalogJsonSchema::bundled();
+    let result = schema.validate(&valid_manifest());
+    assert!(result.is_ok());
+}
+
+#[test]
+fn bundled_schema_rejects_invalid_manifest() {
+    let schema = AiCatalogJsonSchema::bundled();
+    let result = schema.validate(&invalid_manifest());
+    assert!(result.is_err());
+}
+
+#[test]
+fn bundled_returns_cloneable_schema() {
+    let schema = AiCatalogJsonSchema::bundled();
+    let cloned = schema.clone();
+    assert!(cloned.validate(&valid_manifest()).is_ok());
+}
+
+#[test]
+fn violations_accessor_returns_all_violations() {
+    let err = validate_ai_catalog_value(&invalid_manifest()).unwrap_err();
+    let violations = err.violations();
+    assert!(!violations.is_empty());
 }

@@ -264,3 +264,139 @@ fn list_agents_page_token_advances_offset() {
     assert_ne!(first.items[0].identifier, second.items[0].identifier);
     assert!(second.page_token.is_none());
 }
+
+#[test]
+fn referrals_for_federation_returns_none_when_federation_includes_referrals_but_none_configured() {
+    let registry = Registry::new(RegistryConfig::new(
+        SourceUrl::parse("https://registry.example.com").unwrap(),
+        CatalogManifestWire {
+            spec_version: SPEC_VERSION.to_owned(),
+            host: None,
+            entries: vec![],
+        }
+        .try_into()
+        .unwrap(),
+        vec![],
+    ));
+
+    let response_referrals = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
+            query: SearchQueryWire {
+                text: "anything".to_owned(),
+                filter: None,
+            },
+            page_size: Some(10),
+            page_token: None,
+            federation: FederationMode::Referrals,
+        })
+        .unwrap(),
+    );
+    assert!(
+        response_referrals.referrals.is_none(),
+        "Referrals mode with no configured referrals should return None"
+    );
+
+    let response_auto = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
+            query: SearchQueryWire {
+                text: "anything".to_owned(),
+                filter: None,
+            },
+            page_size: Some(10),
+            page_token: None,
+            federation: FederationMode::Auto,
+        })
+        .unwrap(),
+    );
+    assert!(
+        response_auto.referrals.is_none(),
+        "Auto mode with no configured referrals should return None"
+    );
+}
+
+#[test]
+fn search_none_federation_returns_no_referrals() {
+    let registry = registry();
+    let response = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
+            query: SearchQueryWire {
+                text: "alpha".to_owned(),
+                filter: None,
+            },
+            page_size: Some(10),
+            page_token: None,
+            federation: FederationMode::None,
+        })
+        .unwrap(),
+    );
+    assert!(response.referrals.is_none());
+}
+
+#[test]
+fn search_tie_break_produces_deterministic_identifier_ordering() {
+    let registry = Registry::new(RegistryConfig::new(
+        SourceUrl::parse("https://registry.example.com").unwrap(),
+        CatalogManifestWire {
+            spec_version: SPEC_VERSION.to_owned(),
+            host: None,
+            entries: vec![
+                CatalogEntryWire {
+                    identifier: "urn:air:example.com:agent:zzz".to_owned(),
+                    display_name: "Tie Agent".to_owned(),
+                    media_type: "application/a2a-agent-card+json".to_owned(),
+                    url: Some("https://example.com/zzz.json".to_owned()),
+                    data: None,
+                    description: Some("Same description for tie".to_owned()),
+                    representative_queries: Some(vec!["tie query".to_owned(), "another query".to_owned()]),
+                    tags: Some(vec!["tie".to_owned()]),
+                    capabilities: None,
+                    version: None,
+                    updated_at: None,
+                    metadata: None,
+                    trust_manifest: None,
+                },
+                CatalogEntryWire {
+                    identifier: "urn:air:example.com:agent:aaa".to_owned(),
+                    display_name: "Tie Agent".to_owned(),
+                    media_type: "application/a2a-agent-card+json".to_owned(),
+                    url: Some("https://example.com/aaa.json".to_owned()),
+                    data: None,
+                    description: Some("Same description for tie".to_owned()),
+                    representative_queries: Some(vec!["tie query".to_owned(), "another query".to_owned()]),
+                    tags: Some(vec!["tie".to_owned()]),
+                    capabilities: None,
+                    version: None,
+                    updated_at: None,
+                    metadata: None,
+                    trust_manifest: None,
+                },
+            ],
+        }
+        .try_into()
+        .unwrap(),
+        vec![],
+    ));
+
+    let response = registry.search(
+        ValidatedSearchRequest::try_from_wire(SearchRequestWire {
+            query: SearchQueryWire {
+                text: "tie agent".to_owned(),
+                filter: None,
+            },
+            page_size: Some(10),
+            page_token: None,
+            federation: FederationMode::None,
+        })
+        .unwrap(),
+    );
+
+    assert_eq!(response.results.len(), 2);
+    assert_eq!(response.results[0].entry.identifier, "urn:air:example.com:agent:aaa");
+    assert_eq!(response.results[1].entry.identifier, "urn:air:example.com:agent:zzz");
+}
+
+#[test]
+fn manifest_accessor_returns_manifest() {
+    let registry = registry();
+    assert_eq!(registry.manifest().entries().len(), 2);
+}
