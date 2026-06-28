@@ -6,12 +6,10 @@ use rustc_lint::LateContext;
 
 use crate::STD_ENV_ACCESS;
 
-/// The `std::env` free functions that `trogon_std::env::ReadEnv` provides an
-/// injectable, fakeable equivalent for, so a direct call bypasses the
-/// abstraction. Only `var` is covered today; the OS-string and iterator readers
-/// (`var_os`, `vars`, `vars_os`) have no `ReadEnv` method, so flagging them
-/// would deny code with no alternative. Extend this set when `ReadEnv` grows.
-const ENV_READERS: &[&str] = &["var"];
+/// The `std::env` free functions that read process environment variables. Each
+/// has an injectable, fakeable `trogon_std::env::ReadEnv` equivalent, so a
+/// direct call bypasses the abstraction.
+const ENV_READERS: &[&str] = &["var", "var_os", "vars", "vars_os"];
 
 #[derive(Default)]
 pub(crate) struct StdEnvAccess;

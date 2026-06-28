@@ -202,7 +202,8 @@ rustc_session::declare_lint! {
 rustc_session::declare_lint! {
     /// ### What it does
     ///
-    /// Detects a direct call to `std::env::var` outside the `trogon-std` crate.
+    /// Detects a direct call to a `std::env` environment-variable reader
+    /// (`var`, `var_os`, `vars`, `vars_os`) outside the `trogon-std` crate.
     ///
     /// ### Why is this bad?
     ///

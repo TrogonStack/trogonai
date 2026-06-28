@@ -33,14 +33,11 @@ lint crate rather than in per-invocation flags.
   the test target is compiled, i.e. when linting with `--all-targets`.
 - `std_env_access` (`deny`): requires reading environment variables through an
   injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv`
-  in tests) rather than calling `std::env::var` directly. A direct call couples
-  logic to process-global state that cannot be supplied deterministically in a
-  test. Scoped to `var`, the one reader `ReadEnv` currently provides; the
-  OS-string and iterator readers (`var_os`, `vars`, `vars_os`) have no `ReadEnv`
-  method yet, so flagging them would deny code with no alternative. `trogon-std`'s
-  own `SystemEnv` is the one allowed caller and is exempt; suppress a justified
-  exception with `#[cfg_attr(dylint_lib = "trogon_lints", allow(std_env_access))]`
-  at the site.
+  in tests) rather than calling a `std::env` reader (`var`, `var_os`, `vars`,
+  `vars_os`) directly. A direct call couples logic to process-global state that
+  cannot be supplied deterministically in a test. `trogon-std`'s own `SystemEnv`
+  is the one allowed caller and is exempt; suppress a justified exception with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(std_env_access))]` at the site.
 
 ## Run
 
