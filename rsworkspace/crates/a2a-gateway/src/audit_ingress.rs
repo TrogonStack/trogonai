@@ -7,7 +7,7 @@
 //! token.
 
 use a2a_redaction::SkillId;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::policy::per_skill::PerSkillDecision;
 
@@ -45,7 +45,11 @@ pub enum A2aIngressAuditBuildError {
 /// Non-empty audit request id. Carried into downstream audit
 /// subscribers as the correlation key — failing closed at the
 /// boundary avoids persisting an empty key that breaks join queries.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+///
+/// `Deserialize` is routed through [`Self::new`] (mirroring the
+/// `SkillId` pattern) so wire-borne values can't bypass the
+/// constructor's validation via a transparent serde derive.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AuditRequestId(String);
 
@@ -63,10 +67,17 @@ impl AuditRequestId {
     }
 }
 
+impl<'de> Deserialize<'de> for AuditRequestId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Non-empty tenant identifier carried alongside the audit envelope
 /// so multi-tenant consumers can route per-tenant without rebuilding
 /// a tenant from the agent id.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AuditTenant(String);
 
@@ -84,11 +95,18 @@ impl AuditTenant {
     }
 }
 
+impl<'de> Deserialize<'de> for AuditTenant {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Non-empty agent identifier scoped to the audit envelope. Mirrors
 /// the `A2aAgentId` constraint of being a single NATS-safe token,
 /// but kept as a local newtype so the envelope's serde wire shape
 /// stays decoupled from upstream NATS-routing changes.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AuditAgent(String);
 
@@ -106,12 +124,19 @@ impl AuditAgent {
     }
 }
 
+impl<'de> Deserialize<'de> for AuditAgent {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
 /// W3C traceparent. Validation is intentionally light (non-empty
 /// only) so the upstream `tracing` machinery — which produces these
 /// strings via its own validated context — remains the source of
 /// truth for shape; we just refuse to persist an empty marker that
 /// would alias every untraced request to the same correlation key.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AuditTraceparent(String);
 
@@ -126,6 +151,13 @@ impl AuditTraceparent {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for AuditTraceparent {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -190,28 +222,30 @@ pub fn ingress_audit_subject(prefix: &str, outcome: IngressAuditOutcome, skill: 
     format!("{prefix}.a2a.audit.{}.ingress.{token}", outcome.as_str())
 }
 
+/// Reversible escape for NATS-unsafe characters in a skill id.
+///
+/// Maps the small set of subject-breaking chars to `_<tag>`
+/// sequences and escapes existing `_` to `__` so distinct skill ids
+/// can't collide on the same audit subject. Without the underscore
+/// double-up, `docs.search` and `docs_search` would both publish to
+/// `…ingress.docs_search`, silently aliasing two different skills.
+///
+/// `SkillId::new` already rejects ASCII control characters (`\t`,
+/// `\n`, …) and the path separators `/`, `\\`, `\0`, so this helper
+/// only has to handle the SkillId-reachable subject-breaking chars.
 fn skill_subject_token(raw: &str) -> String {
-    raw.chars()
-        .map(|c| {
-            // `.` splits into two NATS tokens; `*` and `>` are NATS
-            // wildcard markers and would let a pathological skill id
-            // subscribe to / publish on subjects it shouldn't. Plain
-            // ASCII space also breaks the single-token-per-segment
-            // rule.
-            //
-            // `SkillId::new` already rejects ASCII control characters
-            // (including `\t`, `\n`, `\r`) and the path separators
-            // `/` and `\\` at construction, so this helper never sees
-            // those — the `is_whitespace()` branch is defense-in-depth
-            // for any future SkillId loosening rather than a real
-            // path today.
-            if c.is_whitespace() || matches!(c, '.' | '*' | '>') {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        match c {
+            '_' => out.push_str("__"),
+            '.' => out.push_str("_d"),
+            '*' => out.push_str("_s"),
+            '>' => out.push_str("_g"),
+            c if c.is_whitespace() => out.push_str("_w"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

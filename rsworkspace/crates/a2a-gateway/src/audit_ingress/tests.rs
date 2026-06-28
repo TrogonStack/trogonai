@@ -19,16 +19,17 @@ fn tenant(s: &str) -> AuditTenant {
 
 #[test]
 fn subject_segments_skill_with_dots() {
+    // `.` escapes to `_d` so the skill segment is one NATS token.
     let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
-    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.docs_search");
+    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.docs_dsearch");
 }
 
 #[test]
 fn subject_replaces_each_nats_unsafe_char() {
-    // `.`, `*`, `>` each split or wildcard a subject. Replacing them
-    // keeps the skill segment a single token.
+    // `.`, `*`, `>` each split or wildcard a subject; reversible
+    // escapes `_d`/`_s`/`_g` keep the segment a single token.
     let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Deny, &skill("a.b*c>d"));
-    assert_eq!(subject, "a2a.a2a.audit.deny.ingress.a_b_c_d");
+    assert_eq!(subject, "a2a.a2a.audit.deny.ingress.a_db_sc_gd");
 }
 
 #[test]
@@ -39,7 +40,22 @@ fn subject_normalizes_plain_ascii_space() {
     // defense-in-depth, but the path actually exercised in
     // production goes through this case.
     let subject = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("a b c"));
-    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.a_b_c");
+    assert_eq!(subject, "a2a.a2a.audit.allow.ingress.a_wb_wc");
+}
+
+#[test]
+fn skill_token_avoids_underscore_collision() {
+    // Distinct skill ids that differ only in `.` vs `_` used to
+    // collide on the same audit subject because both mapped to
+    // `_`. The reversible escape (`_` → `__`, `.` → `_d`) keeps
+    // them distinguishable.
+    let dotted = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs.search"));
+    let underscored = ingress_audit_subject("a2a", IngressAuditOutcome::Allow, &skill("docs_search"));
+    assert_ne!(
+        dotted, underscored,
+        "`docs.search` and `docs_search` must publish to different subjects",
+    );
+    assert_eq!(underscored, "a2a.a2a.audit.allow.ingress.docs__search");
 }
 
 #[test]
@@ -225,6 +241,36 @@ fn value_object_accessors_round_trip_through_as_str() {
     let a = AuditAgent::new("planner").expect("valid");
     assert_eq!(a.as_str(), "planner");
     let tp = AuditTraceparent::new("00-aaa-bbb-01").expect("valid");
+    assert_eq!(tp.as_str(), "00-aaa-bbb-01");
+}
+
+#[test]
+fn deserializing_empty_value_object_strings_rejects_them() {
+    // `#[serde(try_from = "String")]` routes deserialization through
+    // `new`, so wire-borne empty/whitespace values fail-closed the
+    // same way as construction would. Without this, a transparent
+    // deserialize would silently smuggle invalid correlation keys
+    // into the envelope.
+    let cases = [
+        (r#""""#, "AuditRequestId"),
+        (r#""   ""#, "AuditTenant"),
+        (r#""\t""#, "AuditAgent"),
+    ];
+    assert!(serde_json::from_str::<AuditRequestId>(cases[0].0).is_err());
+    assert!(serde_json::from_str::<AuditTenant>(cases[1].0).is_err());
+    assert!(serde_json::from_str::<AuditAgent>(cases[2].0).is_err());
+    assert!(serde_json::from_str::<AuditTraceparent>(r#""""#).is_err());
+}
+
+#[test]
+fn deserializing_valid_value_objects_round_trips() {
+    let r: AuditRequestId = serde_json::from_str("\"req-9\"").expect("valid");
+    assert_eq!(r.as_str(), "req-9");
+    let t: AuditTenant = serde_json::from_str("\"acme\"").expect("valid");
+    assert_eq!(t.as_str(), "acme");
+    let a: AuditAgent = serde_json::from_str("\"planner\"").expect("valid");
+    assert_eq!(a.as_str(), "planner");
+    let tp: AuditTraceparent = serde_json::from_str("\"00-aaa-bbb-01\"").expect("valid");
     assert_eq!(tp.as_str(), "00-aaa-bbb-01");
 }
 
