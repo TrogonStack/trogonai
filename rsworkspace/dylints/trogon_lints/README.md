@@ -31,6 +31,15 @@ lint crate rather than in per-invocation flags.
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]` at the
   site. As a late (HIR) pass it sees `#[cfg(test)] mod tests { ... }` only when
   the test target is compiled, i.e. when linting with `--all-targets`.
+- `std_env_access` (`deny`): requires reading environment variables through the
+  injected `trogon_std::env` abstraction (the `ReadEnv` lookup trait and the
+  `EnumerateEnv` enumeration trait, backed by `SystemEnv` in production and
+  `InMemoryEnv` in tests) rather than calling a `std::env` reader (`var`,
+  `var_os`, `vars`, `vars_os`) directly. A direct call couples logic to
+  process-global state that cannot be supplied deterministically in a test.
+  `trogon-std`'s own `SystemEnv` is the one allowed caller and is exempt;
+  suppress a justified exception with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(std_env_access))]` at the site.
 
 ## Run
 

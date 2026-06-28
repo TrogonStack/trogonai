@@ -1,4 +1,6 @@
-use super::super::ReadEnv;
+use std::ffi::OsString;
+
+use super::super::{EnumerateEnv, ReadEnv};
 use super::*;
 
 #[test]
@@ -60,6 +62,37 @@ fn test_in_memory_env_overwrite() {
 
     env.set("KEY", "v2");
     assert_eq!(env.var("KEY").unwrap(), "v2");
+}
+
+#[test]
+fn test_in_memory_env_var_os() {
+    let env = InMemoryEnv::new();
+    env.set("TEST_VAR", "test_value");
+
+    assert_eq!(env.var_os("TEST_VAR"), Some(OsString::from("test_value")));
+    assert_eq!(env.var_os("NONEXISTENT"), None);
+}
+
+#[test]
+fn test_in_memory_env_vars() {
+    let env = InMemoryEnv::new();
+    env.set("A", "1");
+    env.set("B", "2");
+
+    let mut vars = env.vars();
+    vars.sort();
+    assert_eq!(
+        vars,
+        vec![("A".to_string(), "1".to_string()), ("B".to_string(), "2".to_string())]
+    );
+}
+
+#[test]
+fn test_in_memory_env_vars_os() {
+    let env = InMemoryEnv::new();
+    env.set("A", "1");
+
+    assert_eq!(env.vars_os(), vec![(OsString::from("A"), OsString::from("1"))]);
 }
 
 #[test]

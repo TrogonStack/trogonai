@@ -12,6 +12,7 @@ mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
 mod redundant_module_path;
+mod std_env_access;
 mod telemetry_attribute_literal;
 mod telemetry_key_value_literal;
 mod telemetry_literal;
@@ -34,6 +35,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         INLINE_MODULE_BLOCK,
         MANUAL_ERROR_IMPL,
         REDUNDANT_MODULE_PATH,
+        STD_ENV_ACCESS,
         TELEMETRY_ATTRIBUTE_LITERAL,
         TELEMETRY_KEY_VALUE_LITERAL,
         TELEMETRY_METRIC_CONSTRUCTION,
@@ -195,6 +197,44 @@ rustc_session::declare_lint! {
     pub REDUNDANT_MODULE_PATH,
     Deny,
     "drop `#[path]` when `mod foo;` already resolves to the same file",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a direct call to a `std::env` environment-variable reader
+    /// (`var`, `var_os`, `vars`, `vars_os`) outside the `trogon-std` crate.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Reading process environment variables at the call site couples logic to
+    /// ambient global state: the value cannot be supplied in a test without
+    /// mutating the real environment, which is process-global and races across
+    /// parallel tests. `trogon-std` models the read as the `ReadEnv` trait, with
+    /// `SystemEnv` in production and `InMemoryEnv` in tests, so a unit can take
+    /// `&impl ReadEnv` and be driven deterministically. Calling `std::env`
+    /// directly forks that contract and reintroduces the untestable global. The
+    /// `SystemEnv` implementation inside `trogon-std` is the one place allowed to
+    /// reach `std::env`, so the lint is silent there.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// use trogon_std::env::ReadEnv;
+    ///
+    /// fn nats_url(env: &impl ReadEnv) -> String {
+    ///     env.var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into())
+    /// }
+    /// ```
+    pub STD_ENV_ACCESS,
+    Deny,
+    "read environment variables through an injected `trogon_std::env::ReadEnv`, not `std::env` directly",
 }
 
 rustc_session::declare_lint! {
@@ -454,6 +494,7 @@ rustc_session::declare_lint! {
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
     function_local_use: function_local_use::FunctionLocalUse,
+    std_env_access: std_env_access::StdEnvAccess,
     telemetry_attribute_literal: telemetry_attribute_literal::TelemetryAttributeLiteral,
     telemetry_key_value_literal: telemetry_key_value_literal::TelemetryKeyValueLiteral,
     telemetry_metric_construction: telemetry_metric_construction::TelemetryMetricConstruction,
@@ -468,6 +509,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         self.error_string_comparison.check_expr(cx, expr);
+        self.std_env_access.check_expr(cx, expr);
         self.telemetry_attribute_literal.check_expr(cx, expr);
         self.telemetry_key_value_literal.check_expr(cx, expr);
         self.telemetry_metric_construction.check_expr(cx, expr);
@@ -491,6 +533,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,
+    STD_ENV_ACCESS,
     TELEMETRY_ATTRIBUTE_LITERAL,
     TELEMETRY_KEY_VALUE_LITERAL,
     TELEMETRY_METRIC_CONSTRUCTION,
