@@ -19,6 +19,6 @@ pub use agent_card_schema::{
     AGENT_CARD_JSON_SCHEMA, AgentCardJsonSchema, AgentCardValidateError, validate_agent_card_value,
 };
 pub use resource_tuples::{
-    Tier1A2aMethodSlug, Tier1DeriveError, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple, Tier1ResourceTupleRow,
-    Tier1ResourceTupleTable, Tier1ResourceType, Tier1TupleResourceShape,
+    Tier1A2aMethodSlug, Tier1DeriveError, Tier1DeriveInputs, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple,
+    Tier1ResourceTupleRow, Tier1ResourceTupleTable, Tier1ResourceType, Tier1TupleResourceShape, Tier1ValueObjectError,
 };
