@@ -114,6 +114,7 @@ impl SpiceDbImportGate {
             }
         };
 
+        let response = response.into_inner();
         let allowed = response.pairs.first().is_some_and(pair_is_allowed);
 
         if allowed && let Some(token) = response.checked_at.map(|zed| zed.token) {

@@ -48,7 +48,7 @@ impl BulkImportPermissionCheck for FakeBulkClient {
     async fn check_bulk_permissions(
         &self,
         request: authzed::v1::CheckBulkPermissionsRequest,
-    ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+    ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, tonic::Status> {
         *self.seen.lock().expect("seen lock") = true;
         let perms = self.permissionships.lock().expect("perms lock").clone();
         let pairs = request
@@ -69,18 +69,18 @@ impl BulkImportPermissionCheck for FakeBulkClient {
                 }
             })
             .collect();
-        Ok(CheckBulkPermissionsResponse {
+        Ok(tonic::Response::new(CheckBulkPermissionsResponse {
             checked_at: Some(ZedToken {
                 token: "zed-tok".into(),
             }),
             pairs,
-        })
+        }))
     }
 
     async fn write_relationships(
         &self,
         _request: WriteRelationshipsRequest,
-    ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+    ) -> Result<tonic::Response<WriteRelationshipsResponse>, tonic::Status> {
         unimplemented!("agent-view gate doesn't write")
     }
 }
@@ -319,7 +319,7 @@ async fn live_gate_pair_with_no_response_maps_to_denied() {
         async fn check_bulk_permissions(
             &self,
             request: authzed::v1::CheckBulkPermissionsRequest,
-        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, tonic::Status> {
             let pairs = request
                 .items
                 .into_iter()
@@ -328,16 +328,16 @@ async fn live_gate_pair_with_no_response_maps_to_denied() {
                     response: None,
                 })
                 .collect();
-            Ok(CheckBulkPermissionsResponse {
+            Ok(tonic::Response::new(CheckBulkPermissionsResponse {
                 checked_at: Some(ZedToken { token: "zed".into() }),
                 pairs,
-            })
+            }))
         }
 
         async fn write_relationships(
             &self,
             _request: WriteRelationshipsRequest,
-        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<WriteRelationshipsResponse>, tonic::Status> {
             unimplemented!()
         }
     }
@@ -365,9 +365,9 @@ async fn live_gate_pads_short_response_with_transport_error() {
         async fn check_bulk_permissions(
             &self,
             _request: authzed::v1::CheckBulkPermissionsRequest,
-        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, tonic::Status> {
             // Ignore items, return a single pair regardless.
-            Ok(CheckBulkPermissionsResponse {
+            Ok(tonic::Response::new(CheckBulkPermissionsResponse {
                 checked_at: Some(ZedToken { token: "zed".into() }),
                 pairs: vec![CheckBulkPermissionsPair {
                     request: None,
@@ -379,12 +379,12 @@ async fn live_gate_pads_short_response_with_transport_error() {
                         },
                     )),
                 }],
-            })
+            }))
         }
         async fn write_relationships(
             &self,
             _request: WriteRelationshipsRequest,
-        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<WriteRelationshipsResponse>, tonic::Status> {
             unimplemented!()
         }
     }
@@ -419,13 +419,13 @@ async fn live_gate_transport_error_returns_transport_error_per_agent() {
         async fn check_bulk_permissions(
             &self,
             _request: authzed::v1::CheckBulkPermissionsRequest,
-        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, tonic::Status> {
             Err(tonic::Status::unavailable("backend unreachable"))
         }
         async fn write_relationships(
             &self,
             _request: WriteRelationshipsRequest,
-        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+        ) -> Result<tonic::Response<WriteRelationshipsResponse>, tonic::Status> {
             unimplemented!()
         }
     }

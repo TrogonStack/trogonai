@@ -22,12 +22,12 @@ pub trait BulkImportPermissionCheck: Send + Sync {
     async fn check_bulk_permissions(
         &self,
         request: CheckBulkPermissionsRequest,
-    ) -> Result<CheckBulkPermissionsResponse, Status>;
+    ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, Status>;
 
     async fn write_relationships(
         &self,
         request: WriteRelationshipsRequest,
-    ) -> Result<WriteRelationshipsResponse, Status>;
+    ) -> Result<tonic::Response<WriteRelationshipsResponse>, Status>;
 }
 
 /// Per-request interceptor that attaches `Authorization: Bearer <token>`
@@ -74,15 +74,25 @@ impl LiveBulkImportPermissionClient {
         endpoint: &SpiceDbEndpoint,
         token: &SpiceDbToken,
     ) -> Result<Self, SpiceDbImportGateBuildError> {
-        let channel = Channel::from_shared(endpoint.as_str().to_owned())
-            .map_err(|e| SpiceDbImportGateBuildError::Connect(e.to_string()))?
-            .connect()
-            .await
-            .map_err(|e| SpiceDbImportGateBuildError::Connect(e.to_string()))?;
+        // Validate all local config first so an invalid endpoint
+        // or token surfaces as the precise error rather than
+        // masquerading as a transport failure. `Channel::from_shared`
+        // is a local URI parse, and `MetadataValue::try_from` is
+        // a local ASCII check -- neither touches the network.
+        let endpoint_uri = Channel::from_shared(endpoint.as_str().to_owned())
+            .map_err(|e| SpiceDbImportGateBuildError::InvalidEndpoint(e.to_string()))?;
 
         let bearer = format!("Bearer {}", token.expose_secret());
         let metadata = MetadataValue::try_from(bearer)
             .map_err(|e| SpiceDbImportGateBuildError::InvalidToken(format!("authorization metadata invalid: {e}")))?;
+
+        // Only after local validation succeeds do we touch the
+        // network. A `Connect` error from here on really is a
+        // transport problem.
+        let channel = endpoint_uri
+            .connect()
+            .await
+            .map_err(|e| SpiceDbImportGateBuildError::Connect(e.to_string()))?;
 
         let inner = PermissionsServiceClient::with_interceptor(channel, BearerTokenInterceptor { token: metadata });
 
@@ -95,23 +105,15 @@ impl BulkImportPermissionCheck for LiveBulkImportPermissionClient {
     async fn check_bulk_permissions(
         &self,
         request: CheckBulkPermissionsRequest,
-    ) -> Result<CheckBulkPermissionsResponse, Status> {
-        self.inner
-            .clone()
-            .check_bulk_permissions(request)
-            .await
-            .map(|response| response.into_inner())
+    ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, Status> {
+        self.inner.clone().check_bulk_permissions(request).await
     }
 
     async fn write_relationships(
         &self,
         request: WriteRelationshipsRequest,
-    ) -> Result<WriteRelationshipsResponse, Status> {
-        self.inner
-            .clone()
-            .write_relationships(request)
-            .await
-            .map(|response| response.into_inner())
+    ) -> Result<tonic::Response<WriteRelationshipsResponse>, Status> {
+        self.inner.clone().write_relationships(request).await
     }
 }
 
