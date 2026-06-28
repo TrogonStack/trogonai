@@ -45,10 +45,10 @@ pub enum CommandWireError {
     InvalidDuration(#[from] trogonai_proto::convert::StdDurationConversionError),
 }
 
-impl TryFrom<v1::CreateScheduleCommand> for CreateSchedule {
+impl TryFrom<v1::CreateSchedule> for CreateSchedule {
     type Error = CommandWireError;
 
-    fn try_from(value: v1::CreateScheduleCommand) -> Result<Self, Self::Error> {
+    fn try_from(value: v1::CreateSchedule) -> Result<Self, Self::Error> {
         if value.schedule_id.is_empty() {
             return Err(CommandWireError::MissingField("schedule_id"));
         }
@@ -83,10 +83,10 @@ impl TryFrom<v1::CreateScheduleCommand> for CreateSchedule {
     }
 }
 
-impl TryFrom<v1::PauseScheduleCommand> for PauseSchedule {
+impl TryFrom<v1::PauseSchedule> for PauseSchedule {
     type Error = CommandWireError;
 
-    fn try_from(value: v1::PauseScheduleCommand) -> Result<Self, Self::Error> {
+    fn try_from(value: v1::PauseSchedule) -> Result<Self, Self::Error> {
         if value.schedule_id.is_empty() {
             return Err(CommandWireError::MissingField("schedule_id"));
         }
@@ -94,10 +94,10 @@ impl TryFrom<v1::PauseScheduleCommand> for PauseSchedule {
     }
 }
 
-impl TryFrom<v1::RemoveScheduleCommand> for RemoveSchedule {
+impl TryFrom<v1::RemoveSchedule> for RemoveSchedule {
     type Error = CommandWireError;
 
-    fn try_from(value: v1::RemoveScheduleCommand) -> Result<Self, Self::Error> {
+    fn try_from(value: v1::RemoveSchedule) -> Result<Self, Self::Error> {
         if value.schedule_id.is_empty() {
             return Err(CommandWireError::MissingField("schedule_id"));
         }
@@ -105,10 +105,10 @@ impl TryFrom<v1::RemoveScheduleCommand> for RemoveSchedule {
     }
 }
 
-impl TryFrom<v1::ResumeScheduleCommand> for ResumeSchedule {
+impl TryFrom<v1::ResumeSchedule> for ResumeSchedule {
     type Error = CommandWireError;
 
-    fn try_from(value: v1::ResumeScheduleCommand) -> Result<Self, Self::Error> {
+    fn try_from(value: v1::ResumeSchedule) -> Result<Self, Self::Error> {
         if value.schedule_id.is_empty() {
             return Err(CommandWireError::MissingField("schedule_id"));
         }

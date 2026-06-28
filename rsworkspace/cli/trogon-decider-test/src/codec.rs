@@ -26,15 +26,15 @@ pub fn json_any_to_command(value: &serde_json::Value) -> Result<CommandEnvelope>
         }),
         PAUSE_SCHEDULE_TYPE_URL => Ok(CommandEnvelope {
             type_: type_url,
-            payload: parse_schedule_id_command::<schedules_v1::PauseScheduleCommand>(value)?.encode_to_vec(),
+            payload: parse_schedule_id_command::<schedules_v1::PauseSchedule>(value)?.encode_to_vec(),
         }),
         REMOVE_SCHEDULE_TYPE_URL => Ok(CommandEnvelope {
             type_: type_url,
-            payload: parse_schedule_id_command::<schedules_v1::RemoveScheduleCommand>(value)?.encode_to_vec(),
+            payload: parse_schedule_id_command::<schedules_v1::RemoveSchedule>(value)?.encode_to_vec(),
         }),
         RESUME_SCHEDULE_TYPE_URL => Ok(CommandEnvelope {
             type_: type_url,
-            payload: parse_schedule_id_command::<schedules_v1::ResumeScheduleCommand>(value)?.encode_to_vec(),
+            payload: parse_schedule_id_command::<schedules_v1::ResumeSchedule>(value)?.encode_to_vec(),
         }),
         other => bail!("unsupported command type '{other}'"),
     }
@@ -110,8 +110,8 @@ fn parse_light_turned_on(value: &serde_json::Value) -> Result<light_v1::LightTur
     })
 }
 
-fn parse_create_schedule_command(value: &serde_json::Value) -> Result<schedules_v1::CreateScheduleCommand> {
-    Ok(schedules_v1::CreateScheduleCommand {
+fn parse_create_schedule_command(value: &serde_json::Value) -> Result<schedules_v1::CreateSchedule> {
+    Ok(schedules_v1::CreateSchedule {
         schedule_id: required_string(value, "schedule_id")?,
         status: MessageField::some(parse_schedule_status(value.get("status"))?),
         schedule: MessageField::some(parse_schedule(value.get("schedule"))?),
@@ -131,19 +131,19 @@ trait ScheduleIdCommand: buffa::Message {
     fn from_schedule_id(schedule_id: String) -> Result<Self>;
 }
 
-impl ScheduleIdCommand for schedules_v1::PauseScheduleCommand {
+impl ScheduleIdCommand for schedules_v1::PauseSchedule {
     fn from_schedule_id(schedule_id: String) -> Result<Self> {
         Ok(Self { schedule_id })
     }
 }
 
-impl ScheduleIdCommand for schedules_v1::RemoveScheduleCommand {
+impl ScheduleIdCommand for schedules_v1::RemoveSchedule {
     fn from_schedule_id(schedule_id: String) -> Result<Self> {
         Ok(Self { schedule_id })
     }
 }
 
-impl ScheduleIdCommand for schedules_v1::ResumeScheduleCommand {
+impl ScheduleIdCommand for schedules_v1::ResumeSchedule {
     fn from_schedule_id(schedule_id: String) -> Result<Self> {
         Ok(Self { schedule_id })
     }

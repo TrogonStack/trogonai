@@ -8,7 +8,7 @@ import "trogonai/scheduler/schedules/v1/schedule.proto";
 import "trogonai/scheduler/schedules/v1/schedule_status.proto";
 
 // Wire command to create a schedule stream.
-message CreateScheduleCommand {
+message CreateSchedule {
   string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
   ScheduleStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
   Schedule schedule = 3 [features.field_presence = LEGACY_REQUIRED];

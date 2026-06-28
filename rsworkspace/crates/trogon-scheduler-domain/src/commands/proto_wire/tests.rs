@@ -3,8 +3,8 @@ use trogonai_proto::scheduler::schedules::v1;
 
 use super::*;
 
-fn minimal_create_proto(id: &str) -> v1::CreateScheduleCommand {
-    v1::CreateScheduleCommand {
+fn minimal_create_proto(id: &str) -> v1::CreateSchedule {
+    v1::CreateSchedule {
         schedule_id: id.to_string(),
         status: MessageField::some(v1::ScheduleStatus {
             kind: Some(v1::schedule_status::Scheduled {}.into()),
@@ -51,7 +51,7 @@ fn create_schedule_command_round_trips_from_proto() {
 #[test]
 fn pause_command_requires_schedule_id() {
     assert!(
-        PauseSchedule::try_from(v1::PauseScheduleCommand {
+        PauseSchedule::try_from(v1::PauseSchedule {
             schedule_id: String::new(),
         })
         .is_err()
@@ -73,7 +73,7 @@ fn timezone(id: &str) -> trogonai_proto::google::r#type::TimeZone {
     }
 }
 
-fn create_proto_with_schedule(kind: v1::schedule::Kind) -> v1::CreateScheduleCommand {
+fn create_proto_with_schedule(kind: v1::schedule::Kind) -> v1::CreateSchedule {
     let mut proto = minimal_create_proto("backup");
     proto.schedule = MessageField::some(v1::Schedule { kind: Some(kind) });
     proto
@@ -223,7 +223,7 @@ fn create_rejects_schedule_without_kind() {
     ));
 }
 
-fn create_proto_with_schedule_none() -> v1::CreateScheduleCommand {
+fn create_proto_with_schedule_none() -> v1::CreateSchedule {
     let mut proto = minimal_create_proto("backup");
     proto.schedule = MessageField::some(v1::Schedule { kind: None });
     proto
@@ -321,7 +321,7 @@ fn create_rejects_missing_every_duration() {
 
 #[test]
 fn pause_command_round_trips() {
-    let command = PauseSchedule::try_from(v1::PauseScheduleCommand {
+    let command = PauseSchedule::try_from(v1::PauseSchedule {
         schedule_id: "backup".to_string(),
     })
     .unwrap();
@@ -331,7 +331,7 @@ fn pause_command_round_trips() {
 #[test]
 fn remove_command_round_trips() {
     assert!(
-        RemoveSchedule::try_from(v1::RemoveScheduleCommand {
+        RemoveSchedule::try_from(v1::RemoveSchedule {
             schedule_id: "backup".to_string(),
         })
         .is_ok()
@@ -341,7 +341,7 @@ fn remove_command_round_trips() {
 #[test]
 fn remove_command_requires_schedule_id() {
     assert!(
-        RemoveSchedule::try_from(v1::RemoveScheduleCommand {
+        RemoveSchedule::try_from(v1::RemoveSchedule {
             schedule_id: String::new(),
         })
         .is_err()
@@ -351,7 +351,7 @@ fn remove_command_requires_schedule_id() {
 #[test]
 fn resume_command_round_trips() {
     assert!(
-        ResumeSchedule::try_from(v1::ResumeScheduleCommand {
+        ResumeSchedule::try_from(v1::ResumeSchedule {
             schedule_id: "backup".to_string(),
         })
         .is_ok()
@@ -361,7 +361,7 @@ fn resume_command_round_trips() {
 #[test]
 fn resume_command_requires_schedule_id() {
     assert!(
-        ResumeSchedule::try_from(v1::ResumeScheduleCommand {
+        ResumeSchedule::try_from(v1::ResumeSchedule {
             schedule_id: String::new(),
         })
         .is_err()

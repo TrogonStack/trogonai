@@ -2,6 +2,6 @@ edition = "2024";
 
 package trogonai.scheduler.schedules.v1;
 
-message PauseScheduleCommand {
+message ResumeSchedule {
   string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
 }

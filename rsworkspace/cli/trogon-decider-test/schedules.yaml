@@ -3,7 +3,7 @@ scenarios:
   - name: create schedule from initial state
     given: []
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
       schedule_id: backup
       status:
         scheduled: {}
@@ -48,7 +48,7 @@ scenarios:
             content_type: application/json
             data: '{"kind":"heartbeat"}'
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
       schedule_id: backup
       status:
         scheduled: {}
@@ -80,7 +80,7 @@ scenarios:
             content_type: application/json
             data: '{}'
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
       schedule_id: backup
     then:
       events:
@@ -90,7 +90,7 @@ scenarios:
   - name: reject pause when schedule missing
     given: []
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
       schedule_id: backup
     then:
       rejected: true
@@ -113,7 +113,7 @@ scenarios:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
         schedule_id: backup
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeSchedule
       schedule_id: backup
     then:
       events:
@@ -136,7 +136,7 @@ scenarios:
             content_type: application/json
             data: '{}'
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveSchedule
       schedule_id: backup
     then:
       events:
@@ -161,7 +161,7 @@ scenarios:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
         schedule_id: backup
     when:
-      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateScheduleCommand
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
       schedule_id: backup
       status:
         scheduled: {}

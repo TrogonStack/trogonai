@@ -16,7 +16,7 @@ fn schedules_wasm() -> Vec<u8> {
 fn create_command(id: &str) -> CommandEnvelope {
     CommandEnvelope {
         type_: CREATE_SCHEDULE_TYPE_URL.to_string(),
-        payload: v1::CreateScheduleCommand {
+        payload: v1::CreateSchedule {
             schedule_id: id.to_string(),
             status: MessageField::some(v1::ScheduleStatus {
                 kind: Some(v1::schedule_status::Scheduled {}.into()),
@@ -124,7 +124,7 @@ fn pause_existing_schedule() {
         .given([schedule_created_event("backup")])
         .when(CommandEnvelope {
             type_: PAUSE_SCHEDULE_TYPE_URL.to_string(),
-            payload: v1::PauseScheduleCommand {
+            payload: v1::PauseSchedule {
                 schedule_id: "backup".to_string(),
             }
             .encode_to_vec(),

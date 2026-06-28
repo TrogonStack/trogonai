@@ -10,7 +10,7 @@ use trogonai_proto::scheduler::schedules::{
 export_decider!(
     CreateSchedule {
         type_url = CREATE_SCHEDULE_TYPE_URL,
-        proto = v1::CreateScheduleCommand,
+        proto = v1::CreateSchedule,
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
@@ -18,21 +18,21 @@ export_decider!(
     },
     PauseSchedule {
         type_url = PAUSE_SCHEDULE_TYPE_URL,
-        proto = v1::PauseScheduleCommand,
+        proto = v1::PauseSchedule,
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
     },
     RemoveSchedule {
         type_url = REMOVE_SCHEDULE_TYPE_URL,
-        proto = v1::RemoveScheduleCommand,
+        proto = v1::RemoveSchedule,
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
     },
     ResumeSchedule {
         type_url = RESUME_SCHEDULE_TYPE_URL,
-        proto = v1::ResumeScheduleCommand,
+        proto = v1::ResumeSchedule,
         module = "scheduler.schedules",
         version = "0.1.0",
         state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
