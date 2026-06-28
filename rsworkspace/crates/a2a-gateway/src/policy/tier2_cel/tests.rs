@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use a2a_nats::A2aAgentId;
@@ -49,6 +48,10 @@ fn compile_invalid_cel_source_err() {
 
 #[test]
 fn mtime_change_triggers_recompile() {
+    // Use `filetime::set_file_mtime` to bump mtime deterministically
+    // instead of sleeping past filesystem granularity — the prior
+    // `thread::sleep(1.1s)` approach depended on filesystem mtime
+    // resolution and added a full second of wall-clock per test run.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("rule.cel");
     fs::write(&path, "true").expect("write cel");
@@ -56,8 +59,13 @@ fn mtime_change_triggers_recompile() {
     let bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load bundle");
     assert_eq!(bundle.rules().count(), 1);
 
-    thread::sleep(Duration::from_millis(1100));
     fs::write(&path, "false").expect("rewrite cel");
+    // Bump mtime by a known amount so the bundle's cached mtime is
+    // guaranteed to differ from the new file mtime regardless of
+    // underlying FS time resolution.
+    let original_mtime = fs::metadata(&path).expect("meta").modified().expect("mtime");
+    let bumped = original_mtime + Duration::from_secs(5);
+    filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(bumped)).expect("bump mtime");
 
     let mut refreshed = bundle;
     refreshed.refresh_if_stale().expect("refresh");
@@ -225,8 +233,45 @@ fn evaluation_context_accessors_round_trip_constructor_args() {
 
 #[test]
 fn bundle_load_from_missing_dir_yields_empty_bundle() {
-    let bundle = Tier2CompiledBundle::load_from_dir("/nonexistent/path").expect("missing tolerated");
+    // Use a path derived from a real tempdir so the test doesn't depend
+    // on Unix-style root semantics or hope that `/nonexistent/path`
+    // happens to be absent on the runner.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("does-not-exist");
+    let bundle = Tier2CompiledBundle::load_from_dir(missing).expect("missing tolerated");
     assert_eq!(bundle.rules().count(), 0);
+}
+
+#[test]
+fn bundle_load_from_non_directory_path_fails_fast() {
+    // An existing path that's a file (not a directory) is a
+    // misconfiguration; the loader must surface it instead of returning
+    // an empty bundle and silently default-allowing every request.
+    let file = tempfile::NamedTempFile::new().expect("tempfile");
+    let err = Tier2CompiledBundle::load_from_dir(file.path()).expect_err("non-dir rejected");
+    assert_eq!(err.path(), file.path());
+}
+
+#[test]
+fn bundle_refresh_drops_deleted_rules() {
+    // Without this, a `.cel` file that an operator removes would keep
+    // enforcing its old rule indefinitely.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("temporary.cel");
+    fs::write(&path, "true").expect("write cel");
+    let mut bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load");
+    assert_eq!(bundle.rules().count(), 1);
+    fs::remove_file(&path).expect("remove cel");
+    bundle.refresh_if_stale().expect("refresh after delete");
+    assert_eq!(bundle.rules().count(), 0);
+}
+
+#[test]
+fn rule_name_try_new_rejects_empty_or_whitespace() {
+    use crate::policy::tier2::rule_name::RuleNameError;
+    assert!(matches!(RuleName::try_new(""), Err(RuleNameError::Empty)));
+    assert!(matches!(RuleName::try_new("   "), Err(RuleNameError::Empty)));
+    assert!(RuleName::try_new("rule-1").is_ok());
 }
 
 #[test]

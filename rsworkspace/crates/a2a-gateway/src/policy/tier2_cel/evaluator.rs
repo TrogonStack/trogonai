@@ -36,10 +36,10 @@ impl CelEngine for CelInterpreterEngine {
         let value = program
             .program()
             .execute(&cel_ctx)
-            .map_err(|err| Tier2EvalError::new(format!("CEL execution failed: {err}")))?;
+            .map_err(|err| Tier2EvalError::execution(err.to_string()))?;
         match value {
             Value::Bool(result) => Ok(result),
-            other => Err(Tier2EvalError::new(format!("CEL rule must return bool, got {other:?}"))),
+            other => Err(Tier2EvalError::non_bool_result(format!("{other:?}"))),
         }
     }
 }
@@ -67,24 +67,30 @@ impl RealTier2CelEvaluator {
 
 impl Tier2CelEvaluator for RealTier2CelEvaluator {
     fn evaluate(&self, ctx: &Tier2EvaluationContext) -> Tier2Decision {
-        let mut bundle = match self.bundle.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                warn!("tier-2 bundle lock poisoned; denying request");
+        // Refresh + snapshot inside the lock; release the lock BEFORE
+        // executing CEL programs so a single slow rule can't block other
+        // callers (each `evaluate` holds the lock only across O(rules)
+        // metadata lookups, not the CEL execution time).
+        let snapshot = {
+            let mut bundle = match self.bundle.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    warn!("tier-2 bundle lock poisoned; denying request");
+                    return Tier2Decision::Deny {
+                        rule: RuleName::evaluation_error(),
+                    };
+                }
+            };
+            if let Err(err) = bundle.refresh_if_stale() {
+                warn!(error = %err, "tier-2 bundle refresh failed; denying request");
                 return Tier2Decision::Deny {
                     rule: RuleName::evaluation_error(),
                 };
             }
+            bundle.snapshot()
         };
 
-        if let Err(err) = bundle.refresh_if_stale() {
-            warn!(error = %err, "tier-2 bundle refresh failed; denying request");
-            return Tier2Decision::Deny {
-                rule: RuleName::evaluation_error(),
-            };
-        }
-
-        for (rule, program) in bundle.rules() {
+        for (rule, program) in &snapshot {
             match self.engine.evaluate_bool(rule, program, ctx) {
                 Ok(true) => {}
                 Ok(false) => return Tier2Decision::Deny { rule: rule.clone() },
@@ -106,30 +112,29 @@ fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) 
         "method": ctx.request_method(),
         "params": ctx.request_params(),
     }))
-    .map_err(|err| Tier2EvalError::new(format!("request binding failed: {err}")))?;
+    .map_err(|err| Tier2EvalError::binding("request", err.to_string()))?;
     cel_ctx.add_variable_from_value("request", request);
 
     let caller = to_value(serde_json::json!({
         "id": ctx.caller_id(),
     }))
-    .map_err(|err| Tier2EvalError::new(format!("caller binding failed: {err}")))?;
+    .map_err(|err| Tier2EvalError::binding("caller", err.to_string()))?;
     cel_ctx.add_variable_from_value("caller", caller);
 
     let agent = to_value(serde_json::json!({
         "id": ctx.agent_id().as_str(),
     }))
-    .map_err(|err| Tier2EvalError::new(format!("agent binding failed: {err}")))?;
+    .map_err(|err| Tier2EvalError::binding("agent", err.to_string()))?;
     cel_ctx.add_variable_from_value("agent", agent);
 
     let task = to_value(serde_json::json!({
         "id": ctx.task_id(),
     }))
-    .map_err(|err| Tier2EvalError::new(format!("task binding failed: {err}")))?;
+    .map_err(|err| Tier2EvalError::binding("task", err.to_string()))?;
     cel_ctx.add_variable_from_value("task", task);
 
     let headers: BTreeMap<String, String> = ctx.headers().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    let headers_value =
-        to_value(headers).map_err(|err| Tier2EvalError::new(format!("headers binding failed: {err}")))?;
+    let headers_value = to_value(headers).map_err(|err| Tier2EvalError::binding("headers", err.to_string()))?;
     cel_ctx.add_variable_from_value("headers", headers_value);
 
     Ok(())
@@ -201,7 +206,7 @@ impl CelEngine for MockCelEngine {
     ) -> Result<bool, Tier2EvalError> {
         match self.outcomes.get(rule) {
             Some(Ok(result)) => Ok(*result),
-            Some(Err(err)) => Err(Tier2EvalError::new(err.to_string())),
+            Some(Err(err)) => Err(Tier2EvalError::execution(err.to_string())),
             None => Ok(true),
         }
     }

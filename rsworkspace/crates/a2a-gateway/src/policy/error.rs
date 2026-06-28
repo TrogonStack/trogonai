@@ -23,22 +23,53 @@ pub enum PolicyError {
     Tier2(#[from] Tier2EvalError),
 }
 
-/// Failure surface for the Tier2 CEL evaluator. The CEL evaluator's own
+/// Failure surface for the Tier2 CEL evaluator. The CEL interpreter's own
 /// error type carries spans + interpreter state we don't want crossing the
-/// crate boundary, so this opaque newtype keeps the audit log message
-/// stable while still letting the source chain flow through `Display`.
+/// crate boundary, so each variant collapses its source into the message
+/// while letting callers route on the variant tag (execution vs. binding
+/// vs. wrong-result-type) instead of pattern-matching on `Display`.
 #[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct Tier2EvalError(Box<str>);
+pub enum Tier2EvalError {
+    /// `Program::execute` returned an interpreter error. The collapsed
+    /// message preserves the interpreter's own description without
+    /// dragging the cel-interpreter types across the crate boundary.
+    #[error("CEL execution failed: {message}")]
+    Execution { message: Box<str> },
+    /// The rule returned a value other than `bool`. CEL rules MUST
+    /// evaluate to a boolean — anything else is a misconfigured rule
+    /// that must be denied closed rather than silently coerced.
+    #[error("CEL rule must return bool, got {value_type}")]
+    NonBoolResult { value_type: Box<str> },
+    /// One of the variable bindings (request, caller, agent, task,
+    /// headers) failed to serialize into the CEL context.
+    #[error("CEL binding `{binding}` failed: {message}")]
+    Binding { binding: Box<str>, message: Box<str> },
+}
 
 impl Tier2EvalError {
+    /// Convenience for the execution-failed path.
     #[must_use]
-    pub fn new(message: impl Into<Box<str>>) -> Self {
-        Self(message.into())
+    pub fn execution(message: impl Into<Box<str>>) -> Self {
+        Self::Execution {
+            message: message.into(),
+        }
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
+    /// Convenience for the non-bool-result path.
+    #[must_use]
+    pub fn non_bool_result(value_type: impl Into<Box<str>>) -> Self {
+        Self::NonBoolResult {
+            value_type: value_type.into(),
+        }
+    }
+
+    /// Convenience for a binding-stage failure.
+    #[must_use]
+    pub fn binding(binding: impl Into<Box<str>>, message: impl Into<Box<str>>) -> Self {
+        Self::Binding {
+            binding: binding.into(),
+            message: message.into(),
+        }
     }
 }
 
