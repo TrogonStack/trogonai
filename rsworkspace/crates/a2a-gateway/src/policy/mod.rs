@@ -12,6 +12,8 @@
 
 pub mod error;
 pub mod per_skill;
+#[cfg(feature = "spicedb")]
+pub mod spicedb_tier1;
 pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
