@@ -59,6 +59,20 @@ fn rejects_unknown_field() {
 }
 
 #[test]
+fn accepts_schema_defined_host_fields() {
+    let host = CatalogHost::new(json!({
+        "displayName": "Acme",
+        "identifier": "did:web:acme.example",
+        "documentationUrl": "https://acme.example/docs",
+        "logoUrl": "https://acme.example/logo.png"
+    }))
+    .unwrap();
+    assert_eq!(host.as_value()["identifier"], "did:web:acme.example");
+    assert_eq!(host.as_value()["documentationUrl"], "https://acme.example/docs");
+    assert_eq!(host.as_value()["logoUrl"], "https://acme.example/logo.png");
+}
+
+#[test]
 fn accepts_only_allowed_keys_and_round_trips() {
     let host = CatalogHost::new(json!({
         "displayName": "Acme",

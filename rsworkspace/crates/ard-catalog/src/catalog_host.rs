@@ -34,7 +34,13 @@ impl CatalogHost {
         if let Some(trust_manifest) = object.get("trustManifest") {
             TrustManifest::new(trust_manifest.clone())?;
         }
-        const ALLOWED_KEYS: &[&str] = &["displayName", "identity", "trustManifest"];
+        const ALLOWED_KEYS: &[&str] = &[
+            "displayName",
+            "identifier",
+            "documentationUrl",
+            "logoUrl",
+            "trustManifest",
+        ];
         for key in object.keys() {
             if !ALLOWED_KEYS.contains(&key.as_str()) {
                 return Err(CatalogHostError::UnknownField(key.clone()));
