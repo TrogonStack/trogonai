@@ -39,5 +39,6 @@ pub use gateway_ingress::{
 };
 pub use jsonrpc::{JsonRpcId, extract_request_id};
 pub use req_id::ReqId;
+pub use server::A2aMethod;
 pub use task_id::{A2aTaskId, TaskIdError};
 pub use trogon_nats::NatsConfig;
