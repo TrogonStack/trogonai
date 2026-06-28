@@ -14,6 +14,7 @@ pub mod error;
 pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
+pub mod tier3_redaction;
 
 pub use error::{PolicyError, Tier2EvalError};
 pub use tier1_declarative::{
@@ -29,4 +30,10 @@ pub use tier2::{DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Ti
 pub use tier2_cel::{
     CelCompileError, CelEngine, CelInterpreterEngine, CelProgramHandle, RealTier2CelEvaluator, Tier2CompiledBundle,
     tier2_evaluation_context_from_ingress,
+};
+pub use tier3_redaction::{
+    NoopTier3RedactionGate, RealTier3RedactionGate, RedactionRewrite, RewriteKind, Tier3EngineError,
+    Tier3EvaluationContext, Tier3RedactionDecision, Tier3RedactionGate, Tier3RefusalReason, Tier3SkillManifest,
+    gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, merge_forward_audit_rewrites,
+    tier3_redaction_audit_rewrites,
 };
