@@ -1,0 +1,20 @@
+[package]
+name = "ard-catalog"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "ARD-compatible discovery catalog domain model and wire validation"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hex = { workspace = true }
+jsonschema = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
+url = { workspace = true }
