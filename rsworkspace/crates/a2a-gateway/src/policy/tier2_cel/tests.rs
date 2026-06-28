@@ -93,7 +93,7 @@ fn evaluator_deny_path() {
     assert_eq!(
         evaluator.evaluate(&sample_ctx("message/send")),
         Tier2Decision::Deny {
-            rule: RuleName::new("deny_guests")
+            rule: RuleName::new("deny_guests").expect("non-empty test rule name")
         }
     );
 }
@@ -113,13 +113,16 @@ fn evaluator_error_path_denies_closed() {
 #[test]
 fn mock_engine_drives_decision() {
     let mut outcomes = BTreeMap::new();
-    outcomes.insert(RuleName::new("block_rule"), Ok(false));
+    outcomes.insert(
+        RuleName::new("block_rule").expect("non-empty test rule name"),
+        Ok(false),
+    );
     let (_dir, bundle) = bundle_with_rule("block_rule", "true");
     let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
     assert_eq!(
         evaluator.evaluate(&sample_ctx("message/send")),
         Tier2Decision::Deny {
-            rule: RuleName::new("block_rule")
+            rule: RuleName::new("block_rule").expect("non-empty test rule name")
         }
     );
 }
@@ -134,7 +137,7 @@ fn compiled_program_handle_is_shared() {
 
 #[test]
 fn rule_name_display_round_trips() {
-    let name = RuleName::new("my-rule");
+    let name = RuleName::new("my-rule").expect("non-empty test rule name");
     assert_eq!(format!("{name}"), "my-rule");
     assert_eq!(name.as_str(), "my-rule");
     assert_eq!(RuleName::evaluation_error().as_str(), "evaluation_error");
@@ -145,7 +148,7 @@ fn tier2_decision_is_allow_only_for_allow() {
     assert!(Tier2Decision::Allow.is_allow());
     assert!(
         !Tier2Decision::Deny {
-            rule: RuleName::new("x"),
+            rule: RuleName::new("x").expect("non-empty test rule name"),
         }
         .is_allow()
     );
@@ -272,10 +275,15 @@ fn bundle_refresh_drops_deleted_rules() {
 }
 
 #[test]
-fn rule_name_try_new_rejects_empty_or_whitespace() {
-    assert!(matches!(RuleName::try_new(""), Err(RuleNameError::Empty)));
-    assert!(matches!(RuleName::try_new("   "), Err(RuleNameError::Empty)));
-    assert!(RuleName::try_new("rule-1").is_ok());
+fn rule_name_new_rejects_empty_or_whitespace() {
+    // RuleName's public constructor is the sole validation point —
+    // RuleName::new is fallible so an empty/whitespace name can't
+    // produce a `RuleName` value. The unchecked constructor is
+    // crate-private (`new_unchecked`) and only used by the loader on
+    // pre-filtered file stems plus the `evaluation_error` sentinel.
+    assert!(matches!(RuleName::new(""), Err(RuleNameError::Empty)));
+    assert!(matches!(RuleName::new("   "), Err(RuleNameError::Empty)));
+    assert!(RuleName::new("rule-1").is_ok());
 }
 
 #[test]
@@ -356,18 +364,19 @@ fn bundle_tier2_dir_round_trips() {
 fn cel_engine_non_bool_result_is_eval_error() {
     // Compile a CEL program whose result is an int — the engine must
     // reject anything other than bool so misconfigured rules can't be
-    // silently treated as truthy/falsy. The eval-error variant is
-    // captured by its variant in the policy::error module rather than
-    // by string match on the display message.
+    // silently treated as truthy/falsy. Match the typed variant
+    // directly so a regression to `Execution` or `Binding` doesn't
+    // slip past this test.
     let program = compile_cel_source("1 + 2").expect("compile");
     let engine = CelInterpreterEngine;
     let err = engine
-        .evaluate_bool(&RuleName::new("non-bool"), &program, &sample_ctx("m"))
+        .evaluate_bool(
+            &RuleName::new("non-bool").expect("non-empty test rule name"),
+            &program,
+            &sample_ctx("m"),
+        )
         .expect_err("non-bool rejected");
-    // `Tier2EvalError` doesn't carry a typed kind for "bool-required"
-    // (yet). Cheaply assert it's the right error class via Debug, not
-    // Display — Display is for human logs, not control flow.
-    let _ = format!("{err:?}");
+    assert!(matches!(err, Tier2EvalError::NonBoolResult { .. }));
 }
 
 #[test]
@@ -377,7 +386,10 @@ fn mock_engine_propagates_engine_error_as_deny() {
     // surface that as a deny tagged `evaluation_error` rather than
     // letting the error bubble up to the caller.
     let mut outcomes = BTreeMap::new();
-    outcomes.insert(RuleName::new("crashes"), Err(Tier2EvalError::execution("boom")));
+    outcomes.insert(
+        RuleName::new("crashes").expect("non-empty test rule name"),
+        Err(Tier2EvalError::execution("boom")),
+    );
     let (_dir, bundle) = bundle_with_rule("crashes", "true");
     let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
     assert_eq!(

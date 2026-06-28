@@ -12,9 +12,13 @@ pub enum RuleNameError {
 impl RuleName {
     /// Construct a validated rule name. Rejects empty / whitespace-only
     /// names so an invalid `RuleName` value can't exist in memory.
-    /// Use `try_new` from new code; the legacy `new` is kept for the
-    /// loader path that already filters non-empty file stems.
-    pub fn try_new(name: impl Into<String>) -> Result<Self, RuleNameError> {
+    ///
+    /// This is the only public constructor. Internal call sites that
+    /// already know the input is valid (file stems pre-filtered by the
+    /// loader, static literals like the `evaluation_error` sentinel)
+    /// use [`Self::new_unchecked`], which is crate-private so external
+    /// callers can't bypass the validation contract.
+    pub fn new(name: impl Into<String>) -> Result<Self, RuleNameError> {
         let raw = name.into();
         if raw.trim().is_empty() {
             return Err(RuleNameError::Empty);
@@ -22,11 +26,10 @@ impl RuleName {
         Ok(Self(raw))
     }
 
-    /// Infallible constructor used by the loader and the
-    /// `evaluation_error` sentinel — the inputs are already known to be
-    /// non-empty (file stems / static string literals). Defer to
-    /// [`Self::try_new`] when accepting an arbitrary caller string.
-    pub fn new(name: impl Into<String>) -> Self {
+    /// Crate-private infallible constructor. Use only when the caller
+    /// has already enforced non-emptiness — `pub(crate)` keeps external
+    /// callers on the validating [`Self::new`] path.
+    pub(crate) fn new_unchecked(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
@@ -35,7 +38,8 @@ impl RuleName {
     }
 
     pub fn evaluation_error() -> Self {
-        Self::new("evaluation_error")
+        // Static literal — known non-empty.
+        Self::new_unchecked("evaluation_error")
     }
 }
 

@@ -226,7 +226,17 @@ impl CelEngine for MockCelEngine {
     ) -> Result<bool, Tier2EvalError> {
         match self.outcomes.get(rule) {
             Some(Ok(result)) => Ok(*result),
-            Some(Err(err)) => Err(Tier2EvalError::execution(err.to_string())),
+            Some(Err(err)) => Err(match err {
+                // Preserve the configured variant rather than flattening
+                // every mock error into `Execution` — tests need to
+                // exercise `Binding` and `NonBoolResult` paths through
+                // the real evaluator without lossy translation.
+                Tier2EvalError::Execution { message } => Tier2EvalError::execution(message.clone()),
+                Tier2EvalError::NonBoolResult { value_type } => Tier2EvalError::non_bool_result(value_type.clone()),
+                Tier2EvalError::Binding { binding, message } => {
+                    Tier2EvalError::binding(binding.clone(), message.clone())
+                }
+            }),
             None => Ok(true),
         }
     }

@@ -85,7 +85,13 @@ impl Tier2CompiledBundle {
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            let rule = RuleName::new(stem);
+            // Skip files that turn into an empty stem (e.g. `.cel` with
+            // no name) so the unchecked constructor only ever sees the
+            // non-empty input it requires.
+            if stem.trim().is_empty() {
+                continue;
+            }
+            let rule = RuleName::new_unchecked(stem);
             let (program, mtime) = compiler::compile_cel_file(&path)?;
             rules.insert(rule, CachedRule { path, mtime, program });
         }
@@ -171,7 +177,10 @@ impl Tier2CompiledBundle {
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            let rule = RuleName::new(stem);
+            if stem.trim().is_empty() {
+                continue;
+            }
+            let rule = RuleName::new_unchecked(stem);
             if self.rules.contains_key(&rule) {
                 continue;
             }
