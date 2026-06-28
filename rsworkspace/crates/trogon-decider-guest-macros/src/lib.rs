@@ -25,6 +25,29 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
     let module_version = &canonical.version;
     let state_schema_version = &canonical.state_schema_version;
 
+    // Only the canonical command's `module`/`version` feed `descriptor()`, so a
+    // bundle must agree on the exported module identity. These are string
+    // literals, so reject any divergence at macro-expansion time (the
+    // `state_schema_version` guard below covers its non-literal expression form).
+    for command in commands.iter().skip(1) {
+        if command.module.value() != canonical.module.value() {
+            return syn::Error::new_spanned(
+                &command.module,
+                "all export_decider! commands must declare the same module",
+            )
+            .to_compile_error()
+            .into();
+        }
+        if command.version.value() != canonical.version.value() {
+            return syn::Error::new_spanned(
+                &command.version,
+                "all export_decider! commands must declare the same version",
+            )
+            .to_compile_error()
+            .into();
+        }
+    }
+
     let stream_id_arms = commands.iter().map(|command| {
         let ty = &command.ty;
         let type_url = &command.type_url;
