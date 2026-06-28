@@ -12,6 +12,8 @@
 
 pub mod error;
 pub mod tier1_declarative;
+pub mod tier2;
+pub mod tier2_cel;
 
 pub use error::{PolicyError, Tier2EvalError};
 pub use tier1_declarative::{
@@ -21,4 +23,10 @@ pub use tier1_declarative::{
     Tier1DeclarativeDecision, Tier1DeclarativeEffect, Tier1DeclarativeGate, Tier1DeclarativeLoadError,
     Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId, Tier1DeclarativeSchemaError,
     Tier1ResourceKind, tier1_declarative_audit_rule_fired,
+};
+pub use tier2::rule_name::RuleName;
+pub use tier2::{DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};
+pub use tier2_cel::{
+    CelCompileError, CelEngine, CelInterpreterEngine, CelProgramHandle, RealTier2CelEvaluator, Tier2CompiledBundle,
+    tier2_evaluation_context_from_ingress,
 };
