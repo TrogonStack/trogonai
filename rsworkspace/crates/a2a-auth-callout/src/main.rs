@@ -5,7 +5,7 @@ use {
     a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcVerifier},
     a2a_auth_callout::dispatcher::{CalloutDispatcher, CalloutDispatcherConfig},
     a2a_auth_callout::error::AuthCalloutError,
-    a2a_auth_callout::signing_key_source::signing_key_source_from_process_env,
+    a2a_auth_callout::signing_key_source::signing_key_source_from_env,
     a2a_auth_callout::{
         AccountResolver, AuthCalloutWireCodec, NkeyPublic, NkeySeed, StaticAccountResolver, Subscriber, XkeyPublic,
     },
@@ -97,7 +97,7 @@ async fn main() {
     let env = SystemEnv;
 
     let nats_url = env.var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".into());
-    let signing_key_source = match signing_key_source_from_process_env() {
+    let signing_key_source = match signing_key_source_from_env(&env) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "invalid signing key source configuration");

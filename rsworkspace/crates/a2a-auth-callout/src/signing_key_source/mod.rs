@@ -12,7 +12,7 @@ pub use file::FileSigningKeySource;
 #[allow(unused_imports)]
 pub(crate) use key_version::unminted_placeholder;
 pub use key_version::{KeyVersion, KeyVersionError};
-pub use loader::signing_key_source_from_process_env;
+pub use loader::signing_key_source_from_env;
 pub use minting_material::MintingMaterial;
 pub use signing_key_handle::SigningKeyHandle;
 pub use static_source::StaticSigningKeySource;

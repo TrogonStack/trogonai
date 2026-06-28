@@ -6,11 +6,7 @@ use crate::error::AuthCalloutError;
 
 use super::{EnvSigningKeySource, FileSigningKeySource, SigningKeySource};
 
-pub fn signing_key_source_from_process_env() -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
-    signing_key_source_from_env(&trogon_std::env::SystemEnv)
-}
-
-pub(crate) fn signing_key_source_from_env(env: &impl ReadEnv) -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
+pub fn signing_key_source_from_env(env: &impl ReadEnv) -> Result<Arc<dyn SigningKeySource>, AuthCalloutError> {
     let kind = env
         .var("AUTH_CALLOUT_SIGNING_KEY_SOURCE")
         .unwrap_or_else(|_| "env".into());
