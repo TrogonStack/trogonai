@@ -7,6 +7,7 @@ use authzed::v1::{
     check_permission_response::Permissionship,
 };
 use trogon_std::env::InMemoryEnv;
+use trogon_std::env::ReadEnv;
 
 use super::*;
 
@@ -227,6 +228,24 @@ fn tier1_zed_token_ttl_uses_env_value_or_default() {
     assert_eq!(default.as_duration(), std::time::Duration::from_secs(60));
 }
 
+/// `ReadEnv` impl that returns `NotUnicode` for any key. `InMemoryEnv`
+/// only models `NotPresent`/`Ok`, so this fixture is the only way to
+/// hit the `NotUnicode` arm of the env-decode helpers from a test.
+struct NotUnicodeEnv;
+
+impl ReadEnv for NotUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::from("garbage")))
+    }
+}
+
+#[test]
+fn tier1_zed_token_ttl_rejects_non_unicode_env() {
+    let env = NotUnicodeEnv;
+    let err = tier1_zed_token_ttl(&env).expect_err("non-unicode env must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidZedTokenTtl(_)));
+}
+
 #[test]
 fn tier1_zed_token_ttl_rejects_garbage() {
     let env = InMemoryEnv::new();
@@ -330,6 +349,62 @@ async fn live_gate_pair_with_no_response_maps_to_denied() {
     let principal = principal_with_subject("user:alice");
     let outcomes = gate.bulk_check_agent_view(&session, &principal, &[agent("a1")]).await;
     assert_eq!(outcomes, vec![AgentViewCheckOutcome::Denied]);
+}
+
+#[tokio::test]
+async fn live_gate_pads_short_response_with_transport_error() {
+    // SpiceDB returning fewer pairs than requested is a protocol
+    // violation. Without the length-mismatch guard, `zip` would
+    // truncate and the single-agent helper would mislabel
+    // answered items as TransportError. The gate now pads the
+    // missing tail with TransportError so the per-agent contract
+    // holds and the protocol mismatch surfaces in audit.
+    struct ShortResponseClient;
+    #[async_trait]
+    impl BulkImportPermissionCheck for ShortResponseClient {
+        async fn check_bulk_permissions(
+            &self,
+            _request: authzed::v1::CheckBulkPermissionsRequest,
+        ) -> Result<CheckBulkPermissionsResponse, tonic::Status> {
+            // Ignore items, return a single pair regardless.
+            Ok(CheckBulkPermissionsResponse {
+                checked_at: Some(ZedToken { token: "zed".into() }),
+                pairs: vec![CheckBulkPermissionsPair {
+                    request: None,
+                    response: Some(check_bulk_permissions_pair::Response::Item(
+                        CheckBulkPermissionsResponseItem {
+                            permissionship: Permissionship::HasPermission as i32,
+                            partial_caveat_info: None,
+                            debug_trace: None,
+                        },
+                    )),
+                }],
+            })
+        }
+        async fn write_relationships(
+            &self,
+            _request: WriteRelationshipsRequest,
+        ) -> Result<WriteRelationshipsResponse, tonic::Status> {
+            unimplemented!()
+        }
+    }
+    let gate = LiveAgentViewGate::new(
+        std::sync::Arc::new(ShortResponseClient),
+        SpiceDbSessionCache::new(ZedTokenTtl::from_secs(60)),
+    );
+    let session = SpiceDbSessionKey::new("alice", "acme");
+    let principal = principal_with_subject("user:alice");
+    let outcomes = gate
+        .bulk_check_agent_view(&session, &principal, &[agent("a1"), agent("a2"), agent("a3")])
+        .await;
+    assert_eq!(
+        outcomes,
+        vec![
+            AgentViewCheckOutcome::Allowed,
+            AgentViewCheckOutcome::TransportError,
+            AgentViewCheckOutcome::TransportError,
+        ],
+    );
 }
 
 #[tokio::test]

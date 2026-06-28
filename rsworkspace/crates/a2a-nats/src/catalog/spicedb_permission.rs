@@ -243,17 +243,25 @@ impl AgentViewGate for LiveAgentViewGate {
             self.session_cache.insert(session.clone(), token).await;
         }
 
-        agent_ids
-            .iter()
-            .zip(response.pairs.iter())
-            .map(|(_agent_id, pair)| {
-                if pair_is_allowed(pair) {
-                    AgentViewCheckOutcome::Allowed
-                } else {
-                    AgentViewCheckOutcome::Denied
-                }
-            })
-            .collect()
+        // The SpiceDB bulk RPC must return exactly one pair per
+        // requested item -- a shorter response is a protocol
+        // violation. `zip` would silently truncate, leaving a
+        // shorter outcome vec than `agent_ids` and tripping the
+        // single-agent helper into `TransportError` for items the
+        // RPC actually answered.  Fail closed instead: pad with
+        // `TransportError` so the per-agent contract holds and the
+        // audit consumer sees the protocol mismatch as a transport
+        // bucket, not silently labelled `Allowed`.
+        let mut outcomes = Vec::with_capacity(agent_ids.len());
+        for (idx, _) in agent_ids.iter().enumerate() {
+            let outcome = match response.pairs.get(idx) {
+                Some(pair) if pair_is_allowed(pair) => AgentViewCheckOutcome::Allowed,
+                Some(_) => AgentViewCheckOutcome::Denied,
+                None => AgentViewCheckOutcome::TransportError,
+            };
+            outcomes.push(outcome);
+        }
+        outcomes
     }
 }
 
