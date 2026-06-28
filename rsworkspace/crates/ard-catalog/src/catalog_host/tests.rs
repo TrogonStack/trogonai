@@ -73,6 +73,22 @@ fn accepts_schema_defined_host_fields() {
 }
 
 #[test]
+fn rejects_non_string_optional_fields() {
+    assert_eq!(
+        CatalogHost::new(json!({"displayName": "Acme", "documentationUrl": 42})),
+        Err(CatalogHostError::InvalidStringField("documentationUrl"))
+    );
+    assert_eq!(
+        CatalogHost::new(json!({"displayName": "Acme", "logoUrl": ["x"]})),
+        Err(CatalogHostError::InvalidStringField("logoUrl"))
+    );
+    assert_eq!(
+        CatalogHost::new(json!({"displayName": "Acme", "identifier": {"a": 1}})),
+        Err(CatalogHostError::InvalidStringField("identifier"))
+    );
+}
+
+#[test]
 fn accepts_only_allowed_keys_and_round_trips() {
     let host = CatalogHost::new(json!({
         "displayName": "Acme",

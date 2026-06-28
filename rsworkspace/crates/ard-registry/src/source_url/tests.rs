@@ -51,3 +51,15 @@ fn rejects_url_with_fragment() {
         Err(SourceUrlError::NotAnOrigin)
     ));
 }
+
+#[test]
+fn rejects_url_with_credentials() {
+    assert!(matches!(
+        SourceUrl::parse("https://user:pass@example.com"),
+        Err(SourceUrlError::CredentialsNotAllowed)
+    ));
+    assert!(matches!(
+        SourceUrl::parse("https://user@example.com"),
+        Err(SourceUrlError::CredentialsNotAllowed)
+    ));
+}

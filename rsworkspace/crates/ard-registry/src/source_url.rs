@@ -11,6 +11,8 @@ pub enum SourceUrlError {
     UnsupportedScheme(String),
     #[error("source url must be an http/https origin (no path, query, or fragment)")]
     NotAnOrigin,
+    #[error("source url must not embed credentials")]
+    CredentialsNotAllowed,
 }
 
 /// A validated URL that identifies the registry's own HTTP origin.
@@ -26,6 +28,9 @@ impl SourceUrl {
         }
         if url.host().is_none() {
             return Err(SourceUrlError::NotAnOrigin);
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(SourceUrlError::CredentialsNotAllowed);
         }
         let path = url.path();
         if !path.is_empty() && path != "/" {

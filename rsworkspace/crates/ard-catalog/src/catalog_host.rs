@@ -17,6 +17,8 @@ pub enum CatalogHostError {
     TrustManifest(#[from] TrustManifestError),
     #[error("host has unsupported field: {0}")]
     UnknownField(String),
+    #[error("host.{0} must be a string")]
+    InvalidStringField(&'static str),
 }
 
 /// Preserved ARD catalog publisher metadata.
@@ -33,6 +35,13 @@ impl CatalogHost {
         }
         if let Some(trust_manifest) = object.get("trustManifest") {
             TrustManifest::new(trust_manifest.clone())?;
+        }
+        for field in ["identifier", "documentationUrl", "logoUrl"] {
+            if let Some(value) = object.get(field)
+                && !value.is_string()
+            {
+                return Err(CatalogHostError::InvalidStringField(field));
+            }
         }
         const ALLOWED_KEYS: &[&str] = &[
             "displayName",
