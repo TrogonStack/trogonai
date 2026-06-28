@@ -731,8 +731,9 @@ fn mock_invoker_factory_covers_every_wasm_variant() {
     // invoker should produce the SAME variant on call — `is_err()`
     // alone would let a misrouted entry (e.g. `WasmEngine` returning
     // `WasmAbi`) slip through unnoticed.
+    type VariantCheck = fn(&RedactionError) -> bool;
     let skill = SkillId::new("variant-cover").expect("skill");
-    let cases: [(RedactionError, fn(&RedactionError) -> bool); 7] = [
+    let cases: [(RedactionError, VariantCheck); 7] = [
         (RedactionError::WasmCall("a".into()), |e| {
             matches!(e, RedactionError::WasmCall(_))
         }),
