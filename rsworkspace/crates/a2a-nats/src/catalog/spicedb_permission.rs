@@ -232,7 +232,7 @@ impl AgentViewGate for LiveAgentViewGate {
         }
 
         let response = match self.client.check_bulk_permissions(request).await {
-            Ok(response) => response,
+            Ok(response) => response.into_inner(),
             // Transport-level failures (timeouts, RPC errors) must
             // surface distinct from Denied so the audit consumer
             // can route them to the "couldn't ask" bucket.
