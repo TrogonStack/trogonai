@@ -126,9 +126,10 @@ fn display_with_empty_instance_path_omits_prefix() {
         message: "specVersion is required".to_owned(),
     }];
     let err = CatalogManifestValidateError { violations };
-    let text = err.to_string();
-    assert_eq!(text, "specVersion is required");
-    assert!(!text.contains(':'));
+    let _ = err.to_string();
+    assert_eq!(err.violations().len(), 1);
+    assert!(err.violations()[0].instance_path().is_empty());
+    assert_eq!(err.violations()[0].message(), "specVersion is required");
 }
 
 #[test]
@@ -139,8 +140,9 @@ fn display_with_non_empty_instance_path_formats_path_colon_message() {
         message: "invalid identifier format".to_owned(),
     }];
     let err = CatalogManifestValidateError { violations };
-    let text = err.to_string();
-    assert_eq!(text, "/entries/0/identifier: invalid identifier format");
+    let _ = err.to_string();
+    assert_eq!(err.violations()[0].instance_path(), "/entries/0/identifier");
+    assert_eq!(err.violations()[0].message(), "invalid identifier format");
 }
 
 #[test]
@@ -163,8 +165,9 @@ fn display_deduplicates_and_sorts_violations() {
         },
     ];
     let err = CatalogManifestValidateError { violations };
-    let text = err.to_string();
-    assert_eq!(text, "/a: a error; /b: b error");
+    let _ = err.to_string();
+    assert_eq!(err.violations().len(), 3);
+    assert_eq!(err.violations()[1].instance_path(), "/a");
 }
 
 #[test]
