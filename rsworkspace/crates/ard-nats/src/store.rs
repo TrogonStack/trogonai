@@ -5,9 +5,11 @@ use crate::catalog_event::CatalogEvent;
 #[derive(Debug, thiserror::Error)]
 pub enum CatalogStoreError {
     #[error("catalog entry not found: {0}")]
-    NotFound(String),
+    NotFound(ArdIdentifier),
     #[error(transparent)]
     CatalogEntry(#[from] ard_catalog::CatalogEntryWireError),
+    #[error(transparent)]
+    Identifier(#[from] ard_catalog::ArdIdentifierError),
 }
 
 pub trait CatalogStore {

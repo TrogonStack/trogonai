@@ -10,7 +10,7 @@ use crate::ard_identifier::ArdIdentifier;
 ///
 /// Safe for NATS KV keys and single subject tokens because it is ASCII,
 /// dot-free, and wildcard-free.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArdStorageKey(Arc<str>);
 
 impl ArdStorageKey {

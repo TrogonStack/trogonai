@@ -1,16 +1,15 @@
 use std::collections::BTreeMap;
 
 use ard_catalog::{
-    CatalogEntry, CatalogEntryWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION,
-    SearchResultWire,
+    ArdStorageKey, CatalogEntry, CatalogEntryWire, CatalogManifest, CatalogManifestWire, CatalogManifestWireError,
+    SearchResultWire, SPEC_VERSION,
 };
 
 use crate::catalog_event::CatalogEvent;
-use crate::store::CatalogStoreError;
 
 #[derive(Debug, Clone, Default)]
 pub struct CatalogIndex {
-    entries: BTreeMap<String, CatalogEntry>,
+    entries: BTreeMap<ArdStorageKey, CatalogEntry>,
 }
 
 impl CatalogIndex {
@@ -18,25 +17,25 @@ impl CatalogIndex {
         Self::default()
     }
 
-    pub fn replay(events: &[CatalogEvent]) -> Result<Self, CatalogStoreError> {
+    pub fn replay(events: &[CatalogEvent]) -> Self {
         let mut index = Self::new();
         for event in events {
-            index.apply(event.clone())?;
+            index.apply(event.clone());
         }
-        Ok(index)
+        index
     }
 
-    pub fn apply(&mut self, event: CatalogEvent) -> Result<(), CatalogStoreError> {
+    pub fn apply(&mut self, event: CatalogEvent) {
         match event {
-            CatalogEvent::Upserted { storage_key, entry } => {
-                self.entries.insert(storage_key, (*entry).try_into()?);
+            CatalogEvent::Upserted { entry } => {
+                let key = ArdStorageKey::from_identifier(entry.identifier());
+                self.entries.insert(key, *entry);
             }
-            CatalogEvent::Deleted { storage_key, .. } => {
-                self.entries.remove(&storage_key);
+            CatalogEvent::Deleted { identifier } => {
+                self.entries.remove(&ArdStorageKey::from_identifier(&identifier));
             }
             CatalogEvent::Validated { .. } | CatalogEvent::Indexed { .. } => {}
         }
-        Ok(())
     }
 
     pub fn manifest(&self) -> Result<CatalogManifest, CatalogManifestWireError> {
@@ -143,7 +142,7 @@ mod tests {
             .put(entry("urn:air:example.com:agent:assistant", "Assistant"))
             .unwrap();
 
-        let index = CatalogIndex::replay(store.events()).unwrap();
+        let index = CatalogIndex::replay(store.events());
         let results = index.search("assistant", "https://registry.example.com");
 
         assert_eq!(results.len(), 1);
@@ -161,7 +160,7 @@ mod tests {
             .delete(&ArdIdentifier::new("urn:air:example.com:agent:assistant").unwrap())
             .unwrap();
 
-        let index = CatalogIndex::replay(store.events()).unwrap();
+        let index = CatalogIndex::replay(store.events());
 
         assert!(index.search("assistant", "https://registry.example.com").is_empty());
         assert!(index.manifest().unwrap().entries().is_empty());
