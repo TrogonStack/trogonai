@@ -38,3 +38,22 @@ fn unprefixed_path_returns_none() {
     let root = serde_json::json!({"x": 1});
     assert!(value_at_path(&root, "params.x").is_none());
 }
+
+#[test]
+fn empty_bracket_segment_fails_resolution() {
+    // `$.params.parts[].text` previously elided the empty bracket
+    // and resolved to `/params/parts/text`, silently bypassing the
+    // intended array index. The tokenizer now rejects empty brackets
+    // so a malformed manifest path fails-closed at lookup.
+    let root = serde_json::json!({"params": {"parts": [{"text": "x"}]}});
+    assert!(value_at_path(&root, "$.params.parts[].text").is_none());
+    assert!(to_json_pointer("$.params.parts[].text").is_none());
+}
+
+#[test]
+fn unterminated_bracket_fails_resolution() {
+    // An unterminated `[` consumed the rest of the input as if it
+    // were an index, producing surprising pointers. The tokenizer
+    // now rejects unterminated brackets explicitly.
+    assert!(to_json_pointer("$.params.parts[0").is_none());
+}

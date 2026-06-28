@@ -20,7 +20,12 @@ pub fn gateway_tier3_redaction_enabled<E: trogon_std::env::ReadEnv>(env: &E) -> 
     let Ok(flag) = env.var("A2A_GATEWAY_TIER3_REDACTION_ENABLED") else {
         return false;
     };
-    matches!(flag.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    // Trim before lowercasing so operators that set the value through
+    // a shell heredoc or `.env` file (where a trailing newline or
+    // padding space is common) get the expected on/off semantics.
+    // Matches the trim-then-lowercase shape used by other gateway
+    // `*_enabled` helpers.
+    matches!(flag.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
 pub fn tier3_redaction_audit_rewrites(rewrites: &[RedactionRewrite]) -> Option<serde_json::Value> {

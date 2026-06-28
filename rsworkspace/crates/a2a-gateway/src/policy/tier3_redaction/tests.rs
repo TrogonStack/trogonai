@@ -299,12 +299,18 @@ fn audit_rewrites_serializes_each_rewrite() {
 
 #[test]
 fn gateway_tier3_redaction_env_recognizes_truthy_strings() {
-    for raw in ["1", "true", "yes", "on", "YES", "On", "TRUE"] {
+    // Padding-tolerant truthy values: `.env` files and shell
+    // heredocs commonly leak trailing newlines or spaces. The
+    // helper trims before lowercasing so operators don't get a
+    // silent off-state from cosmetic whitespace.
+    for raw in [
+        "1", "true", "yes", "on", "YES", "On", "TRUE", " true", "true ", "\ttrue\n", "  on  ",
+    ] {
         let env = InMemoryEnv::new();
         env.set("A2A_GATEWAY_TIER3_REDACTION_ENABLED", raw);
         assert!(
             gateway_tier3_redaction_enabled(&env),
-            "expected `{raw}` to enable tier-3",
+            "expected `{raw:?}` to enable tier-3",
         );
     }
     let env = InMemoryEnv::new();

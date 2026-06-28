@@ -1,4 +1,11 @@
-fn tokenize_json_path(path: &str) -> Vec<String> {
+/// Tokenize a `$.`-prefixed JSONPath (with the leading `$.` already
+/// stripped) into reference tokens. Returns `None` when the input
+/// contains a malformed segment that would silently drop information
+/// — an empty bracket `[]`, an unterminated `[` (no closing `]`), or
+/// trailing whitespace — so callers fail-closed instead of mapping
+/// `$.parts[].text` to `parts/text` (which silently elides the
+/// intended array indexing and lets sensitive data through).
+fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = path.chars().peekable();
@@ -14,15 +21,18 @@ fn tokenize_json_path(path: &str) -> Vec<String> {
                     tokens.push(std::mem::take(&mut current));
                 }
                 let mut index = String::new();
+                let mut closed = false;
                 for inner in chars.by_ref() {
                     if inner == ']' {
+                        closed = true;
                         break;
                     }
                     index.push(inner);
                 }
-                if !index.is_empty() {
-                    tokens.push(index);
+                if !closed || index.is_empty() {
+                    return None;
                 }
+                tokens.push(index);
             }
             _ => current.push(ch),
         }
@@ -30,7 +40,7 @@ fn tokenize_json_path(path: &str) -> Vec<String> {
     if !current.is_empty() {
         tokens.push(current);
     }
-    tokens
+    Some(tokens)
 }
 
 pub fn to_json_pointer(path: &str) -> Option<String> {
@@ -47,7 +57,7 @@ pub fn to_json_pointer(path: &str) -> Option<String> {
         if stripped.is_empty() {
             return Some(String::new());
         }
-        let tokens = tokenize_json_path(stripped);
+        let tokens = tokenize_json_path(stripped)?;
         if tokens.is_empty() {
             return None;
         }
