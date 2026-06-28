@@ -213,7 +213,7 @@ webhook_secret = { env = "PATH" }
     let cfg = load(Some(f.path())).expect("load failed");
     let github = cfg.github.first().expect("github should be configured");
 
-    assert_eq!(github.config.webhook_secret.as_str(), env::var("PATH").unwrap());
+    assert_eq!(github.config.webhook_secret.as_str(), SystemEnv.var("PATH").unwrap());
 }
 
 #[test]
