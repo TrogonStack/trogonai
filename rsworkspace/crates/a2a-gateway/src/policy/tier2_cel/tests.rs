@@ -417,3 +417,49 @@ fn evaluator_denies_when_bundle_lock_poisoned() {
         }
     );
 }
+
+#[test]
+fn mock_engine_preserves_non_bool_result_variant() {
+    let mut outcomes = BTreeMap::new();
+    outcomes.insert(
+        RuleName::new("non-bool-rule").expect("non-empty test rule name"),
+        Err(Tier2EvalError::non_bool_result("Int(7)")),
+    );
+    let (_dir, bundle) = bundle_with_rule("non-bool-rule", "true");
+    let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
+}
+
+#[test]
+fn mock_engine_preserves_binding_variant() {
+    let mut outcomes = BTreeMap::new();
+    outcomes.insert(
+        RuleName::new("binding-fail").expect("non-empty test rule name"),
+        Err(Tier2EvalError::binding("request", "ser failed")),
+    );
+    let (_dir, bundle) = bundle_with_rule("binding-fail", "true");
+    let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
+}
+
+#[test]
+fn mock_engine_unspecified_rule_defaults_allow() {
+    // When the mock has no entry for a rule, it defaults to Ok(true)
+    // (allow). Without coverage on this branch, a regression to
+    // default-deny would silently flip the gateway's open-by-default
+    // semantics for unmapped rules.
+    let outcomes = BTreeMap::new();
+    let (_dir, bundle) = bundle_with_rule("unmapped", "true");
+    let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
+    assert_eq!(evaluator.evaluate(&sample_ctx("any")), Tier2Decision::Allow);
+}
