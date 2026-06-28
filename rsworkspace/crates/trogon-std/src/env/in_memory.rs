@@ -4,11 +4,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(any(test, feature = "test-support"))]
 use std::env;
-#[cfg(any(test, feature = "test-support"))]
-use std::ffi::OsString;
 
 #[cfg(any(test, feature = "test-support"))]
-use super::ReadEnv;
+use super::{EnumerateEnv, ReadEnv};
 
 /// Won't touch the global process environment.
 ///
@@ -57,21 +55,12 @@ impl ReadEnv for InMemoryEnv {
     fn var(&self, key: &str) -> Result<String, env::VarError> {
         self.vars.borrow().get(key).cloned().ok_or(env::VarError::NotPresent)
     }
+}
 
-    fn var_os(&self, key: &str) -> Option<OsString> {
-        self.vars.borrow().get(key).map(OsString::from)
-    }
-
+#[cfg(any(test, feature = "test-support"))]
+impl EnumerateEnv for InMemoryEnv {
     fn vars(&self) -> Vec<(String, String)> {
         self.vars.borrow().iter().map(|(key, value)| (key.clone(), value.clone())).collect()
-    }
-
-    fn vars_os(&self) -> Vec<(OsString, OsString)> {
-        self.vars
-            .borrow()
-            .iter()
-            .map(|(key, value)| (OsString::from(key), OsString::from(value)))
-            .collect()
     }
 }
 

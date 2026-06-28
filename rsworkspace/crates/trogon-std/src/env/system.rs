@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsString;
 
-use super::ReadEnv;
+use super::{EnumerateEnv, ReadEnv};
 
 /// Zero-sized type — delegates to `std::env`.
 pub struct SystemEnv;
@@ -16,7 +16,9 @@ impl ReadEnv for SystemEnv {
     fn var_os(&self, key: &str) -> Option<OsString> {
         env::var_os(key)
     }
+}
 
+impl EnumerateEnv for SystemEnv {
     #[inline]
     fn vars(&self) -> Vec<(String, String)> {
         env::vars().collect()

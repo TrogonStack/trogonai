@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use super::super::ReadEnv;
+use super::super::{EnumerateEnv, ReadEnv};
 use super::*;
 
 #[test]
