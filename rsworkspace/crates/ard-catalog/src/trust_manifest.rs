@@ -15,6 +15,11 @@ pub enum TrustManifestError {
     InvalidIdentityType,
     #[error("trustManifest has unsupported field: {0}")]
     UnknownField(String),
+    #[error("trustManifest.{field} must be {expected}")]
+    InvalidFieldType {
+        field: &'static str,
+        expected: &'static str,
+    },
 }
 
 /// Preserved ARD trust metadata.
@@ -34,6 +39,32 @@ impl TrustManifest {
                 Some("spiffe" | "did" | "https" | "other") => {}
                 _ => return Err(TrustManifestError::InvalidIdentityType),
             }
+        }
+        if let Some(trust_schema) = object.get("trustSchema")
+            && !trust_schema.is_object()
+        {
+            return Err(TrustManifestError::InvalidFieldType {
+                field: "trustSchema",
+                expected: "an object",
+            });
+        }
+        for field in ["attestations", "provenance"] {
+            if let Some(value) = object.get(field)
+                && !value.is_array()
+            {
+                return Err(TrustManifestError::InvalidFieldType {
+                    field,
+                    expected: "an array",
+                });
+            }
+        }
+        if let Some(signature) = object.get("signature")
+            && !signature.is_string()
+        {
+            return Err(TrustManifestError::InvalidFieldType {
+                field: "signature",
+                expected: "a string",
+            });
         }
         const ALLOWED_KEYS: &[&str] = &[
             "identity",
