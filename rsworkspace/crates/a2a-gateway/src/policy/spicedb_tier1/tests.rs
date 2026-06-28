@@ -174,14 +174,78 @@ fn tier1_enabled_recognizes_padded_truthy_values() {
 
 #[test]
 fn tier1_enabled_handles_non_unicode_env_as_disabled() {
-    struct NotUnicodeEnv;
-    impl ReadEnv for NotUnicodeEnv {
-        fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+    let env = AllNotUnicodeEnv;
+    assert!(!tier1_enabled(&env));
+}
+
+/// Env fixture that returns `NotUnicode` for every key. Surfaces
+/// the byte-stream env paths `InMemoryEnv` can't model so the
+/// per-key `NotUnicode` branches in `tier1_zed_token_ttl` and
+/// `optional_tier1_credentials` are reachable from tests.
+struct AllNotUnicodeEnv;
+
+impl ReadEnv for AllNotUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::from("garbage")))
+    }
+}
+
+#[test]
+fn tier1_zed_token_ttl_rejects_non_unicode_env() {
+    let env = AllNotUnicodeEnv;
+    let err = tier1_zed_token_ttl(&env).expect_err("non-unicode must reject");
+    assert!(matches!(err, Tier1SpiceDbBuildError::InvalidZedTokenTtl(_)));
+}
+
+/// Env that returns the supplied value for `key_ok` and
+/// `NotUnicode` for the other key. Lets each side of the
+/// `optional_tier1_credentials` branch surface independently.
+struct PartiallyNotUnicodeEnv {
+    /// (key whose lookup succeeds, value to return).
+    ok: (&'static str, &'static str),
+}
+
+impl ReadEnv for PartiallyNotUnicodeEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        if key == self.ok.0 {
+            Ok(self.ok.1.into())
+        } else {
             Err(std::env::VarError::NotUnicode(std::ffi::OsString::from("garbage")))
         }
     }
-    let env = NotUnicodeEnv;
-    assert!(!tier1_enabled(&env));
+}
+
+#[test]
+fn optional_tier1_credentials_rejects_non_unicode_endpoint() {
+    let env = PartiallyNotUnicodeEnv {
+        ok: (ENV_TIER1_SPICEDB_TOKEN, "tok"),
+    };
+    let err = optional_tier1_credentials(&env).expect_err("non-unicode endpoint must reject");
+    assert!(matches!(err, Tier1SpiceDbBuildError::InvalidEndpoint(_)));
+}
+
+#[test]
+fn optional_tier1_credentials_rejects_non_unicode_token() {
+    let env = PartiallyNotUnicodeEnv {
+        ok: (ENV_TIER1_SPICEDB_ENDPOINT, "https://spicedb.example"),
+    };
+    let err = optional_tier1_credentials(&env).expect_err("non-unicode token must reject");
+    assert!(matches!(err, Tier1SpiceDbBuildError::InvalidToken(_)));
+}
+
+#[test]
+fn gateway_tier1_layer_debug_emits_summary_fields() {
+    // Tier1SpiceDbConfig::from_env -> GatewayTier1Layer Debug is
+    // surfaced in audit/telemetry; pin the field names so a
+    // renamed field doesn't silently drop from the log shape.
+    let layer = GatewayTier1Layer::noop();
+    let debug = format!("{layer:?}");
+    assert!(
+        debug.contains("gate_is_enabled"),
+        "debug must carry gate_is_enabled: {debug}"
+    );
+    assert!(debug.contains("has_owner_emitter"));
+    assert!(debug.contains("discovery_view_is_enabled"));
 }
 
 #[test]
