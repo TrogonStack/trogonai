@@ -42,6 +42,13 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
     fn redact(&self, ctx: &mut Tier3EvaluationContext) -> Tier3RedactionDecision {
         let mut rewrites = Vec::new();
         let manifests: Vec<Tier3SkillManifest> = ctx.skill_manifests().values().cloned().collect();
+        // Snapshot the inbound payload so a later skill returning
+        // Refuse/Error rolls back earlier in-place edits. Without this
+        // the context would carry partially-redacted bytes even though
+        // the decision says "deny", and any caller that read
+        // `ctx.payload()` after a non-Allow outcome would observe a
+        // state inconsistent with the rewrite list it received.
+        let original_payload = ctx.payload().clone();
 
         for manifest in manifests {
             let skill_id = manifest.skill_id().clone();
@@ -60,6 +67,7 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
             let input_bytes = match serde_json::to_vec(&before_value) {
                 Ok(bytes) => bytes,
                 Err(_) => {
+                    *ctx.payload_mut() = original_payload;
                     return Tier3RedactionDecision::Error {
                         rule: skill_id,
                         kind: Tier3EngineError::InvalidPayload,
@@ -80,13 +88,13 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
                         .as_deref()
                         .and_then(Tier3RefusalReason::from_sentinel_tag)
                         .unwrap_or(Tier3RefusalReason::SkillPolicyDeniedPart);
+                    *ctx.payload_mut() = original_payload;
                     return Tier3RedactionDecision::Refuse { reason, rule: skill_id };
                 }
                 Err(err) => {
-                    return Tier3RedactionDecision::Error {
-                        rule: skill_id,
-                        kind: map_redaction_error(&err),
-                    };
+                    let kind = map_redaction_error(&err);
+                    *ctx.payload_mut() = original_payload;
+                    return Tier3RedactionDecision::Error { rule: skill_id, kind };
                 }
             };
 
@@ -106,12 +114,14 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
                 let reason = tier3_refusal_reason_tag(&output_bytes)
                     .and_then(Tier3RefusalReason::from_sentinel_tag)
                     .unwrap_or(Tier3RefusalReason::SkillPolicyDeniedPart);
+                *ctx.payload_mut() = original_payload;
                 return Tier3RedactionDecision::Refuse { reason, rule: skill_id };
             }
 
             let after_value: serde_json::Value = match serde_json::from_slice(&output_bytes) {
                 Ok(value) => value,
                 Err(_) => {
+                    *ctx.payload_mut() = original_payload;
                     return Tier3RedactionDecision::Error {
                         rule: skill_id,
                         kind: Tier3EngineError::InvalidPayload,
@@ -129,12 +139,14 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
             };
 
             let Some(pointer) = to_json_pointer(&path) else {
+                *ctx.payload_mut() = original_payload;
                 return Tier3RedactionDecision::Error {
                     rule: skill_id,
                     kind: Tier3EngineError::InvalidPayload,
                 };
             };
             let Some(slot) = ctx.payload_mut().pointer_mut(&pointer) else {
+                *ctx.payload_mut() = original_payload;
                 return Tier3RedactionDecision::Error {
                     rule: skill_id,
                     kind: Tier3EngineError::InvalidPayload,
@@ -149,6 +161,7 @@ impl Tier3RedactionGate for RealTier3RedactionGate {
             match RedactionRewrite::new(skill_id.clone(), path, kind) {
                 Ok(rewrite) => rewrites.push(rewrite),
                 Err(_) => {
+                    *ctx.payload_mut() = original_payload;
                     return Tier3RedactionDecision::Error {
                         rule: skill_id,
                         kind: Tier3EngineError::InvalidPayload,
@@ -256,6 +269,29 @@ impl Tier3PartInvoker for MockTier3PartInvoker {
         if let Some(factory) = self.error_factories.get(skill) {
             return Err(factory());
         }
+        Ok(self.outputs.get(skill).cloned().unwrap_or_else(|| payload.to_vec()))
+    }
+}
+
+/// Multi-skill mock invoker for tests that exercise gate behavior
+/// across more than one manifest in a single call (e.g. payload
+/// rollback when a later skill refuses after an earlier one
+/// already edited in-place).
+#[cfg(test)]
+pub(crate) struct MultiMockInvoker {
+    outputs: std::collections::HashMap<SkillId, Vec<u8>>,
+}
+
+#[cfg(test)]
+impl MultiMockInvoker {
+    pub fn new(outputs: std::collections::HashMap<SkillId, Vec<u8>>) -> Self {
+        Self { outputs }
+    }
+}
+
+#[cfg(test)]
+impl Tier3PartInvoker for MultiMockInvoker {
+    fn redact_part_bytes(&self, skill: &SkillId, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
         Ok(self.outputs.get(skill).cloned().unwrap_or_else(|| payload.to_vec()))
     }
 }

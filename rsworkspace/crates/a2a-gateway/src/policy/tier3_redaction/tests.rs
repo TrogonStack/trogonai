@@ -10,7 +10,7 @@ use super::context::Tier3EvaluationContext;
 use super::decision::{Tier3EngineError, Tier3RedactionDecision, Tier3RefusalReason};
 use super::gate::{NoopTier3RedactionGate, Tier3RedactionGate};
 use super::manifest::Tier3SkillManifest;
-use super::real_gate::{MockTier3PartInvoker, RealTier3RedactionGate};
+use super::real_gate::{MockTier3PartInvoker, MultiMockInvoker, RealTier3RedactionGate};
 use super::rewrite::RewriteKind;
 use crate::policy::tier3_redaction::gateway_tier3_redaction_enabled;
 
@@ -587,6 +587,66 @@ fn tier3_skill_manifest_new_rejects_empty_and_unrecognized_paths() {
         Tier3SkillManifest::new(skill, "params.message", RewriteKind::Masked),
         Err(super::manifest::Tier3SkillManifestError::InvalidJsonPath(_))
     ));
+}
+
+#[test]
+fn tier3_skill_manifest_new_rejects_unresolvable_jsonpath_shapes() {
+    // `$..` and `$.[]` look JSONPath-shaped by prefix but never
+    // resolve to a JSON Pointer at runtime — the loose prefix check
+    // used to let them through, then every evaluation would silently
+    // skip the skill with a warning. Validation now ties to the same
+    // parser the gate uses so these fail closed at config-load time.
+    let skill = SkillId::new("pii").expect("skill");
+    assert!(matches!(
+        Tier3SkillManifest::new(skill.clone(), "$..", RewriteKind::Masked),
+        Err(super::manifest::Tier3SkillManifestError::InvalidJsonPath(_))
+    ));
+    assert!(matches!(
+        Tier3SkillManifest::new(skill, "$.[]", RewriteKind::Masked),
+        Err(super::manifest::Tier3SkillManifestError::InvalidJsonPath(_))
+    ));
+}
+
+#[test]
+fn real_gate_refusal_after_prior_allow_restores_original_payload() {
+    // Two manifests against the same payload: the first edits its
+    // slot in-place, the second refuses. Without rollback the
+    // payload would carry the first skill's edit even though the
+    // overall decision denies the request — callers reading
+    // `ctx.payload()` after a Refuse would observe a state
+    // inconsistent with the rewrite list (which is empty for
+    // Refuse).
+    let allow_skill = SkillId::new("allow-mask").expect("skill");
+    let refuse_skill = SkillId::new("deny-other").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        allow_skill.clone(),
+        manifest_for("allow-mask", "$.params.message.parts[0].text"),
+    );
+    manifests.insert(
+        refuse_skill.clone(),
+        manifest_for("deny-other", "$.params.message.role"),
+    );
+
+    // The mock answers `allow-mask` with a redacted value and
+    // `deny-other` with the refusal sentinel.
+    let mut outputs = std::collections::HashMap::new();
+    outputs.insert(allow_skill, br#""[REDACTED]""#.to_vec());
+    let mut sentinel = TIER3_REFUSE_SENTINEL.to_vec();
+    sentinel.extend_from_slice(b":UnauthorizedDataCategory");
+    outputs.insert(refuse_skill.clone(), sentinel);
+    let invoker = MultiMockInvoker::new(outputs);
+    let gate = RealTier3RedactionGate::new(std::sync::Arc::new(invoker));
+
+    let inbound = sample_payload();
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, inbound.clone(), manifests);
+    let decision = gate.redact(&mut ctx);
+    assert!(matches!(decision, Tier3RedactionDecision::Refuse { .. }));
+    assert_eq!(
+        ctx.payload(),
+        &inbound,
+        "Refuse must roll back in-place edits from earlier skills",
+    );
 }
 
 #[test]

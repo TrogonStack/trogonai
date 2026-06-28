@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use a2a_redaction::{SkillId, WasmBundlePath};
 use tracing::warn;
 
+use super::json_path::to_json_pointer;
 use super::rewrite::RewriteKind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,11 +86,16 @@ impl Tier3SkillManifest {
     }
 }
 
-/// Accept the two JSON-path shapes the redactor understands: a
-/// JSONPath dollar-prefixed form (`$`, `$.x`, `$.a.b[0]`) or a raw
-/// JSON Pointer (`/x/0`). Anything else is invalid input.
+/// Accept only the JSON-path shapes the redactor can actually
+/// resolve at runtime. Delegating to `to_json_pointer` ties manifest
+/// validation to the same parser the gate uses, so a value that
+/// passes here is guaranteed to round-trip to a JSON Pointer at
+/// evaluation time. A loose prefix check (`$`, `$.…`, `/…`) lets
+/// patterns like `$..` or `$.[]` through, and the gate would then
+/// silently skip the skill with a warning at runtime — surfacing the
+/// error at config-load time fails closed instead.
 fn is_recognized_json_path(path: &str) -> bool {
-    path == "$" || path.starts_with("$.") || path.starts_with('/')
+    to_json_pointer(path).is_some()
 }
 
 pub fn load_tier3_manifests_from_bundle(
