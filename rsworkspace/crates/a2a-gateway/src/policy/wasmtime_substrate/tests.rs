@@ -81,6 +81,23 @@ fn noop_tier2_evaluator_returns_allow() {
 }
 
 #[test]
+fn preload_redaction_skill_surfaces_missing_bundle_as_policy_error() {
+    // Smoke-cover the preload entry point so a future refactor that
+    // accidentally drops the `?`-propagation would surface in CI
+    // instead of silently swallowing the bundle-load failure. We
+    // point at an empty temp dir so the host's filesystem read
+    // fails with `WasmModule`, which the substrate maps into
+    // `PolicyError`.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let substrate = WasmtimeSubstrate::try_new(WasmBundlePath::new(dir.path())).expect("wasmtime substrate");
+    let result = substrate.preload_redaction_skill(SkillId::new("does-not-exist").expect("non-empty"));
+    assert!(
+        result.is_err(),
+        "missing bundle file must surface as PolicyError, got {result:?}",
+    );
+}
+
+#[test]
 fn try_new_defaults_tier2_to_noop_inactive() {
     let dir = WasmBundlePath::new(std::env::temp_dir());
     let substrate = WasmtimeSubstrate::try_new(dir).expect("wasmtime substrate");
