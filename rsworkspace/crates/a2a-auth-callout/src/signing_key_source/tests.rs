@@ -2,6 +2,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use tempfile::NamedTempFile;
+use trogon_std::env::InMemoryEnv;
 
 use super::env::test_env_dev_warn_count;
 use super::{
@@ -11,42 +12,37 @@ use super::{
 use crate::error::AuthCalloutError;
 use crate::jwt::{CallerId, ExternalSubject, SigningKey, UserJwtClaims, UserJwtSubject};
 use crate::permissions::IssuedPermissions;
-use crate::signing_key_source::env_test_lock;
 use crate::{AccountName, SpiceDbPrincipal};
 use nkeys::KeyPair;
 
 #[test]
 fn env_source_current_previous_missing_and_warn_once() {
-    let _guard = env_test_lock();
     let account = KeyPair::new_account();
     let previous = KeyPair::new_account();
-    unsafe {
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
-        std::env::set_var(
-            "AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS",
-            previous.seed().expect("previous seed"),
-        );
-    }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+    env.set(
+        "AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS",
+        previous.seed().expect("previous seed"),
+    );
 
     let before = test_env_dev_warn_count();
-    let source = EnvSigningKeySource::from_env().expect("env source");
+    let source = EnvSigningKeySource::from_env(&env).expect("env source");
     let after_first = test_env_dev_warn_count();
     let accepted = source.accepted();
     assert_eq!(accepted.len(), 2);
     assert_eq!(accepted[0].version().as_str(), "current");
     assert_eq!(accepted[1].version().as_str(), "previous");
 
-    let _ = EnvSigningKeySource::from_env().expect("second construction");
+    let _ = EnvSigningKeySource::from_env(&env).expect("second construction");
     let after_second = test_env_dev_warn_count();
     assert!(
         after_second <= after_first.max(before + 1),
         "dev-only warn must fire at most once per process"
     );
 
-    unsafe {
-        std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET");
-    }
-    let err = EnvSigningKeySource::from_env().unwrap_err();
+    let env2 = InMemoryEnv::new();
+    let err = EnvSigningKeySource::from_env(&env2).unwrap_err();
     assert!(matches!(
         err,
         AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
@@ -55,27 +51,22 @@ fn env_source_current_previous_missing_and_warn_once() {
 
 #[test]
 fn env_source_current_returns_current_handle() {
-    let _guard = env_test_lock();
     let account = KeyPair::new_account();
-    unsafe {
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
-        std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS");
-    }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
 
-    let source = EnvSigningKeySource::from_env().expect("env source");
+    let source = EnvSigningKeySource::from_env(&env).expect("env source");
     assert_eq!(source.current().version().as_str(), "current");
 }
 
 #[test]
 fn env_source_ignores_empty_previous_secret() {
-    let _guard = env_test_lock();
     let account = KeyPair::new_account();
-    unsafe {
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
-        std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS", "");
-    }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_SECRET", account.seed().expect("account seed"));
+    env.set("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS", "");
 
-    let source = EnvSigningKeySource::from_env().expect("env source");
+    let source = EnvSigningKeySource::from_env(&env).expect("env source");
     assert_eq!(source.accepted().len(), 1);
     assert_eq!(source.accepted()[0].version().as_str(), "current");
 }

@@ -33,6 +33,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "trogon-std",
  "uuid",
  "wiremock",
  "x509-parser",
@@ -57,6 +58,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trogon-nats",
+ "trogon-std",
  "wiremock",
 ]
 

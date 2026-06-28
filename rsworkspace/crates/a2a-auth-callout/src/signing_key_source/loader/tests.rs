@@ -1,146 +1,92 @@
 use std::io::Write;
 
 use tempfile::NamedTempFile;
+use trogon_std::env::InMemoryEnv;
 
-use super::signing_key_source_from_process_env;
+use super::signing_key_source_from_env;
 use crate::error::AuthCalloutError;
-use crate::signing_key_source::env_test_lock;
 use nkeys::KeyPair;
-
-const LOADER_ENV_VARS: &[&str] = &[
-    "AUTH_CALLOUT_SIGNING_KEY_SOURCE",
-    "AUTH_CALLOUT_SIGNING_SECRET",
-    "AUTH_CALLOUT_ISSUER_NKEY_SEED",
-    "AUTH_CALLOUT_SIGNING_KEY_PATH",
-    "AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH",
-];
-
-fn with_env_loader_tests<F: FnOnce()>(f: F) {
-    let _guard = env_test_lock();
-    let snapshot: Vec<(&str, Option<String>)> = LOADER_ENV_VARS
-        .iter()
-        .map(|name| (*name, std::env::var(name).ok()))
-        .collect();
-    f();
-    for (name, value) in snapshot {
-        unsafe {
-            match value {
-                Some(v) => std::env::set_var(name, v),
-                None => std::env::remove_var(name),
-            }
-        }
-    }
-}
 
 #[test]
 fn env_source_loads_from_signing_secret() {
-    with_env_loader_tests(|| {
-        let kp = KeyPair::new_account();
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
-            std::env::set_var("AUTH_CALLOUT_SIGNING_SECRET", kp.seed().expect("seed"));
-            std::env::remove_var("AUTH_CALLOUT_ISSUER_NKEY_SEED");
-        }
+    let kp = KeyPair::new_account();
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
+    env.set("AUTH_CALLOUT_SIGNING_SECRET", kp.seed().expect("seed"));
 
-        let source = signing_key_source_from_process_env().expect("env source");
-        assert_eq!(source.accepted().len(), 1);
-    });
+    let source = signing_key_source_from_env(&env).expect("env source");
+    assert_eq!(source.accepted().len(), 1);
 }
 
 #[test]
 fn env_source_falls_back_to_legacy_issuer_seed() {
-    with_env_loader_tests(|| {
-        let kp = KeyPair::new_account();
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
-            std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET");
-            std::env::set_var("AUTH_CALLOUT_ISSUER_NKEY_SEED", kp.seed().expect("seed"));
-        }
+    let kp = KeyPair::new_account();
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
+    env.set("AUTH_CALLOUT_ISSUER_NKEY_SEED", kp.seed().expect("seed"));
 
-        let source = signing_key_source_from_process_env().expect("legacy fallback");
-        assert_eq!(source.accepted().len(), 1);
-    });
+    let source = signing_key_source_from_env(&env).expect("legacy fallback");
+    assert_eq!(source.accepted().len(), 1);
 }
 
 #[test]
 fn env_source_errors_when_secret_missing() {
-    with_env_loader_tests(|| {
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
-            std::env::remove_var("AUTH_CALLOUT_SIGNING_SECRET");
-            std::env::remove_var("AUTH_CALLOUT_ISSUER_NKEY_SEED");
-        }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "env");
 
-        let err = signing_key_source_from_process_env()
-            .err()
-            .expect("expected missing secret error");
-        assert!(matches!(
-            err,
-            AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
-        ));
-    });
+    let err = signing_key_source_from_env(&env)
+        .err()
+        .expect("expected missing secret error");
+    assert!(matches!(
+        err,
+        AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET")
+    ));
 }
 
 #[test]
 fn file_source_loads_from_path() {
-    with_env_loader_tests(|| {
-        let kp = KeyPair::new_account();
-        let mut file = NamedTempFile::new().expect("temp file");
-        file.write_all(kp.seed().expect("seed").as_bytes()).expect("write");
+    let kp = KeyPair::new_account();
+    let mut file = NamedTempFile::new().expect("temp file");
+    file.write_all(kp.seed().expect("seed").as_bytes()).expect("write");
 
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "file");
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_PATH", file.path());
-            std::env::remove_var("AUTH_CALLOUT_SIGNING_KEY_PREVIOUS_PATH");
-        }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "file");
+    env.set("AUTH_CALLOUT_SIGNING_KEY_PATH", file.path().to_str().expect("path"));
 
-        let source = signing_key_source_from_process_env().expect("file source");
-        assert_eq!(source.accepted().len(), 1);
-    });
+    let source = signing_key_source_from_env(&env).expect("file source");
+    assert_eq!(source.accepted().len(), 1);
 }
 
 #[test]
 fn file_source_errors_when_path_missing() {
-    with_env_loader_tests(|| {
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "file");
-            std::env::remove_var("AUTH_CALLOUT_SIGNING_KEY_PATH");
-        }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "file");
 
-        let err = signing_key_source_from_process_env()
-            .err()
-            .expect("expected missing path error");
-        assert!(matches!(
-            err,
-            AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_KEY_PATH")
-        ));
-    });
+    let err = signing_key_source_from_env(&env)
+        .err()
+        .expect("expected missing path error");
+    assert!(matches!(
+        err,
+        AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_KEY_PATH")
+    ));
 }
 
 #[test]
 fn vault_source_is_not_configured() {
-    with_env_loader_tests(|| {
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "vault");
-        }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "vault");
 
-        let err = signing_key_source_from_process_env()
-            .err()
-            .expect("expected vault error");
-        assert!(matches!(err, AuthCalloutError::VaultNotConfigured));
-    });
+    let err = signing_key_source_from_env(&env).err().expect("expected vault error");
+    assert!(matches!(err, AuthCalloutError::VaultNotConfigured));
 }
 
 #[test]
 fn unknown_source_kind_errors() {
-    with_env_loader_tests(|| {
-        unsafe {
-            std::env::set_var("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "aws-kms");
-        }
+    let env = InMemoryEnv::new();
+    env.set("AUTH_CALLOUT_SIGNING_KEY_SOURCE", "aws-kms");
 
-        let err = signing_key_source_from_process_env()
-            .err()
-            .expect("expected unknown source error");
-        assert!(matches!(err, AuthCalloutError::UnknownSigningKeySource(kind) if kind == "aws-kms"));
-    });
+    let err = signing_key_source_from_env(&env)
+        .err()
+        .expect("expected unknown source error");
+    assert!(matches!(err, AuthCalloutError::UnknownSigningKeySource(kind) if kind == "aws-kms"));
 }

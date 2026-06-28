@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use tracing::{error, info, warn};
+use trogon_std::env::ReadEnv;
 
 use crate::denial_claims::CalloutIssuer;
 use crate::dispatcher::AuthDispatcher;
@@ -49,7 +50,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
         }
     }
 
-    pub async fn run(self) -> Result<(), AuthCalloutError> {
+    pub async fn run(self, env: &impl ReadEnv) -> Result<(), AuthCalloutError> {
         // Use a queue subscription so replicas form an HA group on a single
         // worker queue — plain `subscribe` would deliver each
         // $SYS.REQ.USER.AUTH request to every replica and have all of them
@@ -57,7 +58,9 @@ impl<D: AuthDispatcher> Subscriber<D> {
         // server request and producing unpredictable client connect outcomes.
         // The queue name is operator-overridable but defaults to a constant
         // so two callout deployments at the same scope share it.
-        let queue = std::env::var("AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string());
+        let queue = env
+            .var("AUTH_CALLOUT_QUEUE_GROUP")
+            .unwrap_or_else(|_| "a2a-auth-callout".to_string());
         let mut sub = self
             .client
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)
@@ -66,7 +69,7 @@ impl<D: AuthDispatcher> Subscriber<D> {
 
         info!(subject = AUTH_CALLOUT_SUBJECT, "auth callout subscriber started");
 
-        if let Ok(path) = std::env::var("AUTH_CALLOUT_READY_FILE") {
+        if let Ok(path) = env.var("AUTH_CALLOUT_READY_FILE") {
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
