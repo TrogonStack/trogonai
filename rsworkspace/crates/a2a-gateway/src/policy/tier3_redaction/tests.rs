@@ -608,6 +608,153 @@ fn tier3_skill_manifest_new_rejects_unresolvable_jsonpath_shapes() {
 }
 
 #[test]
+fn real_gate_engine_error_after_prior_allow_restores_original_payload() {
+    // Symmetric to the Refuse rollback test: a later skill that hits
+    // an engine error (e.g. WasmCall trap) must also roll back the
+    // in-place edits applied by an earlier allow-skill so the
+    // context never carries partial redactions on a non-Allow exit.
+    let allow_skill = SkillId::new("allow-mask").expect("skill");
+    let trap_skill = SkillId::new("engine-trap").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        allow_skill.clone(),
+        manifest_for("allow-mask", "$.params.message.parts[0].text"),
+    );
+    manifests.insert(trap_skill.clone(), manifest_for("engine-trap", "$.params.message.role"));
+
+    struct AllowThenTrap {
+        allow_skill: SkillId,
+        trap_skill: SkillId,
+    }
+    impl super::real_gate::Tier3PartInvoker for AllowThenTrap {
+        fn redact_part_bytes(&self, skill: &SkillId, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
+            if skill == &self.allow_skill {
+                Ok(br#""[REDACTED]""#.to_vec())
+            } else if skill == &self.trap_skill {
+                Err(RedactionError::WasmCall("trap".into()))
+            } else {
+                Ok(payload.to_vec())
+            }
+        }
+    }
+
+    let gate = RealTier3RedactionGate::new(std::sync::Arc::new(AllowThenTrap {
+        allow_skill,
+        trap_skill: trap_skill.clone(),
+    }));
+
+    let inbound = sample_payload();
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, inbound.clone(), manifests);
+    let decision = gate.redact(&mut ctx);
+    assert_eq!(
+        decision,
+        Tier3RedactionDecision::Error {
+            rule: trap_skill,
+            kind: Tier3EngineError::WasmTrap,
+        }
+    );
+    assert_eq!(
+        ctx.payload(),
+        &inbound,
+        "Error must roll back in-place edits from earlier skills",
+    );
+}
+
+#[test]
+fn real_gate_invalid_output_after_prior_allow_restores_original_payload() {
+    // A later skill returning non-JSON bytes (engine bug) must also
+    // roll back the prior edit. Exercises the after_value
+    // deserialization failure branch with rollback.
+    let allow_skill = SkillId::new("allow-mask").expect("skill");
+    let bad_skill = SkillId::new("bad-output").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        allow_skill.clone(),
+        manifest_for("allow-mask", "$.params.message.parts[0].text"),
+    );
+    manifests.insert(bad_skill.clone(), manifest_for("bad-output", "$.params.message.role"));
+
+    let mut outputs = std::collections::HashMap::new();
+    outputs.insert(allow_skill, br#""[REDACTED]""#.to_vec());
+    outputs.insert(bad_skill.clone(), b"not-json".to_vec());
+    let invoker = MultiMockInvoker::new(outputs);
+    let gate = RealTier3RedactionGate::new(std::sync::Arc::new(invoker));
+
+    let inbound = sample_payload();
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, inbound.clone(), manifests);
+    let decision = gate.redact(&mut ctx);
+    assert_eq!(
+        decision,
+        Tier3RedactionDecision::Error {
+            rule: bad_skill,
+            kind: Tier3EngineError::InvalidPayload,
+        }
+    );
+    assert_eq!(ctx.payload(), &inbound);
+}
+
+#[test]
+fn real_gate_replaced_kind_infers_from_values_on_redact() {
+    // Manifest declares Replaced; gate should call infer_from_values
+    // (which returns Removed on a null after-value, Replaced
+    // otherwise). Confirms the kind-inference path is exercised by
+    // the gate, not just by the standalone helper tests.
+    let skill = SkillId::new("replaced-skill").expect("skill");
+    let mut manifests = BTreeMap::new();
+    manifests.insert(
+        skill.clone(),
+        Tier3SkillManifest::new(skill.clone(), "$.params.message.parts[0].text", RewriteKind::Replaced)
+            .expect("valid manifest"),
+    );
+    let invoker = MockTier3PartInvoker::with_output(skill.clone(), b"null".to_vec());
+    let gate = RealTier3RedactionGate::new(invoker);
+    let mut ctx = Tier3EvaluationContext::new("message/send", None, sample_payload(), manifests);
+    match gate.redact(&mut ctx) {
+        Tier3RedactionDecision::Allow { rewrites } => {
+            assert_eq!(rewrites.len(), 1);
+            assert_eq!(rewrites[0].kind(), &RewriteKind::Removed);
+        }
+        other => panic!("expected allow, got {other:?}"),
+    }
+}
+
+#[test]
+fn mock_invoker_factory_covers_every_wasm_variant() {
+    // Spin up the with_error factory for every supported variant so
+    // the dispatch table can't silently rot. Each constructed
+    // invoker should produce the same variant on call.
+    let skill = SkillId::new("variant-cover").expect("skill");
+    for source_err in [
+        RedactionError::WasmCall("a".into()),
+        RedactionError::WasmEngine("b".into()),
+        RedactionError::WasmModule("c".into()),
+        RedactionError::WasmInstance("d".into()),
+        RedactionError::WasmAbi("e".into()),
+        RedactionError::WasmMemory("f".into()),
+        RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into())),
+    ] {
+        let mock = MockTier3PartInvoker::with_error(skill.clone(), source_err);
+        let result =
+            <MockTier3PartInvoker as super::real_gate::Tier3PartInvoker>::redact_part_bytes(&mock, &skill, b"{}");
+        assert!(
+            result.is_err(),
+            "factory must produce an error for the registered skill"
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "does not support RedactionError::Json")]
+fn mock_invoker_with_error_panics_on_json_variant() {
+    let skill = SkillId::new("json").expect("skill");
+    // serde_json::from_str on invalid input yields a Json error
+    // that's not Clone — the mock must panic to surface the
+    // unsupported variant loudly.
+    let json_err = serde_json::from_str::<serde_json::Value>("not-json").unwrap_err();
+    let _ = MockTier3PartInvoker::with_error(skill, RedactionError::Json(json_err));
+}
+
+#[test]
 fn real_gate_refusal_after_prior_allow_restores_original_payload() {
     // Two manifests against the same payload: the first edits its
     // slot in-place, the second refuses. Without rollback the
