@@ -8,32 +8,39 @@
 /// silently elides the intended index or shifts the key, letting
 /// sensitive data through unredacted).
 fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
-    // A leading `.` (from `$..foo`) or any `..` mid-path is the
-    // JSONPath "recursive descent" operator the manifest parser
-    // does not support. Without these guards `$..params` would strip
-    // to `.params`, the leading `.` would silently be ignored, and
-    // the path would normalize to the same pointer as `$.params` —
-    // letting an operator who meant "match anywhere" silently target
-    // a specific top-level key instead. Note this only checks `..`
-    // between name segments; bracket-followed-by-dot like
-    // `parts[0].text` is still valid because the `]` separates the
-    // two `.`-adjacent regions.
-    if path.starts_with('.') || path.contains("..") {
+    // A leading `.` (from `$..foo`), any `..` mid-path, or a
+    // trailing `.` are all malformed: they would silently elide
+    // segments or retarget the path to a sibling key. Reject up
+    // front so the structural checks below only deal with internal
+    // composition rules.
+    if path.starts_with('.') || path.ends_with('.') || path.contains("..") {
         return None;
     }
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = path.chars().peekable();
+    // True immediately after a `]`. The next char must be a
+    // delimiter (`.` or `[`); bare text would silently re-target
+    // the path (e.g. `$.parts[0]text` previously normalized to
+    // `/parts/0/text` instead of failing).
+    let mut just_closed_bracket = false;
     while let Some(ch) = chars.next() {
         match ch {
             '.' => {
-                if !current.is_empty() {
-                    let segment = std::mem::take(&mut current);
-                    if !is_valid_segment(&segment) {
-                        return None;
-                    }
-                    tokens.push(segment);
+                if just_closed_bracket {
+                    just_closed_bracket = false;
+                    continue;
                 }
+                if current.is_empty() {
+                    // `..` is rejected up front; an unrelated empty
+                    // segment here would be a tokenizer bug.
+                    return None;
+                }
+                let segment = std::mem::take(&mut current);
+                if !is_valid_segment(&segment) {
+                    return None;
+                }
+                tokens.push(segment);
             }
             '[' => {
                 if !current.is_empty() {
@@ -56,8 +63,18 @@ fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
                     return None;
                 }
                 tokens.push(index);
+                just_closed_bracket = true;
             }
-            _ => current.push(ch),
+            _ => {
+                if just_closed_bracket {
+                    // `parts[0]text` — bare text immediately after a
+                    // closed bracket would otherwise be appended as a
+                    // new segment without an intervening `.` and
+                    // produce a surprising pointer.
+                    return None;
+                }
+                current.push(ch);
+            }
         }
     }
     if !current.is_empty() {

@@ -59,6 +59,22 @@ fn unterminated_bracket_fails_resolution() {
 }
 
 #[test]
+fn trailing_dot_fails_resolution() {
+    // `$.params.` previously normalized to `/params` by silently
+    // dropping the trailing separator. Reject so a manifest typo
+    // can't masquerade as the parent key.
+    assert!(to_json_pointer("$.params.").is_none());
+}
+
+#[test]
+fn bare_text_after_closing_bracket_fails_resolution() {
+    // `$.parts[0]text` previously normalized to `/parts/0/text`
+    // by appending the post-bracket text as if it were a new
+    // segment. Reject so missing `.` separators fail-closed.
+    assert!(to_json_pointer("$.parts[0]text").is_none());
+}
+
+#[test]
 fn consecutive_dots_fail_resolution() {
     // `$..params` and `$.params..secret` previously collapsed to
     // the same pointer as `$.params` / `$.params.secret`,

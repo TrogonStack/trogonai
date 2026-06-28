@@ -728,24 +728,40 @@ fn real_gate_replaced_kind_infers_from_values_on_redact() {
 fn mock_invoker_factory_covers_every_wasm_variant() {
     // Spin up the with_error factory for every supported variant so
     // the dispatch table can't silently rot. Each constructed
-    // invoker should produce the same variant on call.
+    // invoker should produce the SAME variant on call — `is_err()`
+    // alone would let a misrouted entry (e.g. `WasmEngine` returning
+    // `WasmAbi`) slip through unnoticed.
     let skill = SkillId::new("variant-cover").expect("skill");
-    for source_err in [
-        RedactionError::WasmCall("a".into()),
-        RedactionError::WasmEngine("b".into()),
-        RedactionError::WasmModule("c".into()),
-        RedactionError::WasmInstance("d".into()),
-        RedactionError::WasmAbi("e".into()),
-        RedactionError::WasmMemory("f".into()),
-        RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into())),
-    ] {
+    let cases: [(RedactionError, fn(&RedactionError) -> bool); 7] = [
+        (RedactionError::WasmCall("a".into()), |e| {
+            matches!(e, RedactionError::WasmCall(_))
+        }),
+        (RedactionError::WasmEngine("b".into()), |e| {
+            matches!(e, RedactionError::WasmEngine(_))
+        }),
+        (RedactionError::WasmModule("c".into()), |e| {
+            matches!(e, RedactionError::WasmModule(_))
+        }),
+        (RedactionError::WasmInstance("d".into()), |e| {
+            matches!(e, RedactionError::WasmInstance(_))
+        }),
+        (RedactionError::WasmAbi("e".into()), |e| {
+            matches!(e, RedactionError::WasmAbi(_))
+        }),
+        (RedactionError::WasmMemory("f".into()), |e| {
+            matches!(e, RedactionError::WasmMemory(_))
+        }),
+        (
+            RedactionError::Tier3Refusal(Some("UnauthorizedDataCategory".into())),
+            |e| matches!(e, RedactionError::Tier3Refusal(_)),
+        ),
+    ];
+    for (source_err, matcher) in cases {
         let mock = MockTier3PartInvoker::with_error(skill.clone(), source_err);
         let result =
             <MockTier3PartInvoker as super::real_gate::Tier3PartInvoker>::redact_part_bytes(&mock, &skill, b"{}");
-        assert!(
-            result.is_err(),
-            "factory must produce an error for the registered skill"
-        );
+        let err = result.expect_err("factory must produce an error for the registered skill");
+        assert!(matcher(&err), "mock factory returned wrong variant: {err:?}");
     }
 }
 
