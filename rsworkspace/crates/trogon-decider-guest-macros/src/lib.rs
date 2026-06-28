@@ -204,7 +204,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         mod __trogon_decider_bindings {
             wit_bindgen::generate!({
                 world: "decider",
-                path: "../trogon-decider-wit/wit",
+                path: "../../crates/trogon-decider-wit/wit",
                 generate_all,
             });
 

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn normalize_adds_prefix() {
     assert_eq!(
-        normalize_type_url("trogonai.example.light.v1.TurnOn"),
-        "type.googleapis.com/trogonai.example.light.v1.TurnOn"
+        normalize_type_url("trogonai.scheduler.schedules.v1.CreateSchedule"),
+        "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule"
     );
 }

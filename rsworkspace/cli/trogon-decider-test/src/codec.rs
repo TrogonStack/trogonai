@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use buffa::{Message as _, MessageField, MessageName as _};
 use trogon_decider_wit::host::{self, CommandEnvelope};
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
-use trogonai_proto::example::{TURN_ON_TYPE_URL, v1 as light_v1};
 use trogonai_proto::scheduler::schedules::{
     CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, REMOVE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL,
     v1 as schedules_v1,
@@ -13,13 +12,6 @@ use trogonai_proto::scheduler::schedules::{
 pub fn json_any_to_command(value: &serde_json::Value) -> Result<CommandEnvelope> {
     let type_url = any_type_url(value)?;
     match type_url.as_str() {
-        TURN_ON_TYPE_URL => {
-            let turn_on = parse_turn_on(value)?;
-            Ok(CommandEnvelope {
-                type_: type_url,
-                payload: turn_on.encode_to_vec(),
-            })
-        }
         CREATE_SCHEDULE_TYPE_URL => Ok(CommandEnvelope {
             type_: type_url,
             payload: parse_create_schedule_command(value)?.encode_to_vec(),
@@ -44,13 +36,6 @@ pub fn json_any_to_envelope(value: &serde_json::Value) -> Result<host::AnyEnvelo
     let type_url = any_type_url(value)?;
     let message_name = type_url_to_message_name(&type_url);
     match message_name.as_str() {
-        light_v1::LightTurnedOn::FULL_NAME => {
-            let event = parse_light_turned_on(value)?;
-            Ok(host::AnyEnvelope {
-                type_: light_v1::LightTurnedOn::FULL_NAME.to_string(),
-                payload: event.encode_to_vec(),
-            })
-        }
         schedules_v1::ScheduleCreated::FULL_NAME => Ok(host::AnyEnvelope {
             type_: schedules_v1::ScheduleCreated::FULL_NAME.to_string(),
             payload: parse_schedule_created(value)?.encode_to_vec(),
@@ -92,22 +77,6 @@ fn type_url_to_message_name(type_url: &str) -> String {
         .trim_start_matches("type.googleapis.com/")
         .trim_start_matches('/')
         .to_string()
-}
-
-fn parse_turn_on(value: &serde_json::Value) -> Result<light_v1::TurnOn> {
-    Ok(light_v1::TurnOn {
-        light_id: required_string(value, "light_id")?,
-    })
-}
-
-fn parse_light_turned_on(value: &serde_json::Value) -> Result<light_v1::LightTurnedOn> {
-    Ok(light_v1::LightTurnedOn {
-        light_id: required_string(value, "light_id")?,
-        turn_on_count: value
-            .get("turn_on_count")
-            .and_then(serde_json::Value::as_u64)
-            .context("LightTurnedOn missing turn_on_count")?,
-    })
 }
 
 fn parse_create_schedule_command(value: &serde_json::Value) -> Result<schedules_v1::CreateSchedule> {

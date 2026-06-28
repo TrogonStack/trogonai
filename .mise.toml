@@ -47,10 +47,6 @@ description = "Format generated Rust protobuf bindings"
 dir = "rsworkspace"
 run = "cargo fmt --all"
 
-[tasks."proto:descriptor-set"]
-description = "Generate FileDescriptorSet for the Light decider test runner"
-run = "protoc --descriptor_set_out=rsworkspace/target/wasm32-unknown-unknown/release/trogon_light_decider.binpb --include_imports -I proto $(find proto/trogonai/example/light -name '*.proto')"
-
 [tasks."proto:schedules-descriptor-set"]
 description = "Generate FileDescriptorSet for the schedules decider test runner"
 run = "mkdir -p rsworkspace/target/wasm32-unknown-unknown/release && buf build -o rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb --as-file-descriptor-set --path proto/trogonai/scheduler/schedules"
@@ -61,9 +57,9 @@ depends = ["proto:schedules-descriptor-set"]
 run = "cd rsworkspace && cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release && mkdir -p dist/decider && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm dist/decider/schedules.wasm && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb dist/decider/schedules.binpb"
 
 [tasks."artifacts:decider-test"]
-description = "Build Light + schedules decider WASM + decider-test CLI"
-depends = ["proto:descriptor-set", "artifacts:schedules-wasm"]
-run = "cd rsworkspace && cargo component build -p trogon-light-decider --target wasm32-unknown-unknown --release && cargo build -p trogon-decider-test --release"
+description = "Build schedules decider WASM + decider-test CLI"
+depends = ["artifacts:schedules-wasm"]
+run = "cd rsworkspace && cargo build -p trogon-decider-test --release"
 
 [tasks."rsc"]
 description = "Format and check all Rust code (fmt, clippy, all targets, all features)"

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "cli/trogon-decider-test"]
+members = ["crates/*", "components/*", "cli/trogon-decider-test"]
+default-members = ["crates/*", "cli/trogon-decider-test"]
 
 [workspace.lints.rust]
 warnings = "deny"

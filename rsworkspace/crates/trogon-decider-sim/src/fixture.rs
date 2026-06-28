@@ -9,17 +9,10 @@ pub struct SimFixture {
 }
 
 impl SimFixture {
-    pub fn light() -> Self {
-        Self::load(
-            "trogon_light_decider.wasm",
-            "../trogon-light-decider/../../target/wasm32-unknown-unknown/release/trogon_light_decider.wasm",
-        )
-    }
-
     pub fn schedules() -> Self {
         Self::load(
             "trogon_schedules_decider.wasm",
-            "../trogon-schedules-decider/../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm",
+            "../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm",
         )
     }
 

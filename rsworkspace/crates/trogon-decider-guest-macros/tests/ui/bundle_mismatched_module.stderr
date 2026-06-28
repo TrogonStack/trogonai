@@ -1,5 +1,5 @@
 error: all export_decider! commands must declare the same module
-  --> tests/ui/bundle_mismatched_module.rs:17:18
+  --> tests/ui/bundle_mismatched_module.rs:18:18
    |
-17 |         module = "example.other",
-   |                  ^^^^^^^^^^^^^^^
+18 |         module = "scheduler.other",
+   |                  ^^^^^^^^^^^^^^^^^

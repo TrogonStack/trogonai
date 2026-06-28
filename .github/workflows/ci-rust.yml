@@ -111,10 +111,7 @@ jobs:
           tool: cargo-llvm-cov,nextest
 
       - name: Build decider components for sim fixtures
-        run: |
-          cargo component build -p trogon-light-decider --target wasm32-unknown-unknown --release
-          cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
-          cargo component build -p trogon-decider-spike --target wasm32-unknown-unknown --release
+        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
         working-directory: rsworkspace
 
       - name: Run documentation tests
@@ -164,7 +161,7 @@ jobs:
           cache-workspace-crates: true
 
       - name: Build release
-        run: cargo build --release --workspace --exclude trogon-light-decider --exclude trogon-schedules-decider --exclude trogon-decider-spike
+        run: cargo build --release
         working-directory: rsworkspace
 
   wasm-decider:
@@ -190,17 +187,13 @@ jobs:
           workspaces: rsworkspace -> target
           save-if: always
 
-      - name: Build Light decider component
-        run: cargo component build -p trogon-light-decider --target wasm32-unknown-unknown --release
-        working-directory: rsworkspace
-
       - name: Build schedules decider component
         run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
         working-directory: rsworkspace
 
       - name: Assert zero imports and validate
         run: |
-          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_light_decider.wasm rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
+          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
             wasm-tools component wit "$WASM" | tee /tmp/wit.txt
             if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
               echo "component declares imports: $WASM"
@@ -212,8 +205,7 @@ jobs:
       - name: Run decider-test suites
         run: |
           cd rsworkspace
-          cargo test -p trogon-decider-sim --test light --test schedules --features test-support
+          cargo test -p trogon-decider-sim --test schedules --features test-support
           cargo test -p trogon-decider-guest-macros --test compile_fail
           cargo build -p trogon-decider-test --release
-          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_light_decider.wasm cli/trogon-decider-test/light.yaml
           ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml

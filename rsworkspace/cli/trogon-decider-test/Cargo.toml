@@ -24,4 +24,4 @@ thiserror = { workspace = true }
 trogon-decider = { workspace = true }
 trogon-decider-sim = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
-trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["light", "schedules"] }
+trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["schedules"] }

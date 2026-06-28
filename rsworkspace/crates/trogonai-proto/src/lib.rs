@@ -1,17 +1,14 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(any(feature = "schedules", feature = "light"))]
+#[cfg(feature = "schedules")]
 mod r#gen;
 
-#[cfg(any(feature = "schedules", feature = "light"))]
+#[cfg(feature = "schedules")]
 mod codec;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
-
-#[cfg(feature = "light")]
-pub mod example;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;
@@ -41,15 +38,12 @@ pub mod google {
 /// messages can serialize to different bytes. Comparing the decoded JSON sidesteps
 /// that, which lets conformance tooling assert event equality by meaning rather
 /// than by raw bytes. Returns `None` for unregistered types.
-#[cfg(any(feature = "schedules", feature = "light"))]
+#[cfg(feature = "schedules")]
 pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Option<String> {
     static REGISTRY: std::sync::OnceLock<buffa::type_registry::TypeRegistry> = std::sync::OnceLock::new();
 
     let registry = REGISTRY.get_or_init(|| {
         let mut registry = buffa::type_registry::TypeRegistry::new();
-        #[cfg(feature = "light")]
-        r#gen::trogonai::example::light::v1::register_types(&mut registry);
-        #[cfg(feature = "schedules")]
         r#gen::trogonai::scheduler::schedules::v1::register_types(&mut registry);
         registry
     });
@@ -64,5 +58,5 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Option<String> {
     (entry.to_json)(payload).ok().map(|value| value.to_string())
 }
 
-#[cfg(all(test, feature = "light"))]
+#[cfg(all(test, feature = "schedules"))]
 mod tests;

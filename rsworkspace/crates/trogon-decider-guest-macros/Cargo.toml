@@ -22,5 +22,6 @@ thiserror = { workspace = true }
 trogon-decider = { workspace = true }
 trogon-decider-guest-sdk = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["guest"] }
-trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["light"] }
+trogon-scheduler-domain = { path = "../trogon-scheduler-domain" }
+trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
 wit-bindgen = { workspace = true }

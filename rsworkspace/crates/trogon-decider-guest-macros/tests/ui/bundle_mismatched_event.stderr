@@ -1,407 +1,378 @@
-warning: unused import: `WritePrecondition`
- --> tests/ui/bundle_mismatched_event.rs:1:41
-  |
-1 | use trogon_decider::{Decider, Decision, WritePrecondition};
-  |                                         ^^^^^^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `Guest::Session`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `Guest::Session`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:58:5
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:60:5
    |
-58 |     WrongEventCommand {
-   |     ^^^^^^^^^^^^^^^^^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+60 |     WrongEventCommand {
+   |     ^^^^^^^^^^^^^^^^^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required by a bound in `__assert_bundle_shares_state_event`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `__assert_bundle_shares_state_event`
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0277]: the trait bound `WrongEventCommand: From<TurnOn>` is not satisfied
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ unsatisfied trait bound
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-help: the trait `From<TurnOn>` is not implemented for `WrongEventCommand`
-  --> tests/ui/bundle_mismatched_event.rs:11:1
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-11 | struct WrongEventCommand {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^
-   = note: required for `TurnOn` to implement `Into<WrongEventCommand>`
-   = note: required for `WrongEventCommand` to implement `TryFrom<TurnOn>`
-   = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
-   |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
-...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-   |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
-   |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `_export_constructor_session_cabi`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `_export_constructor_session_cabi`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `_export_method_session_evolve_cabi`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `_export_method_session_evolve_cabi`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `__post_return_method_session_evolve`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `__post_return_method_session_evolve`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `_export_method_session_decide_cabi`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `_export_method_session_decide_cabi`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `__post_return_method_session_decide`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `__post_return_method_session_decide`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `_export_method_session_snapshot_cabi`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `_export_method_session_snapshot_cabi`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+error[E0271]: type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
-   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == LightEvent`
+66 | |     },
+67 | | );
+   | |_^ type mismatch resolving `<WrongEventCommand as Decider>::Event == ScheduleEvent`
    |
-note: expected this to be `LightEvent`
-  --> tests/ui/bundle_mismatched_event.rs:26:18
+note: expected this to be `ScheduleEvent`
+  --> tests/ui/bundle_mismatched_event.rs:31:18
    |
-26 |     type Event = WrongEvent;
+31 |     type Event = WrongEvent;
    |                  ^^^^^^^^^^
 note: required for `Session` to implement `GuestSession`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^
    = note: associated types for the current `impl` cannot be restricted in `where` clauses
 note: required by a bound in `__post_return_method_session_snapshot`
-  --> tests/ui/bundle_mismatched_event.rs:50:1
+  --> tests/ui/bundle_mismatched_event.rs:52:1
    |
-50 | / export_decider!(
-51 | |     TurnOnCommand {
-52 | |         type_url = TURN_ON_TYPE_URL,
-53 | |         proto = v1::TurnOn,
+52 | / export_decider!(
+53 | |     CreateSchedule {
+54 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+55 | |         proto = v1::CreateSchedule,
 ...  |
-64 | |     },
-65 | | );
+66 | |     },
+67 | | );
    | |_^ required by this bound in `__post_return_method_session_snapshot`
    = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)

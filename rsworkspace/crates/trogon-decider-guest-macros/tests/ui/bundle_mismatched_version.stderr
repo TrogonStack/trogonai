@@ -1,5 +1,5 @@
 error: all export_decider! commands must declare the same version
-  --> tests/ui/bundle_mismatched_version.rs:18:19
+  --> tests/ui/bundle_mismatched_version.rs:19:19
    |
-18 |         version = "0.2.0",
+19 |         version = "0.2.0",
    |                   ^^^^^^^

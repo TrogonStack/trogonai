@@ -1,30 +1,44 @@
-use buffa::{Message as _, MessageName as _};
+use buffa::{Message as _, MessageField, MessageName as _};
 
-use crate::example::v1::LightTurnedOn;
+use crate::scheduler::schedules::v1::ScheduleOccurrenceRecorded;
+
+fn timestamp(seconds: i64) -> buffa_types::google::protobuf::Timestamp {
+    buffa_types::google::protobuf::Timestamp {
+        seconds,
+        nanos: 0,
+        ..buffa_types::google::protobuf::Timestamp::default()
+    }
+}
 
 #[test]
 fn decode_event_to_json_is_canonical_across_wire_orderings() {
-    let event = LightTurnedOn {
-        light_id: "kitchen".to_string(),
-        turn_on_count: 3,
+    let event = ScheduleOccurrenceRecorded {
+        schedule_id: "backup".to_string(),
+        occurrence_sequence: Some(7),
+        occurrence_at: MessageField::some(timestamp(1_700_000_000)),
+        recorded_at: MessageField::some(timestamp(1_700_000_005)),
     };
     let canonical = event.encode_to_vec();
 
-    // The same message with fields written in reverse wire order (field 2
-    // before field 1). Protobuf permits any field order, so this is a valid
-    // alternate encoding that differs on the wire.
-    let reordered = {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&[0x10, 0x03]); // field 2 (turn_on_count) varint = 3
-        bytes.push(0x0A); // field 1 (light_id) length-delimited
-        bytes.push(7);
-        bytes.extend_from_slice(b"kitchen");
-        bytes
-    };
+    // Re-encode the same message with field 2 (occurrence_sequence) emitted
+    // before field 1; protobuf permits any field order, so this is a valid
+    // alternate encoding that differs on the wire. Build each fragment with the
+    // encoder rather than hand-rolling tags.
+    let only_sequence = ScheduleOccurrenceRecorded {
+        occurrence_sequence: Some(7),
+        ..ScheduleOccurrenceRecorded::default()
+    }
+    .encode_to_vec();
+    let without_sequence = ScheduleOccurrenceRecorded {
+        occurrence_sequence: None,
+        ..event.clone()
+    }
+    .encode_to_vec();
+    let reordered = [only_sequence, without_sequence].concat();
     assert_ne!(canonical, reordered, "encodings must differ on the wire");
 
-    let from_canonical = super::decode_event_to_json(LightTurnedOn::FULL_NAME, &canonical);
-    let from_reordered = super::decode_event_to_json(LightTurnedOn::FULL_NAME, &reordered);
+    let from_canonical = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, &canonical);
+    let from_reordered = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, &reordered);
 
     assert!(from_canonical.is_some());
     assert_eq!(from_canonical, from_reordered);
@@ -33,7 +47,7 @@ fn decode_event_to_json_is_canonical_across_wire_orderings() {
 #[test]
 fn decode_event_to_json_returns_none_for_unknown_type() {
     assert_eq!(
-        super::decode_event_to_json("type.googleapis.com/trogonai.example.light.v1.Unknown", &[]),
+        super::decode_event_to_json("type.googleapis.com/trogonai.scheduler.schedules.v1.Unknown", &[]),
         None
     );
 }
