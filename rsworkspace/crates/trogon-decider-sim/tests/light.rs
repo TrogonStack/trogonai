@@ -105,3 +105,240 @@ fn then_error_matches_rejection() {
         .run(&mut instance)
         .unwrap();
 }
+
+fn unknown_command() -> CommandEnvelope {
+    CommandEnvelope {
+        type_: "type.googleapis.com/trogonai.example.light.v1.DoesNotExist".to_string(),
+        payload: Vec::new(),
+    }
+}
+
+#[test]
+fn descriptor_lists_light_command() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let descriptor = instance.descriptor().unwrap();
+    assert_eq!(descriptor.name, "example.light");
+    assert!(
+        descriptor
+            .commands
+            .iter()
+            .any(|spec| spec.command_type == TURN_ON_TYPE_URL)
+    );
+}
+
+#[test]
+fn stream_id_returns_command_target() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let stream = instance.stream_id(&turn_on_command("kitchen")).unwrap().unwrap();
+    assert_eq!(stream, "kitchen");
+}
+
+#[test]
+fn then_accepted_passes_for_fresh_turn_on() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .then_accepted()
+        .run(&mut instance)
+        .unwrap();
+}
+
+#[test]
+fn then_accepted_reports_rejection_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .given([light_turned_on_event("kitchen", 1)])
+        .when(turn_on_command("kitchen"))
+        .then_accepted()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("expected acceptance, got rejection"), "{error}");
+}
+
+#[test]
+fn then_accepted_reports_fault_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(unknown_command())
+        .then_accepted()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("expected acceptance, got fault"), "{error}");
+}
+
+#[test]
+fn then_error_matches_fault_code() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    SimScenario::new()
+        .when(unknown_command())
+        .then_error("invalid-command")
+        .run(&mut instance)
+        .unwrap();
+}
+
+#[test]
+fn then_error_reports_rejection_code_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .given([light_turned_on_event("kitchen", 1)])
+        .when(turn_on_command("kitchen"))
+        .then_error("some-other-code")
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("got rejection: already-on"), "{error}");
+}
+
+#[test]
+fn then_error_reports_fault_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(unknown_command())
+        .then_error("some-other-code")
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("got fault: invalid-command"), "{error}");
+}
+
+#[test]
+fn then_error_reports_unexpected_events() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .then_error("already-on")
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("got 1 event(s)"), "{error}");
+}
+
+#[test]
+fn then_rejected_reports_event_count() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .then_rejected()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("expected rejection, got 1 event(s)"), "{error}");
+}
+
+#[test]
+fn then_rejected_reports_fault_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(unknown_command())
+        .then_rejected()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("expected rejection, got fault"), "{error}");
+}
+
+#[test]
+fn then_events_reports_count_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .then_events([])
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("expected 0 event(s), got 1"), "{error}");
+}
+
+#[test]
+fn then_events_reports_payload_mismatch() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .then_events([light_turned_on_event("hallway", 1)])
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("event 0 mismatch"), "{error}");
+}
+
+#[test]
+fn then_events_reports_fault() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(unknown_command())
+        .then_events([light_turned_on_event("kitchen", 1)])
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("faulted: invalid-command"), "{error}");
+}
+
+#[test]
+fn run_requires_a_command() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .then_rejected()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("scenario missing .when(...)"), "{error}");
+}
+
+#[test]
+fn run_requires_a_then_expectation() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(turn_on_command("kitchen"))
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("scenario missing .then_events(...)"), "{error}");
+}
+
+#[test]
+fn then_events_reports_rejection() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .given([light_turned_on_event("kitchen", 1)])
+        .when(turn_on_command("kitchen"))
+        .then_events([light_turned_on_event("kitchen", 2)])
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(error.contains("rejected: already-on"), "{error}");
+}
+
+#[test]
+fn default_scenario_matches_new() {
+    let host = SimHost::load(&light_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    SimScenario::default()
+        .when(turn_on_command("kitchen"))
+        .then_accepted()
+        .run(&mut instance)
+        .unwrap();
+}
