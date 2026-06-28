@@ -134,8 +134,48 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         }
     };
 
+    // Snapshot load/encode is wired only from the canonical command's
+    // `state_schema_version`. Because the bundle shares one `State`, every command
+    // must declare the same schema version; a divergent literal would otherwise be
+    // silently ignored. Assert equality at compile time, mirroring the shared
+    // State/Event guard above.
+    let schema_assert = if commands.len() == 1 {
+        quote! {}
+    } else {
+        let checks = commands.iter().skip(1).map(|command| {
+            let schema = &command.state_schema_version;
+            quote! {
+                assert!(
+                    __assert_bundle_shares_schema_version(#schema, #state_schema_version),
+                    "all export_decider! commands must declare the same state_schema_version",
+                );
+            }
+        });
+        quote! {
+            const _: () = {
+                const fn __assert_bundle_shares_schema_version(a: &str, b: &str) -> bool {
+                    let (a, b) = (a.as_bytes(), b.as_bytes());
+                    if a.len() != b.len() {
+                        return false;
+                    }
+                    let mut index = 0;
+                    while index < a.len() {
+                        if a[index] != b[index] {
+                            return false;
+                        }
+                        index += 1;
+                    }
+                    true
+                }
+                #(#checks)*
+            };
+        }
+    };
+
     let expanded = quote! {
         #bundle_assert
+
+        #schema_assert
 
         #[doc(hidden)]
         mod __trogon_decider_bindings {

@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: all export_decider! commands must declare the same state_schema_version
+  --> tests/ui/bundle_mismatched_schema.rs:55:1
+   |
+55 | / export_decider!(
+56 | |     TurnOnCommand {
+57 | |         type_url = TURN_ON_TYPE_URL,
+58 | |         proto = v1::TurnOn,
+...  |
+69 | |     },
+70 | | );
+   | |_^ evaluation of `_` failed here
