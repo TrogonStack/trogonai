@@ -532,6 +532,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "ard-catalog"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "url",
+]
+
+[[package]]
+name = "ard-nats"
+version = "0.1.0"
+dependencies = [
+ "ard-catalog",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "trogon-nats",
+]
+
+[[package]]
+name = "ard-registry"
+version = "0.1.0"
+dependencies = [
+ "ard-catalog",
+ "axum",
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "tower-http",
+]
+
+[[package]]
 name = "asn1-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

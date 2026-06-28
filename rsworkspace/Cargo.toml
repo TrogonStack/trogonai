@@ -19,6 +19,9 @@ a2a-bridge = { path = "crates/a2a-bridge" }
 a2a-identity-types = { path = "crates/a2a-identity-types" }
 a2a-nats = { path = "crates/a2a-nats" }
 a2a-pack = { path = "crates/a2a-pack" }
+ard-catalog = { path = "crates/ard-catalog" }
+ard-nats = { path = "crates/ard-nats" }
+ard-registry = { path = "crates/ard-registry" }
 a2a-redaction = { path = "crates/a2a-redaction" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
@@ -63,6 +66,7 @@ futures-util = "=0.3.32"
 tokio = "=1.52.1"
 tokio-util = "=0.7.18"
 tokio-tungstenite = "=0.29.0"
+tower = "=0.5.3"
 tower-http = { version = "=0.6.8", features = ["trace"] }
 
 # Serialization
