@@ -59,6 +59,16 @@ fn unterminated_bracket_fails_resolution() {
 }
 
 #[test]
+fn consecutive_dots_fail_resolution() {
+    // `$..params` and `$.params..secret` previously collapsed to
+    // the same pointer as `$.params` / `$.params.secret`,
+    // hiding the JSONPath "recursive descent" intent behind a
+    // benign-looking specific path. The tokenizer now rejects both.
+    assert!(to_json_pointer("$..params").is_none());
+    assert!(to_json_pointer("$.params..secret").is_none());
+}
+
+#[test]
 fn whitespace_padded_segments_fail_resolution() {
     // Padding whitespace inside or around a segment almost always
     // means operator typo (e.g. `" params"` not `params`, `" 0 "`

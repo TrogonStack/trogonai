@@ -8,6 +8,19 @@
 /// silently elides the intended index or shifts the key, letting
 /// sensitive data through unredacted).
 fn tokenize_json_path(path: &str) -> Option<Vec<String>> {
+    // A leading `.` (from `$..foo`) or any `..` mid-path is the
+    // JSONPath "recursive descent" operator the manifest parser
+    // does not support. Without these guards `$..params` would strip
+    // to `.params`, the leading `.` would silently be ignored, and
+    // the path would normalize to the same pointer as `$.params` —
+    // letting an operator who meant "match anywhere" silently target
+    // a specific top-level key instead. Note this only checks `..`
+    // between name segments; bracket-followed-by-dot like
+    // `parts[0].text` is still valid because the `]` separates the
+    // two `.`-adjacent regions.
+    if path.starts_with('.') || path.contains("..") {
+        return None;
+    }
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut chars = path.chars().peekable();
