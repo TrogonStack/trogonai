@@ -48,33 +48,94 @@ impl Clone for AiCatalogJsonSchema {
     }
 }
 
+/// A single structured schema violation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchemaViolation {
+    instance_path: String,
+    schema_path: String,
+    message: String,
+}
+
+impl SchemaViolation {
+    pub fn instance_path(&self) -> &str {
+        &self.instance_path
+    }
+
+    pub fn schema_path(&self) -> &str {
+        &self.schema_path
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 /// Validation failure for an ARD catalog manifest document.
 #[derive(Debug, thiserror::Error)]
-#[error("{}", .details.join("; "))]
 pub struct CatalogManifestValidateError {
-    details: Vec<String>,
+    violations: Vec<SchemaViolation>,
+}
+
+impl std::fmt::Display for CatalogManifestValidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut lines: Vec<String> = self
+            .violations
+            .iter()
+            .map(|v| {
+                if v.instance_path.is_empty() {
+                    v.message.clone()
+                } else {
+                    format!("{}: {}", v.instance_path, v.message)
+                }
+            })
+            .collect();
+        lines.sort();
+        lines.dedup();
+        write!(f, "{}", lines.join("; "))
+    }
 }
 
 impl CatalogManifestValidateError {
     fn from_validation_errors<'a>(errors: impl IntoIterator<Item = jsonschema::ValidationError<'a>>) -> Self {
-        let mut details: Vec<String> = errors
+        let mut violations: Vec<SchemaViolation> = errors
             .into_iter()
-            .map(|error| {
-                let path = error.instance_path().as_str();
-                if path.is_empty() {
-                    error.to_string()
-                } else {
-                    format!("{path}: {error}")
-                }
+            .map(|error| SchemaViolation {
+                instance_path: error.instance_path().as_str().to_owned(),
+                schema_path: error.schema_path().as_str().to_owned(),
+                message: error.to_string(),
             })
             .collect();
-        details.sort();
-        details.dedup();
-        Self { details }
+        violations.sort_by(|a, b| {
+            let a_line = if a.instance_path.is_empty() {
+                a.message.clone()
+            } else {
+                format!("{}: {}", a.instance_path, a.message)
+            };
+            let b_line = if b.instance_path.is_empty() {
+                b.message.clone()
+            } else {
+                format!("{}: {}", b.instance_path, b.message)
+            };
+            a_line.cmp(&b_line)
+        });
+        violations.dedup_by(|a, b| {
+            let a_line = if a.instance_path.is_empty() {
+                a.message.clone()
+            } else {
+                format!("{}: {}", a.instance_path, a.message)
+            };
+            let b_line = if b.instance_path.is_empty() {
+                b.message.clone()
+            } else {
+                format!("{}: {}", b.instance_path, b.message)
+            };
+            a_line == b_line
+        });
+        Self { violations }
     }
 
-    pub fn details(&self) -> &[String] {
-        &self.details
+    pub fn violations(&self) -> &[SchemaViolation] {
+        &self.violations
     }
 }
 

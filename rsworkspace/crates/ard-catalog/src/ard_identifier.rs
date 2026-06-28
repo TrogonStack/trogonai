@@ -17,6 +17,8 @@ pub enum ArdIdentifierError {
     TooFewComponents,
     #[error("publisher contains invalid character '{0}'")]
     InvalidPublisherCharacter(char),
+    #[error("publisher domain label is invalid: '{0}'")]
+    InvalidPublisherLabel(String),
     #[error("resource component contains invalid character '{0}'")]
     InvalidResourceCharacter(char),
 }
@@ -58,6 +60,11 @@ impl ArdIdentifier {
             .find(|ch| !(ch.is_ascii_alphanumeric() || *ch == '.' || *ch == '-'))
         {
             return Err(ArdIdentifierError::InvalidPublisherCharacter(ch));
+        }
+        for label in publisher_domain.split('.') {
+            if label.is_empty() || label.starts_with('-') || label.ends_with('-') {
+                return Err(ArdIdentifierError::InvalidPublisherLabel(label.to_string()));
+            }
         }
         for component in components.iter().skip(1) {
             if let Some(ch) = component

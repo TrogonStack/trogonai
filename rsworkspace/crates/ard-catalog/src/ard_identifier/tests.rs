@@ -73,3 +73,33 @@ fn rejects_invalid_identifier_characters() {
         Err(ArdIdentifierError::InvalidResourceCharacter('/'))
     );
 }
+
+#[test]
+fn rejects_empty_dns_label() {
+    assert!(matches!(
+        ArdIdentifier::new("urn:air:example..com:agent:x"),
+        Err(ArdIdentifierError::InvalidPublisherLabel(_))
+    ));
+}
+
+#[test]
+fn rejects_leading_hyphen_in_dns_label() {
+    assert!(matches!(
+        ArdIdentifier::new("urn:air:-example.com:agent:x"),
+        Err(ArdIdentifierError::InvalidPublisherLabel(_))
+    ));
+}
+
+#[test]
+fn rejects_trailing_hyphen_in_dns_label() {
+    assert!(matches!(
+        ArdIdentifier::new("urn:air:example-.com:agent:x"),
+        Err(ArdIdentifierError::InvalidPublisherLabel(_))
+    ));
+}
+
+#[test]
+fn accepts_valid_multi_label_domain() {
+    let id = ArdIdentifier::new("urn:air:sub.example.com:agent:assistant").unwrap();
+    assert_eq!(id.publisher_domain(), "sub.example.com");
+}

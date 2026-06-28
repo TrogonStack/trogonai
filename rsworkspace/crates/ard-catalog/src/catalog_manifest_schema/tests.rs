@@ -61,7 +61,7 @@ fn rejects_deprecated_collections_field() {
     let mut manifest = valid_manifest();
     manifest["collections"] = json!([]);
     let err = validate_ai_catalog_value(&manifest).unwrap_err();
-    assert!(err.details().iter().any(|detail| detail.contains("collections")));
+    assert!(err.violations().iter().any(|v| v.message().contains("collections") || v.instance_path().contains("collections")));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn rejects_invalid_urn_ai_identifier() {
     let mut manifest = valid_manifest();
     manifest["entries"][0]["identifier"] = json!("urn:ai:example.com:agent:assistant");
     let err = validate_ai_catalog_value(&manifest).unwrap_err();
-    assert!(err.details().iter().any(|detail| detail.contains("identifier")));
+    assert!(err.violations().iter().any(|v| v.message().contains("identifier") || v.instance_path().contains("identifier")));
 }
 
 #[test]
@@ -77,5 +77,12 @@ fn rejects_both_url_and_data() {
     let mut manifest = valid_manifest();
     manifest["entries"][0]["data"] = json!({ "name": "assistant" });
     let err = validate_ai_catalog_value(&manifest).unwrap_err();
-    assert!(!err.details().is_empty());
+    assert!(!err.violations().is_empty());
+}
+
+#[test]
+fn rejects_unknown_top_level_entry_field() {
+    let mut manifest = valid_manifest();
+    manifest["entries"][0]["somethingUnknown"] = json!("x");
+    assert!(validate_ai_catalog_value(&manifest).is_err());
 }

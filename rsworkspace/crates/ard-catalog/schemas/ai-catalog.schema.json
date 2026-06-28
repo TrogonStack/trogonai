@@ -127,7 +127,8 @@
         "trustManifest": {
           "$ref": "#/$defs/trustManifest"
         }
-      }
+      },
+      "additionalProperties": false
     },
     "trustManifest": {
       "type": "object",
