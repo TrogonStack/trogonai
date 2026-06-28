@@ -19,8 +19,9 @@ fn function_imported() {
     let _ = var("NATS_PASSWORD");
 }
 
-// The other reader functions all resolve into `std::env` and must fire too.
-fn other_readers() {
+// `ReadEnv` has no equivalent for the OS-string and iterator readers, so
+// flagging them would deny code with no alternative: must NOT fire (yet).
+fn unsupported_readers() {
     let _ = std::env::var_os("HOME");
     let _ = std::env::vars();
     let _ = std::env::vars_os();

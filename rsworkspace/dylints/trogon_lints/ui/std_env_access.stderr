@@ -23,29 +23,5 @@ LL |     let _ = var("NATS_PASSWORD");
    |
    = help: read it through an injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv` in tests) instead
 
-error: environment variable read directly through `std::env`
-  --> $DIR/std_env_access.rs:24:13
-   |
-LL |     let _ = std::env::var_os("HOME");
-   |             ^^^^^^^^^^^^^^^^
-   |
-   = help: read it through an injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv` in tests) instead
-
-error: environment variable read directly through `std::env`
-  --> $DIR/std_env_access.rs:25:13
-   |
-LL |     let _ = std::env::vars();
-   |             ^^^^^^^^^^^^^^
-   |
-   = help: read it through an injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv` in tests) instead
-
-error: environment variable read directly through `std::env`
-  --> $DIR/std_env_access.rs:26:13
-   |
-LL |     let _ = std::env::vars_os();
-   |             ^^^^^^^^^^^^^^^^^
-   |
-   = help: read it through an injected `trogon_std::env::ReadEnv` (`SystemEnv` in production, `InMemoryEnv` in tests) instead
-
-error: aborting due to 6 previous errors
+error: aborting due to 3 previous errors
 
