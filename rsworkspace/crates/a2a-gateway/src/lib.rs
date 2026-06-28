@@ -17,9 +17,15 @@
 //! - [`caller_jwt_header`] — re-exports the wire-level header constants from
 //!   `a2a-auth-callout` so callers only depend on this crate.
 //! - [`config`] — clap-derived [`Args`] + env-resolved [`Config`].
+//! - [`gw_ingress_stream`] — gateway-owned JetStream pull pipe for
+//!   streaming ingress (`message/stream`, `tasks/resubscribe`).
+//! - [`gw_pull_backpressure`] — pull consumer for task-event egress
+//!   (`A2A_EVENTS`) with JetStream flow control + per-caller inflight cap.
 //! - [`jwt_caller_identity`] — resolves a verified caller identity from a
 //!   minted NATS User JWT carried on the inbound message, with a
 //!   labs-only header-trust fallback gated behind an env flag.
+//! - [`policy`] — shared policy-tier scaffold; later slices layer Tier 1
+//!   declarative, Tier 1 SpiceDB, Tier 2 CEL, and Tier 3 redaction on top.
 //! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.push.dlq.>`
 //!   into a tenant-readable `mirror.*` view with in-process dedupe so a
 //!   re-delivered DLQ envelope only publishes once.
@@ -33,7 +39,10 @@ pub mod aauth;
 pub mod agent_card_surface;
 pub mod caller_jwt_header;
 pub mod config;
+pub mod gw_ingress_stream;
+pub mod gw_pull_backpressure;
 pub mod jwt_caller_identity;
+pub mod policy;
 pub mod push_dlq_mirror;
 pub mod runtime;
 
@@ -44,17 +53,6 @@ pub use runtime::RuntimeError;
 /// runtime's terminal error if one fires. The binary calls this directly so
 /// `main.rs` stays a thin shim and integration tests can inject a fake env
 /// through [`runtime::run_with_args`].
-///
-/// Under `cfg(coverage)` this collapses to a stub that returns `Ok(())`
-/// matching the `main.rs` coverage stub. The real env-resolution path is
-/// exercised through `runtime::run_with_args` directly under the normal
-/// test profile, so coverage doesn't depend on running a tokio runtime.
-#[cfg(not(coverage))]
 pub async fn run(args: Args) -> Result<(), RuntimeError> {
     runtime::run_with_args(args, &trogon_std::env::SystemEnv).await
-}
-
-#[cfg(coverage)]
-pub async fn run(_args: Args) -> Result<(), RuntimeError> {
-    Ok(())
 }

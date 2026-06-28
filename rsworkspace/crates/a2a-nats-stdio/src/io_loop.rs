@@ -270,7 +270,6 @@ where
 
 /// Collapse the writer task's `Result<Result<(), io::Error>, JoinError>` into a
 /// single `io::Error`. Used by every select arm that polls `&mut writer_task`.
-#[cfg(not(coverage))]
 fn writer_task_err(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> std::io::Error {
     match res {
         Ok(Ok(())) => std::io::Error::other("writer task exited unexpectedly"),
@@ -322,7 +321,9 @@ mod tests;
 // stub of `run_io_loop` gets exercised. Mirrors the runtime::run pattern.
 #[cfg(all(test, coverage))]
 mod cov_stub_tests;
-// parse_inbound tests are cheap and deterministic — they run under every build
-// mode including coverage so the parser remains fully measured.
+// parse_inbound and writer_task_err tests are cheap and deterministic — they
+// run under every build mode including coverage.
 #[cfg(test)]
 mod parse_tests;
+#[cfg(test)]
+mod writer_err_tests;
