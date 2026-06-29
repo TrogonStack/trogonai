@@ -1,29 +1,18 @@
-//! An alternative schedules read-model backend, stored in Postgres.
+//! The storage seam shared by the schedules projectors.
 //!
-//! This is additive: the default NATS JetStream KV read model (under
-//! [`crate::projections::schedules`] and queried via [`crate::queries`]) is
-//! untouched. This module introduces a storage seam, [`SchedulesProjectionStore`],
-//! and a Postgres implementation behind the `postgres` feature, plus its own query
-//! entry points under [`crate::projections::queries`].
-//!
-//! The same `projections.v1.ScheduleProjection` proto is the stored value, so the
-//! read model a caller sees is identical regardless of backend; only the storage
-//! and key scheme differ.
+//! Each projector under [`crate::projections`] folds the schedule event stream
+//! into the `projections.v1.ScheduleProjection` proto; this trait is where that
+//! proto is read from and written to. The [`crate::projections::schedules`]
+//! projector writes it to NATS JetStream KV directly; the
+//! [`crate::projections::postgres`] projector writes it through this trait into a
+//! Postgres table. The read model a caller sees is identical regardless of which
+//! projector served it; only the storage and key scheme differ.
 
 use std::collections::HashSet;
 
 use async_trait::async_trait;
 
 use crate::{error::SchedulerError, projections_v1};
-
-// The Postgres backend reaches a live database, so it is integration-tested
-// (testcontainers) rather than unit-covered; exclude it from the coverage build
-// the same way the NATS store/query paths are.
-#[cfg(all(feature = "postgres", not(coverage)))]
-pub mod postgres;
-
-#[cfg(all(feature = "postgres", not(coverage)))]
-pub use postgres::PostgresSchedulesProjection;
 
 /// Storage for the schedules read model: point/list reads, upserts, deletes, the
 /// catch-up reconcile, and the catch-up checkpoint.

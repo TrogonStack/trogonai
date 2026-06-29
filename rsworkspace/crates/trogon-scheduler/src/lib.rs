@@ -28,11 +28,9 @@ pub use commands::{
 pub use config::ScheduleWriteCondition;
 pub use error::{ScheduleSpecError, SchedulerError};
 pub use projections::SchedulesProjectionStore;
-#[cfg(not(coverage))]
-pub use projections::SchedulesProjector;
-#[cfg(all(feature = "postgres", not(coverage)))]
-pub use projections::backend::PostgresSchedulesProjection;
 pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
+#[cfg(all(feature = "postgres", not(coverage)))]
+pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
 
 /// Query entry points for the alternative projection backends (e.g. Postgres).
 #[cfg(not(coverage))]

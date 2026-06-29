@@ -1,5 +1,5 @@
-//! Query entry points for the alternative projection backends (those behind
-//! [`crate::projections::backend::SchedulesProjectionStore`]).
+//! Query entry points for the store-backed projectors (those reading through
+//! [`crate::projections::store::SchedulesProjectionStore`]).
 //!
 //! These mirror the NATS read-model queries in [`crate::queries`] but read through
 //! the storage trait instead of a concrete NATS bucket, so they work over any

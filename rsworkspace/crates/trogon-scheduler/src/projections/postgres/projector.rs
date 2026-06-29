@@ -1,14 +1,13 @@
-//! Drives an alternative projection backend (a [`SchedulesProjectionStore`], e.g.
-//! Postgres) from the schedule event stream.
+//! Drives the Postgres schedules projection from the schedule event stream.
 //!
-//! This is additive and standalone: it does not touch the NATS KV projection or
-//! the event store's append path. It reuses this module's fold state machine
-//! ([`super::apply`]) so the alternative backend produces the same read model the
-//! NATS projection does — event-for-event.
+//! This is additive and standalone: it does not touch the NATS KV projector or the
+//! event store's append path. It reuses the schedules fold state machine
+//! ([`crate::projections::schedules::apply`]) so the Postgres read model is
+//! identical to the NATS one — event-for-event.
 //!
 //! Each event is folded against the schedule's current stored view (read back from
-//! the backend), and the checkpoint advances per event so a restart resumes where
-//! it left off. A per-event anomaly (undecodable, foreign subject, misrouted, an
+//! the store), and the checkpoint advances per event so a restart resumes where it
+//! left off. A per-event anomaly (undecodable, foreign subject, misrouted, an
 //! invalid transition) is logged and skipped, never wedging the projector.
 
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
@@ -22,14 +21,13 @@ use trogon_nats::jetstream::JetStreamGetStream;
 
 use crate::error::SchedulerError;
 use crate::kv::open_events_stream;
-use crate::projections::backend::SchedulesProjectionStore;
-use crate::v1;
-
-use super::storage::read_model_key;
-use super::{
+use crate::projections::schedules::storage::read_model_key;
+use crate::projections::schedules::{
     ProjectionChange, ScheduleStreamState, apply, decode_recorded_delivery_message, event_message_sequence,
     event_replay_consumer_config, event_schedule_id, projection_change, read_model_token_from_event_subject,
 };
+use crate::projections::store::SchedulesProjectionStore;
+use crate::v1;
 
 /// Projects the schedule event stream into a [`SchedulesProjectionStore`].
 #[derive(Clone)]

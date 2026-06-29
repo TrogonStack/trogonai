@@ -24,9 +24,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgPool, Row};
 
+use crate::projections::store::SchedulesProjectionStore;
 use crate::{error::SchedulerError, projections_v1};
-
-use super::SchedulesProjectionStore;
 
 use projections_v1::__buffa::oneof::delivery::Kind as DeliveryKind;
 use projections_v1::__buffa::oneof::delivery::nats_message::source::Kind as SourceKind;

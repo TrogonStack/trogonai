@@ -45,17 +45,20 @@
 //! The residual is a transient stale (or briefly missing) schedule that resolves
 //! on the schedule's next event or the next restart.
 
+/// The NATS JetStream KV schedules projector.
 mod schedules;
 
-/// An alternative read-model storage backend (Postgres) behind a storage trait.
-/// Additive: the NATS KV projection above is unchanged.
-pub mod backend;
-/// Query entry points for the alternative projection backends.
+/// The Postgres schedules projector (additive; the NATS KV projector is unchanged).
+#[cfg(all(feature = "postgres", not(coverage)))]
+pub mod postgres;
+/// Query entry points over a [`store::SchedulesProjectionStore`].
 pub mod queries;
+/// The storage seam the projectors read and write the read model through.
+pub mod store;
 
-pub use backend::SchedulesProjectionStore;
-#[cfg(not(coverage))]
-pub use schedules::projector::SchedulesProjector;
+#[cfg(all(feature = "postgres", not(coverage)))]
+pub use postgres::{PostgresSchedulesProjection, SchedulesProjector};
 pub(crate) use schedules::storage;
 #[cfg(not(coverage))]
 pub(crate) use schedules::{catch_up_schedules_read_model, project_appended_events};
+pub use store::SchedulesProjectionStore;

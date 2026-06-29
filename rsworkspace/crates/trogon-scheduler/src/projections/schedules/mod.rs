@@ -30,11 +30,6 @@ use storage::{SCHEDULES_CHECKPOINT_KEY, read_model_key};
 /// owned by the projection that defines that layout.
 pub(crate) mod storage;
 
-/// Drives an alternative projection backend from the event stream, reusing this
-/// module's fold. A child module so it can use the fold internals directly.
-#[cfg(not(coverage))]
-pub(crate) mod projector;
-
 // The schedules read-model projection: it folds the schedule event stream
 // (`v1` event protos) directly into the stored KV view (`projections_v1::ScheduleProjection`
 // protos). It deals only in protobuf — event proto in, KV proto out — and has no
@@ -43,14 +38,14 @@ pub(crate) mod projector;
 
 /// A change to apply to the KV bucket for a single schedule.
 #[derive(Clone, PartialEq)]
-enum ProjectionChange {
+pub(crate) enum ProjectionChange {
     Upsert(projections_v1::ScheduleProjection),
     Delete(String),
 }
 
 /// The folded state of one schedule stream.
 #[derive(Clone, PartialEq)]
-enum ScheduleStreamState {
+pub(crate) enum ScheduleStreamState {
     Initial,
     Present(projections_v1::ScheduleProjection),
     Deleted(String),
@@ -76,7 +71,7 @@ impl std::fmt::Debug for ProjectionChange {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ScheduleTransitionError {
+pub(crate) enum ScheduleTransitionError {
     #[error("schedule event id '{schedule_id}' does not match stream id '{stream_id}'")]
     MismatchedEventScheduleId { stream_id: String, schedule_id: String },
     #[error("schedule event is malformed: {context}")]
@@ -97,7 +92,7 @@ const fn initial_state() -> ScheduleStreamState {
     ScheduleStreamState::Initial
 }
 
-fn apply(
+pub(crate) fn apply(
     stream_id: &str,
     state: ScheduleStreamState,
     event: &v1::ScheduleEvent,
@@ -257,7 +252,7 @@ fn validate_event_payload_schedule_id(
     }
 }
 
-fn event_schedule_id(event: &v1::ScheduleEvent) -> Option<&str> {
+pub(crate) fn event_schedule_id(event: &v1::ScheduleEvent) -> Option<&str> {
     match &event.event {
         Some(ScheduleEventCase::ScheduleCreated(inner)) => Some(&inner.schedule_id),
         Some(ScheduleEventCase::SchedulePaused(inner)) => Some(&inner.schedule_id),
@@ -270,7 +265,7 @@ fn event_schedule_id(event: &v1::ScheduleEvent) -> Option<&str> {
     }
 }
 
-fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) -> Option<ProjectionChange> {
+pub(crate) fn projection_change(before: &ScheduleStreamState, after: &ScheduleStreamState) -> Option<ProjectionChange> {
     match (before, after) {
         (_, ScheduleStreamState::Present(view)) => Some(ProjectionChange::Upsert(view.clone())),
         // Emit a delete for any transition into Deleted, including from Initial.
@@ -553,7 +548,9 @@ fn decode_recorded_job_event(
 }
 
 #[cfg(not(coverage))]
-fn decode_recorded_delivery_message(message: &async_nats::jetstream::Message) -> Result<StreamEvent, SchedulerError> {
+pub(crate) fn decode_recorded_delivery_message(
+    message: &async_nats::jetstream::Message,
+) -> Result<StreamEvent, SchedulerError> {
     // A consumer-delivered message carries its stream sequence and timestamp in
     // its JetStream metadata, not in the direct-get headers that
     // `StreamMessage::try_from` expects, so build the stream message from
@@ -575,7 +572,7 @@ fn decode_recorded_delivery_message(message: &async_nats::jetstream::Message) ->
     decode_recorded_job_event(stream_message)
 }
 
-fn event_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
+pub(crate) fn event_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
     pull::OrderedConfig {
         deliver_policy: DeliverPolicy::ByStartSequence { start_sequence },
         replay_policy: ReplayPolicy::Instant,
@@ -587,7 +584,10 @@ fn event_replay_consumer_config(start_sequence: u64) -> pull::OrderedConfig {
 }
 
 #[cfg(not(coverage))]
-fn event_message_sequence(message: &jetstream::Message, context: &'static str) -> Result<u64, SchedulerError> {
+pub(crate) fn event_message_sequence(
+    message: &jetstream::Message,
+    context: &'static str,
+) -> Result<u64, SchedulerError> {
     message
         .info()
         .map(|info| info.stream_sequence)
@@ -720,7 +720,7 @@ fn apply_event_to_read_model_state(
 /// raw schedule id, so this cannot recover the id; the raw id is read from the
 /// event payload). The token is used only to confirm an event routes to the
 /// schedule named in its payload before that event is folded.
-fn read_model_token_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
+pub(crate) fn read_model_token_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
     // Confirm the subject is a schedule event, then take its final dot-segment as
     // the key. `key.simple()` never contains a dot, so the last segment is always
     // the whole token — correct whether or not `EVENTS_SUBJECT_PREFIX` itself ends
