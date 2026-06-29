@@ -12,6 +12,7 @@ use crate::config::{Args, ConfigError, config_from_args};
 
 pub mod audit_publish;
 pub mod env;
+pub mod policy_stack;
 pub mod reply;
 pub mod streaming;
 #[cfg(feature = "spicedb")]
