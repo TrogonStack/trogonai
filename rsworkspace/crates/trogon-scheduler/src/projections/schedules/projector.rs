@@ -135,6 +135,12 @@ impl SchedulesProjector {
                 SchedulerError::event_source("failed to read schedule event during projector run", source)
             })?;
             let sequence = event_message_sequence(&message, "failed to read projector event metadata")?;
+            // A logged-and-skipped anomaly (foreign, malformed, misrouted, or an
+            // invalid transition) produces no read-model change, so advancing past
+            // it is correct and necessary for liveness — holding would re-skip the
+            // same sequence forever. A real store failure returns `Err` from
+            // `project_message` and short-circuits via `?` above, leaving the
+            // checkpoint unadvanced so the next run re-folds that sequence.
             self.project_message(&message).await?;
             self.store.write_checkpoint(sequence).await?;
         }
