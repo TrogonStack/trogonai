@@ -110,9 +110,12 @@ where
 /// Rejects an out-of-range protobuf timestamp instead of coercing it to the epoch,
 /// so malformed projection input cannot be persisted as a valid schedule time.
 fn timestamp_to_datetime(ts: &Timestamp) -> Result<DateTime<Utc>, SchedulerError> {
-    Utc.timestamp_opt(ts.seconds, ts.nanos as u32)
-        .single()
-        .ok_or_else(|| malformed_owned(format!("out-of-range timestamp (seconds={}, nanos={})", ts.seconds, ts.nanos)))
+    Utc.timestamp_opt(ts.seconds, ts.nanos as u32).single().ok_or_else(|| {
+        malformed_owned(format!(
+            "out-of-range timestamp (seconds={}, nanos={})",
+            ts.seconds, ts.nanos
+        ))
+    })
 }
 
 fn optional_datetime(ts: &MessageField<Timestamp>) -> Result<Option<DateTime<Utc>>, SchedulerError> {
@@ -188,7 +191,11 @@ fn source_subject(source: &projections_v1::delivery::nats_message::Source) -> Op
 }
 
 fn headers_to_json(view: &projections_v1::ScheduleProjection) -> serde_json::Value {
-    let headers = view.message.as_option().map(|message| message.headers.as_slice()).unwrap_or(&[]);
+    let headers = view
+        .message
+        .as_option()
+        .map(|message| message.headers.as_slice())
+        .unwrap_or(&[]);
     serde_json::Value::Array(
         headers
             .iter()
@@ -259,7 +266,10 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
     let delivery_kind: String = col(row, "delivery_kind")?;
     let delivery: DeliveryKind = match delivery_kind.as_str() {
         "nats_message" => projections_v1::delivery::NatsMessage {
-            subject: require(col(row, "delivery_subject")?, "nats_message delivery missing delivery_subject")?,
+            subject: require(
+                col(row, "delivery_subject")?,
+                "nats_message delivery missing delivery_subject",
+            )?,
             ttl: optional_duration(col(row, "delivery_ttl_seconds")?),
             source: col::<Option<String>>(row, "delivery_source_subject")?.map_or_else(MessageField::none, |subject| {
                 MessageField::some(projections_v1::delivery::nats_message::Source {
@@ -301,10 +311,7 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
 
 #[async_trait]
 impl SchedulesProjectionStore for PostgresSchedulesProjection {
-    async fn get_view(
-        &self,
-        schedule_id: &str,
-    ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
+    async fn get_view(&self, schedule_id: &str) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
         let row = sqlx::query(&format!("{SELECT_COLUMNS} WHERE schedule_id = $1"))
             .bind(schedule_id)
             .fetch_optional(&self.pool)

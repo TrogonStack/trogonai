@@ -8,16 +8,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use buffa::MessageField;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::postgres::Postgres;
-use buffa::MessageField;
 use testcontainers_modules::testcontainers::ImageExt;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId,
-    SchedulesProjectionStore, SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries,
-    projections_v1,
+    SchedulesProjectionStore, SchedulesProjector, commands::domain as command_domain, connect_store,
+    projection_queries, projections_v1,
 };
 
 /// A complete-but-event-less view, used to seed an orphan row.
@@ -25,7 +25,12 @@ fn orphan_view(id: &str) -> projections_v1::ScheduleProjection {
     projections_v1::ScheduleProjection {
         schedule_id: id.to_string(),
         schedule: MessageField::some(projections_v1::Schedule {
-            kind: Some(projections_v1::schedule::Every { every: MessageField::none() }.into()),
+            kind: Some(
+                projections_v1::schedule::Every {
+                    every: MessageField::none(),
+                }
+                .into(),
+            ),
         }),
         delivery: MessageField::some(projections_v1::Delivery {
             kind: Some(
@@ -140,6 +145,9 @@ async fn projector_folds_event_stream_into_postgres() {
         .into_iter()
         .map(|schedule| schedule.id)
         .collect();
-    assert!(!ids.contains(&"ghost".to_string()), "orphan must be reconciled away: {ids:?}");
+    assert!(
+        !ids.contains(&"ghost".to_string()),
+        "orphan must be reconciled away: {ids:?}"
+    );
     assert_eq!(ids.len(), 2, "the two event-backed schedules survive: {ids:?}");
 }

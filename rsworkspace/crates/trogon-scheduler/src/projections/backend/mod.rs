@@ -35,10 +35,7 @@ pub use postgres::PostgresSchedulesProjection;
 #[async_trait]
 pub trait SchedulesProjectionStore: Send + Sync {
     /// Reads the stored view for one schedule, or `None` if it is absent.
-    async fn get_view(
-        &self,
-        schedule_id: &str,
-    ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError>;
+    async fn get_view(&self, schedule_id: &str) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError>;
 
     /// Reads every stored view. A single unreadable row must not suppress the rest:
     /// a backend skips it with a warning rather than failing the listing.

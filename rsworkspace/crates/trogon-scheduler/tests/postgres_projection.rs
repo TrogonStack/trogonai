@@ -199,7 +199,11 @@ async fn corrupt_row_is_unreadable_not_silently_repaired() {
         .into_iter()
         .map(|view| view.schedule_id)
         .collect();
-    assert_eq!(ids, vec!["ok".to_string()], "list skips the corrupt row, keeps the rest");
+    assert_eq!(
+        ids,
+        vec!["ok".to_string()],
+        "list skips the corrupt row, keeps the rest"
+    );
 }
 
 #[tokio::test]
@@ -208,10 +212,13 @@ async fn projection_queries_read_through_the_backend() {
     let (_container, projection) = start().await;
     projection.upsert_view(&view("orders")).await.unwrap();
 
-    let fetched = projection_queries::get_schedule(&projection, GetScheduleCommand::new(ScheduleId::parse("orders").unwrap()))
-        .await
-        .unwrap()
-        .expect("orders present");
+    let fetched = projection_queries::get_schedule(
+        &projection,
+        GetScheduleCommand::new(ScheduleId::parse("orders").unwrap()),
+    )
+    .await
+    .unwrap()
+    .expect("orders present");
     assert_eq!(fetched.id, "orders");
 
     let listed = projection_queries::list_schedules(&projection, ListSchedulesCommand)
@@ -221,9 +228,12 @@ async fn projection_queries_read_through_the_backend() {
     assert_eq!(listed[0].id, "orders");
 
     assert!(
-        projection_queries::get_schedule(&projection, GetScheduleCommand::new(ScheduleId::parse("absent").unwrap()))
-            .await
-            .unwrap()
-            .is_none()
+        projection_queries::get_schedule(
+            &projection,
+            GetScheduleCommand::new(ScheduleId::parse("absent").unwrap())
+        )
+        .await
+        .unwrap()
+        .is_none()
     );
 }
