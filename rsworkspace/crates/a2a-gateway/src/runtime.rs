@@ -15,6 +15,8 @@ pub mod env;
 pub mod reply;
 #[cfg(feature = "spicedb")]
 pub mod tier1;
+#[cfg(feature = "spicedb")]
+pub mod tier1_denial;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
