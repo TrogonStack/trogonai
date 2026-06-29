@@ -1,4 +1,28 @@
-use crate::bridge::DomainErrorParts;
+/// Typed failure from decoding a versioned snapshot frame.
+///
+/// Kept typed within the snapshot layer (carrying the source decode error as a variant field
+/// rather than a string) and only rendered to a message at the WIT-facing boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum SnapshotDecodeError {
+    #[error("expected schema '{expected}', got '{actual}'")]
+    SchemaMismatch { expected: String, actual: String },
+    #[error("failed to decode snapshot payload: {0}")]
+    Payload(#[source] buffa::DecodeError),
+    #[error("invalid utf8 in schema_version: {0}")]
+    SchemaVersionUtf8(#[source] std::string::FromUtf8Error),
+    #[error("missing schema_version")]
+    MissingSchemaVersion,
+    #[error("missing payload")]
+    MissingPayload,
+    #[error("unexpected eof")]
+    UnexpectedEof,
+    #[error("varint overflow")]
+    VarintOverflow,
+    #[error("length overflow")]
+    LengthOverflow,
+    #[error("unsupported wire type")]
+    UnsupportedWireType,
+}
 
 /// Load guest state from an optional snapshot frame or fall back to [`C::initial_state`](trogon_decider::Decider::initial_state).
 ///
@@ -19,7 +43,7 @@ where
     match snapshot {
         Some(bytes) => match decode_snapshot::<S>(&bytes, schema_version) {
             Ok(state) => state,
-            Err(error) => panic!("failed to load decider snapshot ({}): {}", error.code, error.message),
+            Err(error) => panic!("failed to load decider snapshot: {error}"),
         },
         None => C::initial_state(),
     }
@@ -40,21 +64,18 @@ where
     encode_snapshot_frame(schema_version, buffa::Message::encode_to_vec(state))
 }
 
-pub fn decode_snapshot<S>(bytes: &[u8], expected_schema: &str) -> Result<S, DomainErrorParts>
+pub fn decode_snapshot<S>(bytes: &[u8], expected_schema: &str) -> Result<S, SnapshotDecodeError>
 where
     S: buffa::Message,
 {
     let (schema_version, payload) = decode_snapshot_frame(bytes)?;
     if schema_version != expected_schema {
-        return Err(DomainErrorParts {
-            code: "snapshot-version-mismatch".to_string(),
-            message: format!("expected schema '{expected_schema}', got '{schema_version}'"),
+        return Err(SnapshotDecodeError::SchemaMismatch {
+            expected: expected_schema.to_string(),
+            actual: schema_version,
         });
     }
-    <S as buffa::Message>::decode_from_slice(payload).map_err(|source| DomainErrorParts {
-        code: "snapshot-decode-failed".to_string(),
-        message: source.to_string(),
-    })
+    <S as buffa::Message>::decode_from_slice(payload).map_err(SnapshotDecodeError::Payload)
 }
 
 fn encode_snapshot_frame(schema_version: &str, payload: Vec<u8>) -> Vec<u8> {
@@ -64,7 +85,7 @@ fn encode_snapshot_frame(schema_version: &str, payload: Vec<u8>) -> Vec<u8> {
     out
 }
 
-fn decode_snapshot_frame(bytes: &[u8]) -> Result<(String, &[u8]), DomainErrorParts> {
+fn decode_snapshot_frame(bytes: &[u8]) -> Result<(String, &[u8]), SnapshotDecodeError> {
     let mut schema_version = None;
     let mut payload = None;
     let mut offset = 0;
@@ -75,9 +96,8 @@ fn decode_snapshot_frame(bytes: &[u8]) -> Result<(String, &[u8]), DomainErrorPar
         match tag {
             1 => {
                 let (value, next) = read_length_delimited(bytes, offset)?;
-                schema_version = Some(
-                    String::from_utf8(value.to_vec()).map_err(|_| snapshot_fault("invalid utf8 in schema_version"))?,
-                );
+                schema_version =
+                    Some(String::from_utf8(value.to_vec()).map_err(SnapshotDecodeError::SchemaVersionUtf8)?);
                 offset = next;
             }
             2 => {
@@ -92,8 +112,8 @@ fn decode_snapshot_frame(bytes: &[u8]) -> Result<(String, &[u8]), DomainErrorPar
     }
 
     Ok((
-        schema_version.ok_or_else(|| snapshot_fault("missing schema_version"))?,
-        payload.ok_or_else(|| snapshot_fault("missing payload"))?,
+        schema_version.ok_or(SnapshotDecodeError::MissingSchemaVersion)?,
+        payload.ok_or(SnapshotDecodeError::MissingPayload)?,
     ))
 }
 
@@ -127,11 +147,11 @@ fn write_varint(out: &mut Vec<u8>, mut value: u64) {
     }
 }
 
-fn read_varint(bytes: &[u8], mut offset: usize) -> Result<(u64, usize), DomainErrorParts> {
+fn read_varint(bytes: &[u8], mut offset: usize) -> Result<(u64, usize), SnapshotDecodeError> {
     let mut value = 0u64;
     let mut shift = 0;
     loop {
-        let byte = *bytes.get(offset).ok_or_else(|| snapshot_fault("unexpected eof"))?;
+        let byte = *bytes.get(offset).ok_or(SnapshotDecodeError::UnexpectedEof)?;
         offset += 1;
         value |= u64::from(byte & 0x7f) << shift;
         if byte & 0x80 == 0 {
@@ -139,27 +159,25 @@ fn read_varint(bytes: &[u8], mut offset: usize) -> Result<(u64, usize), DomainEr
         }
         shift += 7;
         if shift >= 64 {
-            return Err(snapshot_fault("varint overflow"));
+            return Err(SnapshotDecodeError::VarintOverflow);
         }
     }
 }
 
-fn read_key(bytes: &[u8], offset: usize) -> Result<(u32, u32, usize), DomainErrorParts> {
+fn read_key(bytes: &[u8], offset: usize) -> Result<(u32, u32, usize), SnapshotDecodeError> {
     let (key, offset) = read_varint(bytes, offset)?;
     Ok(((key >> 3) as u32, (key & 0x07) as u32, offset))
 }
 
-fn read_length_delimited(bytes: &[u8], offset: usize) -> Result<(&[u8], usize), DomainErrorParts> {
+fn read_length_delimited(bytes: &[u8], offset: usize) -> Result<(&[u8], usize), SnapshotDecodeError> {
     let (len, offset) = read_varint(bytes, offset)?;
     let len = len as usize;
-    let end = offset
-        .checked_add(len)
-        .ok_or_else(|| snapshot_fault("length overflow"))?;
-    let slice = bytes.get(offset..end).ok_or_else(|| snapshot_fault("unexpected eof"))?;
+    let end = offset.checked_add(len).ok_or(SnapshotDecodeError::LengthOverflow)?;
+    let slice = bytes.get(offset..end).ok_or(SnapshotDecodeError::UnexpectedEof)?;
     Ok((slice, end))
 }
 
-fn skip_field(bytes: &[u8], offset: usize, wire_type: u32) -> Result<usize, DomainErrorParts> {
+fn skip_field(bytes: &[u8], offset: usize, wire_type: u32) -> Result<usize, SnapshotDecodeError> {
     match wire_type {
         0 => {
             let (_, offset) = read_varint(bytes, offset)?;
@@ -171,13 +189,6 @@ fn skip_field(bytes: &[u8], offset: usize, wire_type: u32) -> Result<usize, Doma
             Ok(offset)
         }
         5 => Ok(offset + 4),
-        _ => Err(snapshot_fault("unsupported wire type")),
-    }
-}
-
-fn snapshot_fault(message: &str) -> DomainErrorParts {
-    DomainErrorParts {
-        code: "snapshot-decode-failed".to_string(),
-        message: message.to_string(),
+        _ => Err(SnapshotDecodeError::UnsupportedWireType),
     }
 }

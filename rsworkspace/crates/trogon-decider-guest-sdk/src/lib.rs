@@ -9,8 +9,8 @@ mod bridge;
 mod snapshot;
 
 pub use bridge::{
-    AnyEnvelopeParts, AnyEnvelopeView, CommandEnvelopeView, DecideErrorView, DomainErrorParts, WritePreconditionTag,
-    decide_command, decode_command, evolve_one, map_write_precondition,
+    AnyEnvelopeParts, AnyEnvelopeView, BridgeError, CommandEnvelopeView, DecideErrorView, DomainErrorParts,
+    WritePreconditionTag, decide_command, decode_command, evolve_one, map_write_precondition,
 };
-pub use snapshot::{decode_snapshot, encode_current, encode_snapshot, load_or_initial};
+pub use snapshot::{SnapshotDecodeError, decode_snapshot, encode_current, encode_snapshot, load_or_initial};
 pub use trogon_decider_guest_macros::export_decider;
