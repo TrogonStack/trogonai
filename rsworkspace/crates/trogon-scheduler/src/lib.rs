@@ -34,16 +34,9 @@ pub use projections::SchedulesProjector;
 pub use projections::backend::PostgresSchedulesProjection;
 pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 
-/// Query entry points for the alternative projection backends (e.g. Postgres),
-/// reading through [`SchedulesProjectionStore`]. The default NATS read-model
-/// queries remain at the crate root ([`get_schedule`], [`list_schedules`]).
-///
-/// These read through a live backend, so (like the NATS query path) they are
-/// integration-tested and excluded from the coverage build.
+/// Query entry points for the alternative projection backends (e.g. Postgres).
 #[cfg(not(coverage))]
-pub mod projection_queries {
-    pub use crate::projections::queries::{get_schedule, list_schedules};
-}
+pub mod projection_queries;
 pub use queries::read_model::{
     MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError, Schedule, ScheduleDetails,
     ScheduleEventDelivery, ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus,
