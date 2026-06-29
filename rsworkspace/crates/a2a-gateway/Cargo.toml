@@ -50,7 +50,8 @@ tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 trogon-aauth-verify = { workspace = true }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

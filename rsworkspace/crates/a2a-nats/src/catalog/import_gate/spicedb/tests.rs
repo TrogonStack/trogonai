@@ -52,25 +52,27 @@ impl BulkImportPermissionCheck for MockBulkImportClient {
     async fn check_bulk_permissions(
         &self,
         request: CheckBulkPermissionsRequest,
-    ) -> Result<CheckBulkPermissionsResponse, Status> {
+    ) -> Result<tonic::Response<CheckBulkPermissionsResponse>, Status> {
         self.requests.lock().unwrap().push(request);
         self.responses
             .lock()
             .unwrap()
             .pop()
             .unwrap_or_else(|| Err(Status::unavailable("no mock response queued")))
+            .map(tonic::Response::new)
     }
 
     async fn write_relationships(
         &self,
         request: WriteRelationshipsRequest,
-    ) -> Result<WriteRelationshipsResponse, Status> {
+    ) -> Result<tonic::Response<WriteRelationshipsResponse>, Status> {
         self.write_requests.lock().unwrap().push(request);
         self.write_responses
             .lock()
             .unwrap()
             .pop()
             .unwrap_or_else(|| Ok(WriteRelationshipsResponse { written_at: None }))
+            .map(tonic::Response::new)
     }
 }
 

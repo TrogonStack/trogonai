@@ -16,3 +16,5 @@ future implementation work.
 - [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [ADR 0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
 - [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
+- [ADR 0012: ARD-Compatible Discovery Catalog](./0012-ard-compatible-discovery-catalog.md)
+- [ADR 0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)

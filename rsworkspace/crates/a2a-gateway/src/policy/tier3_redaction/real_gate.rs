@@ -20,6 +20,12 @@ impl Tier3PartInvoker for WasmRedactorHost {
     }
 }
 
+impl Tier3PartInvoker for crate::policy::wasmtime_substrate::WasmtimeSubstrate {
+    fn redact_part_bytes(&self, skill: &SkillId, payload: &[u8]) -> Result<Vec<u8>, RedactionError> {
+        self.redaction.redact_part_bytes(skill, payload)
+    }
+}
+
 pub struct RealTier3RedactionGate {
     invoker: Arc<dyn Tier3PartInvoker>,
 }
