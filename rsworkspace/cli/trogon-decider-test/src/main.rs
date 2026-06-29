@@ -56,8 +56,34 @@ struct Scenario {
 #[allow(dead_code)]
 enum Then {
     Events { events: Vec<serde_json::Value> },
-    Error { error: String },
+    Error { error: ErrorExpectation },
     Rejected { rejected: bool },
+}
+
+/// `then.error` accepts either a bare string or the documented `{ code, message }`
+/// object; both are matched against the domain error's code or message.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ErrorExpectation {
+    Structured {
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        message: Option<String>,
+    },
+    Plain(String),
+}
+
+impl ErrorExpectation {
+    fn expected(&self) -> Result<String> {
+        match self {
+            Self::Plain(value) => Ok(value.clone()),
+            Self::Structured { code, message } => code
+                .clone()
+                .or_else(|| message.clone())
+                .context("then.error requires a code or message"),
+        }
+    }
 }
 
 fn main() {
@@ -76,8 +102,8 @@ fn run() -> Result<()> {
     )?;
 
     let host = SimHost::load(&wasm_bytes)?;
-    let mut instance = host.instantiate(())?;
-    let declared = instance
+    let declared = host
+        .instantiate(())?
         .descriptor()?
         .commands
         .into_iter()
@@ -87,6 +113,8 @@ fn run() -> Result<()> {
 
     let mut failures = 0usize;
     for scenario in &suite.scenarios {
+        // Fresh component per scenario so guest-global state cannot leak between runs.
+        let mut instance = host.instantiate(())?;
         let when_type = any_type_url(&scenario.when)?;
         exercised.insert(when_type.clone());
         match run_scenario(&mut instance, scenario) {
@@ -148,7 +176,7 @@ fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &S
         Then::Error { error } => SimScenario::new()
             .given(given)
             .when(when)
-            .then_error(error.clone())
+            .then_error(error.expected()?)
             .run(instance)
             .map_err(|err| anyhow::anyhow!(err)),
     }
@@ -159,5 +187,27 @@ fn parse_output_format(raw: &str) -> Result<OutputFormat> {
         "human" => Ok(OutputFormat::Human),
         "tap" => Ok(OutputFormat::Tap),
         other => bail!("unknown format '{other}', expected human or tap"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn error_expectation(yaml: &str) -> String {
+        match serde_yaml::from_str::<Then>(yaml) {
+            Ok(Then::Error { error }) => error.expected().unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    #[test]
+    fn then_error_accepts_structured_code() {
+        assert_eq!(error_expectation("error:\n  code: already-exists\n"), "already-exists");
+    }
+
+    #[test]
+    fn then_error_accepts_plain_string() {
+        assert_eq!(error_expectation("error: already-exists\n"), "already-exists");
     }
 }

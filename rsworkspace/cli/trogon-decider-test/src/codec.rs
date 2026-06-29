@@ -168,12 +168,16 @@ fn parse_schedule(value: Option<&serde_json::Value>) -> Result<schedules_v1::Sch
             .get("seconds")
             .and_then(serde_json::Value::as_i64)
             .context("every schedule missing seconds")?;
+        let nanos = every.get("nanos").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        if !(0..=999_999_999).contains(&nanos) {
+            bail!("every.nanos must be between 0 and 999999999");
+        }
         return Ok(schedules_v1::Schedule {
             kind: Some(
                 schedules_v1::schedule::Every {
                     every: MessageField::some(buffa_types::google::protobuf::Duration {
                         seconds,
-                        nanos: every.get("nanos").and_then(serde_json::Value::as_i64).unwrap_or(0) as i32,
+                        nanos: nanos as i32,
                         ..buffa_types::google::protobuf::Duration::default()
                     }),
                 }
@@ -186,9 +190,17 @@ fn parse_schedule(value: Option<&serde_json::Value>) -> Result<schedules_v1::Sch
 
 fn parse_delivery(value: Option<&serde_json::Value>) -> Result<schedules_v1::Delivery> {
     let value = value.context("missing delivery")?;
+    let nats_message = value.get("nats_message");
+    if value.get("ttl").is_some()
+        || value.get("source").is_some()
+        || nats_message.and_then(|inner| inner.get("ttl")).is_some()
+        || nats_message.and_then(|inner| inner.get("source")).is_some()
+    {
+        bail!("delivery.ttl/source are not supported yet in test YAML");
+    }
     let subject = value
         .get("subject")
-        .or_else(|| value.get("nats_message").and_then(|inner| inner.get("subject")))
+        .or_else(|| nats_message.and_then(|inner| inner.get("subject")))
         .and_then(serde_json::Value::as_str)
         .context("delivery missing subject")?;
     Ok(schedules_v1::Delivery {
@@ -205,6 +217,9 @@ fn parse_delivery(value: Option<&serde_json::Value>) -> Result<schedules_v1::Del
 
 fn parse_message(value: Option<&serde_json::Value>) -> Result<schedules_v1::Message> {
     let value = value.context("missing message")?;
+    if value.get("headers").is_some() {
+        bail!("message.headers are not supported yet in test YAML");
+    }
     let content = value.get("content").context("message missing content")?;
     let data = content
         .get("data")
