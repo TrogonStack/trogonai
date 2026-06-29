@@ -188,14 +188,10 @@ fn source_subject(source: &projections_v1::delivery::nats_message::Source) -> Op
         .map(|SourceKind::LatestFromSubject(inner)| inner.subject.clone())
 }
 
-fn headers_to_json(view: &projections_v1::ScheduleProjection) -> serde_json::Value {
-    let headers = view
-        .message
-        .as_option()
-        .map(|message| message.headers.as_slice())
-        .unwrap_or(&[]);
+fn headers_to_json(message: &projections_v1::Message) -> serde_json::Value {
     serde_json::Value::Array(
-        headers
+        message
+            .headers
             .iter()
             .map(|header| serde_json::json!({ "name": header.name, "value": header.value }))
             .collect(),
@@ -402,13 +398,17 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             ),
         };
 
-        let (message_content_type, message_body): (Option<String>, Option<Vec<u8>>) =
-            match view.message.as_option().and_then(|m| m.content.as_option()) {
-                // Store raw bytes so non-UTF-8 payloads round-trip losslessly.
-                Some(content) => (Some(content.content_type.clone()), Some(content.data.clone())),
-                None => (None, None),
-            };
-        let message_headers = headers_to_json(view);
+        // Require message like schedule and delivery: the fold always sets all
+        // three, so an absent one is malformed and must not silently round-trip as
+        // an empty message (which would diverge from the NATS KV backend).
+        let message = view.message.as_option().ok_or_else(|| malformed("missing message"))?;
+        let (message_content_type, message_body): (Option<String>, Option<Vec<u8>>) = match message.content.as_option()
+        {
+            // Store raw bytes so non-UTF-8 payloads round-trip losslessly.
+            Some(content) => (Some(content.content_type.clone()), Some(content.data.clone())),
+            None => (None, None),
+        };
+        let message_headers = headers_to_json(message);
 
         sqlx::query(
             "INSERT INTO schedules_projection ( \
