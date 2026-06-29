@@ -5,8 +5,8 @@
 //! ([`crate::projections::schedules::apply`]) so the Postgres read model is
 //! identical to the NATS one — event-for-event.
 //!
-//! Each event is folded against the schedule's current stored view (read back from
-//! the store), and the checkpoint advances per event so a restart resumes where it
+//! Each event is folded against the schedule's current stored projection (read back
+//! from the store), and the checkpoint advances per event so a restart resumes where it
 //! left off. A per-event anomaly (undecodable, foreign subject, misrouted, an
 //! invalid transition) is logged and skipped, never wedging the projector.
 
@@ -41,7 +41,7 @@ impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
 
     /// Folds the event stream from the backend's checkpoint up to the current tail,
     /// then returns. Idempotent: re-running re-folds only what is past the
-    /// checkpoint, and folding an already-applied event yields the same view.
+    /// checkpoint, and folding an already-applied event yields the same projection.
     ///
     /// On a from-zero rebuild (checkpoint at 0) it also reconciles: the full replay
     /// is authoritative for which schedules should exist, so any stale row left in
@@ -188,7 +188,7 @@ impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
 
         let before = self
             .store
-            .get_view(schedule_id)
+            .get_projection(schedule_id)
             .await?
             .map_or(ScheduleStreamState::Initial, ScheduleStreamState::Present);
         let after = match apply(schedule_id, before.clone(), &decoded) {
@@ -199,8 +199,8 @@ impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
             }
         };
         match projection_change(&before, &after) {
-            Some(ProjectionChange::Upsert(view)) => self.store.upsert_view(&view).await,
-            Some(ProjectionChange::Delete(id)) => self.store.delete_view(&id).await,
+            Some(ProjectionChange::Upsert(projection)) => self.store.upsert_projection(&projection).await,
+            Some(ProjectionChange::Delete(id)) => self.store.delete_projection(&id).await,
             None => Ok(()),
         }
     }

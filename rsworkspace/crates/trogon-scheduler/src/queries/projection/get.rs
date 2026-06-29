@@ -12,9 +12,9 @@ pub async fn run(
     store: &impl SchedulesProjectionStore,
     command: GetSchedule,
 ) -> Result<Option<Schedule>, SchedulerError> {
-    let Some(view) = store.get_view(command.id.as_str()).await? else {
+    let Some(projection) = store.get_projection(command.id.as_str()).await? else {
         return Ok(None);
     };
 
-    schedule_from_view(&view).map(Some)
+    schedule_from_view(&projection).map(Some)
 }

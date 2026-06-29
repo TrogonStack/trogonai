@@ -12,15 +12,15 @@ pub async fn run(
     store: &impl SchedulesProjectionStore,
     _command: ListSchedules,
 ) -> Result<Vec<Schedule>, SchedulerError> {
-    let views = store.list_views().await?;
-    let mut schedules = Vec::with_capacity(views.len());
-    for view in &views {
-        // One malformed view must not suppress every other schedule in the listing.
-        // Skip it with a warning; catch-up rebuilds the read model on restart.
-        match schedule_from_view(view) {
+    let projections = store.list_projections().await?;
+    let mut schedules = Vec::with_capacity(projections.len());
+    for projection in &projections {
+        // One malformed projection must not suppress every other schedule in the
+        // listing. Skip it with a warning; catch-up rebuilds the read model on restart.
+        match schedule_from_view(projection) {
             Ok(schedule) => schedules.push(schedule),
             Err(source) => {
-                tracing::warn!(schedule_id = %view.schedule_id, %source, "skipping unreadable projected schedule during list");
+                tracing::warn!(schedule_id = %projection.schedule_id, %source, "skipping unreadable projected schedule during list");
             }
         }
     }

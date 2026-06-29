@@ -19,8 +19,8 @@ use trogon_scheduler::{
     projection_queries, projections_v1,
 };
 
-/// A complete-but-event-less view, used to seed an orphan row.
-fn orphan_view(id: &str) -> projections_v1::ScheduleProjection {
+/// A complete-but-event-less projection, used to seed an orphan row.
+fn orphan_projection(id: &str) -> projections_v1::ScheduleProjection {
     projections_v1::ScheduleProjection {
         schedule_id: id.to_string(),
         schedule: MessageField::some(projections_v1::Schedule {
@@ -134,7 +134,9 @@ async fn projector_folds_event_stream_into_postgres() {
 
     // A stale row with no backing events plus a reset checkpoint: a from-zero
     // catch-up must reconcile it away.
-    pg.upsert_view(&orphan_view("ghost")).await.expect("seed orphan");
+    pg.upsert_projection(&orphan_projection("ghost"))
+        .await
+        .expect("seed orphan");
     pg.write_checkpoint(0).await.expect("reset checkpoint");
     projector.catch_up(&js).await.expect("rebuild from zero");
 

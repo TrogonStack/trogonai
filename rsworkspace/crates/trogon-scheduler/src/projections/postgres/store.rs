@@ -81,15 +81,21 @@ const SELECT_COLUMNS: &str = "SELECT schedule_id, status, completed, next_occurr
 // ── error helpers ───────────────────────────────────────────────────────────
 
 fn malformed(context: &'static str) -> SchedulerError {
-    SchedulerError::kv_source("projected schedule view is malformed", std::io::Error::other(context))
+    SchedulerError::kv_source(
+        "stored schedule projection is malformed",
+        std::io::Error::other(context),
+    )
 }
 
 fn malformed_owned(context: String) -> SchedulerError {
-    SchedulerError::kv_source("projected schedule view is malformed", std::io::Error::other(context))
+    SchedulerError::kv_source(
+        "stored schedule projection is malformed",
+        std::io::Error::other(context),
+    )
 }
 
 /// A discriminator-required column must be present: a NULL means the row is
-/// corrupt, which must surface as an error so `list_views` skips it rather than
+/// corrupt, which must surface as an error so `list_projections` skips it rather than
 /// returning a defaulted, wrong schedule.
 fn require<T>(value: Option<T>, field: &'static str) -> Result<T, SchedulerError> {
     value.ok_or_else(|| malformed(field))
@@ -161,9 +167,9 @@ fn optional_timezone(id: Option<String>) -> MessageField<trogonai_proto::google:
     }
 }
 
-fn status_text(view: &projections_v1::ScheduleProjection) -> &'static str {
+fn status_text(projection: &projections_v1::ScheduleProjection) -> &'static str {
     if matches!(
-        view.status.as_option().and_then(|status| status.kind.as_ref()),
+        projection.status.as_option().and_then(|status| status.kind.as_ref()),
         Some(ScheduleStatusKind::Paused(_))
     ) {
         "paused"
@@ -225,7 +231,7 @@ fn headers_from_json(value: &serde_json::Value) -> Result<Vec<projections_v1::He
 
 // ── row -> proto (read side) ──────────────────────────────────────────────────
 
-fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, SchedulerError> {
+fn projection_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, SchedulerError> {
     let timezone: Option<String> = col(row, "timezone")?;
     let schedule_kind: String = col(row, "schedule_kind")?;
     let schedule: ScheduleKind = match schedule_kind.as_str() {
@@ -304,39 +310,42 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
 }
 
 impl SchedulesProjectionStore for PostgresSchedulesProjection {
-    async fn get_view(&self, schedule_id: &str) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
+    async fn get_projection(
+        &self,
+        schedule_id: &str,
+    ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
         let row = sqlx::query(&format!("{SELECT_COLUMNS} WHERE schedule_id = $1"))
             .bind(schedule_id)
             .fetch_optional(&self.pool)
             .await
             .map_err(|source| SchedulerError::kv_source("failed to read projected schedule", source))?;
         match row {
-            Some(row) => view_from_row(&row).map(Some),
+            Some(row) => projection_from_row(&row).map(Some),
             None => Ok(None),
         }
     }
 
-    async fn list_views(&self) -> Result<Vec<projections_v1::ScheduleProjection>, SchedulerError> {
+    async fn list_projections(&self) -> Result<Vec<projections_v1::ScheduleProjection>, SchedulerError> {
         let rows = sqlx::query(&format!("{SELECT_COLUMNS} ORDER BY schedule_id"))
             .fetch_all(&self.pool)
             .await
             .map_err(|source| SchedulerError::kv_source("failed to list projected schedules", source))?;
-        let mut views = Vec::with_capacity(rows.len());
+        let mut projections = Vec::with_capacity(rows.len());
         for row in &rows {
             // One corrupt row must not suppress every other schedule in the listing.
-            match view_from_row(row) {
-                Ok(view) => views.push(view),
+            match projection_from_row(row) {
+                Ok(projection) => projections.push(projection),
                 Err(source) => {
                     let key: String = row.try_get("schedule_id").unwrap_or_default();
                     tracing::warn!(%key, %source, "skipping unreadable projected schedule row during list");
                 }
             }
         }
-        Ok(views)
+        Ok(projections)
     }
 
-    async fn upsert_view(&self, view: &projections_v1::ScheduleProjection) -> Result<(), SchedulerError> {
-        let schedule = view
+    async fn upsert_projection(&self, projection: &projections_v1::ScheduleProjection) -> Result<(), SchedulerError> {
+        let schedule = projection
             .schedule
             .as_option()
             .and_then(|schedule| schedule.kind.as_ref())
@@ -379,7 +388,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             ),
         };
 
-        let delivery = view
+        let delivery = projection
             .delivery
             .as_option()
             .and_then(|delivery| delivery.kind.as_ref())
@@ -401,7 +410,10 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         // Require message like schedule and delivery: the fold always sets all
         // three, so an absent one is malformed and must not silently round-trip as
         // an empty message (which would diverge from the NATS KV backend).
-        let message = view.message.as_option().ok_or_else(|| malformed("missing message"))?;
+        let message = projection
+            .message
+            .as_option()
+            .ok_or_else(|| malformed("missing message"))?;
         let (message_content_type, message_body): (Option<String>, Option<Vec<u8>>) = match message.content.as_option()
         {
             // Store raw bytes so non-UTF-8 payloads round-trip losslessly.
@@ -440,11 +452,11 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
                  message_headers = EXCLUDED.message_headers, \
                  updated_at = now()",
         )
-        .bind(&view.schedule_id)
-        .bind(status_text(view))
-        .bind(view.completed.unwrap_or(false))
-        .bind(optional_datetime(&view.next_occurrence_at)?)
-        .bind(optional_datetime(&view.last_occurrence_at)?)
+        .bind(&projection.schedule_id)
+        .bind(status_text(projection))
+        .bind(projection.completed.unwrap_or(false))
+        .bind(optional_datetime(&projection.next_occurrence_at)?)
+        .bind(optional_datetime(&projection.last_occurrence_at)?)
         .bind(schedule_kind)
         .bind(at_at)
         .bind(every_seconds)
@@ -467,7 +479,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         .map_err(|source| SchedulerError::kv_source("failed to store projected job state", source))
     }
 
-    async fn delete_view(&self, schedule_id: &str) -> Result<(), SchedulerError> {
+    async fn delete_projection(&self, schedule_id: &str) -> Result<(), SchedulerError> {
         sqlx::query("DELETE FROM schedules_projection WHERE schedule_id = $1")
             .bind(schedule_id)
             .execute(&self.pool)
