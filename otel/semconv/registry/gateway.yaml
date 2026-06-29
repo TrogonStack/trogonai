@@ -1,0 +1,159 @@
+groups:
+  # trogon-gateway: one server span per integration source (spans only, no
+  # metrics). `subject` and `event_type` are defined in common.yaml.
+  - id: registry.trogonai.gateway
+    type: attribute_group
+    display_name: Gateway Webhook Attributes
+    brief: Custom attributes emitted by trogon-gateway webhook spans today.
+    attributes:
+      - id: resource
+        type: string
+        stability: development
+        brief: Sentry resource targeted by the webhook.
+      - id: action
+        type: string
+        stability: development
+        brief: Action carried by the webhook (Sentry, Linear).
+      - id: request_id
+        type: string
+        stability: development
+        brief: Sentry webhook request identifier.
+      - id: event_id
+        type: string
+        stability: development
+        brief: Webhook event identifier (Slack, Notion).
+      - id: event
+        type: string
+        stability: development
+        brief: Webhook event name (GitHub, GitLab).
+      - id: delivery
+        type: string
+        stability: development
+        brief: GitHub webhook delivery identifier.
+      - id: webhook_uuid
+        type: string
+        stability: development
+        brief: GitLab webhook UUID.
+      - id: update_type
+        type: string
+        stability: development
+        brief: Telegram update type.
+      - id: update_id
+        type: string
+        stability: development
+        brief: Telegram update identifier.
+      - id: payload_kind
+        type: string
+        stability: development
+        brief: Twitter webhook payload kind.
+      - id: webhook_id
+        type: string
+        stability: development
+        brief: Webhook identifier (Linear, incident.io).
+      - id: subscription_id
+        type: string
+        stability: development
+        brief: Notion subscription identifier.
+      - id: notification_count
+        type: int
+        stability: development
+        brief: Microsoft Graph notification batch count.
+
+  - id: span.sentry.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Sentry webhook ingestion.
+    attributes:
+      - ref: resource
+      - ref: action
+      - ref: request_id
+      - ref: subject
+  - id: span.slack.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Slack webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: event_id
+      - ref: subject
+  - id: span.github.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: GitHub webhook ingestion.
+    attributes:
+      - ref: event
+      - ref: delivery
+      - ref: subject
+  - id: span.gitlab.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: GitLab webhook ingestion.
+    attributes:
+      - ref: event
+      - ref: webhook_uuid
+      - ref: subject
+  - id: span.telegram.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Telegram webhook ingestion.
+    attributes:
+      - ref: update_type
+      - ref: update_id
+      - ref: subject
+  - id: span.twitter.crc
+    type: span
+    span_kind: server
+    stability: development
+    brief: Twitter CRC challenge handling.
+  - id: span.twitter.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Twitter webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: payload_kind
+      - ref: subject
+  - id: span.linear.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Linear webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: action
+      - ref: webhook_id
+      - ref: subject
+      - ref: messaging.message.body.size
+  - id: span.notion.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Notion webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: event_id
+      - ref: subscription_id
+      - ref: subject
+  - id: span.incidentio.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: incident.io webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: webhook_id
+      - ref: subject
+  - id: span.microsoft_graph.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Microsoft Graph webhook ingestion.
+    attributes:
+      - ref: notification_count
+      - ref: subject

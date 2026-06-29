@@ -1,13 +1,23 @@
 mod codec;
 
+// Thin wrappers that re-export the generated proto packages, emitted as inline
+// module trees that mirror the codegen layout.
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod checkpoints_v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::checkpoints::v1::*;
 }
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
+pub mod projections_v1 {
+    pub use crate::r#gen::trogonai::scheduler::schedules::projections::v1::*;
+}
+
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod state_v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::state::v1::*;
 }
 
+#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod v1 {
     pub use crate::r#gen::trogonai::scheduler::schedules::v1::*;
 }

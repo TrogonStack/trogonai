@@ -24,4 +24,4 @@ pub mod wire;
 pub use bridge::{Bridge, BridgeError};
 pub use dispatch::A2aMethod;
 pub use handler::{A2aError, A2aExecutor, TaskEventStream};
-pub use wire::{JsonRpcErrorResponse, JsonRpcResponse, parse_request};
+pub use wire::{encode_error_reply, encode_success_reply, is_notification, parse_request_params, publish_reply};

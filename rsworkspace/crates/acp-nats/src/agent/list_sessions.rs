@@ -1,11 +1,12 @@
 use super::Bridge;
-use crate::error::map_nats_error;
-use crate::nats::{self, RequestClient, agent};
+use super::rpc_call::jsonrpc_call;
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::{ListSessionsRequest, ListSessionsResponse, Result};
 use tracing::{info, instrument};
+use trogon_semconv::span::ACP_SESSION_LIST;
 use trogon_std::time::GetElapsed;
 
-#[instrument(name = "acp.session.list", skip(bridge, args))]
+#[instrument(name = ACP_SESSION_LIST, skip(bridge, args))]
 pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     bridge: &Bridge<N, C, J>,
     args: ListSessionsRequest,
@@ -14,17 +15,16 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     info!("List sessions request");
 
-    let nats = bridge.nats();
-    let subject = agent::SessionListSubject::new(bridge.config.acp_prefix_ref());
+    let subject = global::SessionListSubject::new(bridge.config.acp_prefix_ref());
 
-    let result = nats::request_with_timeout::<N, ListSessionsRequest, ListSessionsResponse>(
-        nats,
+    let result = jsonrpc_call(
+        bridge.nats(),
         &subject,
+        "session.list",
         &args,
         bridge.config.operation_timeout,
     )
-    .await
-    .map_err(map_nats_error);
+    .await;
 
     bridge.metrics.record_request(
         "list_sessions",
@@ -36,74 +36,4 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
-    use crate::error::AGENT_UNAVAILABLE;
-    use agent_client_protocol::{Agent, ErrorCode, ListSessionsRequest, ListSessionsResponse};
-
-    #[tokio::test]
-    async fn list_sessions_forwards_request_and_returns_response() {
-        let (mock, _js, bridge) = mock_bridge();
-        let expected = ListSessionsResponse::new(vec![]);
-        set_json_response(&mock, "acp.agent.session.list", &expected);
-
-        let request = ListSessionsRequest::new();
-        let result = bridge.list_sessions(request).await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn list_sessions_returns_error_when_nats_fails() {
-        let (mock, _js, bridge) = mock_bridge();
-        mock.fail_next_request();
-
-        let request = ListSessionsRequest::new();
-        let err = bridge.list_sessions(request).await.unwrap_err();
-
-        assert_eq!(err.code, ErrorCode::Other(AGENT_UNAVAILABLE));
-    }
-
-    #[tokio::test]
-    async fn list_sessions_returns_error_when_response_is_invalid_json() {
-        let (mock, _js, bridge) = mock_bridge();
-        mock.set_response("acp.agent.session.list", "not json".into());
-
-        let request = ListSessionsRequest::new();
-        let err = bridge.list_sessions(request).await.unwrap_err();
-
-        assert_eq!(err.code, ErrorCode::InternalError);
-    }
-
-    #[tokio::test]
-    async fn list_sessions_records_metrics_on_success() {
-        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-        set_json_response(&mock, "acp.agent.session.list", &ListSessionsResponse::new(vec![]));
-
-        let _ = bridge.list_sessions(ListSessionsRequest::new()).await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_request_metric(&finished_metrics, "list_sessions", true),
-            "expected acp.requests with method=list_sessions, success=true"
-        );
-        provider.shutdown().unwrap();
-    }
-
-    #[tokio::test]
-    async fn list_sessions_records_metrics_on_failure() {
-        let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-        mock.fail_next_request();
-
-        let _ = bridge.list_sessions(ListSessionsRequest::new()).await;
-
-        provider.force_flush().unwrap();
-        let finished_metrics = exporter.get_finished_metrics().unwrap();
-        assert!(
-            has_request_metric(&finished_metrics, "list_sessions", false),
-            "expected acp.requests with method=list_sessions, success=false"
-        );
-        provider.shutdown().unwrap();
-    }
-}
+mod tests;

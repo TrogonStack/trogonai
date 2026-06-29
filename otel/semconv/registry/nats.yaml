@@ -1,0 +1,60 @@
+groups:
+  # trogon-nats: NATS messaging primitives (spans only, no metrics today).
+  # Standard messaging.* and error.type attributes are defined in common.yaml.
+  - id: registry.trogonai.nats
+    type: attribute_group
+    display_name: NATS Connection Attributes
+    brief: Custom attributes emitted by trogon-nats connection spans today.
+    attributes:
+      - id: servers
+        type: string
+        stability: development
+        brief: NATS server URLs used to establish the connection.
+      - id: auth
+        type: string
+        stability: development
+        brief: Authentication mode used for the NATS connection.
+      - id: timeout_secs
+        type: int
+        stability: development
+        brief: Connection timeout in seconds.
+
+  - id: span.nats.request
+    type: span
+    span_kind: client
+    stability: development
+    brief: NATS request-reply call.
+    attributes:
+      - ref: subject
+      - ref: messaging.system
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: error.type
+        requirement_level:
+          conditionally_required: When the request fails.
+
+  - id: span.nats.publish
+    type: span
+    span_kind: client
+    stability: development
+    brief: NATS publish (fire-and-forget) call.
+    attributes:
+      - ref: subject
+      - ref: messaging.system
+      - ref: messaging.destination.name
+      - ref: messaging.operation.name
+      - ref: messaging.operation.type
+      - ref: error.type
+        requirement_level:
+          conditionally_required: When the publish fails.
+
+  - id: span.nats.connect
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Establishing a NATS connection.
+    attributes:
+      - ref: servers
+      - ref: auth
+      - ref: timeout_secs

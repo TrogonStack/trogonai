@@ -1,0 +1,237 @@
+groups:
+  - id: registry.trogonai.common
+    type: attribute_group
+    display_name: Shared TrogonAi Attributes
+    brief: Custom attributes emitted by more than one crate today.
+    attributes:
+      - id: subject
+        type: string
+        stability: development
+        brief: NATS subject for the operation. Emitted by trogon-nats, acp-nats, and every gateway webhook span.
+        examples: ["acp.v1.session.prompt"]
+      - id: event_type
+        type: string
+        stability: development
+        brief: Event type discriminator. Reused by scheduler reconciliation and several gateway webhook spans with different value spaces.
+        examples: ["ScheduleCreated", "issue.created"]
+      - id: method
+        type:
+          members:
+            - id: initialize
+              value: "initialize"
+              brief: ACP initialize request.
+              stability: development
+            - id: authenticate
+              value: "authenticate"
+              brief: ACP authenticate request.
+              stability: development
+            - id: new_session
+              value: "new_session"
+              brief: ACP new_session request.
+              stability: development
+            - id: load_session
+              value: "load_session"
+              brief: ACP load_session request.
+              stability: development
+            - id: fork_session
+              value: "fork_session"
+              brief: ACP fork_session request.
+              stability: development
+            - id: close_session
+              value: "close_session"
+              brief: ACP close_session request.
+              stability: development
+            - id: resume_session
+              value: "resume_session"
+              brief: ACP resume_session request.
+              stability: development
+            - id: prompt
+              value: "prompt"
+              brief: ACP prompt request.
+              stability: development
+            - id: cancel
+              value: "cancel"
+              brief: ACP cancel request.
+              stability: development
+            - id: list_sessions
+              value: "list_sessions"
+              brief: ACP list_sessions request.
+              stability: development
+            - id: set_session_model
+              value: "set_session_model"
+              brief: ACP set_session_model request.
+              stability: development
+            - id: set_session_mode
+              value: "set_session_mode"
+              brief: ACP set_session_mode request.
+              stability: development
+            - id: set_session_config_option
+              value: "set_session_config_option"
+              brief: ACP set_session_config_option request.
+              stability: development
+            - id: ext_method
+              value: "ext_method"
+              brief: ACP extension method request.
+              stability: development
+            - id: ext_notification
+              value: "ext_notification"
+              brief: ACP extension notification.
+              stability: development
+            - id: logout
+              value: "logout"
+              brief: ACP logout request.
+              stability: development
+        stability: development
+        brief: >
+          Operation method. OVERLOADED today: the listed values are the ACP request
+          methods on acp.requests / acp.request.duration; the same `method` key is
+          also emitted with free-form values by acp.ext / acp.ext.notification and
+          with HTTP methods by http.server.request.
+        examples: ["prompt", "initialize"]
+
+  # Standard OpenTelemetry attributes reused as-is. Documented locally so the
+  # registry stays self-contained; these should become refs to the upstream OTel
+  # semantic-conventions registry once that dependency is enabled.
+  - id: registry.otel.standard
+    type: attribute_group
+    display_name: Reused OpenTelemetry Attributes
+    brief: Standard OpenTelemetry attributes emitted by TrogonAi, documented as-is.
+    attributes:
+      - id: messaging.system
+        type:
+          members:
+            - id: nats
+              value: "nats"
+              brief: NATS messaging system.
+              stability: development
+        stability: development
+        brief: Standard OTel messaging.system. Emitted by nats.request / nats.publish.
+      - id: messaging.destination.name
+        type: string
+        stability: development
+        brief: Standard OTel messaging.destination.name (the NATS subject).
+      - id: messaging.operation.name
+        type:
+          members:
+            - id: request
+              value: "request"
+              brief: Request-reply operation.
+              stability: development
+            - id: publish
+              value: "publish"
+              brief: Fire-and-forget publish operation.
+              stability: development
+        stability: development
+        brief: Standard OTel messaging.operation.name.
+      - id: messaging.operation.type
+        type:
+          members:
+            - id: send
+              value: "send"
+              brief: Send operation type.
+              stability: development
+        stability: development
+        brief: Standard OTel messaging.operation.type.
+      - id: messaging.message.body.size
+        type: int
+        stability: development
+        brief: Standard OTel messaging.message.body.size, in bytes. Emitted by linear.webhook.
+      - id: error.type
+        type:
+          members:
+            - id: deserialize
+              value: "deserialize"
+              brief: Payload deserialization failed.
+              stability: development
+            - id: flush_operation
+              value: "flush_operation"
+              brief: Flush operation failed.
+              stability: development
+            - id: publish_operation
+              value: "publish_operation"
+              brief: Publish operation failed.
+              stability: development
+            - id: request
+              value: "request"
+              brief: Request operation failed.
+              stability: development
+            - id: serialize
+              value: "serialize"
+              brief: Payload serialization failed.
+              stability: development
+            - id: timeout
+              value: "timeout"
+              brief: Operation timed out.
+              stability: development
+        stability: development
+        brief: Standard OTel error.type. Emitted on nats.request / nats.publish failures.
+      - id: http.request.method
+        type: string
+        stability: development
+        brief: Standard OTel http.request.method. Emitted by http.server.request.
+        examples: ["GET", "POST"]
+      - id: url.path
+        type: string
+        stability: development
+        brief: Standard OTel url.path. Emitted by http.server.request.
+        examples: ["/healthz"]
+      - id: network.protocol.version
+        type: string
+        stability: development
+        brief: Standard OTel network.protocol.version. Emitted by http.server.request.
+        examples: ["1.1", "2"]
+      - id: user_agent.original
+        type: string
+        stability: development
+        brief: Standard OTel user_agent.original. Emitted by http.server.request.
+      - id: server.address
+        type: string
+        stability: development
+        brief: Standard OTel server.address. Emitted by http.server.request.
+      - id: server.port
+        type: int
+        stability: development
+        brief: Standard OTel server.port. Emitted by http.server.request.
+      - id: http.response.status_code
+        type: int
+        stability: development
+        brief: Standard OTel http.response.status_code. Emitted by http.server.request.
+
+  # SDK-level resource attributes set at logger init, not span/metric attributes.
+  - id: registry.trogonai.resource
+    type: attribute_group
+    display_name: TrogonAi Resource Attributes
+    brief: Custom OTel resource attributes injected at telemetry init.
+    attributes:
+      - id: acp.prefix
+        type: string
+        stability: development
+        brief: ACP NATS subject prefix for the service instance. Resource attribute in acp-nats-server / acp-nats-stdio.
+      - id: mcp.prefix
+        type: string
+        stability: development
+        brief: MCP NATS subject prefix for the service instance. Resource attribute in mcp-nats-server / mcp-nats-stdio.
+
+  # Structured fields on debug log events (not spans or metrics), recorded for
+  # completeness of the name inventory.
+  - id: registry.trogonai.logfield
+    type: attribute_group
+    display_name: TrogonAi Log Fields
+    brief: Structured log-event fields emitted today (not spans or metrics).
+    attributes:
+      - id: nats.subject
+        type: string
+        stability: development
+        brief: NATS subject field on trogon-nats claim_check debug log events.
+      - id: trogon.claim_check.threshold_bytes
+        type: int
+        stability: development
+        brief: Claim-check payload size threshold in bytes (debug log field).
+      - id: trogon.claim_check.used
+        type: boolean
+        stability: development
+        brief: Whether the claim-check pattern was applied (debug log field).
+      - id: trogon.claim_check.key
+        type: string
+        stability: development
+        brief: Object-store key used for the claim-check payload (debug log field).

@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.projections.v1;
+
+import "trogon/content/v1alpha1/content.proto";
+
+// Message is the read model's own copy of the static payload and headers
+// recorded when a schedule was created.
+//
+// It mirrors the command-side message today but is defined here so the read
+// model owns its full storage shape and can evolve independently of the event
+// and command schemas.
+message Message {
+  trogon.content.v1alpha1.Content content = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated Header headers = 2;
+}
+
+message Header {
+  string name = 1 [features.field_presence = LEGACY_REQUIRED];
+  string value = 2 [features.field_presence = LEGACY_REQUIRED];
+}

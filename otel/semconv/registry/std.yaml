@@ -1,0 +1,33 @@
+groups:
+  # trogon-std: HTTP server span via tower-http TraceLayer. Follows the OTel
+  # semconv HTTP server span name. Standard http.*/url.*/server.*/network.*
+  # attributes are defined in common.yaml; `method` is the shared (overloaded)
+  # attribute, also defined in common.yaml.
+  - id: registry.trogonai.http
+    type: attribute_group
+    display_name: HTTP Server Attributes
+    brief: Custom HTTP attributes emitted by trogon-std today.
+    attributes:
+      - id: path
+        type: string
+        stability: development
+        brief: Raw request path field emitted alongside the standard url.path.
+        examples: ["/healthz"]
+
+  - id: span.http.server.request
+    type: span
+    span_kind: server
+    stability: development
+    brief: >
+      Inbound HTTP request span. Emits both raw fields (`method`, `path`) and the
+      standard OTel attributes below; `method` collides with the ACP `method` key.
+    attributes:
+      - ref: method
+      - ref: path
+      - ref: http.request.method
+      - ref: url.path
+      - ref: network.protocol.version
+      - ref: user_agent.original
+      - ref: server.address
+      - ref: server.port
+      - ref: http.response.status_code

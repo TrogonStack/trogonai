@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.projections.v1;
+
+import "google/protobuf/duration.proto";
+
+// Delivery is the read model's own copy of where a schedule publishes when it
+// fires.
+//
+// It mirrors the command-side delivery today but is defined here so the read
+// model owns its full storage shape and can evolve independently of the event
+// and command schemas.
+message Delivery {
+  oneof kind {
+    NatsMessage nats_message = 1;
+  }
+
+  message NatsMessage {
+    string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    google.protobuf.Duration ttl = 2;
+    Source source = 3;
+
+    message Source {
+      oneof kind {
+        LatestFromSubject latest_from_subject = 1;
+      }
+    }
+
+    message LatestFromSubject {
+      string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    }
+  }
+}

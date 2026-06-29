@@ -1,0 +1,57 @@
+// edition:2024
+
+// Inline module with a body block: this is the violation.
+mod twin {
+    pub fn run() {}
+}
+
+// Another inline block, nested inside a function-free module tree.
+mod tests {
+    #[test]
+    fn it_works() {}
+}
+
+// Nested inline modules: BOTH the outer and the inner block must be flagged.
+mod outer {
+    mod inner {
+        pub fn run() {}
+    }
+}
+
+// Explicitly allowed at the site: must NOT be linted.
+#[allow(inline_module_block)]
+mod allowed_inline {
+    pub fn run() {}
+}
+
+// `#[allow]` on a parent must suppress nested inline modules too: neither
+// `allowed_outer` nor `allowed_inner` may be linted.
+#[allow(inline_module_block)]
+mod allowed_outer {
+    mod allowed_inner {
+        pub fn run() {}
+    }
+}
+
+// Macro-generated inline modules come from expansion and must NOT be linted.
+macro_rules! make_mod {
+    ($name:ident) => {
+        mod $name {
+            pub fn run() {}
+        }
+    };
+}
+
+make_mod!(generated);
+
+// File-backed declaration (`mod foo;`): the body lives in a separate file, so
+// the lint must NOT fire. This is the central negative the policy promises.
+#[path = "auxiliary/file_backed.rs"]
+mod file_backed;
+
+// Generated files (carrying an `@generated` marker near the top) are exempt:
+// the inline module inside this file-backed generated module must NOT fire.
+#[path = "auxiliary/generated.rs"]
+mod generated_file;
+
+fn main() {}

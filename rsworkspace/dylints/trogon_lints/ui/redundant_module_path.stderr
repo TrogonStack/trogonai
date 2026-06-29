@@ -1,0 +1,19 @@
+error: redundant `#[path]` on module `tests`
+  --> $DIR/redundant_module_path.rs:5:1
+   |
+LL | #[path = "tests.rs"]
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the attribute; `mod tests;` already resolves to this file
+   = note: `#[deny(redundant_module_path)]` on by default
+
+error: redundant `#[path]` on module `inner`
+  --> $DIR/auxiliary/owner.rs:1:1
+   |
+LL | #[path = "owner/inner.rs"]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: remove the attribute; `mod inner;` already resolves to this file
+
+error: aborting due to 2 previous errors
+

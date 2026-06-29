@@ -10,10 +10,15 @@ on:
       - 'rsworkspace/**'
       - 'LICENSE'
       - '.mise.toml'
+      - 'rust-toolchain.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/enforce-cargo-license/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
+
+concurrency:
+  group: ci-rust-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,7 +40,7 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
-          components: rustfmt,clippy
+          dylint-toolchain-dir: rsworkspace/dylints/trogon_lints
 
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
@@ -50,6 +55,22 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+        working-directory: rsworkspace
+
+      - name: Test repo Rust policy lints
+        run: |
+          dylint_toolchain="$(python - <<'PY'
+          import tomllib
+
+          with open("rust-toolchain.toml", "rb") as toolchain_file:
+              print(tomllib.load(toolchain_file)["toolchain"]["channel"])
+          PY
+          )"
+          rustup run "$dylint_toolchain" cargo test
+        working-directory: rsworkspace/dylints/trogon_lints
+
+      - name: Run repo Rust policy lints
+        run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
         working-directory: rsworkspace
 
       - name: Run clippy
@@ -72,8 +93,6 @@ jobs:
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
-        with:
-          components: llvm-tools-preview
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1

@@ -111,7 +111,7 @@ Runtime configuration decides which transports start. Cargo features may make
 optional adapters available at compile time, but configuration decides what runs.
 
 Combining multiple transports in one binary is valid only when the binary is one
-operated workload, as defined in ADR 0003.
+operated workload, as defined in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md).
 
 ## Package Boundary Rules
 
@@ -177,6 +177,6 @@ currently used to reach it.
 
 ## References
 
-- [ADR 0001: Workspace Runtime Taxonomy](/adr/0001-workspace-runtime-taxonomy)
-- [ADR 0002: Rust Crate Boundaries](/adr/0002-rust-crate-boundaries)
-- [ADR 0003: AI Protocol Transport Taxonomy](/adr/0003-ai-protocol-transport-taxonomy)
+- [ADR 0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
+- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)

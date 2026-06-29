@@ -8,18 +8,27 @@
 //! excluded during coverage runs.
 
 #[cfg(not(coverage))]
+use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
+#[cfg(not(coverage))]
+use a2a_nats::nats_connect_timeout;
+#[cfg(not(coverage))]
+use a2a_nats::server::Bridge;
+#[cfg(not(coverage))]
+use a2a_nats_server::NoopHandler;
+#[cfg(not(coverage))]
+use a2a_nats_server::runtime::{RuntimeError, parse_env};
+#[cfg(not(coverage))]
+use tokio_util::sync::CancellationToken;
+#[cfg(not(coverage))]
+use tracing::{error, info};
+#[cfg(not(coverage))]
+use trogon_nats::jetstream::NatsJetStreamClient;
+#[cfg(not(coverage))]
+use trogon_std::env::SystemEnv;
+
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() {
-    use a2a_nats::jetstream::{StreamProvisionOptions, provision_streams_with_options};
-    use a2a_nats::nats_connect_timeout;
-    use a2a_nats::server::Bridge;
-    use a2a_nats_server::NoopHandler;
-    use a2a_nats_server::runtime::{RuntimeError, parse_env};
-    use tokio_util::sync::CancellationToken;
-    use tracing::{error, info};
-    use trogon_nats::jetstream::NatsJetStreamClient;
-    use trogon_std::env::SystemEnv;
-
     tracing_subscriber::fmt::init();
 
     let env = SystemEnv;
@@ -73,10 +82,4 @@ async fn main() {
 fn main() {}
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    #[cfg(coverage)]
-    fn coverage_main_stub_is_callable() {
-        super::main();
-    }
-}
+mod tests;

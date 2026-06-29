@@ -89,3 +89,6 @@ impl TryFrom<RRuleWakeupPayloadWire> for RRuleWakeupPayload {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,22 @@
+use super::*;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
+
+#[test]
+// Exercises the export pipeline with a throwaway resource attribute that has no
+// semantic-convention counterpart.
+#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_key_value_literal))]
+fn init_provider_returns_valid_provider() {
+    let resource = Resource::builder()
+        .with_service_name("test-metric")
+        .with_attributes(vec![KeyValue::new("test", "true")])
+        .build();
+
+    let provider = init_provider(&resource);
+    assert!(provider.is_ok());
+}
+
+#[test]
+fn shutdown_succeeds_when_provider_not_initialized() {
+    assert!(shutdown().is_ok());
+}

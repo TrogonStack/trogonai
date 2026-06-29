@@ -23,7 +23,8 @@ pub use gate::ImportGate;
 pub use principal::{ImportedAccountName, SpiceDbPrincipal};
 #[cfg(feature = "spicedb")]
 pub use spicedb::{
-    BulkImportPermissionCheck, ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS, SpiceDbEndpoint,
-    SpiceDbImportGate, SpiceDbImportGateBuildError, SpiceDbToken, ZedTokenSnapshot, ZedTokenTtl,
-    optional_spicedb_credentials, parse_subject_reference, spicedb_subject_from_principal, zed_token_ttl_from_env,
+    BulkImportPermissionCheck, ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS,
+    LiveBulkImportPermissionClient, SpiceDbEndpoint, SpiceDbImportGate, SpiceDbImportGateBuildError, SpiceDbToken,
+    ZedTokenSnapshot, ZedTokenTtl, optional_spicedb_credentials, parse_subject_reference,
+    spicedb_subject_from_principal, zed_token_ttl_from_env,
 };

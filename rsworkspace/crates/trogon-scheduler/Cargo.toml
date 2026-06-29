@@ -4,32 +4,46 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
+autotests = false
 
-[lints]
-workspace = true
+[lints.rust]
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
+
+[features]
+test-support = ["trogon-decider-runtime/test-support", "trogon-nats/test-support"]
 
 [dependencies]
 thiserror = { workspace = true }
+trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 base64 = { workspace = true }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 bytes = { workspace = true }
-chrono = { version = "0.4" }
-chrono-tz = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { workspace = true }
 cron = "0.15"
 futures = { workspace = true }
 opentelemetry = { workspace = true }
-rrule = "0.14"
+rrule = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tokio = { workspace = true, features = ["time", "signal", "rt-multi-thread", "macros", "sync"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-trogon-decider-runtime = { workspace = true }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true }
-trogonai-proto = { path = "../trogonai-proto", features = ["schedules"] }
+trogon-decider-nats = { workspace = true }
+trogon-decider-runtime = { workspace = true }
+trogonai-proto = { workspace = true, features = ["schedules"] }
+trogon-std = { workspace = true, features = ["uuid"] }
 uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
@@ -38,7 +52,17 @@ proptest = "1"
 testcontainers-modules = { version = "0.15", features = ["nats"] }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
-trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
-trogon-decider-nats = { path = "../trogon-decider-nats" }
+trogon-decider = { workspace = true, features = ["test-support"] }
+trogon-decider-runtime = { workspace = true, features = ["test-support"] }
+trogon-decider-nats = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
+
+[[test]]
+name = "schedule_unit"
+path = "tests/schedule_unit.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

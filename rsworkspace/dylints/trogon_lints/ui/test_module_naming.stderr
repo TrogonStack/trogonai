@@ -1,0 +1,11 @@
+error: test module `helpers` is not named `tests` or `*_tests`
+  --> $DIR/test_module_naming.rs:14:1
+   |
+LL | mod helpers;
+   | ^^^^^^^^^^^
+   |
+   = help: rename `helpers` to `tests` (the sole test module for its parent) or to `helpers_tests` (a sibling test module), and rename its file to match
+   = note: `#[deny(test_module_naming)]` on by default
+
+error: aborting due to 1 previous error
+

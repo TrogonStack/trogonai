@@ -1,9 +1,17 @@
 name: cd / release please
 
+# TODO: Re-enable the automatic push trigger once the cargo-workspace plugin
+# supports a Cargo.toml outside the repository root. The plugin hardcodes the
+# Cargo.toml lookup at the repo root, but our workspace lives at rsworkspace/,
+# so release-please fails with "Failed to find file: Cargo.toml".
+#
+# - https://github.com/TrogonStack/trogonai/pull/58
+# - https://github.com/googleapis/release-please/pull/2682
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - main
 
 permissions:
   contents: write

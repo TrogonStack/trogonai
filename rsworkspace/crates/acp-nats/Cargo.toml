@@ -31,6 +31,8 @@ tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+jsonrpc-nats = { workspace = true }
+trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 

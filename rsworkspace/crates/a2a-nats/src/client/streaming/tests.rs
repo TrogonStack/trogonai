@@ -1,0 +1,237 @@
+use bytes::Bytes;
+use jsonrpc_nats::Direction;
+use jsonrpc_nats::{Message, ResponseId, encode, to_json_value};
+
+use a2a::types::{SendMessageResponse, Task, TaskState, TaskStatus};
+use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::jetstream::mocks::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
+
+use a2a_identity_types::MintedUserJwt;
+
+use super::*;
+
+fn test_prefix() -> A2aPrefix {
+    A2aPrefix::new("a2a".to_string()).unwrap()
+}
+
+fn test_req_id() -> ReqId {
+    ReqId::from_test("req-stream-1")
+}
+
+fn bootstrap_success(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
+    let task = Task {
+        id: task_id.to_string(),
+        context_id: String::new(),
+        status: TaskStatus {
+            state: TaskState::Working,
+            message: None,
+            timestamp: None,
+        },
+        artifacts: None,
+        history: None,
+        metadata: None,
+    };
+    let response = SendMessageResponse::Task(task);
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("req-stream-1".into()),
+        result: serde_json::to_value(response).unwrap(),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
+}
+
+fn bootstrap_error(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
+    let encoded = encode(&Message::Error {
+        id: ResponseId::String("req-stream-1".into()),
+        code,
+        message: msg.to_string(),
+        data: None,
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
+}
+
+#[derive(serde::Serialize)]
+struct TestParams {
+    dummy: String,
+}
+
+fn make_ctx<'a>(
+    nats: &'a AdvancedMockNatsClient,
+    js: &'a MockJetStreamConsumerFactory,
+    req_id: &'a ReqId,
+    prefix: &'a A2aPrefix,
+    timeout: std::time::Duration,
+) -> StreamingRequest<'a, AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
+    StreamingRequest {
+        nats,
+        js,
+        subject: "a2a.agents.bot.message.stream",
+        method: "message/stream",
+        req_id,
+        prefix,
+        op_timeout: timeout,
+        gateway_caller_jwt: None,
+    }
+}
+
+#[tokio::test]
+async fn bootstrap_success_returns_task_and_stream() {
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_success("task-abc");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let (envelope, _stream) = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(envelope, SendMessageResponse::Task(_)));
+}
+
+#[tokio::test]
+async fn bootstrap_error_propagates_as_client_error() {
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_error(-32001, "not found");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let result = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await;
+
+    assert!(matches!(result, Err(ClientError::TaskNotFound)));
+}
+
+#[tokio::test]
+async fn nats_transport_failure_returns_transport_error() {
+    let nats = AdvancedMockNatsClient::new();
+    nats.fail_next_request();
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let result = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await;
+
+    assert!(matches!(result, Err(ClientError::Transport(_))));
+}
+
+#[tokio::test]
+async fn get_stream_failure_returns_consumer_setup_error() {
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_success("t1");
+    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    js.fail_get_stream_at(1);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let result = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await;
+
+    assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
+}
+
+#[tokio::test]
+async fn open_task_stream_returns_typed_event_stream() {
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+
+    let stream = open_task_stream(&js, &test_prefix(), &req_id).await;
+    assert!(stream.is_ok());
+}
+
+#[tokio::test]
+async fn open_task_stream_get_stream_failure_returns_error() {
+    let js = MockJetStreamConsumerFactory::new();
+    js.fail_get_stream_at(1);
+
+    let req_id = test_req_id();
+
+    let result = open_task_stream(&js, &test_prefix(), &req_id).await;
+    assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
+}
+
+#[tokio::test]
+async fn hang_returns_timeout_error() {
+    let nats = AdvancedMockNatsClient::new();
+    nats.hang_next_request();
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let result = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_millis(10)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await;
+
+    assert!(matches!(result, Err(ClientError::Timeout { .. })));
+}
+
+#[tokio::test]
+async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_success("task-gw");
+    nats.set_response_wire("a2a.gateway.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let ctx = StreamingRequest {
+        nats: &nats,
+        js: &js,
+        subject: "a2a.gateway.bot.message.stream",
+        method: "message/stream",
+        req_id: &req_id,
+        prefix: &prefix,
+        op_timeout: std::time::Duration::from_secs(5),
+        gateway_caller_jwt: Some(&jwt),
+    };
+    let (envelope, _stream) = send_streaming(ctx, &TestParams { dummy: "hi".into() }).await.unwrap();
+    assert!(matches!(envelope, SendMessageResponse::Task(_)));
+}
+
+#[test]
+fn wire_bootstrap_response_decodes_from_headers() {
+    let (headers, body) = bootstrap_success("t");
+    let message = jsonrpc_nats::decode(Direction::Response, None, &headers, &body).unwrap();
+    let value = to_json_value(&message);
+    assert_eq!(value["id"], "req-stream-1");
+}
