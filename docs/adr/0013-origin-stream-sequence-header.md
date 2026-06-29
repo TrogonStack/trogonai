@@ -30,13 +30,13 @@ metadata must not use that namespace.
 
 ## Decision
 
-Reserve the event metadata header `trogon-origin-stream-sequence`.
+Reserve the event metadata header `Trogon-Origin-Stream-Sequence`.
 
 The header records the original JetStream stream sequence of an event when that
 event is written into a stream other than the stream position where it originally
 lived.
 
-Set `trogon-origin-stream-sequence` when:
+Set `Trogon-Origin-Stream-Sequence` when:
 
 - Restoring archived events into a replacement or recovery stream.
 - Backfilling historical events into a live or rebuilt stream.
@@ -44,7 +44,7 @@ Set `trogon-origin-stream-sequence` when:
 - Rebuilding a stream while preserving provenance for projection verification,
   diagnostics, or repair tooling.
 
-Do not set `trogon-origin-stream-sequence` during ordinary event appends. During
+Do not set `Trogon-Origin-Stream-Sequence` during ordinary event appends. During
 normal operation, the current JetStream message metadata already provides the
 stream sequence.
 
@@ -52,7 +52,7 @@ The current JetStream sequence values remain authoritative for processors,
 consumers, checkpoints, high-water marks, and optimistic concurrency decisions
 owned by the NATS adapter.
 
-`trogon-origin-stream-sequence` is provenance metadata. It is not an optimistic
+`Trogon-Origin-Stream-Sequence` is provenance metadata. It is not an optimistic
 concurrency token, not a checkpoint cursor by default, and not a per-aggregate
 version.
 
