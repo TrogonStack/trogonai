@@ -2,31 +2,33 @@
 //!
 //! Gated behind the `spicedb` feature so deployments without an
 //! external authoriser don't pay the authzed/tonic compile cost.
-//! This slice ships the typed gate trait + Noop impl, the typed
-//! outcome enum, the audit-side owner-tuple emitter trait, and the
-//! env-driven layer config that hands callers either a Noop gate
-//! (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED` unset) or a runtime error
-//! when an operator tries to enable Tier-1 without providing the
-//! credentials.
-//!
-//! The `LiveSpiceDbTier1Gate` that talks to authzed/SpiceDB over
-//! gRPC ships in a follow-up alongside the `LiveBulkImportPermissionClient`
-//! integration smoke harness; this slice keeps the gateway boot
-//! path's policy stack on the Noop gate so the slice can land
-//! without dragging the live client wiring into review.
+//! Ships the typed gate trait, Noop + Live impls, the outcome
+//! enum, the audit-side owner-tuple emitter, and the env-driven
+//! layer config that constructs either a Noop (gate disabled) or
+//! a tonic-backed Live gate (gate enabled with credentials).
 
 use std::sync::Arc;
 
 use a2a_nats::A2aMethod;
 use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::catalog::agent_view::{AgentViewCheckOutcome, SpiceDbSessionKey};
-use a2a_nats::catalog::import_gate::{SpiceDbImportGateBuildError, SpiceDbPrincipal};
-use a2a_nats::catalog::spicedb_permission::{AgentViewGate, NoopAgentViewGate, SpiceDbSessionCache};
+use a2a_nats::catalog::import_gate::{
+    BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
+    ZedTokenTtl, parse_subject_reference,
+};
+use a2a_nats::catalog::spicedb_permission::{AgentViewGate, LiveAgentViewGate, NoopAgentViewGate, SpiceDbSessionCache};
 use a2a_pack::resource_tuples::{
     Tier1A2aMethodSlug, Tier1DeriveError, Tier1DeriveInputs, Tier1ResourceId, Tier1ResourceTuple,
     Tier1ResourceTupleTable, Tier1ResourceType,
 };
 use async_trait::async_trait;
+use authzed::v1::check_bulk_permissions_pair;
+use authzed::v1::check_permission_response::Permissionship;
+use authzed::v1::relationship_update::Operation;
+use authzed::v1::{
+    CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, Relationship,
+    RelationshipUpdate, SubjectReference, WriteRelationshipsRequest, ZedToken,
+};
 use tonic::Status;
 use trogon_std::env::ReadEnv;
 
@@ -204,44 +206,242 @@ impl GatewayTier1Layer {
     }
 }
 
+/// SpiceDB-backed Tier-1 gate. Issues `CheckBulkPermissions` RPCs
+/// to authorize requests against a single tuple; reuses the same
+/// session cache as `LiveAgentViewGate` so the per-session
+/// consistency upgrade (`FullyConsistent` -> `AtLeastAsFresh`)
+/// applies across both surfaces.
+pub struct LiveSpiceDbTier1Gate {
+    client: Arc<dyn BulkImportPermissionCheck>,
+    session_cache: SpiceDbTier1SessionCache,
+    view_gate: LiveAgentViewGate,
+}
+
+impl std::fmt::Debug for LiveSpiceDbTier1Gate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveSpiceDbTier1Gate").finish_non_exhaustive()
+    }
+}
+
+impl LiveSpiceDbTier1Gate {
+    pub fn new(client: Arc<dyn BulkImportPermissionCheck>, session_cache: SpiceDbTier1SessionCache) -> Self {
+        let view_gate = LiveAgentViewGate::new(client.clone(), session_cache.clone());
+        Self {
+            client,
+            session_cache,
+            view_gate,
+        }
+    }
+}
+
+#[async_trait]
+impl OwnerTupleEmitter for LiveSpiceDbTier1Gate {
+    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), Status> {
+        let request = WriteRelationshipsRequest {
+            updates: vec![RelationshipUpdate {
+                operation: Operation::Touch as i32,
+                relationship: Some(Relationship {
+                    resource: Some(ObjectReference {
+                        object_type: owner.resource_type.as_str().to_owned(),
+                        object_id: owner.resource_id.as_str().to_owned(),
+                    }),
+                    relation: owner.relation.clone(),
+                    subject: Some(SubjectReference {
+                        object: Some(ObjectReference {
+                            object_type: owner.subject_type.clone(),
+                            object_id: owner.subject_id.clone(),
+                        }),
+                        optional_relation: String::new(),
+                    }),
+                    optional_caveat: None,
+                    optional_expires_at: None,
+                }),
+            }],
+            optional_preconditions: Vec::new(),
+            optional_transaction_metadata: None,
+        };
+        self.client.write_relationships(request).await.map(|_| ())
+    }
+}
+
+#[async_trait]
+impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
+    async fn authorize(
+        &self,
+        session: &Tier1SessionKey,
+        principal: &SpiceDbPrincipal,
+        tuple: &Tier1ResourceTuple,
+    ) -> Tier1AuthorizeOutcome {
+        // No subject claim -> fail closed. The session log makes
+        // the denial cause visible without leaking the principal
+        // payload itself.
+        let Some((subject_type, subject_id)) = spicedb_tier1_subject_from_principal(principal) else {
+            tracing::warn!(
+                session_sub = %session.sub(),
+                session_account = %session.account(),
+                "SpiceDbTier1Gate denying: principal lacks subject mapping",
+            );
+            return Tier1AuthorizeOutcome::Denied;
+        };
+
+        let mut request = CheckBulkPermissionsRequest {
+            items: vec![CheckBulkPermissionsRequestItem {
+                resource: Some(ObjectReference {
+                    object_type: tuple.resource_type.as_str().to_owned(),
+                    object_id: tuple.resource_id.as_str().to_owned(),
+                }),
+                permission: tuple.permission.as_str().to_owned(),
+                subject: Some(SubjectReference {
+                    object: Some(ObjectReference {
+                        object_type: subject_type,
+                        object_id: subject_id,
+                    }),
+                    optional_relation: String::new(),
+                }),
+                context: None,
+            }],
+            consistency: None,
+            with_tracing: false,
+        };
+
+        // First request after a session cache miss pays the
+        // `FullyConsistent` round-trip cost so we get a fresh
+        // zed-token; subsequent requests inside the TTL window
+        // use the cheaper `AtLeastAsFresh` mode.
+        request.consistency = Some(if let Some(snapshot) = self.session_cache.get(session).await {
+            Consistency {
+                requirement: Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(ZedToken {
+                    token: snapshot.token,
+                })),
+            }
+        } else {
+            Consistency {
+                requirement: Some(authzed::v1::consistency::Requirement::FullyConsistent(true)),
+            }
+        });
+
+        let response = match self.client.check_bulk_permissions(request).await {
+            Ok(response) => response.into_inner(),
+            Err(error) => {
+                tracing::warn!(
+                    session_sub = %session.sub(),
+                    resource = %tuple.resource_id.as_str(),
+                    error = %error,
+                    "SpiceDbTier1Gate transport error",
+                );
+                return Tier1AuthorizeOutcome::TransportError;
+            }
+        };
+
+        let allowed = response.pairs.first().is_some_and(pair_is_allowed);
+        if !allowed {
+            return Tier1AuthorizeOutcome::Denied;
+        }
+
+        let zed_token = response.checked_at.map(|zed| zed.token);
+        if let Some(token) = zed_token.clone() {
+            self.session_cache.insert(session.clone(), token).await;
+        }
+
+        Tier1AuthorizeOutcome::Allowed { zed_token }
+    }
+
+    async fn bulk_check_agent_view(
+        &self,
+        session: &Tier1SessionKey,
+        principal: &SpiceDbPrincipal,
+        agent_ids: &[A2aAgentId],
+    ) -> Vec<AgentViewCheckOutcome> {
+        self.view_gate
+            .bulk_check_agent_view(session, principal, agent_ids)
+            .await
+    }
+}
+
+fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
+    match pair.response.as_ref() {
+        Some(check_bulk_permissions_pair::Response::Item(item)) => {
+            item.permissionship == Permissionship::HasPermission as i32
+        }
+        Some(check_bulk_permissions_pair::Response::Error(_)) | None => false,
+    }
+}
+
+/// Extract `(object_type, object_id)` from a principal's
+/// `spicedb_subject` claim, delegating to the import-gate parser
+/// so the Tier-1 and import-gate paths agree on the subject
+/// grammar.
+fn spicedb_tier1_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
+    principal
+        .0
+        .get("spicedb_subject")
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_subject_reference)
+}
+
+/// Build a Tier-1 session key from a verified principal, falling
+/// back to the supplied account when the principal didn't carry
+/// an explicit account claim. Delegates to the a2a-nats helper so
+/// the Tier-1 and discovery paths agree on the key shape.
+pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_account: &str) -> Option<Tier1SessionKey> {
+    a2a_nats::catalog::spicedb_permission::session_from_principal(principal, fallback_account)
+}
+
+/// Build a principal payload from a caller slug + session account.
+/// Used by the gateway runtime to materialise a principal from
+/// the verified caller identity once an AAuth token is mapped.
+pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
+    SpiceDbPrincipal(serde_json::json!({
+        "spicedb_subject": format!("user/{caller_slug}"),
+        "sub": caller_slug,
+        "session_account": account,
+    }))
+}
+
 pub struct Tier1SpiceDbConfig;
 
 impl Tier1SpiceDbConfig {
-    /// Resolve a [`GatewayTier1Layer`] from environment. Returns a
-    /// Noop layer when `A2A_GATEWAY_TIER1_SPICEDB_ENABLED` is unset
-    /// or off; fails closed when an operator enables Tier-1 without
-    /// providing both endpoint and token. The Live gate itself
-    /// ships in a follow-up slice -- this entry point intentionally
-    /// errors when enabled to keep an operator from misreading
-    /// "Noop returned silently" as "Tier-1 active".
-    pub fn from_env<E: ReadEnv>(env: &E) -> Result<GatewayTier1Layer, Tier1SpiceDbBuildError> {
-        // Always parse the TTL so an invalid value surfaces even
-        // when Tier-1 isn't enabled -- catches a typo before it
-        // becomes an outage at the moment the operator flips the
-        // flag.
-        let _ttl = tier1_zed_token_ttl(env)?;
+    /// Resolve a [`GatewayTier1Layer`] from environment.
+    ///
+    /// Returns a Noop layer when `A2A_GATEWAY_TIER1_SPICEDB_ENABLED`
+    /// is unset or off; constructs a Live gate (tonic-backed
+    /// SpiceDB client + session cache + agent-view fanout) when
+    /// enabled. Fails closed when an operator enables Tier-1
+    /// without providing both endpoint and token, and surfaces
+    /// transport errors at boot rather than at first request so
+    /// half-configured deployments never silently run on Noop.
+    pub async fn from_env<E: ReadEnv>(env: &E) -> Result<GatewayTier1Layer, Tier1SpiceDbBuildError> {
+        let ttl_secs = tier1_zed_token_ttl(env)?;
 
         if !tier1_enabled(env) {
             return Ok(GatewayTier1Layer::noop());
         }
 
-        // Sanity-check the credentials so a half-configured
-        // deployment fails closed at boot rather than running on a
-        // Noop gate operators believed was Live.
-        let Some((_endpoint, _token)) = optional_tier1_credentials(env)? else {
+        let Some((endpoint, token)) = optional_tier1_credentials(env)? else {
             return Err(Tier1SpiceDbBuildError::PartialConfig(format!(
                 "{ENV_TIER1_SPICEDB_ENABLED}=on requires {ENV_TIER1_SPICEDB_ENDPOINT} and {ENV_TIER1_SPICEDB_TOKEN}"
             )));
         };
 
-        // `LiveSpiceDbTier1Gate` lives in the follow-up integration
-        // PR alongside `LiveBulkImportPermissionClient`. Until that
-        // lands, an operator with credentials configured still
-        // gets the Noop gate; surface that explicitly so the audit
-        // log shows the layer is shadow-only.
-        Err(Tier1SpiceDbBuildError::Connect(
-            "tier-1 live SpiceDB gate not yet wired; ships with the integration PR".into(),
-        ))
+        let endpoint = SpiceDbEndpoint::parse(endpoint)?;
+        let token = SpiceDbToken::parse(token)?;
+        let ttl = ZedTokenTtl::from_secs(ttl_secs);
+
+        let client =
+            Arc::new(a2a_nats::catalog::import_gate::LiveBulkImportPermissionClient::connect(&endpoint, &token).await?);
+        let session_cache = SpiceDbTier1SessionCache::new(ttl);
+        let live = Arc::new(LiveSpiceDbTier1Gate::new(client.clone(), session_cache.clone()));
+        let discovery_view = Arc::new(LiveAgentViewGate::new(client, session_cache));
+
+        Ok(GatewayTier1Layer {
+            gate: live.clone(),
+            owner_emitter: Some(live),
+            discovery_view,
+        })
     }
 }
 
