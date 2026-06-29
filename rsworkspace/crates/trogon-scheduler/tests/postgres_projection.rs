@@ -16,6 +16,10 @@ use trogon_scheduler::{
     projection_queries, projections_v1,
 };
 
+fn id(raw: &str) -> ScheduleId {
+    ScheduleId::parse(raw).unwrap()
+}
+
 /// A complete projection so the query side's `schedule_from_view` decodes it
 /// cleanly: it needs schedule, delivery, and message present.
 fn schedule_projection(id: &str) -> projections_v1::ScheduleProjection {
@@ -60,12 +64,16 @@ async fn start() -> (ContainerAsync<Postgres>, PostgresSchedulesProjection) {
 async fn upsert_get_list_delete_round_trip() {
     let (_container, store) = start().await;
 
-    assert!(store.get_projection("missing").await.unwrap().is_none());
+    assert!(store.get_projection(&id("missing")).await.unwrap().is_none());
 
     store.upsert_projection(&schedule_projection("alpha")).await.unwrap();
     store.upsert_projection(&schedule_projection("beta")).await.unwrap();
 
-    let alpha = store.get_projection("alpha").await.unwrap().expect("alpha present");
+    let alpha = store
+        .get_projection(&id("alpha"))
+        .await
+        .unwrap()
+        .expect("alpha present");
     assert_eq!(alpha.schedule_id, "alpha");
 
     let mut ids: Vec<String> = store
@@ -82,10 +90,10 @@ async fn upsert_get_list_delete_round_trip() {
     store.upsert_projection(&schedule_projection("alpha")).await.unwrap();
     assert_eq!(store.list_projections().await.unwrap().len(), 2);
 
-    store.delete_projection("alpha").await.unwrap();
-    assert!(store.get_projection("alpha").await.unwrap().is_none());
+    store.delete_projection(&id("alpha")).await.unwrap();
+    assert!(store.get_projection(&id("alpha")).await.unwrap().is_none());
     // Deleting an absent row is a no-op.
-    store.delete_projection("alpha").await.unwrap();
+    store.delete_projection(&id("alpha")).await.unwrap();
 }
 
 #[tokio::test]
@@ -95,9 +103,9 @@ async fn reconcile_removes_rows_absent_from_the_live_set() {
     store.upsert_projection(&schedule_projection("keep")).await.unwrap();
     store.upsert_projection(&schedule_projection("stale")).await.unwrap();
 
-    store.reconcile(&HashSet::from(["keep".to_string()])).await.unwrap();
-    assert!(store.get_projection("keep").await.unwrap().is_some());
-    assert!(store.get_projection("stale").await.unwrap().is_none());
+    store.reconcile(&HashSet::from([id("keep")])).await.unwrap();
+    assert!(store.get_projection(&id("keep")).await.unwrap().is_some());
+    assert!(store.get_projection(&id("stale")).await.unwrap().is_none());
 
     // An empty live set clears the table.
     store.reconcile(&HashSet::new()).await.unwrap();
@@ -156,7 +164,11 @@ async fn non_utf8_message_body_round_trips() {
     });
     store.upsert_projection(&projection).await.unwrap();
 
-    let stored = store.get_projection("binary").await.unwrap().expect("binary present");
+    let stored = store
+        .get_projection(&id("binary"))
+        .await
+        .unwrap()
+        .expect("binary present");
     let data = stored
         .message
         .as_option()
@@ -182,7 +194,7 @@ async fn corrupt_row_is_unreadable_not_silently_repaired() {
     .unwrap();
 
     assert!(
-        store.get_projection("broken").await.is_err(),
+        store.get_projection(&id("broken")).await.is_err(),
         "a corrupt row must be unreadable, not repaired"
     );
 

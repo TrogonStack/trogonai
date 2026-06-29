@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 
+use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
 
 /// Storage for the schedules read model: point/list reads, upserts, deletes, the
@@ -27,7 +28,7 @@ pub trait SchedulesProjectionStore: Send + Sync {
     /// Reads the stored projection for one schedule, or `None` if it is absent.
     async fn get_projection(
         &self,
-        schedule_id: &str,
+        schedule_id: &ScheduleId,
     ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError>;
 
     /// Reads every stored projection. A single unreadable row must not suppress the
@@ -39,14 +40,14 @@ pub trait SchedulesProjectionStore: Send + Sync {
 
     /// Removes the stored projection for a schedule. Deleting an absent schedule is
     /// a no-op so the delete-on-removal stays idempotent.
-    async fn delete_projection(&self, schedule_id: &str) -> Result<(), SchedulerError>;
+    async fn delete_projection(&self, schedule_id: &ScheduleId) -> Result<(), SchedulerError>;
 
     /// Deletes every stored projection whose schedule id is not in `live_ids`.
     ///
     /// Called only after a full catch-up rebuild, where `live_ids` is the
     /// authoritative set of schedules the fold produced. It relies on the
     /// single-active-writer invariant (see the projection module docs).
-    async fn reconcile(&self, live_ids: &HashSet<String>) -> Result<(), SchedulerError>;
+    async fn reconcile(&self, live_ids: &HashSet<ScheduleId>) -> Result<(), SchedulerError>;
 
     /// Reads the catch-up checkpoint (the last fully folded stream sequence), or
     /// `0` when unset or unreadable so a fresh rebuild starts from the beginning.

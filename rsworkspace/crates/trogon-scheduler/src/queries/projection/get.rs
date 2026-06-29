@@ -12,7 +12,7 @@ pub async fn run(
     store: &impl SchedulesProjectionStore,
     command: GetSchedule,
 ) -> Result<Option<Schedule>, SchedulerError> {
-    let Some(projection) = store.get_projection(command.id.as_str()).await? else {
+    let Some(projection) = store.get_projection(&command.id).await? else {
         return Ok(None);
     };
 

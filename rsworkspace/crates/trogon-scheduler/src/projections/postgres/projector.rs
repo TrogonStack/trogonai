@@ -26,6 +26,7 @@ use crate::projections::schedules::{
     event_replay_consumer_config, event_schedule_id, projection_change, read_model_token_from_event_subject,
 };
 use crate::projections::store::SchedulesProjectionStore;
+use crate::queries::ScheduleId;
 use crate::v1;
 
 /// Projects the schedule event stream into a [`SchedulesProjectionStore`].
@@ -185,10 +186,19 @@ impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
             );
             return Ok(());
         }
+        // The payload id was validated when the command produced the event, so this
+        // parse is defensive; an unexpected failure is skipped like any other anomaly.
+        let id = match ScheduleId::parse(schedule_id) {
+            Ok(id) => id,
+            Err(source) => {
+                tracing::warn!(%schedule_id, %source, "skipping schedule event with an invalid payload id during projection");
+                return Ok(());
+            }
+        };
 
         let before = self
             .store
-            .get_projection(schedule_id)
+            .get_projection(&id)
             .await?
             .map_or(ScheduleStreamState::Initial, ScheduleStreamState::Present);
         let after = match apply(schedule_id, before.clone(), &decoded) {
@@ -200,7 +210,8 @@ impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
         };
         match projection_change(&before, &after) {
             Some(ProjectionChange::Upsert(projection)) => self.store.upsert_projection(&projection).await,
-            Some(ProjectionChange::Delete(id)) => self.store.delete_projection(&id).await,
+            // The change always targets this message's schedule, so reuse `id`.
+            Some(ProjectionChange::Delete(_)) => self.store.delete_projection(&id).await,
             None => Ok(()),
         }
     }

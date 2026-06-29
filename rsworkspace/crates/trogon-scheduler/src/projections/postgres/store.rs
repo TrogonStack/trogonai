@@ -24,6 +24,7 @@ use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgPool, Row};
 
 use crate::projections::store::SchedulesProjectionStore;
+use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
 
 use projections_v1::__buffa::oneof::delivery::Kind as DeliveryKind;
@@ -312,10 +313,10 @@ fn projection_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection
 impl SchedulesProjectionStore for PostgresSchedulesProjection {
     async fn get_projection(
         &self,
-        schedule_id: &str,
+        schedule_id: &ScheduleId,
     ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
         let row = sqlx::query(&format!("{SELECT_COLUMNS} WHERE schedule_id = $1"))
-            .bind(schedule_id)
+            .bind(schedule_id.as_str())
             .fetch_optional(&self.pool)
             .await
             .map_err(|source| SchedulerError::kv_source("failed to read projected schedule", source))?;
@@ -479,19 +480,19 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         .map_err(|source| SchedulerError::kv_source("failed to store projected job state", source))
     }
 
-    async fn delete_projection(&self, schedule_id: &str) -> Result<(), SchedulerError> {
+    async fn delete_projection(&self, schedule_id: &ScheduleId) -> Result<(), SchedulerError> {
         sqlx::query("DELETE FROM schedules_projection WHERE schedule_id = $1")
-            .bind(schedule_id)
+            .bind(schedule_id.as_str())
             .execute(&self.pool)
             .await
             .map(|_| ())
             .map_err(|source| SchedulerError::kv_source("failed to delete projected job state", source))
     }
 
-    async fn reconcile(&self, live_ids: &HashSet<String>) -> Result<(), SchedulerError> {
+    async fn reconcile(&self, live_ids: &HashSet<ScheduleId>) -> Result<(), SchedulerError> {
         // `schedule_id <> ALL($1)` deletes every row absent from the folded state;
         // an empty array makes the predicate true for all rows, clearing the table.
-        let ids: Vec<String> = live_ids.iter().cloned().collect();
+        let ids: Vec<String> = live_ids.iter().map(|id| id.as_str().to_owned()).collect();
         sqlx::query("DELETE FROM schedules_projection WHERE schedule_id <> ALL($1)")
             .bind(&ids)
             .execute(&self.pool)
