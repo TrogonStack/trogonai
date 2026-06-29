@@ -10,7 +10,9 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, ConfigError, config_from_args};
 
+pub mod audit_publish;
 pub mod env;
+pub mod reply;
 #[cfg(feature = "spicedb")]
 pub mod tier1;
 
