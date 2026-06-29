@@ -183,11 +183,14 @@ async fn non_utf8_message_body_round_trips() {
 async fn corrupt_row_is_unreadable_not_silently_repaired() {
     let (_container, store) = start().await;
 
-    // A cron row whose required cron_expr is missing: it must surface as an error,
-    // not be returned as a defaulted (wrong) schedule.
+    // A fully schema-valid row (every constraint satisfied) whose JSONB headers are
+    // malformed — a non-string header name — so the corruption is purely at the
+    // application-decode layer and does not depend on any column's nullability. It
+    // must surface as an error, not be returned as a defaulted (wrong) schedule.
     sqlx::query(
-        "INSERT INTO schedules_projection (schedule_id, status, schedule_kind, delivery_kind) \
-         VALUES ('broken', 'scheduled', 'cron', 'nats_message')",
+        "INSERT INTO schedules_projection \
+             (schedule_id, status, schedule_kind, cron_expr, delivery_kind, delivery_subject, message_headers) \
+         VALUES ('broken', 'scheduled', 'cron', '* * * * *', 'nats_message', 'agent.run', '[{\"name\": 5, \"value\": \"x\"}]')",
     )
     .execute(store.pool())
     .await
