@@ -27,7 +27,19 @@ pub use commands::{
 };
 pub use config::ScheduleWriteCondition;
 pub use error::{ScheduleSpecError, SchedulerError};
+pub use projections::SchedulesProjectionStore;
+#[cfg(not(coverage))]
+pub use projections::SchedulesProjector;
+#[cfg(feature = "postgres")]
+pub use projections::backend::PostgresSchedulesProjection;
 pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
+
+/// Query entry points for the alternative projection backends (e.g. Postgres),
+/// reading through [`SchedulesProjectionStore`]. The default NATS read-model
+/// queries remain at the crate root ([`get_schedule`], [`list_schedules`]).
+pub mod projection_queries {
+    pub use crate::projections::queries::{get_schedule, list_schedules};
+}
 pub use queries::read_model::{
     MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError, Schedule, ScheduleDetails,
     ScheduleEventDelivery, ScheduleEventSamplingSource, ScheduleEventSchedule, ScheduleEventStatus,

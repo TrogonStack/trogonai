@@ -8,6 +8,11 @@ mod schedule_id;
 /// queries decode it into these types (see [`decode`]).
 pub(crate) mod read_model;
 
+/// Shared with the alternative projection backends' query side
+/// ([`crate::projections::queries`]) so every backend decodes the stored view
+/// into the same read model.
+pub(crate) use decode::schedule_from_view;
+
 #[cfg(not(coverage))]
 pub use get::run as get_schedule;
 pub use get::{GetSchedule, GetSchedule as GetScheduleCommand};

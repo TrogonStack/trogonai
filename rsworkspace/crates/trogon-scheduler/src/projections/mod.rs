@@ -47,6 +47,15 @@
 
 mod schedules;
 
+/// An alternative read-model storage backend (Postgres) behind a storage trait.
+/// Additive: the NATS KV projection above is unchanged.
+pub mod backend;
+/// Query entry points for the alternative projection backends.
+pub mod queries;
+
+pub use backend::SchedulesProjectionStore;
+#[cfg(not(coverage))]
+pub use schedules::projector::SchedulesProjector;
 pub(crate) use schedules::storage;
 #[cfg(not(coverage))]
 pub(crate) use schedules::{catch_up_schedules_read_model, project_appended_events};

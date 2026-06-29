@@ -30,6 +30,11 @@ use storage::{SCHEDULES_CHECKPOINT_KEY, read_model_key};
 /// owned by the projection that defines that layout.
 pub(crate) mod storage;
 
+/// Drives an alternative projection backend from the event stream, reusing this
+/// module's fold. A child module so it can use the fold internals directly.
+#[cfg(not(coverage))]
+pub(crate) mod projector;
+
 // The schedules read-model projection: it folds the schedule event stream
 // (`v1` event protos) directly into the stored KV view (`projections_v1::ScheduleProjection`
 // protos). It deals only in protobuf — event proto in, KV proto out — and has no
