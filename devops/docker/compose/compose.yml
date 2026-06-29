@@ -45,6 +45,27 @@ services:
       start_period: 10s
       retries: 3
 
+  # Backing store for the optional Postgres schedules read-model projection
+  # (SCHEDULER_PROJECTION_BACKEND=postgres). The default NATS KV projection does
+  # not need this service.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-trogon}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-trogon}"
+      POSTGRES_DB: "${POSTGRES_DB:-trogon_scheduler}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trogon} -d ${POSTGRES_DB:-trogon_scheduler}"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+
   ngrok:
     image: ngrok/ngrok:3.39.6-alpine
     env_file:
@@ -73,3 +94,4 @@ services:
 
 volumes:
   nats_data:
+  postgres_data:

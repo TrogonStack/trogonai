@@ -11,7 +11,7 @@ use crate::commands::domain::{ScheduleId as DomainScheduleId, ScheduleIdError as
 /// be created can also be queried: the read model derives a token-safe KV key
 /// from the raw id, so ids the underlying NATS KV key syntax would reject (dots,
 /// slashes, `:`, `@`, non-ASCII) are still addressable here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScheduleId(String);
 
 #[derive(Debug, thiserror::Error)]

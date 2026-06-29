@@ -69,6 +69,9 @@ tokio-tungstenite = "=0.29.0"
 tower = "=0.5.3"
 tower-http = { version = "=0.6.8", features = ["trace"] }
 
+# Database
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
+
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.228", features = ["derive"] }
