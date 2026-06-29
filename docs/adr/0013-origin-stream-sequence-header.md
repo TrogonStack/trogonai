@@ -52,6 +52,9 @@ The current JetStream sequence values remain authoritative for processors,
 consumers, checkpoints, high-water marks, and optimistic concurrency decisions
 owned by the NATS adapter.
 
+Consumers must not use this header for JetStream consumption tracking,
+acknowledgements, resume position, or ordinary processor high-water marks.
+
 `Trogon-Origin-Stream-Sequence` is provenance metadata. It is not an optimistic
 concurrency token, not a checkpoint cursor by default, and not a per-aggregate
 version.
