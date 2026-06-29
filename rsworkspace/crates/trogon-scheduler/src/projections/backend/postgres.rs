@@ -107,8 +107,20 @@ where
 
 // ── proto <-> scalar conversions ──────────────────────────────────────────────
 
-fn timestamp_to_datetime(ts: &Timestamp) -> DateTime<Utc> {
-    Utc.timestamp_opt(ts.seconds, ts.nanos as u32).single().unwrap_or_default()
+/// Rejects an out-of-range protobuf timestamp instead of coercing it to the epoch,
+/// so malformed projection input cannot be persisted as a valid schedule time.
+fn timestamp_to_datetime(ts: &Timestamp) -> Result<DateTime<Utc>, SchedulerError> {
+    Utc.timestamp_opt(ts.seconds, ts.nanos as u32)
+        .single()
+        .ok_or_else(|| malformed_owned(format!("out-of-range timestamp (seconds={}, nanos={})", ts.seconds, ts.nanos)))
+}
+
+fn optional_datetime(ts: &MessageField<Timestamp>) -> Result<Option<DateTime<Utc>>, SchedulerError> {
+    ts.as_option().map(timestamp_to_datetime).transpose()
+}
+
+fn datetimes(values: &[Timestamp]) -> Result<Vec<DateTime<Utc>>, SchedulerError> {
+    values.iter().map(timestamp_to_datetime).collect()
 }
 
 fn datetime_to_timestamp(dt: &DateTime<Utc>) -> Timestamp {
@@ -341,7 +353,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             Vec<DateTime<Utc>>,
             Vec<DateTime<Utc>>,
         ) = match schedule {
-            ScheduleKind::At(inner) => ("at", inner.at.as_option().map(timestamp_to_datetime), None, None, None, None, None, vec![], vec![]),
+            ScheduleKind::At(inner) => ("at", optional_datetime(&inner.at)?, None, None, None, None, None, vec![], vec![]),
             ScheduleKind::Every(inner) => ("every", None, inner.every.as_option().map(|d| d.seconds), None, None, None, None, vec![], vec![]),
             ScheduleKind::Cron(inner) => (
                 "cron",
@@ -360,10 +372,10 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
                 None,
                 None,
                 Some(inner.rrule.clone()),
-                inner.dtstart.as_option().map(timestamp_to_datetime),
+                optional_datetime(&inner.dtstart)?,
                 timezone_text(&inner.timezone),
-                inner.rdate.iter().map(timestamp_to_datetime).collect(),
-                inner.exdate.iter().map(timestamp_to_datetime).collect(),
+                datetimes(&inner.rdate)?,
+                datetimes(&inner.exdate)?,
             ),
         };
 
@@ -427,8 +439,8 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         .bind(&view.schedule_id)
         .bind(status_text(view))
         .bind(view.completed.unwrap_or(false))
-        .bind(view.next_occurrence_at.as_option().map(timestamp_to_datetime))
-        .bind(view.last_occurrence_at.as_option().map(timestamp_to_datetime))
+        .bind(optional_datetime(&view.next_occurrence_at)?)
+        .bind(optional_datetime(&view.last_occurrence_at)?)
         .bind(schedule_kind)
         .bind(at_at)
         .bind(every_seconds)

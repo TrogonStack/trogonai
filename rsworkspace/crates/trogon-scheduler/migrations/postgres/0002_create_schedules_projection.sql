@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS schedules_projection (
     last_occurrence_at      TIMESTAMPTZ,
 
     -- schedule spec (oneof: at | every | cron | rrule)
-    schedule_kind           TEXT NOT NULL,
+    schedule_kind           TEXT NOT NULL CHECK (schedule_kind IN ('at', 'every', 'cron', 'rrule')),
     at_at                   TIMESTAMPTZ,
     every_seconds           BIGINT,
     cron_expr               TEXT,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS schedules_projection (
     rrule_exdate            TIMESTAMPTZ[] NOT NULL DEFAULT '{}',
 
     -- delivery (oneof: nats_message)
-    delivery_kind           TEXT NOT NULL,
+    delivery_kind           TEXT NOT NULL CHECK (delivery_kind IN ('nats_message')),
     delivery_subject        TEXT,
     delivery_ttl_seconds    BIGINT,
     delivery_source_subject TEXT,                     -- LatestFromSubject sampling source
