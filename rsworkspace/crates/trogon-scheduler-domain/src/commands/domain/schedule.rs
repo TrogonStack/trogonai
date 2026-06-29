@@ -307,34 +307,39 @@ fn strip_rrule_prefix(trimmed: &str) -> &str {
 fn validate_rrule_expression(rrule: &str) -> Result<(), RRuleExpressionError> {
     let mut has_count = false;
     let mut has_until = false;
+    let mut freq = None;
 
     for part in rrule.split(';') {
-        let Some((key, _)) = part.split_once('=') else {
-            return Err(RRuleExpressionError::Invalid {
-                rrule: rrule.to_string(),
-                source: Box::new(std::io::Error::other("RRULE parts must use KEY=VALUE")),
-            });
+        let Some((key, value)) = part.split_once('=') else {
+            return Err(invalid_rrule(rrule, "RRULE parts must use KEY=VALUE"));
         };
         match key {
+            "FREQ" => freq = Some(value),
             "COUNT" => has_count = true,
             "UNTIL" => has_until = true,
             "EXRULE" | "RSCALE" | "SKIP" => {
-                return Err(RRuleExpressionError::Invalid {
-                    rrule: rrule.to_string(),
-                    source: Box::new(std::io::Error::other(format!(
-                        "{key} is not supported by cron RRULE schedules"
-                    ))),
-                });
+                return Err(invalid_rrule(
+                    rrule,
+                    format!("{key} is not supported by cron RRULE schedules"),
+                ));
             }
             _ => {}
         }
     }
 
+    // FREQ is the one mandatory RRULE component (RFC 5545). Validate it here — wasm-safe, no
+    // `rrule` crate — so a missing or bogus frequency fails closed even in the guest build,
+    // where the full parse below is gated out.
+    match freq {
+        None => return Err(invalid_rrule(rrule, "RRULE must specify FREQ")),
+        Some(value) if !is_supported_frequency(value) => {
+            return Err(invalid_rrule(rrule, format!("unsupported FREQ '{value}'")));
+        }
+        Some(_) => {}
+    }
+
     if has_count && has_until {
-        return Err(RRuleExpressionError::Invalid {
-            rrule: rrule.to_string(),
-            source: Box::new(std::io::Error::other("COUNT and UNTIL cannot be used together")),
-        });
+        return Err(invalid_rrule(rrule, "COUNT and UNTIL cannot be used together"));
     }
 
     #[cfg(feature = "schedule-validation")]
@@ -347,6 +352,20 @@ fn validate_rrule_expression(rrule: &str) -> Result<(), RRuleExpressionError> {
     }
 
     Ok(())
+}
+
+fn invalid_rrule(rrule: &str, message: impl Into<String>) -> RRuleExpressionError {
+    RRuleExpressionError::Invalid {
+        rrule: rrule.to_string(),
+        source: Box::new(std::io::Error::other(message.into())),
+    }
+}
+
+fn is_supported_frequency(value: &str) -> bool {
+    matches!(
+        value,
+        "SECONDLY" | "MINUTELY" | "HOURLY" | "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -380,7 +399,8 @@ impl TimeZone {
 
     pub fn with_tzdb_version(timezone: impl Into<String>, tzdb_version: TzdbVersion) -> Result<Self, TimeZoneError> {
         let id = validate_timezone_token(timezone.into())?;
-        #[cfg(feature = "schedule-validation")]
+        // `chrono-tz` is a pure IANA lookup table (no wasm-bindgen), so semantic timezone
+        // validation runs in every build, guest included — an unknown zone is unrepresentable.
         chrono_tz::Tz::from_str(&id).map_err(|_| TimeZoneError::Invalid { timezone: id.clone() })?;
 
         Ok(Self { id, tzdb_version })
@@ -421,14 +441,7 @@ impl TryFrom<&str> for TimeZone {
 
 impl TzdbVersion {
     pub fn current() -> Self {
-        #[cfg(feature = "schedule-validation")]
-        {
-            Self(chrono_tz::IANA_TZDB_VERSION.to_string())
-        }
-        #[cfg(not(feature = "schedule-validation"))]
-        {
-            Self("wasm-guest".to_string())
-        }
+        Self(chrono_tz::IANA_TZDB_VERSION.to_string())
     }
 
     pub fn new(version: impl Into<String>) -> Result<Self, TzdbVersionError> {

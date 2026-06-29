@@ -10,14 +10,18 @@ workspace = true
 
 [features]
 default = ["schedule-validation"]
-schedule-validation = ["dep:chrono-tz", "dep:rrule"]
+# `rrule` pulls chrono's default `clock`/`wasmbind` features → wasm-bindgen, which would add
+# imports and break the guest's zero-import contract; only the full RRULE parse is gated behind
+# this feature. The wasm-safe validators (timezone, RRULE structure/FREQ) always run. `chrono-tz`
+# is import-clean (depends on chrono with default-features = false) so it stays unconditional.
+schedule-validation = ["dep:rrule"]
 runtime-snapshot = ["dep:trogon-decider-runtime", "trogonai-proto/runtime-snapshot", "trogonai-proto/runtime-host"]
 
 [dependencies]
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-chrono-tz = { version = "0.10", optional = true }
+chrono-tz = "0.10"
 cron = "0.15"
 rrule = { version = "0.14", optional = true }
 serde = { workspace = true }
