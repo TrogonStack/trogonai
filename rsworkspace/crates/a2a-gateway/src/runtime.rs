@@ -11,6 +11,8 @@ use trogon_std::env::ReadEnv;
 use crate::config::{Args, ConfigError, config_from_args};
 
 pub mod audit_publish;
+#[cfg(all(feature = "spicedb", not(coverage)))]
+pub mod dispatch;
 pub mod env;
 pub mod policy_stack;
 pub mod reply;
