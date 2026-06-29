@@ -53,9 +53,12 @@ async fn start() -> (ContainerAsync<Postgres>, PostgresSchedulesProjection) {
     let host = container.get_host().await.expect("container host");
     let port = container.get_host_port_ipv4(5432).await.expect("container port");
     let url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
-    let store = PostgresSchedulesProjection::connect(&url)
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&url)
         .await
-        .expect("connect pool and run migrations");
+        .expect("connect pool");
+    let store = PostgresSchedulesProjection::new(pool).await.expect("run migrations");
     (container, store)
 }
 

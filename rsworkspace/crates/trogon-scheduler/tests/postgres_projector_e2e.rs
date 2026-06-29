@@ -70,9 +70,12 @@ async fn projector_folds_event_stream_into_postgres() {
     let pg_host = pg_container.get_host().await.expect("postgres host");
     let pg_port = pg_container.get_host_port_ipv4(5432).await.expect("postgres port");
     let pg_url = format!("postgres://postgres:postgres@{pg_host}:{pg_port}/postgres");
-    let pg = PostgresSchedulesProjection::connect(&pg_url)
+    let pg_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&pg_url)
         .await
-        .expect("connect postgres + migrate");
+        .expect("connect postgres pool");
+    let pg = PostgresSchedulesProjection::new(pg_pool).await.expect("run migrations");
 
     // NATS with JetStream for the event store.
     let nats_cmd = NatsServerCmd::default().with_jetstream();

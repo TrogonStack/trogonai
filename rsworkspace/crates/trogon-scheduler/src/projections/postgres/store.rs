@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, TimeZone, Utc};
-use sqlx::postgres::{PgPoolOptions, PgRow};
+use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
 use crate::queries::ScheduleId;
@@ -41,26 +41,16 @@ pub struct PostgresSchedulesProjection {
 }
 
 impl PostgresSchedulesProjection {
-    /// Connects a pool to `database_url`, applies the embedded migrations, and
-    /// returns a ready backend.
-    pub async fn connect(database_url: &str) -> Result<Self, SchedulerError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
-            .await
-            .map_err(|source| SchedulerError::kv_source("failed to connect schedules Postgres pool", source))?;
+    /// Wraps a caller-provided connection pool and applies the embedded migrations.
+    /// The caller owns the pool and its connection configuration; this only ensures
+    /// the read-model schema exists.
+    pub async fn new(pool: PgPool) -> Result<Self, SchedulerError> {
         Self::run_migrations(&pool).await?;
         Ok(Self { pool })
     }
 
-    /// Builds a backend over an existing pool without running migrations. The
-    /// caller is responsible for having applied [`Self::run_migrations`].
-    pub const fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
     /// Applies the embedded schema migrations to `pool`.
-    pub async fn run_migrations(pool: &PgPool) -> Result<(), SchedulerError> {
+    async fn run_migrations(pool: &PgPool) -> Result<(), SchedulerError> {
         sqlx::migrate!("./migrations/postgres")
             .run(pool)
             .await
@@ -77,8 +67,6 @@ const SELECT_COLUMNS: &str = "SELECT schedule_id, status, completed, next_occurr
      delivery_kind, delivery_subject, delivery_ttl_seconds, delivery_source_subject, \
      message_content_type, message_body, message_headers \
      FROM schedules_projection";
-
-// ── error helpers ───────────────────────────────────────────────────────────
 
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(
@@ -108,8 +96,6 @@ where
     row.try_get::<T, _>(name)
         .map_err(|source| SchedulerError::kv_source("failed to read projected schedule column", source))
 }
-
-// ── proto <-> scalar conversions ──────────────────────────────────────────────
 
 /// Rejects an out-of-range protobuf timestamp instead of coercing it to the epoch,
 /// so malformed projection input cannot be persisted as a valid schedule time.
@@ -228,8 +214,6 @@ fn headers_from_json(value: &serde_json::Value) -> Result<Vec<projections_v1::He
         })
         .collect()
 }
-
-// ── row -> proto (read side) ──────────────────────────────────────────────────
 
 fn projection_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, SchedulerError> {
     let timezone: Option<String> = col(row, "timezone")?;
