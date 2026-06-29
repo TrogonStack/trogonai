@@ -10,6 +10,8 @@ use trogon_std::env::ReadEnv;
 
 use crate::config::{Args, ConfigError, config_from_args};
 
+pub mod env;
+
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
     /// Config resolution failed at boot — the binary cannot proceed.
