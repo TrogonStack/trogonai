@@ -62,6 +62,25 @@ version.
 When the header is absent, processors and projections must use the current
 JetStream stream sequence as usual.
 
+## Projection Provenance Rule
+
+For projection provenance, rebuild verification, diagnostics, and repair
+tooling, derive an effective origin stream sequence as follows:
+
+- Use `Trogon-Origin-Stream-Sequence` when present.
+- Otherwise use the current JetStream stream sequence from the consumed message
+  metadata.
+
+This rule is only for origin provenance. It does not change checkpoint,
+acknowledgement, resume, high-water mark, or optimistic concurrency behavior.
+
+For example, a restored event may be consumed from a replacement stream at
+JetStream stream sequence `9500` and carry
+`Trogon-Origin-Stream-Sequence: 120`. The projection checkpoints `9500` because
+that is the position it consumed. The projection may record or compare `120` as
+the event's original stream position for provenance, rebuild verification,
+diagnostics, or repair.
+
 ## Consequences
 
 - Event replay, restore, migration, and repair workflows can preserve the origin
