@@ -447,6 +447,69 @@ async fn live_gate_transport_error_returns_transport_error_per_agent() {
     );
 }
 
+#[tokio::test]
+async fn agent_view_gate_layer_from_env_returns_noop_when_disabled() {
+    let env = InMemoryEnv::new();
+    let layer = AgentViewGateLayer::from_env(&env).await.expect("noop ok");
+    assert!(!layer.gate.is_enabled());
+}
+
+#[tokio::test]
+async fn agent_view_gate_layer_from_env_errors_when_enabled_without_credentials() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_TIER1_SPICEDB_ENABLED, "true");
+    let err = AgentViewGateLayer::from_env(&env)
+        .await
+        .expect_err("missing creds must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::Connect(_)));
+}
+
+#[tokio::test]
+async fn agent_view_gate_layer_from_env_errors_when_endpoint_only() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_TIER1_SPICEDB_ENABLED, "true");
+    env.set(ENV_TIER1_SPICEDB_ENDPOINT, "https://spicedb.example/");
+    let err = AgentViewGateLayer::from_env(&env)
+        .await
+        .expect_err("endpoint without token must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::Connect(_)));
+}
+
+#[tokio::test]
+async fn agent_view_gate_layer_from_env_errors_when_token_only() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_TIER1_SPICEDB_ENABLED, "true");
+    env.set(ENV_TIER1_SPICEDB_TOKEN, "tok");
+    let err = AgentViewGateLayer::from_env(&env)
+        .await
+        .expect_err("token without endpoint must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::Connect(_)));
+}
+
+#[tokio::test]
+async fn agent_view_gate_layer_from_env_rejects_bad_endpoint_at_parse_time() {
+    // Endpoint that can't be parsed surfaces as InvalidEndpoint --
+    // operators see config errors distinct from transport blips.
+    let env = InMemoryEnv::new();
+    env.set(ENV_TIER1_SPICEDB_ENABLED, "true");
+    env.set(ENV_TIER1_SPICEDB_ENDPOINT, "");
+    env.set(ENV_TIER1_SPICEDB_TOKEN, "tok");
+    let err = AgentViewGateLayer::from_env(&env)
+        .await
+        .expect_err("empty endpoint must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::InvalidEndpoint(_)));
+}
+
+#[tokio::test]
+async fn live_agent_view_gate_connect_dials_unreachable_endpoint() {
+    let endpoint = SpiceDbEndpoint::parse("http://127.0.0.1:1").expect("uri-shaped");
+    let token = SpiceDbToken::parse("secret").expect("non-empty token");
+    let err = LiveAgentViewGate::connect(&endpoint, &token, ZedTokenTtl::from_secs(60))
+        .await
+        .expect_err("unreachable endpoint must error");
+    assert!(matches!(err, SpiceDbImportGateBuildError::Connect(_)));
+}
+
 #[test]
 fn parse_subject_id_strips_slash_and_colon_prefixes() {
     assert_eq!(parse_subject_id("user/alice"), Some("alice".to_owned()));
