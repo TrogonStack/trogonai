@@ -89,24 +89,32 @@ pub fn unix_epoch_ms() -> u64 {
 }
 
 /// Extract the JSON-RPC `params` object from a raw payload. Returns
-/// an empty object on any parse failure so the caller doesn't have
-/// to special-case "no params" vs "malformed" -- both shapes
-/// downstream behave identically (Tier-3 manifest lookups miss, the
-/// gate skips the skill).
+/// an empty object on any parse failure, missing field, or
+/// non-object value (arrays, scalars, `null`) so the caller can
+/// rely on `params` always being an object map -- both "no params"
+/// and "malformed" shapes downstream behave identically (Tier-3
+/// manifest lookups miss, the gate skips the skill).
 pub fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
-    serde_json::from_slice::<serde_json::Value>(payload)
+    let extracted = serde_json::from_slice::<serde_json::Value>(payload)
         .ok()
-        .and_then(|value| value.get("params").cloned())
-        .unwrap_or_else(|| serde_json::Value::Object(Default::default()))
+        .and_then(|value| value.get("params").cloned());
+    match extracted {
+        Some(value) if value.is_object() => value,
+        _ => serde_json::Value::Object(Default::default()),
+    }
 }
 
-/// Audit-side correlation id derived from the JSON-RPC request id
-/// header. Returns `None` when the payload doesn't carry an id (a
-/// notification or malformed envelope) so the audit consumer can
-/// route those to the no-correlation bucket without trying to join
-/// on a synthesized key.
+/// Audit-side correlation id derived from the JSON-RPC request id.
+/// Returns `None` when the payload doesn't carry an id (a
+/// notification or malformed envelope) AND when the id is the
+/// JSON-RPC `null` variant -- both shapes mean "no caller
+/// correlation possible", so synthesizing a string would alias
+/// unrelated envelopes onto the same audit row.
 pub fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
-    a2a_nats::jsonrpc::extract_request_id_from_body(payload).map(|id| id.to_string())
+    match a2a_nats::jsonrpc::extract_request_id_from_body(payload)? {
+        a2a_nats::JsonRpcId::Null => None,
+        id => Some(id.to_string()),
+    }
 }
 
 fn parse_bool_flag<E: ReadEnv>(env: &E, key: &str) -> bool {

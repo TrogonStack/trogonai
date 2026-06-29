@@ -135,6 +135,38 @@ fn json_rpc_params_extracts_present_params_object() {
 }
 
 #[test]
+fn json_rpc_params_normalizes_array_to_empty_object() {
+    // The helper's contract is "always returns an object". A
+    // payload with `params: []` (positional JSON-RPC) would
+    // otherwise leak an array into Tier-3 manifest-lookup
+    // codepaths that .get(key) on a Value::Object.
+    let payload = br#"{"jsonrpc":"2.0","id":"1","method":"x","params":[]}"#;
+    assert_eq!(json_rpc_params(payload), serde_json::Value::Object(Default::default()));
+}
+
+#[test]
+fn json_rpc_params_normalizes_null_to_empty_object() {
+    let payload = br#"{"jsonrpc":"2.0","id":"1","method":"x","params":null}"#;
+    assert_eq!(json_rpc_params(payload), serde_json::Value::Object(Default::default()));
+}
+
+#[test]
+fn json_rpc_params_normalizes_scalar_to_empty_object() {
+    let payload = br#"{"jsonrpc":"2.0","id":"1","method":"x","params":42}"#;
+    assert_eq!(json_rpc_params(payload), serde_json::Value::Object(Default::default()));
+}
+
+#[test]
+fn json_rpc_audit_req_id_returns_none_for_null_id() {
+    // A JSON-RPC envelope with `"id": null` mustn't synthesize a
+    // correlation key -- the audit consumer joins on this and
+    // `"null"` would alias unrelated null-id envelopes onto the
+    // same row.
+    let payload = br#"{"jsonrpc":"2.0","id":null,"method":"x","params":{}}"#;
+    assert!(json_rpc_audit_req_id(payload).is_none());
+}
+
+#[test]
 fn json_rpc_audit_req_id_returns_none_for_notification() {
     // A JSON-RPC notification (no id field) must not synthesize a
     // correlation key -- the audit consumer joins on this and a
