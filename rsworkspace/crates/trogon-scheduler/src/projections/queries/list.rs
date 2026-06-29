@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, allow(unused_imports))]
+
 use crate::error::SchedulerError;
 use crate::projections::backend::SchedulesProjectionStore;
 use crate::queries::ListSchedules;
@@ -5,6 +7,7 @@ use crate::queries::read_model::Schedule;
 use crate::queries::schedule_from_view;
 
 /// Lists every schedule from a projection backend.
+#[cfg(not(coverage))]
 pub async fn run(
     store: &dyn SchedulesProjectionStore,
     _command: ListSchedules,

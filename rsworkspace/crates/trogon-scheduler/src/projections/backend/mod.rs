@@ -16,10 +16,13 @@ use async_trait::async_trait;
 
 use crate::{error::SchedulerError, projections_v1};
 
-#[cfg(feature = "postgres")]
+// The Postgres backend reaches a live database, so it is integration-tested
+// (testcontainers) rather than unit-covered; exclude it from the coverage build
+// the same way the NATS store/query paths are.
+#[cfg(all(feature = "postgres", not(coverage)))]
 pub mod postgres;
 
-#[cfg(feature = "postgres")]
+#[cfg(all(feature = "postgres", not(coverage)))]
 pub use postgres::PostgresSchedulesProjection;
 
 /// Storage for the schedules read model: point/list reads, upserts, deletes, the

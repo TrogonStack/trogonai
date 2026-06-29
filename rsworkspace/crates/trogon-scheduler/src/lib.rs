@@ -30,13 +30,17 @@ pub use error::{ScheduleSpecError, SchedulerError};
 pub use projections::SchedulesProjectionStore;
 #[cfg(not(coverage))]
 pub use projections::SchedulesProjector;
-#[cfg(feature = "postgres")]
+#[cfg(all(feature = "postgres", not(coverage)))]
 pub use projections::backend::PostgresSchedulesProjection;
 pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 
 /// Query entry points for the alternative projection backends (e.g. Postgres),
 /// reading through [`SchedulesProjectionStore`]. The default NATS read-model
 /// queries remain at the crate root ([`get_schedule`], [`list_schedules`]).
+///
+/// These read through a live backend, so (like the NATS query path) they are
+/// integration-tested and excluded from the coverage build.
+#[cfg(not(coverage))]
 pub mod projection_queries {
     pub use crate::projections::queries::{get_schedule, list_schedules};
 }

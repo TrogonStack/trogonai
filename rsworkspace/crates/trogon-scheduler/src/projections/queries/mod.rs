@@ -11,5 +11,7 @@
 mod get;
 mod list;
 
+#[cfg(not(coverage))]
 pub use get::run as get_schedule;
+#[cfg(not(coverage))]
 pub use list::run as list_schedules;
