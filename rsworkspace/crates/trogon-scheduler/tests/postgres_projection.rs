@@ -146,6 +146,64 @@ async fn schedule_fields_are_stored_as_typed_columns() {
 
 #[tokio::test]
 #[ignore = "requires Docker for testcontainers Postgres"]
+async fn non_utf8_message_body_round_trips() {
+    let (_container, projection) = start().await;
+
+    let bytes = vec![0xff, 0xfe, 0x00, 0x01, 0x80];
+    let mut view = view("binary");
+    view.message = MessageField::some(projections_v1::Message {
+        content: MessageField::some(trogonai_proto::content::v1alpha1::Content {
+            content_type: "application/octet-stream".to_string(),
+            data: bytes.clone(),
+        }),
+        headers: Vec::new(),
+    });
+    projection.upsert_view(&view).await.unwrap();
+
+    let stored = projection.get_view("binary").await.unwrap().expect("binary present");
+    let data = stored
+        .message
+        .as_option()
+        .and_then(|message| message.content.as_option())
+        .map(|content| content.data.clone())
+        .expect("content present");
+    assert_eq!(data, bytes, "non-UTF-8 body must round-trip byte-for-byte");
+}
+
+#[tokio::test]
+#[ignore = "requires Docker for testcontainers Postgres"]
+async fn corrupt_row_is_unreadable_not_silently_repaired() {
+    let (_container, projection) = start().await;
+
+    // A cron row whose required cron_expr is missing: it must surface as an error,
+    // not be returned as a defaulted (wrong) schedule.
+    sqlx::query(
+        "INSERT INTO schedules_projection (schedule_id, status, schedule_kind, delivery_kind) \
+         VALUES ('broken', 'scheduled', 'cron', 'nats_message')",
+    )
+    .execute(projection.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        projection.get_view("broken").await.is_err(),
+        "a corrupt row must be unreadable, not repaired"
+    );
+
+    // And a corrupt row must not suppress the readable ones in a listing.
+    projection.upsert_view(&view("ok")).await.unwrap();
+    let ids: Vec<String> = projection
+        .list_views()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|view| view.schedule_id)
+        .collect();
+    assert_eq!(ids, vec!["ok".to_string()], "list skips the corrupt row, keeps the rest");
+}
+
+#[tokio::test]
+#[ignore = "requires Docker for testcontainers Postgres"]
 async fn projection_queries_read_through_the_backend() {
     let (_container, projection) = start().await;
     projection.upsert_view(&view("orders")).await.unwrap();

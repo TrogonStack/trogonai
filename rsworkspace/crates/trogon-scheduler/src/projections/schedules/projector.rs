@@ -13,6 +13,7 @@
 
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_nats::jetstream;
@@ -44,6 +45,11 @@ impl SchedulesProjector {
     /// Folds the event stream from the backend's checkpoint up to the current tail,
     /// then returns. Idempotent: re-running re-folds only what is past the
     /// checkpoint, and folding an already-applied event yields the same view.
+    ///
+    /// On a from-zero rebuild (checkpoint at 0) it also reconciles: the full replay
+    /// is authoritative for which schedules should exist, so any stale row left in
+    /// the backend (a reused database, a reset checkpoint) is removed before the
+    /// checkpoint is written.
     pub async fn catch_up<J>(&self, js: &J) -> Result<(), SchedulerError>
     where
         J: JetStreamGetStream<Stream = jetstream::stream::Stream>,
@@ -56,15 +62,24 @@ impl SchedulesProjector {
             return Ok(());
         }
         let target = info.state.last_sequence;
-        if self.store.read_checkpoint().await? >= target {
+        let checkpoint = self.store.read_checkpoint().await?;
+        if checkpoint >= target {
             return Ok(());
+        }
+
+        // A from-zero rebuild replays the whole log, folding each stream from
+        // empty, so the store must start empty: clearing it both satisfies that and
+        // drops any orphaned rows from a reused database or a reset checkpoint. A
+        // resume (checkpoint > 0) only sees a suffix, so it folds onto the existing
+        // rows and must not clear.
+        if checkpoint == 0 {
+            self.store.reconcile(&HashSet::new()).await?;
         }
 
         // Resume after the last folded sequence; the ordered consumer filters to
         // schedule-event subjects and replays in per-subject order.
-        let start = self.store.read_checkpoint().await?.saturating_add(1);
         let consumer = stream
-            .create_consumer(event_replay_consumer_config(start))
+            .create_consumer(event_replay_consumer_config(checkpoint.saturating_add(1)))
             .await
             .map_err(|source| SchedulerError::event_source("failed to create projector catch-up consumer", source))?;
         let mut messages = consumer.messages().await.map_err(|source| {
@@ -76,12 +91,14 @@ impl SchedulesProjector {
             })?;
             let sequence = event_message_sequence(&message, "failed to read projector catch-up event metadata")?;
             self.project_message(&message).await?;
-            self.store.write_checkpoint(sequence).await?;
             if sequence >= target {
                 break;
             }
         }
-        Ok(())
+
+        // Advance the checkpoint once the pass is complete; a crash mid-rebuild
+        // leaves it unmoved so the next start re-folds (idempotently) from empty.
+        self.store.write_checkpoint(target).await
     }
 
     /// Tails the stream from the backend's checkpoint indefinitely, folding each

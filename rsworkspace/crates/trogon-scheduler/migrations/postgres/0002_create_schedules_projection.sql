@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS schedules_projection (
     delivery_ttl_seconds    BIGINT,
     delivery_source_subject TEXT,                     -- LatestFromSubject sampling source
 
-    -- message
+    -- message (body is raw bytes so non-UTF-8 payloads round-trip losslessly)
     message_content_type    TEXT,
-    message_body            TEXT,
+    message_body            BYTEA,
     message_headers         JSONB NOT NULL DEFAULT '[]',
 
     inserted_at             TIMESTAMPTZ NOT NULL DEFAULT now(),

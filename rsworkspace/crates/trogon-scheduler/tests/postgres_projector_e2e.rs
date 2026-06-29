@@ -10,13 +10,37 @@ use std::time::Duration;
 
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::postgres::Postgres;
+use buffa::MessageField;
 use testcontainers_modules::testcontainers::ImageExt;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId,
-    SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries,
+    SchedulesProjectionStore, SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries,
+    projections_v1,
 };
+
+/// A complete-but-event-less view, used to seed an orphan row.
+fn orphan_view(id: &str) -> projections_v1::ScheduleProjection {
+    projections_v1::ScheduleProjection {
+        schedule_id: id.to_string(),
+        schedule: MessageField::some(projections_v1::Schedule {
+            kind: Some(projections_v1::schedule::Every { every: MessageField::none() }.into()),
+        }),
+        delivery: MessageField::some(projections_v1::Delivery {
+            kind: Some(
+                projections_v1::delivery::NatsMessage {
+                    subject: "agent.run".to_string(),
+                    ttl: MessageField::none(),
+                    source: MessageField::none(),
+                }
+                .into(),
+            ),
+        }),
+        message: MessageField::some(projections_v1::Message::default()),
+        ..Default::default()
+    }
+}
 
 fn base_schedule(id: &str) -> CreateSchedule {
     CreateSchedule {
@@ -103,4 +127,19 @@ async fn projector_folds_event_stream_into_postgres() {
             .len(),
         2
     );
+
+    // A stale row with no backing events plus a reset checkpoint: a from-zero
+    // catch-up must reconcile it away.
+    pg.upsert_view(&orphan_view("ghost")).await.expect("seed orphan");
+    pg.write_checkpoint(0).await.expect("reset checkpoint");
+    projector.catch_up(&js).await.expect("rebuild from zero");
+
+    let ids: Vec<String> = projection_queries::list_schedules(&pg, ListSchedulesCommand)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|schedule| schedule.id)
+        .collect();
+    assert!(!ids.contains(&"ghost".to_string()), "orphan must be reconciled away: {ids:?}");
+    assert_eq!(ids.len(), 2, "the two event-backed schedules survive: {ids:?}");
 }

@@ -90,6 +90,13 @@ fn malformed_owned(context: String) -> SchedulerError {
     SchedulerError::kv_source("projected schedule view is malformed", std::io::Error::other(context))
 }
 
+/// A discriminator-required column must be present: a NULL means the row is
+/// corrupt, which must surface as an error so `list_views` skips it rather than
+/// returning a defaulted, wrong schedule.
+fn require<T>(value: Option<T>, field: &'static str) -> Result<T, SchedulerError> {
+    value.ok_or_else(|| malformed(field))
+}
+
 fn col<'r, T>(row: &'r PgRow, name: &'static str) -> Result<T, SchedulerError>
 where
     T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
@@ -178,21 +185,29 @@ fn headers_to_json(view: &projections_v1::ScheduleProjection) -> serde_json::Val
     )
 }
 
-fn headers_from_json(value: &serde_json::Value) -> Vec<projections_v1::Header> {
-    value
+fn headers_from_json(value: &serde_json::Value) -> Result<Vec<projections_v1::Header>, SchedulerError> {
+    let entries = value
         .as_array()
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    Some(projections_v1::Header {
-                        name: entry.get("name")?.as_str()?.to_string(),
-                        value: entry.get("value")?.as_str()?.to_string(),
-                    })
-                })
-                .collect()
+        .ok_or_else(|| malformed("message_headers is not a JSON array"))?;
+    // A malformed entry means the row is corrupt; reject rather than silently
+    // dropping it so the bad row surfaces as unreadable.
+    entries
+        .iter()
+        .map(|entry| {
+            let name = entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| malformed("message header entry missing a string name"))?;
+            let value = entry
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| malformed("message header entry missing a string value"))?;
+            Ok(projections_v1::Header {
+                name: name.to_string(),
+                value: value.to_string(),
+            })
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 // ── row -> proto (read side) ──────────────────────────────────────────────────
@@ -210,7 +225,7 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
         }
         .into(),
         "cron" => projections_v1::schedule::Cron {
-            expr: col::<Option<String>>(row, "cron_expr")?.unwrap_or_default(),
+            expr: require(col(row, "cron_expr")?, "cron schedule missing cron_expr")?,
             timezone: optional_timezone(timezone),
         }
         .into(),
@@ -219,7 +234,7 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
             let exdate: Vec<DateTime<Utc>> = col(row, "rrule_exdate")?;
             projections_v1::schedule::RRule {
                 dtstart: optional_timestamp(col(row, "rrule_dtstart")?),
-                rrule: col::<Option<String>>(row, "rrule")?.unwrap_or_default(),
+                rrule: require(col(row, "rrule")?, "rrule schedule missing rrule")?,
                 timezone: optional_timezone(timezone),
                 rdate: rdate.iter().map(datetime_to_timestamp).collect(),
                 exdate: exdate.iter().map(datetime_to_timestamp).collect(),
@@ -232,7 +247,7 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
     let delivery_kind: String = col(row, "delivery_kind")?;
     let delivery: DeliveryKind = match delivery_kind.as_str() {
         "nats_message" => projections_v1::delivery::NatsMessage {
-            subject: col::<Option<String>>(row, "delivery_subject")?.unwrap_or_default(),
+            subject: require(col(row, "delivery_subject")?, "nats_message delivery missing delivery_subject")?,
             ttl: optional_duration(col(row, "delivery_ttl_seconds")?),
             source: col::<Option<String>>(row, "delivery_source_subject")?.map_or_else(MessageField::none, |subject| {
                 MessageField::some(projections_v1::delivery::nats_message::Source {
@@ -245,14 +260,15 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
     };
 
     let content_type: Option<String> = col(row, "message_content_type")?;
-    let body: Option<String> = col(row, "message_body")?;
+    let body: Option<Vec<u8>> = col(row, "message_body")?;
     let headers_json: serde_json::Value = col(row, "message_headers")?;
+    // content_type and body are written together, so a row with only one is corrupt.
     let content = match (content_type, body) {
         (None, None) => MessageField::none(),
-        (content_type, body) => MessageField::some(trogonai_proto::content::v1alpha1::Content {
-            content_type: content_type.unwrap_or_default(),
-            data: body.unwrap_or_default().into_bytes(),
-        }),
+        (Some(content_type), Some(data)) => {
+            MessageField::some(trogonai_proto::content::v1alpha1::Content { content_type, data })
+        }
+        _ => return Err(malformed("message has only one of content_type/body")),
     };
 
     let status: String = col(row, "status")?;
@@ -266,7 +282,7 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
         delivery: MessageField::some(projections_v1::Delivery { kind: Some(delivery) }),
         message: MessageField::some(projections_v1::Message {
             content,
-            headers: headers_from_json(&headers_json),
+            headers: headers_from_json(&headers_json)?,
         }),
     })
 }
@@ -370,13 +386,12 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             ),
         };
 
-        let (message_content_type, message_body) = match view.message.as_option().and_then(|m| m.content.as_option()) {
-            Some(content) => (
-                Some(content.content_type.clone()),
-                Some(String::from_utf8_lossy(&content.data).into_owned()),
-            ),
-            None => (None, None),
-        };
+        let (message_content_type, message_body): (Option<String>, Option<Vec<u8>>) =
+            match view.message.as_option().and_then(|m| m.content.as_option()) {
+                // Store raw bytes so non-UTF-8 payloads round-trip losslessly.
+                Some(content) => (Some(content.content_type.clone()), Some(content.data.clone())),
+                None => (None, None),
+            };
         let message_headers = headers_to_json(view);
 
         sqlx::query(
