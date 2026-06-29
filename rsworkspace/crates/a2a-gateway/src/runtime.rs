@@ -11,6 +11,8 @@ use trogon_std::env::ReadEnv;
 use crate::config::{Args, ConfigError, config_from_args};
 
 pub mod env;
+#[cfg(feature = "spicedb")]
+pub mod tier1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
