@@ -9,10 +9,21 @@ use crate::import_check::{ImportCheckError, assert_zero_imports};
 pub enum SimError {
     #[error(transparent)]
     Import(#[from] ImportCheckError),
-    #[error("failed to configure wasmtime engine: {0}")]
-    Engine(String),
-    #[error("failed to compile wasm component: {0}")]
-    Compile(#[from] wasmtime::Error),
+    #[error("failed to configure wasmtime engine")]
+    Engine {
+        #[source]
+        source: wasmtime::Error,
+    },
+    #[error("failed to compile wasm component")]
+    Compile {
+        #[source]
+        source: wasmtime::Error,
+    },
+    #[error("failed to instantiate wasm component")]
+    Instantiate {
+        #[source]
+        source: wasmtime::Error,
+    },
 }
 
 /// Loaded decider component ready to instantiate in-memory test sessions.
@@ -27,8 +38,8 @@ impl SimHost {
 
         let mut config = Config::new();
         config.wasm_component_model(true);
-        let engine = Engine::new(&config).map_err(|err| SimError::Engine(err.to_string()))?;
-        let component = Component::new(&engine, bytes)?;
+        let engine = Engine::new(&config).map_err(|source| SimError::Engine { source })?;
+        let component = Component::new(&engine, bytes).map_err(|source| SimError::Compile { source })?;
 
         Ok(Self { engine, component })
     }
@@ -36,7 +47,8 @@ impl SimHost {
     pub fn instantiate<T>(&self, host_state: T) -> Result<SimInstance<T>, SimError> {
         let linker = Linker::new(&self.engine);
         let mut store = Store::new(&self.engine, host_state);
-        let bindings = Decider::instantiate(&mut store, &self.component, &linker)?;
+        let bindings = Decider::instantiate(&mut store, &self.component, &linker)
+            .map_err(|source| SimError::Instantiate { source })?;
         Ok(SimInstance { store, bindings })
     }
 }

@@ -166,7 +166,10 @@ fn then_accepted_reports_rejection_mismatch() {
         .then_accepted()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("expected acceptance, got rejection"), "{error}");
+    assert!(
+        error.to_string().contains("expected acceptance, got rejection"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -179,7 +182,7 @@ fn then_accepted_reports_fault_mismatch() {
         .then_accepted()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("expected acceptance, got fault"), "{error}");
+    assert!(error.to_string().contains("expected acceptance, got fault"), "{error}");
 }
 
 #[test]
@@ -216,7 +219,7 @@ fn then_error_reports_rejection_mismatch() {
         .then_error("some-other-code")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("got rejection: rejected"), "{error}");
+    assert!(error.to_string().contains("got rejection: rejected"), "{error}");
 }
 
 #[test]
@@ -229,7 +232,7 @@ fn then_error_reports_fault_mismatch() {
         .then_error("some-other-code")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("got fault: invalid-command"), "{error}");
+    assert!(error.to_string().contains("got fault: invalid-command"), "{error}");
 }
 
 #[test]
@@ -242,7 +245,7 @@ fn then_error_reports_unexpected_events() {
         .then_error("rejected")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("got 1 event(s)"), "{error}");
+    assert!(error.to_string().contains("got 1 event(s)"), "{error}");
 }
 
 #[test]
@@ -267,7 +270,10 @@ fn then_rejected_reports_event_count() {
         .then_rejected()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("expected rejection, got 1 event(s)"), "{error}");
+    assert!(
+        error.to_string().contains("expected rejection, got 1 event(s)"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -280,7 +286,7 @@ fn then_rejected_reports_fault_mismatch() {
         .then_rejected()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("expected rejection, got fault"), "{error}");
+    assert!(error.to_string().contains("expected rejection, got fault"), "{error}");
 }
 
 #[test]
@@ -293,7 +299,7 @@ fn then_events_reports_count_mismatch() {
         .then_events([])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("expected 0 event(s), got 1"), "{error}");
+    assert!(error.to_string().contains("expected 0 event(s), got 1"), "{error}");
 }
 
 #[test]
@@ -306,7 +312,7 @@ fn then_events_reports_payload_mismatch() {
         .then_events([schedule_created_event("other")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("event 0 mismatch"), "{error}");
+    assert!(error.to_string().contains("event 0 mismatch"), "{error}");
 }
 
 #[test]
@@ -319,7 +325,7 @@ fn then_events_reports_fault() {
         .then_events([schedule_created_event("backup")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("faulted: invalid-command"), "{error}");
+    assert!(error.to_string().contains("faulted: invalid-command"), "{error}");
 }
 
 #[test]
@@ -328,7 +334,7 @@ fn run_requires_a_command() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new().then_rejected().run(&mut instance).unwrap_err();
-    assert!(error.contains("scenario missing .when(...)"), "{error}");
+    assert!(error.to_string().contains("scenario missing .when(...)"), "{error}");
 }
 
 #[test]
@@ -340,7 +346,10 @@ fn run_requires_a_then_expectation() {
         .when(create_command("backup"))
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("scenario missing .then_events(...)"), "{error}");
+    assert!(
+        error.to_string().contains("scenario missing .then_events(...)"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -353,7 +362,7 @@ fn then_events_reports_rejection() {
         .then_events([schedule_created_event("backup")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.contains("rejected:"), "{error}");
+    assert!(error.to_string().contains("rejected:"), "{error}");
 }
 
 #[test]

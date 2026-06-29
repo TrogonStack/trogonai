@@ -2,6 +2,72 @@ use trogon_decider_wit::host;
 
 use crate::host::SimInstance;
 
+/// Typed failure from running a [`SimScenario`]: a Wasmtime/session fault, an evolve error, or a
+/// then-expectation mismatch. Each variant keeps its structured context (the source Wasmtime error
+/// or the domain error's code/message) instead of flattening it into a string.
+#[derive(Debug, thiserror::Error)]
+pub enum ScenarioError {
+    #[error("scenario missing .when(...)")]
+    MissingWhen,
+    #[error("scenario missing .then_events(...) or .then_rejected()")]
+    MissingExpectation,
+    #[error("failed to open session")]
+    OpenSession {
+        #[source]
+        source: wasmtime::Error,
+    },
+    #[error("failed to call evolve")]
+    EvolveCall {
+        #[source]
+        source: wasmtime::Error,
+    },
+    #[error("failed to call decide")]
+    DecideCall {
+        #[source]
+        source: wasmtime::Error,
+    },
+    #[error("evolve failed: {code} — {message}")]
+    Evolve { code: String, message: String },
+    #[error("expected error '{expected}', got rejection: {code} — {message}")]
+    ErrorGotRejection {
+        expected: String,
+        code: String,
+        message: String,
+    },
+    #[error("expected error '{expected}', got fault: {code} — {message}")]
+    ErrorGotFault {
+        expected: String,
+        code: String,
+        message: String,
+    },
+    #[error("expected error '{expected}', got {count} event(s)")]
+    ErrorGotEvents { expected: String, count: usize },
+    #[error("expected rejection, got {count} event(s)")]
+    RejectionGotEvents { count: usize },
+    #[error("expected rejection, got fault: {code} — {message}")]
+    RejectionGotFault { code: String, message: String },
+    #[error("expected acceptance, got rejection: {code} — {message}")]
+    AcceptanceGotRejection { code: String, message: String },
+    #[error("expected acceptance, got fault: {code} — {message}")]
+    AcceptanceGotFault { code: String, message: String },
+    #[error("rejected: {code} — {message}")]
+    EventsGotRejection { code: String, message: String },
+    #[error("faulted: {code} — {message}")]
+    EventsGotFault { code: String, message: String },
+    #[error("expected {expected} event(s), got {actual}")]
+    EventCountMismatch { expected: usize, actual: usize },
+    #[error(
+        "event {index} mismatch: got type={got_type} payload={got_payload:?}, want type={want_type} payload={want_payload:?}"
+    )]
+    EventMismatch {
+        index: usize,
+        got_type: String,
+        got_payload: Vec<u8>,
+        want_type: String,
+        want_payload: Vec<u8>,
+    },
+}
+
 /// Fluent given/when/then helper over a loaded WASM decider component.
 #[must_use = "sim scenarios must be completed with .run()"]
 pub struct SimScenario {
@@ -71,71 +137,94 @@ impl SimScenario {
         self
     }
 
-    pub fn run<T>(self, instance: &mut SimInstance<T>) -> Result<(), String> {
-        let command = self.when.ok_or_else(|| "scenario missing .when(...)".to_string())?;
+    pub fn run<T>(self, instance: &mut SimInstance<T>) -> Result<(), ScenarioError> {
+        let command = self.when.ok_or(ScenarioError::MissingWhen)?;
 
-        let mut session = instance.open_session(None).map_err(|err| err.to_string())?;
+        let mut session = instance
+            .open_session(None)
+            .map_err(|source| ScenarioError::OpenSession { source })?;
 
         if !self.given.is_empty() {
             session
                 .evolve(&self.given)
-                .map_err(|err| err.to_string())?
-                .map_err(|err| format!("evolve failed: {} — {}", err.code, err.message))?;
+                .map_err(|source| ScenarioError::EvolveCall { source })?
+                .map_err(|err| ScenarioError::Evolve {
+                    code: err.code,
+                    message: err.message,
+                })?;
         }
 
-        let outcome = session.decide(&command).map_err(|err| err.to_string())?;
+        let outcome = session
+            .decide(&command)
+            .map_err(|source| ScenarioError::DecideCall { source })?;
 
         if let Some(expected) = self.expect_error {
             let matches = |err: &host::DomainError| err.code == expected || err.message == expected;
             match outcome {
                 Err(host::DecideError::Rejected(err)) | Err(host::DecideError::Faulted(err)) if matches(&err) => Ok(()),
-                Err(host::DecideError::Rejected(err)) => Err(format!(
-                    "expected error '{expected}', got rejection: {} — {}",
-                    err.code, err.message
-                )),
-                Err(host::DecideError::Faulted(err)) => Err(format!(
-                    "expected error '{expected}', got fault: {} — {}",
-                    err.code, err.message
-                )),
-                Ok(events) => Err(format!("expected error '{expected}', got {} event(s)", events.len())),
+                Err(host::DecideError::Rejected(err)) => Err(ScenarioError::ErrorGotRejection {
+                    expected,
+                    code: err.code,
+                    message: err.message,
+                }),
+                Err(host::DecideError::Faulted(err)) => Err(ScenarioError::ErrorGotFault {
+                    expected,
+                    code: err.code,
+                    message: err.message,
+                }),
+                Ok(events) => Err(ScenarioError::ErrorGotEvents {
+                    expected,
+                    count: events.len(),
+                }),
             }
         } else if self.expect_rejected {
             match outcome {
                 Err(host::DecideError::Rejected(_)) => Ok(()),
-                Ok(events) => Err(format!("expected rejection, got {} event(s)", events.len())),
-                Err(host::DecideError::Faulted(err)) => {
-                    Err(format!("expected rejection, got fault: {} — {}", err.code, err.message))
-                }
+                Ok(events) => Err(ScenarioError::RejectionGotEvents { count: events.len() }),
+                Err(host::DecideError::Faulted(err)) => Err(ScenarioError::RejectionGotFault {
+                    code: err.code,
+                    message: err.message,
+                }),
             }
         } else if self.expect_accepted {
             match outcome {
                 Ok(_) => Ok(()),
-                Err(host::DecideError::Rejected(err)) => Err(format!(
-                    "expected acceptance, got rejection: {} — {}",
-                    err.code, err.message
-                )),
-                Err(host::DecideError::Faulted(err)) => Err(format!(
-                    "expected acceptance, got fault: {} — {}",
-                    err.code, err.message
-                )),
+                Err(host::DecideError::Rejected(err)) => Err(ScenarioError::AcceptanceGotRejection {
+                    code: err.code,
+                    message: err.message,
+                }),
+                Err(host::DecideError::Faulted(err)) => Err(ScenarioError::AcceptanceGotFault {
+                    code: err.code,
+                    message: err.message,
+                }),
             }
         } else {
-            let expected = self
-                .expect_events
-                .ok_or_else(|| "scenario missing .then_events(...) or .then_rejected()".to_string())?;
+            let expected = self.expect_events.ok_or(ScenarioError::MissingExpectation)?;
             let actual = outcome.map_err(|err| match err {
-                host::DecideError::Rejected(err) => format!("rejected: {} — {}", err.code, err.message),
-                host::DecideError::Faulted(err) => format!("faulted: {} — {}", err.code, err.message),
+                host::DecideError::Rejected(err) => ScenarioError::EventsGotRejection {
+                    code: err.code,
+                    message: err.message,
+                },
+                host::DecideError::Faulted(err) => ScenarioError::EventsGotFault {
+                    code: err.code,
+                    message: err.message,
+                },
             })?;
             if actual.len() != expected.len() {
-                return Err(format!("expected {} event(s), got {}", expected.len(), actual.len()));
+                return Err(ScenarioError::EventCountMismatch {
+                    expected: expected.len(),
+                    actual: actual.len(),
+                });
             }
             for (index, (got, want)) in actual.iter().zip(expected.iter()).enumerate() {
                 if !events_match(got, want) {
-                    return Err(format!(
-                        "event {index} mismatch: got type={} payload={:?}, want type={} payload={:?}",
-                        got.type_, got.payload, want.type_, want.payload
-                    ));
+                    return Err(ScenarioError::EventMismatch {
+                        index,
+                        got_type: got.type_.clone(),
+                        got_payload: got.payload.clone(),
+                        want_type: want.type_.clone(),
+                        want_payload: want.payload.clone(),
+                    });
                 }
             }
             Ok(())

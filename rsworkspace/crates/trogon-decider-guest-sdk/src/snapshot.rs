@@ -93,14 +93,17 @@ fn decode_snapshot_frame(bytes: &[u8]) -> Result<(String, &[u8]), SnapshotDecode
     while offset < bytes.len() {
         let (tag, wire_type, next) = read_key(bytes, offset)?;
         offset = next;
-        match tag {
-            1 => {
+        // Gate the known fields on their expected length-delimited wire type; any other
+        // (tag, wire_type) pairing is skipped (with bounds-checked advancement) so a corrupt
+        // frame fails closed at the missing-field checks rather than being misread.
+        match (tag, wire_type) {
+            (1, 2) => {
                 let (value, next) = read_length_delimited(bytes, offset)?;
                 schema_version =
                     Some(String::from_utf8(value.to_vec()).map_err(SnapshotDecodeError::SchemaVersionUtf8)?);
                 offset = next;
             }
-            2 => {
+            (2, 2) => {
                 let (value, next) = read_length_delimited(bytes, offset)?;
                 payload = Some(value);
                 offset = next;
@@ -183,12 +186,21 @@ fn skip_field(bytes: &[u8], offset: usize, wire_type: u32) -> Result<usize, Snap
             let (_, offset) = read_varint(bytes, offset)?;
             Ok(offset)
         }
-        1 => Ok(offset + 8),
+        1 => skip_fixed(bytes, offset, 8),
         2 => {
             let (_, offset) = read_length_delimited(bytes, offset)?;
             Ok(offset)
         }
-        5 => Ok(offset + 4),
+        5 => skip_fixed(bytes, offset, 4),
         _ => Err(SnapshotDecodeError::UnsupportedWireType),
     }
+}
+
+/// Advance past a fixed-width field only if the bytes are actually present, so truncated
+/// fixed32/fixed64 input fails closed instead of running `offset` past the buffer.
+fn skip_fixed(bytes: &[u8], offset: usize, width: usize) -> Result<usize, SnapshotDecodeError> {
+    offset
+        .checked_add(width)
+        .filter(|end| *end <= bytes.len())
+        .ok_or(SnapshotDecodeError::UnexpectedEof)
 }

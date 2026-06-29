@@ -14,5 +14,5 @@ pub use fixture::SimFixture;
 
 pub use host::{SimError, SimHost, SimInstance};
 pub use import_check::{ImportCheckError, assert_zero_imports};
-pub use scenario::SimScenario;
+pub use scenario::{ScenarioError, SimScenario};
 pub use session::SimSession;

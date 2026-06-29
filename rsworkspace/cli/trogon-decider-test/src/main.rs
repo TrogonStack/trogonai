@@ -162,7 +162,7 @@ fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &S
                 .when(when)
                 .then_events(expected)
                 .run(instance)
-                .map_err(|error| anyhow::anyhow!(error))
+                .map_err(anyhow::Error::new)
         }
         Then::Rejected { rejected } => {
             let scenario = SimScenario::new().given(given).when(when);
@@ -171,14 +171,14 @@ fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &S
             } else {
                 scenario.then_accepted()
             };
-            scenario.run(instance).map_err(|error| anyhow::anyhow!(error))
+            scenario.run(instance).map_err(anyhow::Error::new)
         }
         Then::Error { error } => SimScenario::new()
             .given(given)
             .when(when)
             .then_error(error.expected()?)
             .run(instance)
-            .map_err(|err| anyhow::anyhow!(err)),
+            .map_err(anyhow::Error::new),
     }
 }
 

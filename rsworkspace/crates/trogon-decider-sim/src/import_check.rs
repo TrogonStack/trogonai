@@ -20,10 +20,18 @@ pub enum ImportCheckError {
 /// Matches AC-0.2 literally. wit-bindgen guest artifacts embed component types inside
 /// a core module; `wasmparser` misreads those as imports, so we delegate to wasm-tools.
 pub fn assert_zero_imports(bytes: &[u8]) -> Result<(), ImportCheckError> {
-    if let Ok(()) = assert_zero_imports_via_wasm_tools(bytes) {
-        return Ok(());
+    match assert_zero_imports_via_wasm_tools(bytes) {
+        Ok(()) => Ok(()),
+        // The wasmparser fallback only understands core modules; falling back for a component
+        // when wasm-tools is missing/broken would return Ok and silently skip the check. Only
+        // retry when the input actually is a core module, otherwise surface the failure.
+        Err(_) if is_core_wasm_module(bytes) => assert_zero_imports_via_wasmparser(bytes),
+        Err(error) => Err(error),
     }
-    assert_zero_imports_via_wasmparser(bytes)
+}
+
+fn is_core_wasm_module(bytes: &[u8]) -> bool {
+    bytes.len() >= 8 && bytes[0..4] == *b"\0asm" && bytes[4..8] == [1, 0, 0, 0]
 }
 
 fn assert_zero_imports_via_wasm_tools(bytes: &[u8]) -> Result<(), ImportCheckError> {
