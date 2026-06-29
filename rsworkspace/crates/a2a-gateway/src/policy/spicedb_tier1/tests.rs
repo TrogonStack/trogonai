@@ -67,13 +67,21 @@ impl BulkImportPermissionCheck for FakeBulkClient {
         if *self.transport_err.lock().expect("lock") {
             return Err(Status::unavailable("backend"));
         }
-        let perms = self.responses.lock().expect("lock").clone();
+        // Pop one entry per request item so successive calls drain
+        // distinct permissionships -- without this, two successive
+        // calls would both observe the same head of the queue and
+        // the cache-after-deny test couldn't distinguish "the
+        // second call was allowed" from "both calls were denied".
+        let mut perms = self.responses.lock().expect("lock");
         let pairs = request
             .items
-            .into_iter()
-            .enumerate()
-            .map(|(idx, _)| {
-                let permissionship = perms.get(idx).copied().unwrap_or(Permissionship::HasPermission as i32);
+            .iter()
+            .map(|_| {
+                let permissionship = if perms.is_empty() {
+                    Permissionship::HasPermission as i32
+                } else {
+                    perms.remove(0)
+                };
                 CheckBulkPermissionsPair {
                     request: None,
                     response: Some(check_bulk_permissions_pair::Response::Item(
@@ -86,6 +94,7 @@ impl BulkImportPermissionCheck for FakeBulkClient {
                 }
             })
             .collect();
+        drop(perms);
         Ok(tonic::Response::new(CheckBulkPermissionsResponse {
             checked_at: Some(ZedToken { token: "zed".into() }),
             pairs,
@@ -195,7 +204,7 @@ async fn from_env_errors_when_enabled_without_credentials() {
     let err = Tier1SpiceDbConfig::from_env(&env)
         .await
         .expect_err("must require credentials");
-    assert!(matches!(err, Tier1SpiceDbBuildError::PartialConfig(_)));
+    assert!(matches!(err, Tier1SpiceDbBuildError::EnabledMissingCredentials { .. }));
 }
 
 #[tokio::test]
@@ -206,7 +215,7 @@ async fn from_env_errors_when_endpoint_set_without_token() {
     let err = Tier1SpiceDbConfig::from_env(&env)
         .await
         .expect_err("must require token");
-    assert!(matches!(err, Tier1SpiceDbBuildError::PartialConfig(_)));
+    assert!(matches!(err, Tier1SpiceDbBuildError::EnabledMissingCredentials { .. }));
 }
 
 #[tokio::test]
@@ -217,7 +226,7 @@ async fn from_env_errors_when_token_set_without_endpoint() {
     let err = Tier1SpiceDbConfig::from_env(&env)
         .await
         .expect_err("must require endpoint");
-    assert!(matches!(err, Tier1SpiceDbBuildError::PartialConfig(_)));
+    assert!(matches!(err, Tier1SpiceDbBuildError::EnabledMissingCredentials { .. }));
 }
 
 #[tokio::test]
@@ -324,6 +333,92 @@ async fn live_gate_transport_error_surfaces_distinctly() {
         )
         .await;
     assert_eq!(outcome, Tier1AuthorizeOutcome::TransportError);
+}
+
+#[tokio::test]
+async fn live_gate_caches_zed_token_even_on_denied_response() {
+    // A `NoPermission` response still carries `checked_at` --
+    // caching it lets subsequent checks (including the shared
+    // `LiveAgentViewGate`) skip the `FullyConsistent` round-trip.
+    let client = Arc::new(FakeBulkClient::new(vec![
+        Permissionship::NoPermission as i32,
+        Permissionship::HasPermission as i32,
+    ]));
+    let gate = LiveSpiceDbTier1Gate::new(
+        client.clone(),
+        SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)),
+    );
+    let session = Tier1SessionKey::new("alice", "acme");
+    let tuple = Tier1ResourceTuple::new(
+        Tier1ResourceType::new("agent").expect("valid"),
+        Tier1ResourceId::new("planner").expect("valid"),
+        Tier1Permission::new("invoke").expect("valid"),
+    );
+    let outcome = gate
+        .authorize(&session, &principal_with_subject("user:alice"), &tuple)
+        .await;
+    assert_eq!(outcome, Tier1AuthorizeOutcome::Denied);
+
+    let outcome = gate
+        .authorize(&session, &principal_with_subject("user:alice"), &tuple)
+        .await;
+    assert!(matches!(outcome, Tier1AuthorizeOutcome::Allowed { .. }));
+
+    let requests = client.requests();
+    assert_eq!(requests.len(), 2);
+    let second_consistency = requests[1].consistency.as_ref().expect("consistency");
+    assert!(
+        matches!(
+            second_consistency.requirement,
+            Some(authzed::v1::consistency::Requirement::AtLeastAsFresh(_))
+        ),
+        "second request must reuse cached zed token even though the first call was denied",
+    );
+}
+
+#[tokio::test]
+async fn live_gate_authorize_subject_resolution_matches_discovery_path() {
+    // The authorize path and the discovery `bulk_check_agent_view`
+    // path must resolve the SpiceDB subject the same way --
+    // otherwise the same principal can be authorized under one
+    // subject and filtered under another (silent inconsistency).
+    // Principal here only carries `account`, which the canonical
+    // resolver prefers over `spicedb_subject`.
+    let client = Arc::new(FakeBulkClient::new(vec![Permissionship::HasPermission as i32]));
+    let gate = LiveSpiceDbTier1Gate::new(
+        client.clone(),
+        SpiceDbTier1SessionCache::new(ZedTokenTtl::from_secs(60)),
+    );
+    let principal = SpiceDbPrincipal(serde_json::json!({
+        "account": "acme",
+        "spicedb_subject": "user:alice",
+    }));
+    let outcome = gate
+        .authorize(
+            &Tier1SessionKey::new("alice", "acme"),
+            &principal,
+            &Tier1ResourceTuple::new(
+                Tier1ResourceType::new("agent").expect("valid"),
+                Tier1ResourceId::new("planner").expect("valid"),
+                Tier1Permission::new("invoke").expect("valid"),
+            ),
+        )
+        .await;
+    assert!(matches!(outcome, Tier1AuthorizeOutcome::Allowed { .. }));
+
+    let request = &client.requests()[0];
+    let subject_ref = request.items[0]
+        .subject
+        .as_ref()
+        .expect("subject")
+        .object
+        .as_ref()
+        .expect("object");
+    // The canonical resolver returns `(account, "acme")` because
+    // `account` claim wins over `spicedb_subject` -- discovery
+    // does the same, so they agree.
+    assert_eq!(subject_ref.object_type, "account");
+    assert_eq!(subject_ref.object_id, "acme");
 }
 
 #[tokio::test]

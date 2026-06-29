@@ -14,7 +14,7 @@ use a2a_nats::agent_id::A2aAgentId;
 use a2a_nats::catalog::agent_view::{AgentViewCheckOutcome, SpiceDbSessionKey};
 use a2a_nats::catalog::import_gate::{
     BulkImportPermissionCheck, SpiceDbEndpoint, SpiceDbImportGateBuildError, SpiceDbPrincipal, SpiceDbToken,
-    ZedTokenTtl, parse_subject_reference,
+    ZedTokenTtl, spicedb_subject_from_principal,
 };
 use a2a_nats::catalog::spicedb_permission::{AgentViewGate, LiveAgentViewGate, NoopAgentViewGate, SpiceDbSessionCache};
 use a2a_pack::resource_tuples::{
@@ -50,8 +50,13 @@ pub enum Tier1SpiceDbBuildError {
     InvalidZedTokenTtl(String),
     #[error("tier-1 SpiceDB connect failed: {0}")]
     Connect(String),
-    #[error("partial tier-1 SpiceDB configuration: {0}")]
-    PartialConfig(String),
+    #[error("{enabled_var}=on requires both {endpoint_var} and {token_var} (missing: {missing_var})")]
+    EnabledMissingCredentials {
+        enabled_var: &'static str,
+        endpoint_var: &'static str,
+        token_var: &'static str,
+        missing_var: &'static str,
+    },
 }
 
 impl From<SpiceDbImportGateBuildError> for Tier1SpiceDbBuildError {
@@ -337,14 +342,20 @@ impl SpiceDbTier1Gate for LiveSpiceDbTier1Gate {
             }
         };
 
-        let allowed = response.pairs.first().is_some_and(pair_is_allowed);
-        if !allowed {
-            return Tier1AuthorizeOutcome::Denied;
-        }
-
+        // Cache the zed-token before branching on allow/deny: a
+        // successful SpiceDB response carries `checked_at` even when
+        // the permissionship is `NoPermission`, and reusing that
+        // snapshot lets subsequent checks for the same session
+        // (including the shared `LiveAgentViewGate`) skip the
+        // `FullyConsistent` round-trip.
         let zed_token = response.checked_at.map(|zed| zed.token);
         if let Some(token) = zed_token.clone() {
             self.session_cache.insert(session.clone(), token).await;
+        }
+
+        let allowed = response.pairs.first().is_some_and(pair_is_allowed);
+        if !allowed {
+            return Tier1AuthorizeOutcome::Denied;
         }
 
         Tier1AuthorizeOutcome::Allowed { zed_token }
@@ -371,16 +382,16 @@ fn pair_is_allowed(pair: &authzed::v1::CheckBulkPermissionsPair) -> bool {
     }
 }
 
-/// Extract `(object_type, object_id)` from a principal's
-/// `spicedb_subject` claim, delegating to the import-gate parser
-/// so the Tier-1 and import-gate paths agree on the subject
-/// grammar.
+/// Extract `(object_type, object_id)` from a principal, delegating
+/// to the import-gate resolver so the Tier-1 authorize path and
+/// the discovery-side `bulk_check_agent_view` path (which goes
+/// through `LiveAgentViewGate`) agree on the same precedence
+/// (`account`/`aud` before `spicedb_subject`). Without that, the
+/// same principal could be authorized under one subject and
+/// filtered under another -- a silent inconsistency we'd never
+/// see in unit tests.
 fn spicedb_tier1_subject_from_principal(principal: &SpiceDbPrincipal) -> Option<(String, String)> {
-    principal
-        .0
-        .get("spicedb_subject")
-        .and_then(serde_json::Value::as_str)
-        .and_then(parse_subject_reference)
+    spicedb_subject_from_principal(principal)
 }
 
 /// Build a Tier-1 session key from a verified principal, falling
@@ -422,9 +433,12 @@ impl Tier1SpiceDbConfig {
         }
 
         let Some((endpoint, token)) = optional_tier1_credentials(env)? else {
-            return Err(Tier1SpiceDbBuildError::PartialConfig(format!(
-                "{ENV_TIER1_SPICEDB_ENABLED}=on requires {ENV_TIER1_SPICEDB_ENDPOINT} and {ENV_TIER1_SPICEDB_TOKEN}"
-            )));
+            return Err(Tier1SpiceDbBuildError::EnabledMissingCredentials {
+                enabled_var: ENV_TIER1_SPICEDB_ENABLED,
+                endpoint_var: ENV_TIER1_SPICEDB_ENDPOINT,
+                token_var: ENV_TIER1_SPICEDB_TOKEN,
+                missing_var: "both",
+            });
         };
 
         let endpoint = SpiceDbEndpoint::parse(endpoint)?;
@@ -487,12 +501,18 @@ fn optional_tier1_credentials<E: ReadEnv>(env: &E) -> Result<Option<(String, Str
     match (endpoint, token) {
         (None, None) => Ok(None),
         (Some(endpoint), Some(token)) => Ok(Some((endpoint, token))),
-        (Some(_), None) => Err(Tier1SpiceDbBuildError::PartialConfig(format!(
-            "{ENV_TIER1_SPICEDB_TOKEN} is required when {ENV_TIER1_SPICEDB_ENDPOINT} is set"
-        ))),
-        (None, Some(_)) => Err(Tier1SpiceDbBuildError::PartialConfig(format!(
-            "{ENV_TIER1_SPICEDB_ENDPOINT} is required when {ENV_TIER1_SPICEDB_TOKEN} is set"
-        ))),
+        (Some(_), None) => Err(Tier1SpiceDbBuildError::EnabledMissingCredentials {
+            enabled_var: ENV_TIER1_SPICEDB_ENABLED,
+            endpoint_var: ENV_TIER1_SPICEDB_ENDPOINT,
+            token_var: ENV_TIER1_SPICEDB_TOKEN,
+            missing_var: ENV_TIER1_SPICEDB_TOKEN,
+        }),
+        (None, Some(_)) => Err(Tier1SpiceDbBuildError::EnabledMissingCredentials {
+            enabled_var: ENV_TIER1_SPICEDB_ENABLED,
+            endpoint_var: ENV_TIER1_SPICEDB_ENDPOINT,
+            token_var: ENV_TIER1_SPICEDB_TOKEN,
+            missing_var: ENV_TIER1_SPICEDB_ENDPOINT,
+        }),
     }
 }
 
