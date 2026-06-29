@@ -85,6 +85,10 @@ impl SchedulesProjector {
         let mut messages = consumer.messages().await.map_err(|source| {
             SchedulerError::event_source("failed to open projector catch-up message stream", source)
         })?;
+        // The message stream can end before the tail is drained. Only advance the
+        // checkpoint once `target` is actually folded; otherwise leave it so the
+        // next start re-folds the gap instead of declaring it caught up.
+        let mut reached_target = false;
         while let Some(message) = messages.next().await {
             let message = message.map_err(|source| {
                 SchedulerError::event_source("failed to read schedule event during projector catch-up", source)
@@ -92,8 +96,17 @@ impl SchedulesProjector {
             let sequence = event_message_sequence(&message, "failed to read projector catch-up event metadata")?;
             self.project_message(&message).await?;
             if sequence >= target {
+                reached_target = true;
                 break;
             }
+        }
+
+        if !reached_target {
+            tracing::warn!(
+                target,
+                "projector catch-up ended before reaching the stream tail; will re-fold on next start"
+            );
+            return Ok(());
         }
 
         // Advance the checkpoint once the pass is complete; a crash mid-rebuild
