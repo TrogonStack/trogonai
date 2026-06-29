@@ -13,10 +13,11 @@
 use a2a_nats::A2aTaskId;
 use serde_json::Value;
 
+#[cfg(not(coverage))]
 use crate::gw_ingress_stream::{
-    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressKind, StreamingIngressSpawn,
-    StreamingIngressSpawnError, req_id_from_headers_or_payload, spawn_streaming_ingress_pump,
+    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressSpawn, spawn_streaming_ingress_pump,
 };
+use crate::gw_ingress_stream::{StreamingIngressKind, StreamingIngressSpawnError, req_id_from_headers_or_payload};
 use crate::runtime::env::json_rpc_params;
 
 /// Method-dots string for the unary version of `message/send`.
