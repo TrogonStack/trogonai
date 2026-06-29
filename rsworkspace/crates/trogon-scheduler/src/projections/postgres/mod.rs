@@ -2,8 +2,7 @@
 //!
 //! A sibling of the NATS KV projector ([`crate::projections::schedules`]): it folds
 //! the same schedule event stream into the same `projections.v1.ScheduleProjection`
-//! read model, but persists it in a normalized Postgres table via
-//! [`crate::projections::store::SchedulesProjectionStore`].
+//! read model, but persists it in a normalized Postgres table.
 //!
 //! - [`store`] — `PostgresSchedulesProjection`, the table-backed store.
 //! - [`projector`] — `SchedulesProjector`, which drives the store from the stream.

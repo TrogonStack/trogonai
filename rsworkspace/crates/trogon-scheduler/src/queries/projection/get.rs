@@ -1,15 +1,12 @@
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use crate::error::SchedulerError;
-use crate::projections::store::SchedulesProjectionStore;
+use crate::projections::PostgresSchedulesProjection;
 use crate::queries::GetSchedule;
+use crate::queries::decode::schedule_from_view;
 use crate::queries::read_model::Schedule;
-use crate::queries::schedule_from_view;
 
-/// Reads a single schedule from a projection backend, or `None` if absent.
-#[cfg(not(coverage))]
+/// Reads a single schedule from the Postgres projection, or `None` if absent.
 pub async fn run(
-    store: &impl SchedulesProjectionStore,
+    store: &PostgresSchedulesProjection,
     command: GetSchedule,
 ) -> Result<Option<Schedule>, SchedulerError> {
     let Some(projection) = store.get_projection(&command.id).await? else {

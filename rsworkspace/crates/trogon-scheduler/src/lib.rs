@@ -27,13 +27,12 @@ pub use commands::{
 };
 pub use config::ScheduleWriteCondition;
 pub use error::{ScheduleSpecError, SchedulerError};
-pub use projections::SchedulesProjectionStore;
 pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
 
-/// Query entry points for the alternative projection backends (e.g. Postgres).
-#[cfg(not(coverage))]
+/// Query entry points for the Postgres projection.
+#[cfg(all(feature = "postgres", not(coverage)))]
 pub mod projection_queries;
 pub use queries::read_model::{
     MessageContent, MessageEnvelope, MessageHeaders, MessageHeadersError, Schedule, ScheduleDetails,

@@ -1,15 +1,12 @@
-#![cfg_attr(coverage, allow(unused_imports))]
-
 use crate::error::SchedulerError;
-use crate::projections::store::SchedulesProjectionStore;
+use crate::projections::PostgresSchedulesProjection;
 use crate::queries::ListSchedules;
+use crate::queries::decode::schedule_from_view;
 use crate::queries::read_model::Schedule;
-use crate::queries::schedule_from_view;
 
-/// Lists every schedule from a projection backend.
-#[cfg(not(coverage))]
+/// Lists every schedule from the Postgres projection.
 pub async fn run(
-    store: &impl SchedulesProjectionStore,
+    store: &PostgresSchedulesProjection,
     _command: ListSchedules,
 ) -> Result<Vec<Schedule>, SchedulerError> {
     let projections = store.list_projections().await?;

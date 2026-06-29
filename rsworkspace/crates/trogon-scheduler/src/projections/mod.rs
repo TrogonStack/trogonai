@@ -51,12 +51,9 @@ mod schedules;
 /// The Postgres schedules projector (additive; the NATS KV projector is unchanged).
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub mod postgres;
-/// The storage seam the projectors read and write the read model through.
-pub mod store;
 
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub use postgres::{PostgresSchedulesProjection, SchedulesProjector};
 pub(crate) use schedules::storage;
 #[cfg(not(coverage))]
 pub(crate) use schedules::{catch_up_schedules_read_model, project_appended_events};
-pub use store::SchedulesProjectionStore;

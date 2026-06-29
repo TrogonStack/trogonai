@@ -15,8 +15,7 @@ use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
     CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId,
-    SchedulesProjectionStore, SchedulesProjector, commands::domain as command_domain, connect_store,
-    projection_queries, projections_v1,
+    SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries, projections_v1,
 };
 
 /// A complete-but-event-less projection, used to seed an orphan row.

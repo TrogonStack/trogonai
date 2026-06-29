@@ -25,18 +25,19 @@ use crate::projections::schedules::{
     ProjectionChange, ScheduleStreamState, apply, decode_recorded_delivery_message, event_message_sequence,
     event_replay_consumer_config, event_schedule_id, projection_change, read_model_token_from_event_subject,
 };
-use crate::projections::store::SchedulesProjectionStore;
 use crate::queries::ScheduleId;
 use crate::v1;
 
-/// Projects the schedule event stream into a [`SchedulesProjectionStore`].
+use super::store::PostgresSchedulesProjection;
+
+/// Projects the schedule event stream into a [`PostgresSchedulesProjection`].
 #[derive(Clone)]
-pub struct SchedulesProjector<S> {
-    store: S,
+pub struct SchedulesProjector {
+    store: PostgresSchedulesProjection,
 }
 
-impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
-    pub fn new(store: S) -> Self {
+impl SchedulesProjector {
+    pub fn new(store: PostgresSchedulesProjection) -> Self {
         Self { store }
     }
 

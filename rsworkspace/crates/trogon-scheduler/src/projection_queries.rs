@@ -1,5 +1,5 @@
 //! Query entry points for the alternative projection backends (e.g. Postgres),
-//! reading through [`crate::SchedulesProjectionStore`]. The default NATS read-model
+//! reading from the Postgres table. The default NATS read-model
 //! queries remain at the crate root ([`crate::get_schedule`],
 //! [`crate::list_schedules`]).
 //!

@@ -8,10 +8,10 @@
 //! and `message_headers` as JSONB. The schedule and delivery oneofs are flattened
 //! to a `*_kind` discriminator plus the variant's columns.
 //!
-//! The trait still speaks the proto (the fold and the query side both operate on
-//! it), so this backend decomposes the proto into columns on write and recomposes
-//! it from the row on read. The catch-up checkpoint lives in the shared
-//! `jetstream_projection_checkpoint` table, keyed by [`SCHEDULES_CHECKPOINT_ID`].
+//! The fold and the query side both operate on the proto, so this backend
+//! decomposes the proto into columns on write and recomposes it from the row on
+//! read. The catch-up checkpoint lives in the shared `jetstream_projection_checkpoint`
+//! table, keyed by [`SCHEDULES_CHECKPOINT_ID`].
 
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
@@ -23,7 +23,6 @@ use chrono::{DateTime, TimeZone, Utc};
 use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::{PgPool, Row};
 
-use crate::projections::store::SchedulesProjectionStore;
 use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
 
@@ -310,8 +309,8 @@ fn projection_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection
     })
 }
 
-impl SchedulesProjectionStore for PostgresSchedulesProjection {
-    async fn get_projection(
+impl PostgresSchedulesProjection {
+    pub async fn get_projection(
         &self,
         schedule_id: &ScheduleId,
     ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
@@ -326,7 +325,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         }
     }
 
-    async fn list_projections(&self) -> Result<Vec<projections_v1::ScheduleProjection>, SchedulerError> {
+    pub async fn list_projections(&self) -> Result<Vec<projections_v1::ScheduleProjection>, SchedulerError> {
         let rows = sqlx::query(&format!("{SELECT_COLUMNS} ORDER BY schedule_id"))
             .fetch_all(&self.pool)
             .await
@@ -345,7 +344,10 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         Ok(projections)
     }
 
-    async fn upsert_projection(&self, projection: &projections_v1::ScheduleProjection) -> Result<(), SchedulerError> {
+    pub async fn upsert_projection(
+        &self,
+        projection: &projections_v1::ScheduleProjection,
+    ) -> Result<(), SchedulerError> {
         let schedule = projection
             .schedule
             .as_option()
@@ -480,7 +482,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         .map_err(|source| SchedulerError::kv_source("failed to store projected job state", source))
     }
 
-    async fn delete_projection(&self, schedule_id: &ScheduleId) -> Result<(), SchedulerError> {
+    pub async fn delete_projection(&self, schedule_id: &ScheduleId) -> Result<(), SchedulerError> {
         sqlx::query("DELETE FROM schedules_projection WHERE schedule_id = $1")
             .bind(schedule_id.as_str())
             .execute(&self.pool)
@@ -489,7 +491,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             .map_err(|source| SchedulerError::kv_source("failed to delete projected job state", source))
     }
 
-    async fn reconcile(&self, live_ids: &HashSet<ScheduleId>) -> Result<(), SchedulerError> {
+    pub async fn reconcile(&self, live_ids: &HashSet<ScheduleId>) -> Result<(), SchedulerError> {
         // `schedule_id <> ALL($1)` deletes every row absent from the folded state;
         // an empty array makes the predicate true for all rows, clearing the table.
         let ids: Vec<String> = live_ids.iter().map(|id| id.as_str().to_owned()).collect();
@@ -501,7 +503,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
             .map_err(|source| SchedulerError::kv_source("failed to reconcile schedules read model", source))
     }
 
-    async fn read_checkpoint(&self) -> Result<u64, SchedulerError> {
+    pub async fn read_checkpoint(&self) -> Result<u64, SchedulerError> {
         let row = sqlx::query("SELECT last_event_sequence FROM jetstream_projection_checkpoint WHERE id = $1")
             .bind(SCHEDULES_CHECKPOINT_ID)
             .fetch_optional(&self.pool)
@@ -516,7 +518,7 @@ impl SchedulesProjectionStore for PostgresSchedulesProjection {
         Ok(sequence.max(0) as u64)
     }
 
-    async fn write_checkpoint(&self, sequence: u64) -> Result<(), SchedulerError> {
+    pub async fn write_checkpoint(&self, sequence: u64) -> Result<(), SchedulerError> {
         sqlx::query(
             "INSERT INTO jetstream_projection_checkpoint (id, last_event_sequence) \
              VALUES ($1, $2) \

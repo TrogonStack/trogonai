@@ -12,8 +12,8 @@ use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use trogon_scheduler::{
-    GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId, SchedulesProjectionStore,
-    projection_queries, projections_v1,
+    GetScheduleCommand, ListSchedulesCommand, PostgresSchedulesProjection, ScheduleId, projection_queries,
+    projections_v1,
 };
 
 fn id(raw: &str) -> ScheduleId {
