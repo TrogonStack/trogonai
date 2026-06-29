@@ -9,7 +9,7 @@ use crate::queries::schedule_from_view;
 /// Lists every schedule from a projection backend.
 #[cfg(not(coverage))]
 pub async fn run(
-    store: &dyn SchedulesProjectionStore,
+    store: &impl SchedulesProjectionStore,
     _command: ListSchedules,
 ) -> Result<Vec<Schedule>, SchedulerError> {
     let views = store.list_views().await?;

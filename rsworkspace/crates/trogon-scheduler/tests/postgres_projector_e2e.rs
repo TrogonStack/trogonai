@@ -5,7 +5,6 @@
 // `cargo test -p trogon-scheduler --features postgres -- --ignored`.
 #![cfg(all(feature = "postgres", not(coverage)))]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use buffa::MessageField;
@@ -104,7 +103,7 @@ async fn projector_folds_event_stream_into_postgres() {
 
     // Fold the event stream into Postgres.
     let js = async_nats::jetstream::new(client);
-    let projector = SchedulesProjector::new(Arc::new(pg.clone()));
+    let projector = SchedulesProjector::new(pg.clone());
     projector.catch_up(&js).await.expect("projector catch up");
 
     // The Postgres-backed read model now serves both schedules.

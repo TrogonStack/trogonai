@@ -17,7 +17,6 @@
 
 use std::collections::HashSet;
 
-use async_trait::async_trait;
 use buffa::MessageField;
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, TimeZone, Utc};
@@ -308,7 +307,6 @@ fn view_from_row(row: &PgRow) -> Result<projections_v1::ScheduleProjection, Sche
     })
 }
 
-#[async_trait]
 impl SchedulesProjectionStore for PostgresSchedulesProjection {
     async fn get_view(&self, schedule_id: &str) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
         let row = sqlx::query(&format!("{SELECT_COLUMNS} WHERE schedule_id = $1"))

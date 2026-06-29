@@ -9,7 +9,7 @@ use crate::queries::schedule_from_view;
 /// Reads a single schedule from a projection backend, or `None` if absent.
 #[cfg(not(coverage))]
 pub async fn run(
-    store: &dyn SchedulesProjectionStore,
+    store: &impl SchedulesProjectionStore,
     command: GetSchedule,
 ) -> Result<Option<Schedule>, SchedulerError> {
     let Some(view) = store.get_view(command.id.as_str()).await? else {

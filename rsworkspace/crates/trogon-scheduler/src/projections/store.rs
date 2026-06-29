@@ -10,8 +10,6 @@
 
 use std::collections::HashSet;
 
-use async_trait::async_trait;
-
 use crate::{error::SchedulerError, projections_v1};
 
 /// Storage for the schedules read model: point/list reads, upserts, deletes, the
@@ -21,7 +19,10 @@ use crate::{error::SchedulerError, projections_v1};
 /// rebuild replays the whole event log from empty, so [`Self::reconcile`] receives
 /// the authoritative set of ids that should exist and the backend removes the
 /// rest.
-#[async_trait]
+///
+/// Callers are generic over the store (static dispatch), so plain `async fn` is
+/// used rather than boxed, dyn-compatible futures.
+#[allow(async_fn_in_trait)]
 pub trait SchedulesProjectionStore: Send + Sync {
     /// Reads the stored view for one schedule, or `None` if it is absent.
     async fn get_view(&self, schedule_id: &str) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError>;

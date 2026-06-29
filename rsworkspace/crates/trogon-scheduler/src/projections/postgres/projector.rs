@@ -13,7 +13,6 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use async_nats::jetstream;
 use futures::StreamExt;
@@ -31,12 +30,12 @@ use crate::v1;
 
 /// Projects the schedule event stream into a [`SchedulesProjectionStore`].
 #[derive(Clone)]
-pub struct SchedulesProjector {
-    store: Arc<dyn SchedulesProjectionStore>,
+pub struct SchedulesProjector<S> {
+    store: S,
 }
 
-impl SchedulesProjector {
-    pub fn new(store: Arc<dyn SchedulesProjectionStore>) -> Self {
+impl<S: SchedulesProjectionStore> SchedulesProjector<S> {
+    pub fn new(store: S) -> Self {
         Self { store }
     }
 
