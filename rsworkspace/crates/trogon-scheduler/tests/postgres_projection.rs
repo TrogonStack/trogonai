@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 
 use buffa::MessageField;
+use sqlx::Row;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
@@ -121,8 +122,6 @@ async fn checkpoint_round_trips() {
 #[tokio::test]
 #[ignore = "requires Docker for testcontainers Postgres"]
 async fn schedule_fields_are_stored_as_typed_columns() {
-    use sqlx::Row;
-
     let (_container, projection) = start().await;
     projection.upsert_view(&view("orders")).await.unwrap();
 
