@@ -13,7 +13,7 @@ pub use context::Tier3EvaluationContext;
 pub use decision::{Tier3EngineError, Tier3RedactionDecision, Tier3RefusalReason};
 pub use gate::{NoopTier3RedactionGate, Tier3RedactionGate};
 pub use manifest::{Tier3SkillManifest, load_tier3_manifests_from_bundle};
-pub use real_gate::RealTier3RedactionGate;
+pub use real_gate::{RealTier3RedactionGate, Tier3PartInvoker};
 pub use rewrite::{RedactionRewrite, RewriteKind};
 
 pub fn gateway_tier3_redaction_enabled<E: trogon_std::env::ReadEnv>(env: &E) -> bool {
