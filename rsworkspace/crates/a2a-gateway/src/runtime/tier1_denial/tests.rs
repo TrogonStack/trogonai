@@ -1,3 +1,4 @@
+use std::sync::Once;
 use std::time::Instant;
 
 use a2a_nats::A2aPrefix;
@@ -7,6 +8,21 @@ use bytes::Bytes;
 use trogon_nats::mocks::MockNatsClient;
 
 use super::*;
+
+static TRACING: Once = Once::new();
+
+fn init_tracing_capture() {
+    // Drives the `warn!` call inside `deny_tier1` past the
+    // level-filter early-out so coverage records the macro body.
+    // A no-op subscriber would still be skipped by the static
+    // max-level guard if tracing is built with the off feature.
+    TRACING.call_once(|| {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_test_writer()
+            .try_init();
+    });
+}
 
 fn prefix() -> A2aPrefix {
     A2aPrefix::new("a2a").expect("a2a is a valid prefix")
@@ -63,6 +79,7 @@ async fn deny_tier1_writes_reply_and_audit_when_publishing_enabled() {
     // Happy path: a pre-built denial body and audit enabled. Both
     // the caller-inbox reply and the audit envelope must show up
     // on the mock NATS client.
+    init_tracing_capture();
     let nats = MockNatsClient::new();
     let pre = prefix();
     let agent = agent();
@@ -86,6 +103,7 @@ async fn deny_tier1_writes_reply_and_audit_when_publishing_enabled() {
 async fn deny_tier1_skips_audit_when_publishing_disabled() {
     // Audit-disabled deployments must still get the caller reply
     // but pay zero audit-stream traffic.
+    init_tracing_capture();
     let nats = MockNatsClient::new();
     let pre = prefix();
     let agent = agent();
@@ -106,6 +124,7 @@ async fn deny_tier1_skips_audit_when_publishing_disabled() {
 
 #[tokio::test]
 async fn deny_tier1_audit_envelope_stamps_caller_pair_and_tier1_decision() {
+    init_tracing_capture();
     let nats = MockNatsClient::new();
     let pre = prefix();
     let agent = agent();

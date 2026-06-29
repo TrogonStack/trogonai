@@ -55,7 +55,11 @@ pub async fn deny_tier1<C>(client: &C, reply: Subject, body: Bytes, ctx: Tier1De
 where
     C: PublishClient,
 {
-    warn!(agent_id = ctx.agent_id.as_str(), method = ctx.method_slashes, "tier-1 SpiceDB denied ingress");
+    warn!(
+        "tier-1 SpiceDB denied ingress for agent {} method {}",
+        ctx.agent_id.as_str(),
+        ctx.method_slashes
+    );
     reply_error(client, reply, HeaderMap::new(), body).await;
     let latency_ms = ctx.started_mono.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     spawn_gateway_audit_publish(
