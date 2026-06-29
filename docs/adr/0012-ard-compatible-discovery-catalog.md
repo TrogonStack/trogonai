@@ -119,7 +119,6 @@ packages.
 
 ## References
 
-- [ARD-Compatible Discovery Catalog Plan](../../PLAN.md)
 - [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
 - [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
 - [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
