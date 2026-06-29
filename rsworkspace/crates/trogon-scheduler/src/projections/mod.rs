@@ -51,8 +51,6 @@ mod schedules;
 /// The Postgres schedules projector (additive; the NATS KV projector is unchanged).
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub mod postgres;
-/// Query entry points over a [`store::SchedulesProjectionStore`].
-pub mod queries;
 /// The storage seam the projectors read and write the read model through.
 pub mod store;
 
