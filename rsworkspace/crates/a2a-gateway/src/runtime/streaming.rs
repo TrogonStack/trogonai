@@ -110,6 +110,12 @@ pub fn last_seq_from_resubscribe_params(params: &Value) -> Option<u64> {
 /// or invalid id returns `NotStreaming` so the request lands on the
 /// unary error path rather than spawning a pump with an unknown
 /// stream cursor.
+///
+/// Gated behind `cfg(not(coverage))` because the body binds the
+/// concrete `async_nats::Client` and JetStream-backed pump; the
+/// orchestrator's classification logic
+/// ([`classify_streaming_spawn`]) is what unit tests exercise.
+#[cfg(not(coverage))]
 #[allow(clippy::too_many_arguments)]
 pub fn maybe_spawn_streaming_ingress_pump(
     client: &async_nats::Client,
