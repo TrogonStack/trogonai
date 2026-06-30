@@ -14,13 +14,28 @@ fn state(value: state_v1::StateValue) -> state_v1::State {
     }
 }
 
+fn schedule() -> v1::Schedule {
+    v1::Schedule {
+        kind: Some(
+            v1::schedule::Every {
+                every: MessageField::some(buffa_types::google::protobuf::Duration {
+                    seconds: 30,
+                    nanos: 0,
+                    ..Default::default()
+                }),
+            }
+            .into(),
+        ),
+    }
+}
+
 fn created(status: v1::ScheduleStatus) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
                 schedule_id: "backup".to_string(),
                 status: MessageField::some(status),
-                schedule: MessageField::default(),
+                schedule: MessageField::some(schedule()),
                 delivery: MessageField::default(),
                 message: MessageField::default(),
             }
@@ -275,6 +290,45 @@ fn evolve_reports_invalid_state_and_event_shapes() {
         )
         .unwrap_err(),
         EvolveError::UnknownStateValue { value: 123 }
+    );
+}
+
+#[test]
+fn evolve_created_rejects_missing_schedule_and_status() {
+    let no_schedule = v1::ScheduleEvent {
+        event: Some(
+            v1::ScheduleCreated {
+                schedule_id: "backup".to_string(),
+                status: MessageField::some(v1::ScheduleStatus {
+                    kind: Some(v1::schedule_status::Scheduled {}.into()),
+                }),
+                schedule: MessageField::default(),
+                delivery: MessageField::default(),
+                message: MessageField::default(),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        evolve(state(state_v1::StateValue::STATE_VALUE_MISSING), &no_schedule).unwrap_err(),
+        EvolveError::MissingSchedule
+    );
+
+    let no_status = v1::ScheduleEvent {
+        event: Some(
+            v1::ScheduleCreated {
+                schedule_id: "backup".to_string(),
+                status: MessageField::default(),
+                schedule: MessageField::some(schedule()),
+                delivery: MessageField::default(),
+                message: MessageField::default(),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        evolve(state(state_v1::StateValue::STATE_VALUE_MISSING), &no_status).unwrap_err(),
+        EvolveError::MissingStatus
     );
 }
 

@@ -5,6 +5,10 @@ use trogonai_proto::scheduler::schedules::{ScheduleEventCase, ScheduleStatusKind
 pub enum EvolveError {
     #[error("protobuf state is missing its state value")]
     MissingStateValue,
+    #[error("protobuf schedule created event is missing schedule")]
+    MissingSchedule,
+    #[error("protobuf schedule created event is missing status")]
+    MissingStatus,
     #[error("protobuf schedule event is not supported by command state")]
     UnsupportedEvent,
     #[error("protobuf schedule occurrence event is missing occurrence_at")]
@@ -53,6 +57,13 @@ pub fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Result<state
 
     let next_state = match &event.event {
         Some(ScheduleEventCase::ScheduleCreated(inner)) => {
+            // A creation event must carry the schedule and a resolvable status; reject malformed
+            // ones rather than promoting them to a present state with empty/assumed fields.
+            if inner.schedule.as_option().is_none() {
+                return Err(EvolveError::MissingSchedule);
+            }
+            let status = inner.status.as_option().ok_or(EvolveError::MissingStatus)?;
+            let status_kind = status.kind.as_ref().ok_or(EvolveError::MissingStatus)?;
             last_occurrence_at = MessageField::default();
             last_occurrence_sequence = None;
             pending_occurrence_at = MessageField::default();
@@ -60,10 +71,7 @@ pub fn evolve(state: state_v1::State, event: &v1::ScheduleEvent) -> Result<state
             schedule = inner.schedule.clone();
             if current_state == state_v1::StateValue::STATE_VALUE_DELETED {
                 state_v1::StateValue::STATE_VALUE_DELETED
-            } else if matches!(
-                inner.status.as_option().and_then(|status| status.kind.as_ref()),
-                Some(ScheduleStatusKind::Paused(_))
-            ) {
+            } else if matches!(status_kind, ScheduleStatusKind::Paused(_)) {
                 state_v1::StateValue::STATE_VALUE_PRESENT_DISABLED
             } else {
                 state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED

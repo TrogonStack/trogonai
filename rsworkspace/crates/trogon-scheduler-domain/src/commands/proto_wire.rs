@@ -43,6 +43,8 @@ pub enum CommandWireError {
     InvalidTimestamp(#[from] TimestampConversionError),
     #[error("invalid duration")]
     InvalidDuration(#[from] trogonai_proto::convert::StdDurationConversionError),
+    #[error("message content is not valid utf-8: {0}")]
+    InvalidMessageContentUtf8(#[from] std::str::Utf8Error),
 }
 
 impl TryFrom<v1::CreateSchedule> for CreateSchedule {
@@ -229,16 +231,19 @@ fn message_from_proto(message: &v1::Message) -> Result<ScheduleMessage, CommandW
     )?;
 
     Ok(ScheduleMessage {
-        content: message_content_from_proto(content),
+        content: message_content_from_proto(content)?,
         headers: ScheduleHeaders::try_from(headers)?,
     })
 }
 
-fn message_content_from_proto(content: &content_v1alpha1::Content) -> MessageContent {
+fn message_content_from_proto(content: &content_v1alpha1::Content) -> Result<MessageContent, CommandWireError> {
+    // Domain message content is text; reject non-UTF-8 bytes rather than silently rewriting
+    // them with a lossy decode before they become a domain value.
+    let data = std::str::from_utf8(&content.data)?;
     if content.content_type == "application/json" {
-        MessageContent::json(String::from_utf8_lossy(&content.data))
+        Ok(MessageContent::json(data))
     } else {
-        MessageContent::with_content_type(String::from_utf8_lossy(&content.data), content.content_type.clone())
+        Ok(MessageContent::with_content_type(data, content.content_type.clone()))
     }
 }
 

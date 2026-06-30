@@ -40,7 +40,7 @@ fn decode_event_to_json_is_canonical_across_wire_orderings() {
     let from_canonical = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, &canonical);
     let from_reordered = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, &reordered);
 
-    assert!(from_canonical.is_some());
+    assert!(matches!(from_canonical, Ok(Some(_))));
     assert_eq!(from_canonical, from_reordered);
 }
 
@@ -48,6 +48,15 @@ fn decode_event_to_json_is_canonical_across_wire_orderings() {
 fn decode_event_to_json_returns_none_for_unknown_type() {
     assert_eq!(
         super::decode_event_to_json("type.googleapis.com/trogonai.scheduler.schedules.v1.Unknown", &[]),
-        None
+        Ok(None)
+    );
+}
+
+#[test]
+fn decode_event_to_json_errors_on_malformed_known_payload() {
+    let result = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, b"\xff\xff\xff\xff");
+    assert!(
+        matches!(result, Err(super::EventDecodeError::Json { .. })),
+        "{result:?}"
     );
 }

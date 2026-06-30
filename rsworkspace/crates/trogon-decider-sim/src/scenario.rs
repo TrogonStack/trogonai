@@ -251,8 +251,11 @@ fn events_match(got: &host::AnyEnvelope, want: &host::AnyEnvelope) -> bool {
         trogonai_proto::decode_event_to_json(&got.type_, &got.payload),
         trogonai_proto::decode_event_to_json(&want.type_, &want.payload),
     ) {
-        (Some(got_json), Some(want_json)) => got_json == want_json,
-        _ => got.payload == want.payload,
+        (Ok(Some(got_json)), Ok(Some(want_json))) => got_json == want_json,
+        // Both unregistered (same type was checked above) → fall back to raw bytes.
+        (Ok(None), Ok(None)) => got.payload == want.payload,
+        // A registered type that fails to decode is malformed output, not a match.
+        _ => false,
     }
 }
 
