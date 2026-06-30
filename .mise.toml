@@ -5,6 +5,8 @@ buf = "1.70.0"
 "cargo:dylint-link" = "6.0.1"
 "cargo:protoc-gen-buffa" = "0.7.0"
 "cargo:protoc-gen-buffa-packaging" = "0.7.0"
+"cargo:cargo-component" = "0.21.1"
+"cargo:wasm-tools" = "1.250.0"
 node = "26.3.0"
 pnpm = "11.5.1"
 python = "3.14.5"
@@ -44,6 +46,24 @@ depends_post = ["proto:format:rust"]
 description = "Format generated Rust protobuf bindings"
 dir = "rsworkspace"
 run = "cargo fmt --all"
+
+[tasks."proto:schedules-descriptor-set"]
+description = "Generate FileDescriptorSet for the schedules decider test runner"
+run = "mkdir -p rsworkspace/target/wasm32-unknown-unknown/release && buf build -o rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb --as-file-descriptor-set --path proto/trogonai/scheduler/schedules"
+
+[tasks."rust:wasm-target"]
+description = "Ensure the wasm32-unknown-unknown Rust target is installed"
+run = "rustup target add wasm32-unknown-unknown"
+
+[tasks."artifacts:schedules-wasm"]
+description = "Build schedules decider WASM artifact to dist/decider/"
+depends = ["proto:schedules-descriptor-set", "rust:wasm-target"]
+run = "cd rsworkspace && cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release && mkdir -p dist/decider && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm dist/decider/schedules.wasm && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb dist/decider/schedules.binpb"
+
+[tasks."artifacts:decider-test"]
+description = "Build schedules decider WASM + decider-test CLI"
+depends = ["artifacts:schedules-wasm"]
+run = "cd rsworkspace && cargo build -p trogon-decider-test --release"
 
 [tasks."rsc"]
 description = "Format and check all Rust code (fmt, clippy, all targets, all features)"

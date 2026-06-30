@@ -18,6 +18,15 @@ runs:
         rustup component add rustfmt clippy llvm-tools-preview \
           --toolchain "${RUSTUP_TOOLCHAIN:-$(rustup show active-toolchain | awk '{print $1}')}"
 
+    # Added serially here rather than through rust-toolchain.toml `targets`: that field makes
+    # every concurrent `cargo install` during `mise install` trigger its own rustup target
+    # download, and the parallel downloads corrupt each other (rename fails with os error 2).
+    - name: Install wasm32 target
+      shell: bash
+      run: |
+        rustup target add wasm32-unknown-unknown \
+          --toolchain "${RUSTUP_TOOLCHAIN:-$(rustup show active-toolchain | awk '{print $1}')}"
+
     - name: Install Dylint Rust components
       shell: bash
       run: |

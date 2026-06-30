@@ -89,6 +89,7 @@
 
 mod act;
 mod decision;
+pub mod event;
 mod events;
 #[cfg(feature = "test-support")]
 pub mod testing;
@@ -100,6 +101,7 @@ pub use act::{ActChain, ActRun, First, Steps, Then};
 pub use decision::Decision;
 #[doc(hidden)]
 pub use decision::{DecisionFailure, DecisionResult, evaluate_decision};
+pub use event::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 pub use events::Events;
 #[cfg(feature = "test-support")]
 pub use testing::{History, TestCase, ThenError, ThenEvents, ThenExpectation};
@@ -148,6 +150,19 @@ pub trait Decider: Sized {
 
     /// Decides which events the command produces against the current state.
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
+
+    /// Classifies a [`decide`](Self::decide) rejection into a stable,
+    /// machine-readable code.
+    ///
+    /// The WASM bridge surfaces this as the `code` field of the WIT
+    /// `domain-error`, so hosts and conformance suites can distinguish
+    /// rejection reasons (e.g. `already-exists` vs `deleted`) without parsing
+    /// the human-readable message. Defaults to `"rejected"`; override to map
+    /// each [`DecideError`](Self::DecideError) variant to its own code.
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        let _ = error;
+        "rejected"
+    }
 }
 
 #[cfg(test)]

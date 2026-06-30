@@ -1,0 +1,178 @@
+suite: scheduler.schedules
+scenarios:
+  - name: create schedule from initial state
+    given: []
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
+      schedule_id: backup
+      status:
+        scheduled: {}
+      schedule:
+        every:
+          seconds: 30
+      delivery:
+        subject: agent.run
+      message:
+        content:
+          content_type: application/json
+          data: '{"kind":"heartbeat"}'
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+          schedule_id: backup
+          status:
+            scheduled: {}
+          schedule:
+            every:
+              seconds: 30
+          delivery:
+            subject: agent.run
+          message:
+            content:
+              content_type: application/json
+              data: '{"kind":"heartbeat"}'
+
+  - name: reject create when schedule already exists
+    given:
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+        schedule_id: backup
+        status:
+          scheduled: {}
+        schedule:
+          every:
+            seconds: 30
+        delivery:
+          subject: agent.run
+        message:
+          content:
+            content_type: application/json
+            data: '{"kind":"heartbeat"}'
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
+      schedule_id: backup
+      status:
+        scheduled: {}
+      schedule:
+        every:
+          seconds: 30
+      delivery:
+        subject: agent.run
+      message:
+        content:
+          content_type: application/json
+          data: '{"kind":"heartbeat"}'
+    then:
+      rejected: true
+
+  - name: pause an existing schedule
+    given:
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+        schedule_id: backup
+        status:
+          scheduled: {}
+        schedule:
+          every:
+            seconds: 30
+        delivery:
+          subject: agent.run
+        message:
+          content:
+            content_type: application/json
+            data: '{}'
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
+      schedule_id: backup
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
+          schedule_id: backup
+
+  - name: reject pause when schedule missing
+    given: []
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
+      schedule_id: backup
+    then:
+      rejected: true
+
+  - name: resume a paused schedule
+    given:
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+        schedule_id: backup
+        status:
+          scheduled: {}
+        schedule:
+          every:
+            seconds: 30
+        delivery:
+          subject: agent.run
+        message:
+          content:
+            content_type: application/json
+            data: '{}'
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
+        schedule_id: backup
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeSchedule
+      schedule_id: backup
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleResumed
+          schedule_id: backup
+
+  - name: remove an existing schedule
+    given:
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+        schedule_id: backup
+        status:
+          scheduled: {}
+        schedule:
+          every:
+            seconds: 30
+        delivery:
+          subject: agent.run
+        message:
+          content:
+            content_type: application/json
+            data: '{}'
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveSchedule
+      schedule_id: backup
+    then:
+      events:
+        - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
+          schedule_id: backup
+
+  - name: reject create after schedule removed
+    given:
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+        schedule_id: backup
+        status:
+          scheduled: {}
+        schedule:
+          every:
+            seconds: 30
+        delivery:
+          subject: agent.run
+        message:
+          content:
+            content_type: application/json
+            data: '{}'
+      - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
+        schedule_id: backup
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
+      schedule_id: backup
+      status:
+        scheduled: {}
+      schedule:
+        every:
+          seconds: 30
+      delivery:
+        subject: agent.run
+      message:
+        content:
+          content_type: application/json
+          data: '{"kind":"heartbeat"}'
+    then:
+      rejected: true

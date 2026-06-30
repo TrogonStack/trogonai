@@ -45,7 +45,8 @@ trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
-trogonai-proto = { workspace = true, features = ["schedules"] }
+trogon-scheduler-domain = { path = "../trogon-scheduler-domain", features = ["runtime-snapshot"] }
+trogonai-proto = { workspace = true, features = ["schedules", "runtime-host"] }
 trogon-std = { workspace = true, features = ["uuid"] }
 uuid = { workspace = true, features = ["v5"] }
 

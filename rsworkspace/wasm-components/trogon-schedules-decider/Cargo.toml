@@ -1,0 +1,22 @@
+[package]
+name = "trogon-schedules-decider"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+trogon-decider = { workspace = true }
+trogon-decider-guest-sdk = { workspace = true }
+trogon-scheduler-domain = { path = "../../crates/trogon-scheduler-domain", default-features = false }
+trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["schedules"] }
+wit-bindgen = { workspace = true }
+
+[package.metadata.component]
+package = "trogon:decider"
