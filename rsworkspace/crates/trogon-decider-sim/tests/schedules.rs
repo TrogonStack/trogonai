@@ -413,3 +413,22 @@ fn pause_existing_schedule() {
         .run(&mut instance)
         .unwrap();
 }
+
+#[test]
+fn evolve_skips_events_outside_this_deciders_set() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // An envelope outside the schedules event set must be skipped without affecting state
+    // (matching the native runtime replay), so a fresh create still succeeds afterward.
+    let foreign = host::AnyEnvelope {
+        type_: "trogonai.scheduler.schedules.v1.NotAnEvent".to_string(),
+        payload: vec![1, 2, 3],
+    };
+    SimScenario::new()
+        .given([foreign])
+        .when(create_command("backup"))
+        .then_events([schedule_created_event("backup")])
+        .run(&mut instance)
+        .unwrap();
+}

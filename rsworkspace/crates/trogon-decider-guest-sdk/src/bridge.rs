@@ -38,8 +38,6 @@ pub enum BridgeError {
     CommandConvert(#[source] Box<dyn std::error::Error>),
     #[error("failed to decode event: {0}")]
     EventDecode(#[source] Box<dyn std::error::Error>),
-    #[error("unsupported event type '{event_type}'")]
-    UnknownEvent { event_type: String },
     #[error("failed to evolve state: {0}")]
     Evolve(#[source] Box<dyn std::error::Error>),
     #[error("{source}")]
@@ -63,7 +61,6 @@ impl BridgeError {
         match self {
             Self::UnknownCommandType { .. } | Self::CommandDecode(_) | Self::CommandConvert(_) => "invalid-command",
             Self::EventDecode(_) => "decode-failed",
-            Self::UnknownEvent { .. } => "unknown-event",
             Self::Evolve(_) => "evolve-failed",
             Self::Rejected { code, .. } => code,
             Self::UnsupportedAct | Self::UnsupportedDecision => "unsupported-decision",
@@ -140,11 +137,10 @@ where
 
     let event = match decoded {
         EventDecodeOutcome::Decoded(event) => event,
-        EventDecodeOutcome::Skipped => {
-            return Err(into_view(BridgeError::UnknownEvent {
-                event_type: envelope.event_type().to_string(),
-            }));
-        }
+        // Mirror the native runtime replay (trogon-decider-runtime `execution.rs`): envelopes
+        // outside this decider's event set are skipped without affecting state, so WASM and
+        // native replay fold the same stream to the same state.
+        EventDecodeOutcome::Skipped => return Ok(state),
     };
 
     C::evolve(state, &event).map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
