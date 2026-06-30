@@ -2,6 +2,7 @@ use std::io::Write as _;
 use std::process::Command;
 
 use thiserror::Error;
+use trogon_std::env::{ReadEnv as _, SystemEnv};
 
 #[derive(Debug, Error)]
 pub enum ImportCheckError {
@@ -42,7 +43,7 @@ fn assert_zero_imports_via_wasm_tools(bytes: &[u8]) -> Result<(), ImportCheckErr
     temp.write_all(bytes)
         .map_err(|err| ImportCheckError::Parse(err.to_string()))?;
 
-    let wasm_tools = std::env::var("WASM_TOOLS").unwrap_or_else(|_| "wasm-tools".into());
+    let wasm_tools = SystemEnv.var("WASM_TOOLS").unwrap_or_else(|_| "wasm-tools".into());
     let output = Command::new(&wasm_tools)
         .args(["component", "wit"])
         .arg(temp.path())
