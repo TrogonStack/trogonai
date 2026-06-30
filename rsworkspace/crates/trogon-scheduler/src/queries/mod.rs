@@ -1,6 +1,6 @@
 mod decode;
-mod get;
-mod list;
+mod get_schedule;
+mod list_schedules;
 mod schedule_id;
 
 /// Query entry points over the Postgres projection ([`crate::PostgresSchedulesProjection`]),
@@ -14,9 +14,9 @@ pub mod projection;
 pub(crate) mod read_model;
 
 #[cfg(not(coverage))]
-pub use get::run as get_schedule;
-pub use get::{GetSchedule, GetSchedule as GetScheduleCommand};
+pub use get_schedule::run as get_schedule;
+pub use get_schedule::{GetSchedule, GetSchedule as GetScheduleCommand};
 #[cfg(not(coverage))]
-pub use list::run as list_schedules;
-pub use list::{ListSchedules, ListSchedules as ListSchedulesCommand};
+pub use list_schedules::run as list_schedules;
+pub use list_schedules::{ListSchedules, ListSchedules as ListSchedulesCommand};
 pub use schedule_id::{ScheduleId, ScheduleIdError};

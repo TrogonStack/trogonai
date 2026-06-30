@@ -6,8 +6,8 @@
 //! same [`crate::Schedule`] read model, so a caller cannot tell which projection
 //! served the result.
 
-mod get;
-mod list;
+mod get_schedule;
+mod list_schedules;
 
-pub use get::run as get_schedule;
-pub use list::run as list_schedules;
+pub use get_schedule::run as get_schedule;
+pub use list_schedules::run as list_schedules;
