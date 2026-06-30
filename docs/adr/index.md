@@ -18,3 +18,4 @@ future implementation work.
 - [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
 - [ADR 0012: ARD-Compatible Discovery Catalog](./0012-ard-compatible-discovery-catalog.md)
 - [ADR 0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
+- [ADR 0014: Command and Query Naming](./0014-command-and-query-naming.md)
