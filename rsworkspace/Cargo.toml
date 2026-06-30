@@ -113,7 +113,7 @@ moka = { version = "=0.12.10", features = ["future"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=0.8.23"
-wasmtime = "=45.0.0"
+wasmtime = "=36.0.8"
 http = "=1.4.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
