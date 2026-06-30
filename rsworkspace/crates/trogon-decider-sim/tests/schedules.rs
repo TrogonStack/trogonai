@@ -447,3 +447,23 @@ fn evolve_skips_events_outside_this_deciders_set() {
         .run(&mut instance)
         .unwrap();
 }
+
+#[test]
+fn snapshot_round_trips_into_a_restored_session() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // Fold a creation into one session, then capture its snapshot.
+    let snapshot = {
+        let mut session = instance.open_session(None).unwrap();
+        session.evolve(&[schedule_created_event("backup")]).unwrap().unwrap();
+        session.snapshot().unwrap()
+    };
+    assert!(snapshot.is_some(), "guest should produce a snapshot frame");
+
+    // A fresh session restored from that snapshot must already see the schedule as present,
+    // so re-creating it is rejected without replaying any events.
+    let mut restored = instance.open_session(snapshot.as_deref()).unwrap();
+    let outcome = restored.decide(&create_command("backup")).unwrap();
+    assert!(matches!(outcome, Err(host::DecideError::Rejected(_))), "{outcome:?}");
+}
