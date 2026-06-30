@@ -35,5 +35,10 @@ pub const PAUSE_SCHEDULE_TYPE_URL: &str = v1::PauseSchedule::TYPE_URL;
 pub const REMOVE_SCHEDULE_TYPE_URL: &str = v1::RemoveSchedule::TYPE_URL;
 pub const RESUME_SCHEDULE_TYPE_URL: &str = v1::ResumeSchedule::TYPE_URL;
 
-/// Stable type URL for the [`state_v1::State`] snapshot schema version tag.
-pub const SCHEDULES_STATE_SCHEMA_VERSION: &str = state_v1::State::TYPE_URL;
+/// Schema-version tag for the [`state_v1::State`] snapshot frame.
+///
+/// Uses the proto full name (not the `type.googleapis.com/` URL) so it matches the snapshot type
+/// the native runtime resolves through its `SnapshotType` impl (`State::FULL_NAME`); a host can
+/// therefore hand a native snapshot to the guest frame and have `decode_snapshot` accept it
+/// instead of trapping on a tag mismatch.
+pub const SCHEDULES_STATE_SCHEMA_VERSION: &str = <state_v1::State as buffa::MessageName>::FULL_NAME;
