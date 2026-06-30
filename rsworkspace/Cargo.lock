@@ -100,6 +100,7 @@ dependencies = [
  "trogon-identity-types",
  "trogon-nats",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]
