@@ -4,7 +4,7 @@
 use buffa::Message as _;
 use buffa::MessageField;
 use buffa::MessageName as _;
-use trogon_decider_sim::{SimFixture, SimHost, SimScenario, assert_zero_imports};
+use trogon_decider_sim::{ScenarioError, SimFixture, SimHost, SimScenario, assert_zero_imports};
 use trogon_decider_wit::host::{self, CommandEnvelope};
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, v1};
@@ -167,7 +167,7 @@ fn then_accepted_reports_rejection_mismatch() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        error.to_string().contains("expected acceptance, got rejection"),
+        matches!(&error, ScenarioError::AcceptanceGotRejection { .. }),
         "{error}"
     );
 }
@@ -182,7 +182,7 @@ fn then_accepted_reports_fault_mismatch() {
         .then_accepted()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("expected acceptance, got fault"), "{error}");
+    assert!(matches!(&error, ScenarioError::AcceptanceGotFault { .. }), "{error}");
 }
 
 #[test]
@@ -219,7 +219,10 @@ fn then_error_reports_rejection_mismatch() {
         .then_error("some-other-code")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("got rejection: rejected"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::ErrorGotRejection { code, .. } if code.as_str() == "rejected"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -232,7 +235,10 @@ fn then_error_reports_fault_mismatch() {
         .then_error("some-other-code")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("got fault: invalid-command"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::ErrorGotFault { code, .. } if code.as_str() == "invalid-command"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -245,7 +251,10 @@ fn then_error_reports_unexpected_events() {
         .then_error("rejected")
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("got 1 event(s)"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::ErrorGotEvents { count: 1, .. }),
+        "{error}"
+    );
 }
 
 #[test]
@@ -271,7 +280,7 @@ fn then_rejected_reports_event_count() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        error.to_string().contains("expected rejection, got 1 event(s)"),
+        matches!(&error, ScenarioError::RejectionGotEvents { count: 1 }),
         "{error}"
     );
 }
@@ -286,7 +295,7 @@ fn then_rejected_reports_fault_mismatch() {
         .then_rejected()
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("expected rejection, got fault"), "{error}");
+    assert!(matches!(&error, ScenarioError::RejectionGotFault { .. }), "{error}");
 }
 
 #[test]
@@ -299,7 +308,10 @@ fn then_events_reports_count_mismatch() {
         .then_events([])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("expected 0 event(s), got 1"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::EventCountMismatch { expected: 0, actual: 1 }),
+        "{error}"
+    );
 }
 
 #[test]
@@ -312,7 +324,10 @@ fn then_events_reports_payload_mismatch() {
         .then_events([schedule_created_event("other")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("event 0 mismatch"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::EventMismatch { index: 0, .. }),
+        "{error}"
+    );
 }
 
 #[test]
@@ -325,7 +340,10 @@ fn then_events_reports_fault() {
         .then_events([schedule_created_event("backup")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("faulted: invalid-command"), "{error}");
+    assert!(
+        matches!(&error, ScenarioError::EventsGotFault { code, .. } if code.as_str() == "invalid-command"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -334,7 +352,7 @@ fn run_requires_a_command() {
     let mut instance = host.instantiate(()).unwrap();
 
     let error = SimScenario::new().then_rejected().run(&mut instance).unwrap_err();
-    assert!(error.to_string().contains("scenario missing .when(...)"), "{error}");
+    assert!(matches!(&error, ScenarioError::MissingWhen), "{error}");
 }
 
 #[test]
@@ -346,10 +364,7 @@ fn run_requires_a_then_expectation() {
         .when(create_command("backup"))
         .run(&mut instance)
         .unwrap_err();
-    assert!(
-        error.to_string().contains("scenario missing .then_events(...)"),
-        "{error}"
-    );
+    assert!(matches!(&error, ScenarioError::MissingExpectation), "{error}");
 }
 
 #[test]
@@ -362,7 +377,7 @@ fn then_events_reports_rejection() {
         .then_events([schedule_created_event("backup")])
         .run(&mut instance)
         .unwrap_err();
-    assert!(error.to_string().contains("rejected:"), "{error}");
+    assert!(matches!(&error, ScenarioError::EventsGotRejection { .. }), "{error}");
 }
 
 #[test]
