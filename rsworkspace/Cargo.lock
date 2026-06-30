@@ -6618,6 +6618,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "trogon-decider-wit",
+ "trogon-std",
  "trogonai-proto",
  "wasmparser 0.227.0",
  "wasmtime 29.0.1",
