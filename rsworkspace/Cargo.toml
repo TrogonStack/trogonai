@@ -20,6 +20,9 @@ a2a-bridge = { path = "crates/a2a-bridge" }
 a2a-identity-types = { path = "crates/a2a-identity-types" }
 a2a-nats = { path = "crates/a2a-nats" }
 a2a-pack = { path = "crates/a2a-pack" }
+ard-catalog = { path = "crates/ard-catalog" }
+ard-nats = { path = "crates/ard-nats" }
+ard-registry = { path = "crates/ard-registry" }
 a2a-redaction = { path = "crates/a2a-redaction" }
 acp-nats = { path = "crates/acp-nats" }
 trogon-telemetry = { path = "crates/trogon-telemetry" }
@@ -68,7 +71,11 @@ futures-util = "=0.3.32"
 tokio = "=1.52.1"
 tokio-util = "=0.7.18"
 tokio-tungstenite = "=0.29.0"
+tower = "=0.5.3"
 tower-http = { version = "=0.6.8", features = ["trace"] }
+
+# Database
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
 
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }
@@ -125,10 +132,9 @@ wit-bindgen = "=0.41.0"
 # Auth callout
 hex = "=0.4.3"
 hmac = "=0.12.1"
-jsonwebtoken = "=9.3.0"
+jsonwebtoken = "=10.3.0"
 nats-jwt-rs = "=0.1.1"
 nkeys = { version = "=0.4.5", features = ["xkeys"] }
-rand = "=0.8.5"
 rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.14.0", default-features = false, features = ["std"] }
 rustls-webpki = { version = "=0.103.13", default-features = false, features = ["std", "alloc", "ring"] }

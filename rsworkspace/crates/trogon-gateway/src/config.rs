@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::path::Path;
 
 use crate::source::discord::config::DiscordBotToken;
@@ -26,6 +25,7 @@ use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::{NatsToken, SubjectTokenViolation};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
+use trogon_std::env::{ReadEnv, SystemEnv};
 use trogon_std::{NonZeroDuration, ZeroDuration};
 
 use crate::constants::{
@@ -67,17 +67,17 @@ enum SecretInput {
 }
 
 impl SecretInput {
-    fn resolve(self) -> Result<String, SecretInputError> {
+    fn resolve(self, env: &impl ReadEnv) -> Result<String, SecretInputError> {
         match self {
             Self::Literal(value) => Ok(value),
-            Self::Env { env } => {
-                let name = env.trim();
+            Self::Env { env: var_name } => {
+                let name = var_name.trim();
                 if name.is_empty() {
                     return Err(SecretInputError::EmptyEnvName);
                 }
-                env::var(name).map_err(|error| match error {
-                    env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
-                    env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
+                env.var(name).map_err(|error| match error {
+                    std::env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
+                    std::env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
                 })
             }
         }
@@ -606,19 +606,20 @@ pub fn load_with_overrides(
 
 fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConfig, ConfigError> {
     let nats = resolve_nats(&cfg.nats, nats_overrides);
+    let env = SystemEnv;
     let mut errors = Vec::new();
 
-    let github = resolve_github_integrations(cfg.sources.github, &mut errors);
-    let discord = resolve_discord(cfg.sources.discord, &mut errors);
-    let slack = resolve_slack_integrations(cfg.sources.slack, &mut errors);
-    let telegram = resolve_telegram_integrations(cfg.sources.telegram, &mut errors);
-    let twitter = resolve_twitter_integrations(cfg.sources.twitter, &mut errors);
-    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &mut errors);
-    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &mut errors);
-    let linear = resolve_linear_integrations(cfg.sources.linear, &mut errors);
-    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &mut errors);
-    let notion = resolve_notion_integrations(cfg.sources.notion, &mut errors);
-    let sentry = resolve_sentry_integrations(cfg.sources.sentry, &mut errors);
+    let github = resolve_github_integrations(cfg.sources.github, &env, &mut errors);
+    let discord = resolve_discord(cfg.sources.discord, &env, &mut errors);
+    let slack = resolve_slack_integrations(cfg.sources.slack, &env, &mut errors);
+    let telegram = resolve_telegram_integrations(cfg.sources.telegram, &env, &mut errors);
+    let twitter = resolve_twitter_integrations(cfg.sources.twitter, &env, &mut errors);
+    let gitlab = resolve_gitlab_integrations(cfg.sources.gitlab, &env, &mut errors);
+    let incidentio = resolve_incidentio_integrations(cfg.sources.incidentio, &env, &mut errors);
+    let linear = resolve_linear_integrations(cfg.sources.linear, &env, &mut errors);
+    let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &env, &mut errors);
+    let notion = resolve_notion_integrations(cfg.sources.notion, &env, &mut errors);
+    let sentry = resolve_sentry_integrations(cfg.sources.sentry, &env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(ValidationErrors(errors)));
@@ -645,6 +646,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
 
 fn resolve_github_integrations(
     section: GithubConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::github::GithubConfig>> {
     let GithubConfig {
@@ -665,7 +667,8 @@ fn resolve_github_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("github", &id, "webhook_secret", webhook.webhook_secret, errors)
+        let Some(secret) =
+            require_integration_value("github", &id, "webhook_secret", webhook.webhook_secret, env, errors)
         else {
             continue;
         };
@@ -713,6 +716,7 @@ fn resolve_github_integrations(
 
 fn resolve_discord(
     section: DiscordConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<crate::source::discord::DiscordConfig> {
     let DiscordConfig {
@@ -730,7 +734,7 @@ fn resolve_discord(
     }
 
     let token_str = match bot_token {
-        Some(input) => match input.resolve() {
+        Some(input) => match input.resolve(env) {
             Ok(value) => value,
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
@@ -811,6 +815,7 @@ fn resolve_discord(
 
 fn resolve_slack_integrations(
     section: SlackConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::slack::SlackConfig>> {
     let SlackConfig {
@@ -844,7 +849,7 @@ fn resolve_slack_integrations(
         ) else {
             continue;
         };
-        let transport = match resolve_slack_transport(&id, integration.webhook, integration.socket_mode, errors) {
+        let transport = match resolve_slack_transport(&id, integration.webhook, integration.socket_mode, env, errors) {
             Some(transport) => transport,
             None => continue,
         };
@@ -866,11 +871,12 @@ fn resolve_slack_transport(
     id: &SourceIntegrationId,
     webhook: Option<SlackWebhookConfig>,
     socket_mode: Option<SlackSocketModeConfig>,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
     match (webhook, socket_mode) {
-        (Some(webhook), None) => resolve_slack_webhook_transport(id, webhook, errors),
-        (None, Some(socket_mode)) => resolve_slack_socket_mode_transport(id, socket_mode, errors),
+        (Some(webhook), None) => resolve_slack_webhook_transport(id, webhook, env, errors),
+        (None, Some(socket_mode)) => resolve_slack_socket_mode_transport(id, socket_mode, env, errors),
         (Some(_), Some(_)) => {
             errors.push(ConfigValidationError::invalid_integration(
                 "slack",
@@ -887,9 +893,10 @@ fn resolve_slack_transport(
 fn resolve_slack_webhook_transport(
     id: &SourceIntegrationId,
     webhook: SlackWebhookConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, errors)?;
+    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, env, errors)?;
     let signing_secret = match SlackSigningSecret::new(secret) {
         Ok(secret) => secret,
         Err(error) => {
@@ -928,9 +935,10 @@ fn resolve_slack_webhook_transport(
 fn resolve_slack_socket_mode_transport(
     id: &SourceIntegrationId,
     socket_mode: SlackSocketModeConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, errors)?;
+    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, env, errors)?;
     let app_token = match SlackAppToken::new(token) {
         Ok(token) => token,
         Err(error) => {
@@ -951,6 +959,7 @@ fn resolve_slack_socket_mode_transport(
 
 fn resolve_telegram_integrations(
     section: TelegramConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::telegram::TelegramSourceConfig>> {
     let TelegramConfig {
@@ -971,7 +980,8 @@ fn resolve_telegram_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("telegram", &id, "webhook_secret", webhook.webhook_secret, errors)
+        let Some(secret) =
+            require_integration_value("telegram", &id, "webhook_secret", webhook.webhook_secret, env, errors)
         else {
             continue;
         };
@@ -992,6 +1002,7 @@ fn resolve_telegram_integrations(
             webhook.webhook_registration_mode.as_deref().unwrap_or("manual"),
             webhook.bot_token,
             webhook.public_webhook_url,
+            env,
             errors,
         ) {
             Some(Ok(registration)) => Some(registration),
@@ -1034,6 +1045,7 @@ fn resolve_telegram_integration_registration(
     webhook_registration_mode: &str,
     bot_token: Option<SecretInput>,
     public_webhook_url: Option<String>,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<Result<TelegramWebhookRegistrationConfig, ()>> {
     let mode = match webhook_registration_mode.parse::<TelegramWebhookRegistrationMode>() {
@@ -1055,7 +1067,7 @@ fn resolve_telegram_integration_registration(
 
     let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
     let bot_token = match bot_token {
-        Some(input) => match input.resolve() {
+        Some(input) => match input.resolve(env) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(
@@ -1129,6 +1141,7 @@ fn resolve_telegram_integration_registration(
 
 fn resolve_twitter_integrations(
     section: TwitterConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::twitter::TwitterConfig>> {
     let TwitterConfig {
@@ -1150,7 +1163,7 @@ fn resolve_twitter_integrations(
             continue;
         };
         let Some(secret) =
-            require_integration_value("twitter", &id, "consumer_secret", webhook.consumer_secret, errors)
+            require_integration_value("twitter", &id, "consumer_secret", webhook.consumer_secret, env, errors)
         else {
             continue;
         };
@@ -1198,6 +1211,7 @@ fn resolve_twitter_integrations(
 
 fn resolve_gitlab_integrations(
     section: GitlabConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::gitlab::GitlabConfig>> {
     let GitlabConfig {
@@ -1218,7 +1232,7 @@ fn resolve_gitlab_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, errors)
+        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, env, errors)
         else {
             continue;
         };
@@ -1283,6 +1297,7 @@ fn resolve_gitlab_integrations(
 
 fn resolve_linear_integrations(
     section: LinearConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::linear::LinearConfig>> {
     let LinearConfig {
@@ -1303,7 +1318,8 @@ fn resolve_linear_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("linear", &id, "webhook_secret", webhook.webhook_secret, errors)
+        let Some(secret) =
+            require_integration_value("linear", &id, "webhook_secret", webhook.webhook_secret, env, errors)
         else {
             continue;
         };
@@ -1357,6 +1373,7 @@ fn resolve_linear_integrations(
 
 fn resolve_microsoft_graph_integrations(
     section: MicrosoftGraphConfigInput,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::microsoft_graph::MicrosoftGraphConfig>> {
     let MicrosoftGraphConfigInput {
@@ -1377,9 +1394,14 @@ fn resolve_microsoft_graph_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(raw_client_state) =
-            require_integration_value("microsoft_graph", &id, "client_state", webhook.client_state, errors)
-        else {
+        let Some(raw_client_state) = require_integration_value(
+            "microsoft_graph",
+            &id,
+            "client_state",
+            webhook.client_state,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let client_state = match MicrosoftGraphClientState::new(raw_client_state) {
@@ -1426,6 +1448,7 @@ fn resolve_microsoft_graph_integrations(
 
 fn resolve_incidentio_integrations(
     section: IncidentioConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<IncidentioSourceConfig>> {
     let IncidentioConfig {
@@ -1447,7 +1470,7 @@ fn resolve_incidentio_integrations(
             continue;
         };
         let Some(secret) =
-            require_integration_value("incidentio", &id, "signing_secret", webhook.signing_secret, errors)
+            require_integration_value("incidentio", &id, "signing_secret", webhook.signing_secret, env, errors)
         else {
             continue;
         };
@@ -1512,6 +1535,7 @@ fn resolve_incidentio_integrations(
 
 fn resolve_notion_integrations(
     section: NotionConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::notion::NotionConfig>> {
     let NotionConfig {
@@ -1532,9 +1556,14 @@ fn resolve_notion_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(raw_token) =
-            require_integration_value("notion", &id, "verification_token", webhook.verification_token, errors)
-        else {
+        let Some(raw_token) = require_integration_value(
+            "notion",
+            &id,
+            "verification_token",
+            webhook.verification_token,
+            env,
+            errors,
+        ) else {
             continue;
         };
         let verification_token = match NotionVerificationToken::new(raw_token) {
@@ -1581,6 +1610,7 @@ fn resolve_notion_integrations(
 
 fn resolve_sentry_integrations(
     section: SentryConfig,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Vec<SourceIntegration<crate::source::sentry::SentryConfig>> {
     let SentryConfig {
@@ -1601,7 +1631,8 @@ fn resolve_sentry_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("sentry", &id, "client_secret", webhook.client_secret, errors)
+        let Some(secret) =
+            require_integration_value("sentry", &id, "client_secret", webhook.client_secret, env, errors)
         else {
             continue;
         };
@@ -1675,10 +1706,11 @@ fn require_integration_value(
     id: &SourceIntegrationId,
     field: &'static str,
     value: Option<SecretInput>,
+    env: &impl ReadEnv,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<String> {
     match value {
-        Some(value) => match value.resolve() {
+        Some(value) => match value.resolve(env) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(source, id, field, error));

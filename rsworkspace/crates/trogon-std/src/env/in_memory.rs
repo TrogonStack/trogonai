@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::env;
 
 #[cfg(any(test, feature = "test-support"))]
-use super::ReadEnv;
+use super::{EnumerateEnv, ReadEnv};
 
 /// Won't touch the global process environment.
 ///
@@ -54,6 +54,17 @@ impl Default for InMemoryEnv {
 impl ReadEnv for InMemoryEnv {
     fn var(&self, key: &str) -> Result<String, env::VarError> {
         self.vars.borrow().get(key).cloned().ok_or(env::VarError::NotPresent)
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl EnumerateEnv for InMemoryEnv {
+    fn vars(&self) -> Vec<(String, String)> {
+        self.vars
+            .borrow()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
     }
 }
 

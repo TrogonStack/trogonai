@@ -37,7 +37,7 @@ fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source("projected schedule view is malformed", std::io::Error::other(context))
 }
 
-fn schedule_from_view(view: &projections_v1::ScheduleProjection) -> Result<Schedule, SchedulerError> {
+pub(crate) fn schedule_from_view(view: &projections_v1::ScheduleProjection) -> Result<Schedule, SchedulerError> {
     let schedule = view.schedule.as_option().ok_or_else(|| malformed("missing schedule"))?;
     let delivery = view.delivery.as_option().ok_or_else(|| malformed("missing delivery"))?;
     let message = view.message.as_option().ok_or_else(|| malformed("missing message"))?;

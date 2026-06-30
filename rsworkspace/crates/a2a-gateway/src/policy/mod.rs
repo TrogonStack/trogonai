@@ -11,11 +11,20 @@
 //! the runtime keeps a single audit surface across tiers.
 
 pub mod error;
+pub mod per_skill;
+#[cfg(feature = "spicedb")]
+pub mod spicedb_tier1;
 pub mod tier1_declarative;
 pub mod tier2;
 pub mod tier2_cel;
+pub mod tier3_redaction;
+pub mod wasmtime_substrate;
 
 pub use error::{PolicyError, Tier2EvalError};
+pub use per_skill::{
+    PerSkillDecision, PerSkillPolicy, PerSkillPolicyConfig, PerSkillRequest, ResolvedRule, SkillEffect, SkillRule,
+    SkillScope,
+};
 pub use tier1_declarative::{
     ENV_TIER1_BUNDLE_DIR, ENV_TIER1_DECLARATIVE_ENABLED, FixedTier1Clock, GatewayTier1DeclarativeLayer,
     NoopTier1DeclarativeGate, RealTier1DeclarativeGate, SystemTier1Clock, TIER1_BUNDLE_EXTENSION, Tier1Clock,
@@ -30,3 +39,10 @@ pub use tier2_cel::{
     CelCompileError, CelEngine, CelInterpreterEngine, CelProgramHandle, RealTier2CelEvaluator, Tier2CompiledBundle,
     tier2_evaluation_context_from_ingress,
 };
+pub use tier3_redaction::{
+    NoopTier3RedactionGate, RealTier3RedactionGate, RedactionRewrite, RewriteKind, Tier3EngineError,
+    Tier3EvaluationContext, Tier3RedactionDecision, Tier3RedactionGate, Tier3RefusalReason, Tier3SkillManifest,
+    gateway_tier3_redaction_enabled, load_tier3_manifests_from_bundle, merge_forward_audit_rewrites,
+    tier3_redaction_audit_rewrites,
+};
+pub use wasmtime_substrate::WasmtimeSubstrate;

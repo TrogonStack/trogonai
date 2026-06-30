@@ -3,6 +3,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use futures_util::StreamExt;
 use trogon_nats::AdvancedMockNatsClient;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use a2a_nats::constants::GATEWAY_CALLER_ID_HTTP;
 
@@ -150,13 +151,16 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
 #[tokio::test]
 #[ignore = "requires compose stack: A2A_SMOKE_COMPOSE=1 and NATS_URL (see devops/docker/compose/compose.a2a.smoke.yml)"]
 async fn nats_transport_live_requires_nats_server() {
-    if std::env::var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
+    let env = SystemEnv;
+    if env.var("A2A_SMOKE_COMPOSE").as_deref() != Ok("1") {
         panic!("set A2A_SMOKE_COMPOSE=1 to run live compose-network bridge smoke");
     }
-    let url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
+    let url = env.var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".into());
     let client = async_nats::connect(url).await.expect("live NATS connect");
     let _ = client;
-    let bridge_addr = std::env::var("BRIDGE_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:7443".into());
+    let bridge_addr = env
+        .var("BRIDGE_LISTEN_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:7443".into());
     let response = reqwest::get(format!("http://{bridge_addr}/"))
         .await
         .expect("bridge HTTP reachable");

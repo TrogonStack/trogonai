@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-autotests = false
 
 [lints.rust]
 warnings = "deny"
@@ -18,12 +17,16 @@ unwrap_used = "deny"
 
 [features]
 test-support = ["trogon-decider-runtime/test-support", "trogon-nats/test-support"]
+# Adds the Postgres schedules projector alongside the default NATS KV one. Pulls
+# in sqlx.
+postgres = ["dep:sqlx"]
 
 [dependencies]
 thiserror = { workspace = true }
 trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
 base64 = { workspace = true }
+sqlx = { workspace = true, optional = true }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 bytes = { workspace = true }
@@ -48,9 +51,12 @@ trogon-std = { workspace = true, features = ["uuid"] }
 uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
+buffa = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 proptest = "1"
-testcontainers-modules = { version = "0.15", features = ["nats"] }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+testcontainers-modules = { version = "0.15", features = ["nats", "postgres"] }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 trogon-decider = { workspace = true, features = ["test-support"] }
@@ -59,11 +65,19 @@ trogon-decider-nats = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }
 
+# Only feature-gated tests need explicit targets (to declare required-features);
+# `integration.rs` is auto-discovered.
 [[test]]
 name = "schedule_unit"
 path = "tests/schedule_unit.rs"
 required-features = ["test-support"]
 
 [[test]]
-name = "integration"
-path = "tests/integration.rs"
+name = "postgres_projection"
+path = "tests/postgres_projection.rs"
+required-features = ["postgres"]
+
+[[test]]
+name = "postgres_projector_e2e"
+path = "tests/postgres_projector_e2e.rs"
+required-features = ["postgres"]

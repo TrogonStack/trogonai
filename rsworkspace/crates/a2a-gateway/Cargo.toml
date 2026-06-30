@@ -17,7 +17,17 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Enables the SpiceDB-backed Tier-1 gate. Off by default so
+# deployments without an external authoriser don't pay the
+# authzed/tonic/moka compile cost.
+spicedb = ["a2a-nats/spicedb", "dep:async-trait", "dep:authzed", "dep:tonic"]
+
 [dependencies]
+a2a = { workspace = true }
+async-trait = { workspace = true, optional = true }
+authzed = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true }
 a2a-auth-callout = { workspace = true }
 a2a-nats = { workspace = true }
 a2a-pack = { workspace = true }
@@ -27,7 +37,7 @@ bytes = { workspace = true }
 cel-interpreter = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
-jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -40,7 +50,8 @@ tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 trogon-aauth-verify = { workspace = true }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }

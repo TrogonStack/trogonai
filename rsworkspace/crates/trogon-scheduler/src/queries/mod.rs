@@ -3,6 +3,11 @@ mod get;
 mod list;
 mod schedule_id;
 
+/// Query entry points over the Postgres projection ([`crate::PostgresSchedulesProjection`]),
+/// as opposed to the NATS KV queries above.
+#[cfg(all(feature = "postgres", not(coverage)))]
+pub mod projection;
+
 /// The read-model value objects callers receive. They belong to the read side:
 /// the projection stores a `projections.v1.ScheduleProjection` protobuf, and these
 /// queries decode it into these types (see [`decode`]).

@@ -1,0 +1,14 @@
+_doc = """
+Deny requests outside UTC business hours (Mon–Fri 09:00–17:00). The time_of_day match
+hits inside the window; negate inverts so the deny rule fires after hours and on weekends.
+"""
+
+[[rule]]
+id = "deny-outside-business-hours"
+priority = 100
+effect = "deny"
+
+[[rule.matches]]
+kind = "time_of_day"
+pattern = "Mon-Fri|09:00-17:00|UTC"
+negate = true

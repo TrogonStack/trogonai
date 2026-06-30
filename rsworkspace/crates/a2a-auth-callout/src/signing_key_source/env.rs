@@ -4,6 +4,7 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tracing::warn;
+use trogon_std::env::ReadEnv;
 
 #[cfg(test)]
 static ENV_DEV_WARN_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -27,16 +28,17 @@ pub struct EnvSigningKeySource {
 }
 
 impl EnvSigningKeySource {
-    pub fn from_env() -> Result<Self, AuthCalloutError> {
-        let current_secret = std::env::var("AUTH_CALLOUT_SIGNING_SECRET")
+    pub fn from_env(env: &impl ReadEnv) -> Result<Self, AuthCalloutError> {
+        let current_secret = env
+            .var("AUTH_CALLOUT_SIGNING_SECRET")
             .map_err(|_| AuthCalloutError::MissingEnvVar("AUTH_CALLOUT_SIGNING_SECRET"))?;
-        Self::from_secrets(current_secret)
+        Self::from_secrets(env, current_secret)
     }
 
     /// Constructor that takes the current secret directly. Lets the loader
     /// resolve a fallback (e.g. `AUTH_CALLOUT_ISSUER_NKEY_SEED`) without
     /// mutating the process environment.
-    pub fn from_secrets(current_secret: String) -> Result<Self, AuthCalloutError> {
+    pub fn from_secrets(env: &impl ReadEnv, current_secret: String) -> Result<Self, AuthCalloutError> {
         ENV_DEV_WARN_ONCE.call_once(|| {
             #[cfg(test)]
             ENV_DEV_WARN_COUNT.fetch_add(1, Ordering::SeqCst);
@@ -51,7 +53,8 @@ impl EnvSigningKeySource {
             signing_key_from_secret(&current_secret)?,
         );
 
-        let previous = match std::env::var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
+        let previous = match env
+            .var("AUTH_CALLOUT_SIGNING_SECRET_PREVIOUS")
             .ok()
             .filter(|s| !s.is_empty())
         {
