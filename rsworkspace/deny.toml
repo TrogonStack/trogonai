@@ -1,0 +1,20 @@
+# Enforces ADR 0015 (docs/adr/0015-rust-tls-library.md): rustls is the default
+# TLS implementation for first-party Rust code. This config fails the build if
+# native-tls or OpenSSL re-enter the workspace dependency graph, so the "reject
+# new native-tls/openssl" consequence is machine-checked rather than left to
+# manual review. Scope is intentionally narrow: run `cargo deny check bans`.
+
+[graph]
+# Walk every optional dependency so a native-tls/OpenSSL feature cannot slip in
+# behind a non-default feature flag.
+all-features = true
+
+[bans]
+# Version drift and wildcard pins are out of scope for the TLS policy.
+multiple-versions = "allow"
+wildcards = "allow"
+deny = [
+    { crate = "native-tls", reason = "ADR 0015: first-party Rust uses rustls, not native-tls." },
+    { crate = "openssl", reason = "ADR 0015: first-party Rust uses rustls, not the openssl crate." },
+    { crate = "openssl-sys", reason = "ADR 0015: first-party Rust uses rustls, not OpenSSL (libssl)." },
+]

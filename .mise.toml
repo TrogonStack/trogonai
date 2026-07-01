@@ -6,6 +6,7 @@ buf = "1.70.0"
 "cargo:protoc-gen-buffa" = "0.7.0"
 "cargo:protoc-gen-buffa-packaging" = "0.7.0"
 "cargo:cargo-component" = "0.21.1"
+"cargo:cargo-deny" = "0.19.8"
 "cargo:wasm-tools" = "1.250.0"
 node = "26.3.0"
 pnpm = "11.5.1"
@@ -54,6 +55,11 @@ run = "mkdir -p rsworkspace/target/wasm32-unknown-unknown/release && buf build -
 [tasks."rust:wasm-target"]
 description = "Ensure the wasm32-unknown-unknown Rust target is installed"
 run = "rustup target add wasm32-unknown-unknown"
+
+[tasks."rust:tls-policy"]
+description = "Enforce ADR 0015: fail if native-tls/OpenSSL enter the Rust dependency graph"
+dir = "rsworkspace"
+run = "cargo deny check bans"
 
 [tasks."artifacts:schedules-wasm"]
 description = "Build schedules decider WASM artifact to dist/decider/"
