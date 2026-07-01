@@ -47,6 +47,9 @@ verification_token = "notion-verification-token-example"
 
 [sources.sentry.integrations.primary.webhook]
 client_secret = "sentry-client-secret"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
 "#
     .to_string()
 }
@@ -69,7 +72,7 @@ async fn provision_all_sources_creates_all_streams() {
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 11);
+    assert_eq!(js.created_streams().len(), 12);
 }
 
 #[tokio::test]
@@ -133,6 +136,9 @@ verification_token = "notion-verification-token-example"
 
 [sources.sentry.integrations.primary.webhook]
 client_secret = "sentry-client-secret"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
 "#;
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
@@ -140,5 +146,5 @@ client_secret = "sentry-client-secret"
 
     provision(&js, &cfg).await.expect("provision should succeed");
 
-    assert_eq!(js.created_streams().len(), 10);
+    assert_eq!(js.created_streams().len(), 11);
 }

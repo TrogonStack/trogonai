@@ -120,6 +120,9 @@ pub const ACP_SESSION_SET_MODE: &str = "acp.session.set_mode";
 /// ACP set_session_model handling
 pub const ACP_SESSION_SET_MODEL: &str = "acp.session.set_model";
 
+/// Datadog webhook ingestion
+pub const DATADOG_WEBHOOK: &str = "datadog.webhook";
+
 /// ACP client method dispatch. Span name is `dispatch_client_method` (no namespace) today
 pub const DISPATCH_CLIENT_METHOD: &str = "dispatch_client_method";
 

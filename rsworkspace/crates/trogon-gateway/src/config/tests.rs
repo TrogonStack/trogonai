@@ -128,6 +128,15 @@ client_secret = "{secret}"
     )
 }
 
+fn datadog_toml(token: &str) -> String {
+    format!(
+        r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "{token}"
+"#
+    )
+}
+
 fn incidentio_valid_test_secret() -> String {
     ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
 }
@@ -877,6 +886,87 @@ client_secret = "sentry-client-secret"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(cfg.sentry.is_empty());
+}
+
+#[test]
+fn datadog_resolves_with_valid_token() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(!cfg.datadog.is_empty());
+    assert!(cfg.has_any_source());
+}
+
+#[test]
+fn datadog_disabled_is_empty() {
+    let toml = r#"
+[sources.datadog]
+status = "disabled"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog.is_empty());
+}
+
+#[test]
+fn datadog_enabled_without_webhook_token_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+status = "enabled"
+
+[sources.datadog.integrations.primary.webhook]
+
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: missing webhook_token")))
+    );
+}
+
+#[test]
+fn datadog_empty_webhook_token_is_invalid() {
+    let f = write_toml(&datadog_toml(""));
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: invalid webhook_token")))
+    );
+}
+
+#[test]
+fn datadog_timestamp_tolerance_defaults_to_disabled() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog[0].config.timestamp_tolerance.is_none());
+}
+
+#[test]
+fn datadog_timestamp_tolerance_resolves_when_set() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+timestamp_tolerance_secs = 300
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.datadog[0].config.timestamp_tolerance.map(std::time::Duration::from),
+        Some(std::time::Duration::from_secs(300)),
+    );
+}
+
+#[test]
+fn datadog_zero_timestamp_tolerance_disables_check() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+timestamp_tolerance_secs = 0
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog[0].config.timestamp_tolerance.is_none());
 }
 
 #[test]

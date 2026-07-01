@@ -43,6 +43,7 @@ pub struct LinearPlugin;
 pub struct MicrosoftGraphPlugin;
 pub struct NotionPlugin;
 pub struct SentryPlugin;
+pub struct DatadogPlugin;
 
 async fn provision_integrations<C, T, F>(
     integrations: &[SourceIntegration<T>],
@@ -358,6 +359,31 @@ impl SourcePlugin for SentryPlugin {
     }
 }
 
+impl SourcePlugin for DatadogPlugin {
+    fn id(&self) -> SourceId {
+        "datadog"
+    }
+
+    async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
+        provision_integrations(&config.datadog, self.id(), client, crate::source::datadog::provision).await
+    }
+
+    fn mount<P, S>(&self, app: Router, publisher: ClaimCheckPublisher<P, S>, config: &ResolvedConfig) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+    {
+        mount_integrations(
+            &config.datadog,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            |p, cfg| crate::source::datadog::router(p, cfg),
+        )
+    }
+}
+
 /// Provision JetStream streams for every webhook source. Discord is provisioned separately by the caller.
 pub async fn provision_webhook_sources<C: JetStreamContext>(
     client: &C,
@@ -373,6 +399,7 @@ pub async fn provision_webhook_sources<C: JetStreamContext>(
     MicrosoftGraphPlugin.provision(client, config).await?;
     NotionPlugin.provision(client, config).await?;
     SentryPlugin.provision(client, config).await?;
+    DatadogPlugin.provision(client, config).await?;
     Ok(())
 }
 
@@ -395,5 +422,6 @@ where
     app = LinearPlugin.mount(app, publisher.clone(), config);
     app = MicrosoftGraphPlugin.mount(app, publisher.clone(), config);
     app = NotionPlugin.mount(app, publisher.clone(), config);
-    SentryPlugin.mount(app, publisher, config)
+    app = SentryPlugin.mount(app, publisher.clone(), config);
+    DatadogPlugin.mount(app, publisher, config)
 }

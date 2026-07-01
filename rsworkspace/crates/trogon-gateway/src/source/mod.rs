@@ -1,3 +1,4 @@
+pub mod datadog;
 pub mod discord;
 pub mod github;
 pub mod gitlab;
