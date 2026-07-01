@@ -1,10 +1,14 @@
 use super::datadog_webhook_token::DatadogWebhookToken;
+use axum::http::HeaderName;
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_std::NonZeroDuration;
 
 pub struct DatadogConfig {
     pub webhook_token: DatadogWebhookToken,
+    /// HTTP header the shared secret is delivered in. Defaults to
+    /// `X-Datadog-Webhook-Token`; operators may override the name.
+    pub webhook_token_header: HeaderName,
     pub subject_prefix: NatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,

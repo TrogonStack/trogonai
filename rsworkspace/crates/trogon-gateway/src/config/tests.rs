@@ -970,6 +970,42 @@ timestamp_tolerance_secs = 0
 }
 
 #[test]
+fn datadog_webhook_token_header_defaults() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.datadog[0].config.webhook_token_header.as_str(),
+        "x-datadog-webhook-token",
+    );
+}
+
+#[test]
+fn datadog_custom_webhook_token_header_resolves() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+webhook_token_header = "X-Acme-Token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.datadog[0].config.webhook_token_header.as_str(), "x-acme-token");
+}
+
+#[test]
+fn datadog_invalid_webhook_token_header_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+webhook_token_header = "bad header"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: invalid webhook_token_header")))
+    );
+}
+
+#[test]
 fn sentry_missing_client_secret_returns_none_when_status_unspecified() {
     let toml = r#"
 [sources.sentry]

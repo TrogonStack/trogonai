@@ -2,7 +2,8 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
-    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
+    Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::HeaderName,
+    http::StatusCode, http::header::AsHeaderName, routing::post,
 };
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
@@ -15,9 +16,7 @@ use trogon_std::NonZeroDuration;
 use super::DatadogConfig;
 use super::DatadogEventType;
 use super::DatadogWebhookToken;
-use super::constants::{
-    HEADER_WEBHOOK_TOKEN, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_REJECT_REASON,
-};
+use super::constants::{HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_ID, NATS_HEADER_EVENT_TYPE, NATS_HEADER_REJECT_REASON};
 use super::signature;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +36,7 @@ impl RejectReason {
     }
 }
 
-fn header_value<'a>(headers: &'a HeaderMap, name: &'static str) -> Option<&'a str> {
+fn header_value(headers: &HeaderMap, name: impl AsHeaderName) -> Option<&str> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
@@ -117,6 +116,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_token: DatadogWebhookToken,
+    webhook_token_header: HeaderName,
     subject_prefix: NatsToken,
     timestamp_tolerance: Option<NonZeroDuration>,
     nats_ack_timeout: NonZeroDuration,
@@ -144,6 +144,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
     let state = AppState {
         publisher,
         webhook_token: config.webhook_token.clone(),
+        webhook_token_header: config.webhook_token_header.clone(),
         subject_prefix: config.subject_prefix.clone(),
         timestamp_tolerance: config.timestamp_tolerance,
         nats_ack_timeout: config.nats_ack_timeout,
@@ -169,7 +170,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    let token = header_value(&headers, HEADER_WEBHOOK_TOKEN);
+    let token = header_value(&headers, &state.webhook_token_header);
     if let Err(error) = signature::verify(state.webhook_token.as_str(), token) {
         warn!(reason = %error, "Datadog webhook token validation failed");
         return StatusCode::UNAUTHORIZED;

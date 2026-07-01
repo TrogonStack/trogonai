@@ -89,6 +89,7 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 #
 # [sources.datadog.integrations.primary.webhook]
 # webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
+# webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
 # timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_EPOCH" in the payload
 #
 # [sources.discord]

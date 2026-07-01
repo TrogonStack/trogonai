@@ -9,6 +9,7 @@ use trogon_nats::jetstream::{
 };
 
 const TEST_TOKEN: &str = "datadog-webhook-token";
+const DEFAULT_HEADER: &str = "x-datadog-webhook-token";
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -31,6 +32,7 @@ fn config_with_tolerance(timestamp_tolerance: Option<NonZeroDuration>) -> Datado
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         timestamp_tolerance,
+        webhook_token_header: HeaderName::from_static(DEFAULT_HEADER),
     }
 }
 
@@ -57,7 +59,7 @@ fn now_secs() -> u64 {
 fn webhook_request(body: &[u8], token: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder().method("POST").uri("/webhook");
     if let Some(token) = token {
-        builder = builder.header(HEADER_WEBHOOK_TOKEN, token);
+        builder = builder.header(DEFAULT_HEADER, token);
     }
     builder.body(Body::from(body.to_vec())).unwrap()
 }
@@ -306,4 +308,29 @@ async fn timestamp_ignored_when_tolerance_disabled() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(publisher.published_subjects(), vec!["datadog.event_alert"]);
+}
+
+#[tokio::test]
+async fn custom_webhook_token_header_is_honored() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let config = DatadogConfig {
+        webhook_token_header: HeaderName::from_static("x-acme-token"),
+        ..test_config()
+    };
+    let app = router(wrap_publisher(publisher.clone()), &config);
+    let body = br#"{"event_type":"event_alert"}"#;
+
+    let custom = Request::builder()
+        .method("POST")
+        .uri("/webhook")
+        .header("x-acme-token", TEST_TOKEN)
+        .body(Body::from(body.to_vec()))
+        .unwrap();
+    let resp = app.clone().oneshot(custom).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(publisher.published_subjects(), vec!["datadog.event_alert"]);
+
+    let default_header = app.oneshot(webhook_request(body, Some(TEST_TOKEN))).await.unwrap();
+    assert_eq!(default_header.status(), StatusCode::UNAUTHORIZED);
 }

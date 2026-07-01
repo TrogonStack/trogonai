@@ -20,6 +20,7 @@ use crate::source::telegram::config::{
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use axum::http::HeaderName;
 use confique::Config;
 #[cfg(test)]
 use trogon_nats::NatsAuth;
@@ -559,6 +560,7 @@ struct SentryWebhookConfig {
 #[serde(deny_unknown_fields)]
 struct DatadogWebhookConfig {
     webhook_token: Option<SecretInput>,
+    webhook_token_header: Option<String>,
     timestamp_tolerance_secs: Option<u64>,
 }
 
@@ -1781,6 +1783,21 @@ fn resolve_datadog_integrations(
         ) else {
             continue;
         };
+        let webhook_token_header = match webhook.webhook_token_header {
+            Some(raw) => match HeaderName::try_from(raw.trim()) {
+                Ok(header) => header,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid_integration(
+                        "datadog",
+                        &id,
+                        "webhook_token_header",
+                        error,
+                    ));
+                    continue;
+                }
+            },
+            None => HeaderName::from_static(crate::source::datadog::constants::DEFAULT_HEADER_WEBHOOK_TOKEN),
+        };
         let timestamp_tolerance = webhook
             .timestamp_tolerance_secs
             .and_then(|secs| NonZeroDuration::from_secs(secs).ok());
@@ -1788,6 +1805,7 @@ fn resolve_datadog_integrations(
             id,
             crate::source::datadog::DatadogConfig {
                 webhook_token,
+                webhook_token_header,
                 subject_prefix,
                 stream_name,
                 stream_max_age,
