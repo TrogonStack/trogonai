@@ -5,7 +5,6 @@ use opentelemetry_sdk::Resource;
 #[test]
 // Exercises the export pipeline with a throwaway resource attribute that has no
 // semantic-convention counterpart.
-#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_key_value_literal))]
 fn init_provider_returns_valid_provider() {
     let resource = Resource::builder()
         .with_service_name("test-metric")
