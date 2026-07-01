@@ -78,7 +78,7 @@ fn assert_zero_imports_via_wasmparser(bytes: &[u8]) -> Result<(), ImportCheckErr
         for payload in wasmparser::Parser::new(0).parse_all(bytes) {
             let payload = payload.map_err(|err| ImportCheckError::Parse(err.to_string()))?;
             if let wasmparser::Payload::ImportSection(reader) = payload
-                && let Some(import) = reader.into_iter().next()
+                && let Some(import) = reader.into_imports().next()
             {
                 let import = import.map_err(|err| ImportCheckError::Parse(err.to_string()))?;
                 return Err(ImportCheckError::ImportPresent {

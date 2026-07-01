@@ -17,14 +17,14 @@ thiserror = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-std = { workspace = true }
 trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
-wasmparser = "=0.227.0"
-wasmtime = { version = "=36.0.8", default-features = false, features = ["component-model", "runtime", "cranelift"] }
+wasmparser = "=0.252.0"
+wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
 
 [dev-dependencies]
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
-wasmtime = { version = "=36.0.8", default-features = false, features = ["component-model", "runtime", "cranelift"] }
+wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
 wat = "1"
 
 [[test]]

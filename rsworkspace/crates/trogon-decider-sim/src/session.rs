@@ -2,13 +2,13 @@ use trogon_decider_wit::host::{self, Decider};
 use wasmtime::Store;
 
 /// A guest session resource with deterministic teardown via [`resource_drop`](host::drop_session).
-pub struct SimSession<'a, T> {
+pub struct SimSession<'a, T: 'static> {
     pub(crate) bindings: &'a Decider,
     pub(crate) store: &'a mut Store<T>,
     pub(crate) session: host::Session,
 }
 
-impl<T> SimSession<'_, T> {
+impl<T: 'static> SimSession<'_, T> {
     pub fn evolve(&mut self, events: &[host::AnyEnvelope]) -> Result<Result<(), host::DomainError>, wasmtime::Error> {
         host::evolve(self.bindings, self.store, self.session, events)
     }
@@ -25,7 +25,7 @@ impl<T> SimSession<'_, T> {
     }
 }
 
-impl<T> Drop for SimSession<'_, T> {
+impl<T: 'static> Drop for SimSession<'_, T> {
     fn drop(&mut self) {
         let _ = host::drop_session(self.bindings, self.store, self.session);
     }
