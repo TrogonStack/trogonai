@@ -936,6 +936,19 @@ fn datadog_empty_webhook_token_is_invalid() {
 }
 
 #[test]
+fn datadog_enabled_integration_without_webhook_block_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+subject_prefix = "datadog-primary"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: missing webhook")))
+    );
+}
+
+#[test]
 fn datadog_timestamp_tolerance_defaults_to_disabled() {
     let f = write_toml(&datadog_toml("datadog-webhook-token"));
     let cfg = load(Some(f.path())).expect("load failed");

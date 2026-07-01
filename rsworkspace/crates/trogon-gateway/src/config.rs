@@ -1748,6 +1748,7 @@ fn resolve_datadog_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("datadog", &id, "webhook"));
             continue;
         };
         let Some(token) =
