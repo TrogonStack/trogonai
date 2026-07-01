@@ -1400,7 +1400,11 @@ fn resolve_microsoft_graph_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
-            errors.push(ConfigValidationError::missing_integration("microsoft_graph", &id, "webhook"));
+            errors.push(ConfigValidationError::missing_integration(
+                "microsoft_graph",
+                &id,
+                "webhook",
+            ));
             continue;
         };
         let Some(raw_client_state) = require_integration_value(
