@@ -44,7 +44,7 @@ impl SimHost {
         Ok(Self { engine, component })
     }
 
-    pub fn instantiate<T>(&self, host_state: T) -> Result<SimInstance<T>, SimError> {
+    pub fn instantiate<T: 'static>(&self, host_state: T) -> Result<SimInstance<T>, SimError> {
         let linker = Linker::new(&self.engine);
         let mut store = Store::new(&self.engine, host_state);
         let bindings = Decider::instantiate(&mut store, &self.component, &linker)
@@ -53,12 +53,12 @@ impl SimHost {
     }
 }
 
-pub struct SimInstance<T> {
+pub struct SimInstance<T: 'static> {
     pub(crate) store: Store<T>,
     pub(crate) bindings: Decider,
 }
 
-impl<T> SimInstance<T> {
+impl<T: 'static> SimInstance<T> {
     pub fn descriptor(&mut self) -> Result<host::ModuleDescriptor, wasmtime::Error> {
         host::call_descriptor(&self.bindings, &mut self.store)
     }

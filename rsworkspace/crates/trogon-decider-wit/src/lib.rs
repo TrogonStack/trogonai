@@ -21,7 +21,6 @@ pub mod host {
     wasmtime::component::bindgen!({
         world: "decider",
         path: "wit",
-        trappable_imports: true,
     });
 
     pub use exports::trogon::decider::handler::{

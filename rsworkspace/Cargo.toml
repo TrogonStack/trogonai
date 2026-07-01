@@ -113,7 +113,7 @@ moka = { version = "=0.12.10", features = ["future"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=0.8.23"
-wasmtime = "=45.0.0"
+wasmtime = "=46.0.1"
 http = "=1.4.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
@@ -126,8 +126,8 @@ url = "=2.5.8"
 uuid = { version = "=1.23.1", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
-wasmtime-wasi = "=29.0.1"
-wit-bindgen = "=0.41.0"
+wasmtime-wasi = "=46.0.1"
+wit-bindgen = "=0.58.0"
 
 # Auth callout
 hex = "=0.4.3"
