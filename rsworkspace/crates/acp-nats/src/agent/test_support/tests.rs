@@ -50,7 +50,6 @@ fn has_request_metric_returns_false_when_empty() {
 // Builds a histogram under a counter's name to prove the lookup rejects the
 // wrong instrument kind; that mismatch is the point, so the generated
 // `build_acp_requests` (a counter) cannot stand in here.
-#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_metric_construction))]
 fn has_request_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");
@@ -105,7 +104,6 @@ fn has_error_metric_rejects_wrong_reason() {
 // Builds a histogram under a counter's name to prove the lookup rejects the
 // wrong instrument kind; that mismatch is the point, so the generated
 // `build_acp_errors` (a counter) cannot stand in here.
-#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_metric_construction))]
 fn has_error_metric_returns_false_for_histogram_metric() {
     let (provider, exporter) = test_provider();
     let meter = provider.meter("test");

@@ -44,7 +44,6 @@ fn platform_log_dir_returns_path_ending_with_service_name() {
 #[test]
 // Exercises the export pipeline with a throwaway resource attribute that has no
 // semantic-convention counterpart.
-#[cfg_attr(dylint_lib = "trogon_lints", allow(telemetry_key_value_literal))]
 fn init_provider_lifecycle() {
     let resource = opentelemetry_sdk::Resource::builder()
         .with_service_name("test-log")

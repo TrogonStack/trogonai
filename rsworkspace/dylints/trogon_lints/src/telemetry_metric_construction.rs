@@ -4,7 +4,7 @@ use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
 
 use crate::TELEMETRY_METRIC_CONSTRUCTION;
-use crate::telemetry_literal::{INSTRUMENT_BUILDERS, receiver_is_type};
+use crate::telemetry_literal::{INSTRUMENT_BUILDERS, in_test_file, receiver_is_type};
 
 #[derive(Default)]
 pub(crate) struct TelemetryMetricConstruction;
@@ -25,6 +25,9 @@ impl TelemetryMetricConstruction {
             return;
         }
         if !receiver_is_type(cx, receiver, "opentelemetry", "Meter") {
+            return;
+        }
+        if in_test_file(cx, expr.span) {
             return;
         }
 

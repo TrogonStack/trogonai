@@ -5,7 +5,7 @@ use rustc_lint::LateContext;
 use rustc_middle::ty;
 
 use crate::TELEMETRY_KEY_VALUE_LITERAL;
-use crate::telemetry_literal::string_literal_span;
+use crate::telemetry_literal::{in_test_file, string_literal_span};
 
 #[derive(Default)]
 pub(crate) struct TelemetryKeyValueLiteral;
@@ -22,6 +22,9 @@ impl TelemetryKeyValueLiteral {
             return;
         };
         if !callee_is_key_value_new(cx, callee) {
+            return;
+        }
+        if in_test_file(cx, key_span) {
             return;
         }
 
