@@ -15,6 +15,6 @@ pub struct DatadogConfig {
     pub nats_ack_timeout: NonZeroDuration,
     /// Optional freshness window for the payload `timestamp` field. `None`
     /// disables the check. Datadog does not send a timestamp header, so the
-    /// operator must template `$DATE_EPOCH` (POSIX seconds) into the payload.
+    /// operator must template `$DATE_POSIX` (POSIX seconds) into the payload.
     pub timestamp_tolerance: Option<NonZeroDuration>,
 }

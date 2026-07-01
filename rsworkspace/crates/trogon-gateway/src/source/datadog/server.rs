@@ -53,16 +53,14 @@ fn body_event_id(payload: &serde_json::Value) -> Option<&str> {
 }
 
 /// Reads the `timestamp` field (POSIX epoch seconds, e.g. Datadog's
-/// `$DATE_EPOCH`) from the payload. Datadog does not send a timestamp header, so
-/// the operator templates it into the body. Accepts a JSON number or a numeric
-/// string.
+/// `$DATE_POSIX`) from the payload. Datadog does not send a timestamp header, so
+/// the operator templates it into the body. Accepts an integer JSON number or a
+/// numeric string; fractional values are rejected so truncation cannot shift the
+/// replay-window decision at the tolerance boundary.
 fn body_timestamp_secs(payload: &serde_json::Value) -> Option<u64> {
     let value = payload.get("timestamp")?;
     if let Some(secs) = value.as_u64() {
         return Some(secs);
-    }
-    if let Some(secs) = value.as_f64().filter(|secs| *secs >= 0.0) {
-        return Some(secs as u64);
     }
     value.as_str().and_then(|secs| secs.trim().parse::<u64>().ok())
 }
@@ -73,6 +71,27 @@ fn timestamp_is_fresh(timestamp_secs: u64, tolerance: NonZeroDuration) -> bool {
         .unwrap_or_default()
         .as_secs();
     now.abs_diff(timestamp_secs) <= Duration::from(tolerance).as_secs()
+}
+
+/// Boundary view of an untrusted Datadog webhook payload. All the fields the
+/// handler routes on are extracted from the raw JSON exactly once here, so
+/// downstream logic works with typed values instead of poking at
+/// `serde_json::Value` throughout the request path. The raw `body` is still
+/// forwarded verbatim to NATS; this type only drives routing decisions.
+struct DatadogWebhookWire<'a> {
+    event_type: Option<&'a str>,
+    event_id: Option<&'a str>,
+    timestamp_secs: Option<u64>,
+}
+
+impl<'a> DatadogWebhookWire<'a> {
+    fn from_payload(payload: &'a serde_json::Value) -> Self {
+        Self {
+            event_type: payload.get("event_type").and_then(serde_json::Value::as_str),
+            event_id: body_event_id(payload),
+            timestamp_secs: body_timestamp_secs(payload),
+        }
+    }
 }
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
@@ -191,9 +210,10 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
             .await;
         }
     };
+    let webhook = DatadogWebhookWire::from_payload(&payload);
 
     if let Some(tolerance) = state.timestamp_tolerance {
-        let Some(timestamp_secs) = body_timestamp_secs(&payload) else {
+        let Some(timestamp_secs) = webhook.timestamp_secs else {
             warn!("Missing or invalid timestamp in Datadog webhook payload while tolerance is enabled");
             return StatusCode::BAD_REQUEST;
         };
@@ -203,14 +223,12 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     }
 
-    let event_id = body_event_id(&payload).map(str::to_owned);
-
-    let Some(raw_event_type) = payload.get("event_type").and_then(serde_json::Value::as_str) else {
+    let Some(raw_event_type) = webhook.event_type else {
         warn!("Missing event_type in Datadog webhook payload");
         return publish_unroutable(
             &state.publisher,
             &state.subject_prefix,
-            event_id.as_deref(),
+            webhook.event_id,
             RejectReason::MissingEventType,
             body,
             state.nats_ack_timeout,
@@ -225,7 +243,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
             return publish_unroutable(
                 &state.publisher,
                 &state.subject_prefix,
-                event_id.as_deref(),
+                webhook.event_id,
                 RejectReason::InvalidEventType,
                 body,
                 state.nats_ack_timeout,
@@ -237,14 +255,14 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let subject = format!("{}.{}", state.subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
-    if let Some(event_id) = event_id.as_deref() {
+    if let Some(event_id) = webhook.event_id {
         span.record(trogon_semconv::attribute::EVENT_ID, event_id);
     }
     span.record(trogon_semconv::attribute::SUBJECT, &subject);
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(NATS_HEADER_EVENT_TYPE, event_type.as_str());
-    if let Some(event_id) = event_id.as_deref() {
+    if let Some(event_id) = webhook.event_id {
         nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, event_id);
         nats_headers.insert(NATS_HEADER_EVENT_ID, event_id);
     }
