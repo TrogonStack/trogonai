@@ -665,6 +665,7 @@ fn resolve_github_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("github", &id, "webhook"));
             continue;
         };
         let Some(secret) =
@@ -886,7 +887,10 @@ fn resolve_slack_transport(
             ));
             None
         }
-        (None, None) => None,
+        (None, None) => {
+            errors.push(ConfigValidationError::missing_integration("slack", id, "transport"));
+            None
+        }
     }
 }
 
@@ -978,6 +982,7 @@ fn resolve_telegram_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("telegram", &id, "webhook"));
             continue;
         };
         let Some(secret) =
@@ -1160,6 +1165,7 @@ fn resolve_twitter_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("twitter", &id, "webhook"));
             continue;
         };
         let Some(secret) =
@@ -1230,6 +1236,7 @@ fn resolve_gitlab_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("gitlab", &id, "webhook"));
             continue;
         };
         let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, env, errors)
@@ -1316,6 +1323,7 @@ fn resolve_linear_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("linear", &id, "webhook"));
             continue;
         };
         let Some(secret) =
@@ -1392,6 +1400,11 @@ fn resolve_microsoft_graph_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration(
+                "microsoft_graph",
+                &id,
+                "webhook",
+            ));
             continue;
         };
         let Some(raw_client_state) = require_integration_value(
@@ -1467,6 +1480,7 @@ fn resolve_incidentio_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("incidentio", &id, "webhook"));
             continue;
         };
         let Some(secret) =
@@ -1554,6 +1568,7 @@ fn resolve_notion_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("notion", &id, "webhook"));
             continue;
         };
         let Some(raw_token) = require_integration_value(
@@ -1629,6 +1644,7 @@ fn resolve_sentry_integrations(
             continue;
         }
         let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("sentry", &id, "webhook"));
             continue;
         };
         let Some(secret) =
