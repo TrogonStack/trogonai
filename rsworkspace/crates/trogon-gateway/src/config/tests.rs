@@ -949,6 +949,49 @@ subject_prefix = "datadog-primary"
 }
 
 #[test]
+fn datadog_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations."bad/id".webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/bad/id: invalid integration id")))
+    );
+}
+
+#[test]
+fn datadog_integration_disabled_is_skipped() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+status = "disabled"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog.is_empty());
+}
+
+#[test]
+fn datadog_zero_stream_max_age_is_error() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+stream_max_age_secs = 0
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: stream_max_age_secs must not be zero")))
+    );
+}
+
+#[test]
 fn datadog_timestamp_tolerance_defaults_to_disabled() {
     let f = write_toml(&datadog_toml("datadog-webhook-token"));
     let cfg = load(Some(f.path())).expect("load failed");
