@@ -334,3 +334,102 @@ async fn custom_webhook_token_header_is_honored() {
     let default_header = app.oneshot(webhook_request(body, Some(TEST_TOKEN))).await.unwrap();
     assert_eq!(default_header.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn body_exceeding_limit_returns_413() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+
+    let state = AppState {
+        publisher: wrap_publisher(publisher.clone()),
+        webhook_token: DatadogWebhookToken::new(TEST_TOKEN).unwrap(),
+        webhook_token_header: HeaderName::from_static(DEFAULT_HEADER),
+        subject_prefix: NatsToken::new("datadog").unwrap(),
+        timestamp_tolerance: None,
+        nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+    };
+
+    let app = Router::new()
+        .route(
+            "/webhook",
+            post(handle_webhook::<MockJetStreamPublisher, MockObjectStore>),
+        )
+        .layer(DefaultBodyLimit::max(64))
+        .with_state(state);
+
+    let oversized_body = vec![0u8; 128];
+    let resp = app
+        .oneshot(webhook_request(&oversized_body, Some(TEST_TOKEN)))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(publisher.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn replayed_event_id_produces_identical_dedup_key() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = mock_app(publisher.clone());
+    let body = br#"{"event_type":"metric_alert_monitor","id":"replay-42"}"#;
+
+    let first = app
+        .clone()
+        .oneshot(webhook_request(body, Some(TEST_TOKEN)))
+        .await
+        .unwrap();
+    let second = app.oneshot(webhook_request(body, Some(TEST_TOKEN))).await.unwrap();
+
+    assert_eq!(first.status(), StatusCode::OK);
+    assert_eq!(second.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 2);
+    for message in &messages {
+        assert_eq!(
+            message
+                .headers
+                .get(async_nats::header::NATS_MESSAGE_ID)
+                .map(|v| v.as_str()),
+            Some("replay-42"),
+        );
+        assert_eq!(
+            message.headers.get(NATS_HEADER_EVENT_ID).map(|v| v.as_str()),
+            Some("replay-42"),
+        );
+    }
+}
+
+mod ack_test_support;
+
+use ack_test_support::AckHangPublisher;
+use async_nats::subject::ToSubject;
+
+#[tokio::test]
+async fn ack_timeout_returns_500() {
+    let _guard = tracing_guard();
+    let publisher = AckHangPublisher::hanging();
+
+    let state = AppState {
+        publisher: ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        ),
+        webhook_token: DatadogWebhookToken::new(TEST_TOKEN).unwrap(),
+        webhook_token_header: HeaderName::from_static(DEFAULT_HEADER),
+        subject_prefix: NatsToken::new("datadog").unwrap(),
+        timestamp_tolerance: None,
+        nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
+    };
+
+    let app = Router::new()
+        .route("/webhook", post(handle_webhook::<AckHangPublisher, MockObjectStore>))
+        .with_state(state);
+
+    let body = br#"{"event_type":"event_alert","id":"42"}"#;
+    let resp = app.oneshot(webhook_request(body, Some(TEST_TOKEN))).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
