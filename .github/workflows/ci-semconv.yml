@@ -32,4 +32,4 @@ jobs:
           install_args: ubi:open-telemetry/weaver
 
       - name: Check semconv registry and enforce naming policies
-        run: mise run semconv:check
+        run: mise run --skip-tools semconv:check
