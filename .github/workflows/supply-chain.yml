@@ -1,0 +1,131 @@
+name: Supply chain
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - 'rsworkspace/Cargo.toml'
+      - 'rsworkspace/Cargo.lock'
+      - 'rsworkspace/**/Cargo.toml'
+      - 'scripts/supply-chain/**'
+      - '.github/workflows/supply-chain.yml'
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile-integrity:
+    name: Lockfile integrity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python
+
+      - name: Verify Cargo.lock checksums against crates.io
+        working-directory: scripts/supply-chain
+        run: python3 check_lockfile_integrity.py ../../rsworkspace/Cargo.lock --receipt "$RUNNER_TEMP/lockfile-integrity.jsonl"
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-lockfile-integrity
+          path: ${{ runner.temp }}/lockfile-integrity.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
+
+  dependency-confusion:
+    name: Dependency confusion (namespace squat)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python
+
+      - name: Guard trogon-*/trogonai-* namespace against crates.io squatting
+        working-directory: scripts/supply-chain
+        run: python3 check_dependency_confusion.py --workspace ../../rsworkspace --receipt "$RUNNER_TEMP/dependency-confusion.jsonl"
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-dependency-confusion
+          path: ${{ runner.temp }}/dependency-confusion.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
+
+  release-age:
+    name: Release age (cooling-off)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python
+
+      - name: Flag dependencies published under 7 days ago
+        working-directory: scripts/supply-chain
+        run: python3 check_release_age.py ../../rsworkspace/Cargo.lock --max-deps 0 --receipt "$RUNNER_TEMP/release-age.jsonl"
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-release-age
+          path: ${{ runner.temp }}/release-age.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
+
+  license-headers:
+    name: License headers (report-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python
+
+      - name: Report .rs files missing an SPDX license header
+        working-directory: scripts/supply-chain
+        run: python3 check_license_headers.py --root ../../rsworkspace --receipt "$RUNNER_TEMP/license-headers.jsonl"
+
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain-license-headers
+          path: ${{ runner.temp }}/license-headers.jsonl
+          retention-days: 90
+          if-no-files-found: ignore

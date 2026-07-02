@@ -1,0 +1,341 @@
+# Source of truth for generated CI workflows.
+#
+# Edit this file (and actions.toml) instead of the generated YAML under
+# .github/workflows/*. Regenerate with:
+#   python3 devops/ci/generate_workflows.py --write
+# CI runs `--check` (see .github/workflows/ci-workflows-check.yml) and fails
+# when the committed YAML drifts from this source.
+#
+# TOML-driven CI generator supporting this repo's richer step shape
+# (job-level permissions, `with:` blocks, `if:` conditionals, artifact
+# uploads, schedule/workflow_dispatch triggers). Only a subset of
+# workflows is generated from TOML; the rest are hand-written and listed
+# in the `unmanaged` list below.
+#
+# Schema (validated by devops/ci/generate_workflows.py):
+#   [[workflow]]                     one block per generated workflow file
+#     id                  string     stable identifier, must be unique
+#     name                string     workflow `name:` value
+#     output              string     path of the generated YAML, repo relative
+#     on                  table      raw `on:` block. Renders push/schedule/
+#                                     pull_request/workflow_dispatch in that
+#                                     default order, or `trigger_order` (list
+#                                     of those names) when the source file
+#                                     needs a different order. `cron_quote`
+#                                     picks the quote character wrapping
+#                                     `schedule` cron strings (default `"`).
+#     permissions         table|str  workflow-level `permissions:`; either a
+#                                     map of scope -> read/write, or the
+#                                     literal string "read-all"
+#     concurrency         table      {group, cancel_in_progress}
+#     [[workflow.job]]               one block per job, in order
+#       id                string     job key
+#       name              string     job `name:` (optional)
+#       needs             [str]      `needs:` list (optional)
+#       permissions       table      job-level `permissions:` map
+#       environment       table      {name, url} (optional)
+#       strategy          table      raw strategy table (fail_fast, matrix)
+#                                     rendered as YAML (optional)
+#       [[workflow.job.step]]        one block per step, in order
+#         name            string     step display name (optional)
+#         id              string     step id (optional)
+#         uses            string     action registry key (resolved against
+#                                     actions.toml) OR a literal local/raw
+#                                     `uses:` value when `uses_raw = true`
+#         uses_raw        bool       treat `uses` as a literal string instead
+#                                     of an actions.toml registry key
+#         run             string     shell body (single or multi line)
+#         if_              string    `if:` condition (optional; trailing
+#                                     underscore avoids the Python keyword)
+#         shell             string   `shell:` (optional)
+#         working_directory string   step-level `working-directory:` (optional)
+#         working_directory_before_run bool  place `working-directory:` before
+#                                     `run:` instead of after it (default
+#                                     false; matches source file ordering)
+#         with              table    `with:` map, rendered key by key in
+#                                     insertion order (optional)
+#         env               table    `env:` map (optional)
+#
+# Unmanaged (hand-written, not generated from this file):
+#   ci-rust.yml, ci-semconv.yml, canary-container-images.yml, docs-pages.yml,
+#   pr-title.yml, release-artifacts.yml, release-please.yml.
+# These pin their own actions independently and are intentionally out of
+# scope for WI-14; see the `unmanaged` list below.
+
+unmanaged = [
+  ".github/workflows/ci-rust.yml",
+  ".github/workflows/ci-semconv.yml",
+  ".github/workflows/canary-container-images.yml",
+  ".github/workflows/docs-pages.yml",
+  ".github/workflows/pr-title.yml",
+  ".github/workflows/release-artifacts.yml",
+  ".github/workflows/release-please.yml",
+]
+
+# ---------------------------------------------------------------------------
+# SBOM
+# ---------------------------------------------------------------------------
+
+[[workflow]]
+id = "sbom"
+name = "SBOM"
+output = ".github/workflows/sbom.yml"
+
+[workflow.on]
+push_branches = ["main"]
+workflow_dispatch = true
+
+[workflow.concurrency]
+group = "sbom-${{ github.ref }}"
+cancel_in_progress = true
+
+[workflow.permissions]
+contents = "read"
+
+[[workflow.job]]
+id = "generate"
+[workflow.job.permissions]
+contents = "read"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+name = "Setup Rust"
+uses = "./.github/actions/setup-rust"
+uses_raw = true
+
+[[workflow.job.step]]
+name = "Install cargo-cyclonedx"
+uses = "install-action"
+[workflow.job.step.with]
+tool = "cargo-cyclonedx"
+
+[[workflow.job.step]]
+name = "Generate CycloneDX SBOM"
+run = "cargo cyclonedx --format json --all"
+working_directory = "rsworkspace"
+
+[[workflow.job.step]]
+name = "Collect SBOMs"
+run = """
+mkdir -p /tmp/sbom
+find rsworkspace -name '*.cdx.json' -exec cp {} /tmp/sbom/ \\;
+"""
+
+[[workflow.job.step]]
+name = "Upload SBOM artifacts"
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "sbom-cyclonedx"
+path = "/tmp/sbom/*.cdx.json"
+retention-days = "90"
+
+# ---------------------------------------------------------------------------
+# OSSF Scorecard
+# ---------------------------------------------------------------------------
+
+[[workflow]]
+id = "scorecard"
+name = "OSSF Scorecard"
+output = ".github/workflows/scorecard.yml"
+
+[workflow.on]
+push_branches = ["main"]
+schedule = ["15 7 * * 1"]
+
+[workflow.permissions]
+read_all = true
+comment = "Workflow-level permissions must be read-only for Scorecard verification.\nWrite permissions are scoped to the job level below."
+
+[[workflow.job]]
+id = "analysis"
+name = "Scorecard analysis"
+[workflow.job.permissions]
+security-events = "write"
+id-token = "write"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+uses = "scorecard-action"
+[workflow.job.step.with]
+results_file = "results.sarif"
+results_format = "sarif"
+publish_results = "true"
+
+[[workflow.job.step]]
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "SARIF file"
+path = "results.sarif"
+retention-days = "5"
+
+[[workflow.job.step]]
+uses = "codeql-upload-sarif"
+[workflow.job.step.with]
+sarif_file = "results.sarif"
+
+# ---------------------------------------------------------------------------
+# Supply chain
+# ---------------------------------------------------------------------------
+
+[[workflow]]
+id = "supply-chain"
+name = "Supply chain"
+output = ".github/workflows/supply-chain.yml"
+
+[workflow.on]
+trigger_order = ["pull_request", "schedule", "workflow_dispatch"]
+pull_request_types = ["opened", "synchronize", "reopened", "labeled", "unlabeled"]
+pull_request_branches = ["main"]
+pull_request_paths = [
+  "rsworkspace/Cargo.toml",
+  "rsworkspace/Cargo.lock",
+  "rsworkspace/**/Cargo.toml",
+  "scripts/supply-chain/**",
+  ".github/workflows/supply-chain.yml",
+]
+schedule = ["17 6 * * 1"]
+cron_quote = "'"
+workflow_dispatch = true
+
+[workflow.concurrency]
+group = "supply-chain-${{ github.ref }}"
+cancel_in_progress = true
+
+[workflow.permissions]
+contents = "read"
+
+[[workflow.job]]
+id = "lockfile-integrity"
+name = "Lockfile integrity"
+[workflow.job.permissions]
+contents = "read"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+uses = "mise-action"
+[workflow.job.step.with]
+install_args = "python"
+
+[[workflow.job.step]]
+name = "Verify Cargo.lock checksums against crates.io"
+working_directory = "scripts/supply-chain"
+working_directory_before_run = true
+run = 'python3 check_lockfile_integrity.py ../../rsworkspace/Cargo.lock --receipt "$RUNNER_TEMP/lockfile-integrity.jsonl"'
+
+[[workflow.job.step]]
+name = "Upload receipt"
+if_ = "always()"
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "supply-chain-lockfile-integrity"
+path = "${{ runner.temp }}/lockfile-integrity.jsonl"
+retention-days = "90"
+if-no-files-found = "ignore"
+
+[[workflow.job]]
+id = "dependency-confusion"
+name = "Dependency confusion (namespace squat)"
+[workflow.job.permissions]
+contents = "read"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+uses = "mise-action"
+[workflow.job.step.with]
+install_args = "python"
+
+[[workflow.job.step]]
+name = "Guard trogon-*/trogonai-* namespace against crates.io squatting"
+working_directory = "scripts/supply-chain"
+working_directory_before_run = true
+run = 'python3 check_dependency_confusion.py --workspace ../../rsworkspace --receipt "$RUNNER_TEMP/dependency-confusion.jsonl"'
+
+[[workflow.job.step]]
+name = "Upload receipt"
+if_ = "always()"
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "supply-chain-dependency-confusion"
+path = "${{ runner.temp }}/dependency-confusion.jsonl"
+retention-days = "90"
+if-no-files-found = "ignore"
+
+[[workflow.job]]
+id = "release-age"
+name = "Release age (cooling-off)"
+[workflow.job.permissions]
+contents = "read"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+uses = "mise-action"
+[workflow.job.step.with]
+install_args = "python"
+
+[[workflow.job.step]]
+name = "Flag dependencies published under 7 days ago"
+working_directory = "scripts/supply-chain"
+working_directory_before_run = true
+run = 'python3 check_release_age.py ../../rsworkspace/Cargo.lock --max-deps 0 --receipt "$RUNNER_TEMP/release-age.jsonl"'
+
+[[workflow.job.step]]
+name = "Upload receipt"
+if_ = "always()"
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "supply-chain-release-age"
+path = "${{ runner.temp }}/release-age.jsonl"
+retention-days = "90"
+if-no-files-found = "ignore"
+
+[[workflow.job]]
+id = "license-headers"
+name = "License headers (report-only)"
+[workflow.job.permissions]
+contents = "read"
+
+[[workflow.job.step]]
+uses = "checkout"
+[workflow.job.step.with]
+persist-credentials = "false"
+
+[[workflow.job.step]]
+uses = "mise-action"
+[workflow.job.step.with]
+install_args = "python"
+
+[[workflow.job.step]]
+name = "Report .rs files missing an SPDX license header"
+working_directory = "scripts/supply-chain"
+working_directory_before_run = true
+run = 'python3 check_license_headers.py --root ../../rsworkspace --receipt "$RUNNER_TEMP/license-headers.jsonl"'
+
+[[workflow.job.step]]
+name = "Upload receipt"
+if_ = "always()"
+uses = "upload-artifact"
+[workflow.job.step.with]
+name = "supply-chain-license-headers"
+path = "${{ runner.temp }}/license-headers.jsonl"
+retention-days = "90"
+if-no-files-found = "ignore"

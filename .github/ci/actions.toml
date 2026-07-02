@@ -1,0 +1,104 @@
+# Pinned GitHub Actions registry for the CI workflow generator
+# (devops/ci/generate_workflows.py).
+#
+# Every action referenced by a generated workflow resolves to a
+# full-commit-SHA entry here, so generated workflows share one reviewed
+# pin table instead of hand-pinning independently. The generator fails
+# closed when a `uses` key is missing here or not pinned to a 40 character
+# SHA.
+#
+# Scope note (WI-14): this registry enumerates every actions/* dependency
+# used across ALL workflows in .github/workflows/ today, including the
+# hand-written ones listed as `unmanaged` in workflows.toml. Only the entries
+# consumed by workflows.toml's [[workflow]] blocks are resolved by the
+# generator; the rest document the pins already in use elsewhere so a future
+# migration has a ready-made table. Local composite actions
+# (./.github/actions/*) are not pinned by SHA and are not listed here.
+
+[checkout]
+uses = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+comment = "v7.0.0"
+
+[upload-artifact]
+uses = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+comment = "v7.0.1"
+
+[download-artifact]
+uses = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+comment = "v8.0.1"
+
+[setup-node]
+uses = "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"
+comment = "v6.4.0"
+
+[configure-pages]
+uses = "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d"
+comment = "v6.0.0"
+
+[upload-pages-artifact]
+uses = "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9"
+comment = "v5.0.0"
+
+[deploy-pages]
+uses = "actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128"
+comment = "v5.0.0"
+
+[attest-build-provenance]
+uses = "actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373"
+comment = "v4.1.1"
+
+[install-action]
+uses = "taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419"
+comment = "v2.82.7"
+
+[rust-cache]
+uses = "Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4"
+comment = "v2.9.1"
+
+[coverage-action]
+uses = "insightsengineering/coverage-action@3179498004cf3a28cbd5b496ce580767888375b9"
+comment = "v3.0.4"
+
+[mise-action]
+uses = "jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d"
+comment = "v4.2.0"
+
+[pnpm-action-setup]
+uses = "pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271"
+comment = "v6.0.9"
+
+[semantic-pull-request]
+uses = "amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50"
+comment = "v6.1.1"
+
+[release-please-action]
+uses = "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
+comment = "v5.0.0"
+
+[docker-setup-buildx]
+uses = "docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5"
+comment = "v4.1.0"
+
+[docker-login]
+uses = "docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee"
+comment = "v4.2.0"
+
+[docker-build-push]
+uses = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
+comment = "v7.3.0"
+
+[trivy-action]
+uses = "aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25"
+comment = "v0.36.0"
+
+[sbom-action]
+uses = "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610"
+comment = "v0.24.0"
+
+[scorecard-action]
+uses = "ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a"
+comment = "v2.4.3"
+
+[codeql-upload-sarif]
+uses = "github/codeql-action/upload-sarif@8533807ff379ac610d2b2c389c47e7c629d31d13"
+comment = "v4.36.3"

@@ -1,0 +1,38 @@
+name: CI workflows check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths:
+      - '.github/ci/**'
+      - '.github/workflows/sbom.yml'
+      - '.github/workflows/scorecard.yml'
+      - '.github/workflows/supply-chain.yml'
+      - 'devops/ci/generate_workflows.py'
+      - '.github/workflows/ci-workflows-check.yml'
+
+concurrency:
+  group: ci-workflows-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Generated workflows drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python
+
+      - name: Verify generated workflows match .github/ci/workflows.toml
+        run: python3 devops/ci/generate_workflows.py --check

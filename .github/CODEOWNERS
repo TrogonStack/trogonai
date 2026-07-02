@@ -1,0 +1,3 @@
+# Default owner for everything not covered by a more specific rule below.
+# Keep this file honest: only list people who are actually reviewing PRs today.
+* @yordis
