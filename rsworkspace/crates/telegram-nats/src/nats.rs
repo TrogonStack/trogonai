@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 
 pub async fn setup_event_stream(js: &async_nats::jetstream::Context, prefix: &str) -> Result<()> {
     let stream_name = format!("telegram_events_{}", prefix);
-    let subject_pattern = format!("telegram.{}.bot.>", prefix);
+    let subject_pattern = format!("tgbot.{}.bot.>", prefix);
 
     info!("Setting up JetStream stream: {}", stream_name);
 
@@ -62,7 +62,7 @@ pub async fn setup_agent_stream(
     prefix: &str,
 ) -> Result<()> {
     let stream_name = format!("telegram_commands_{}", prefix);
-    let subject_pattern = format!("telegram.{}.agent.>", prefix);
+    let subject_pattern = format!("tgbot.{}.agent.>", prefix);
 
     info!("Setting up agent command stream: {}", stream_name);
 
@@ -152,7 +152,7 @@ pub async fn create_error_consumer(
 ) -> Result<async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>>
 {
     let stream_name = format!("telegram_events_{}", prefix);
-    let filter = format!("telegram.{}.bot.error.command", prefix);
+    let filter = format!("tgbot.{}.bot.error.command", prefix);
 
     info!(
         "Creating error consumer '{}' on stream '{}' (filter: {})",

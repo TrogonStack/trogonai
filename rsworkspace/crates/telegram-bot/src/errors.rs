@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_command_error_event_has_correct_subject() {
-        let subject = "telegram.prod.bot.message.send";
+        let subject = "tgbot.prod.bot.message.send";
         let err = RequestError::Api(ApiError::BotBlocked);
         let outcome = classify(subject, &err);
         match outcome {

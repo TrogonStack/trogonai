@@ -10,36 +10,52 @@ mod session;
 
 use anyhow::Result;
 use clap::Parser;
+use futures::Stream;
+use futures::StreamExt;
 use teloxide::prelude::*;
 use teloxide::types::Message;
 use tracing::{error, info, warn};
 
-struct PollingErrorHandler;
-
-impl<E: std::fmt::Debug + Send + Sync + 'static> teloxide::error_handlers::ErrorHandler<E>
-    for PollingErrorHandler
-{
-    fn handle_error(
-        self: std::sync::Arc<Self>,
-        error: E,
-    ) -> futures::future::BoxFuture<'static, ()> {
-        Box::pin(async move {
-            let err_str = format!("{error:?}");
-            if err_str.contains("TerminatedByOtherGetUpdates") {
-                tracing::debug!(
-                    "Polling session replaced by a new instance (expected on restart): {}",
-                    err_str
-                );
-            } else {
-                tracing::error!("Update listener error: {}", err_str);
-            }
-        })
-    }
-}
-
 use crate::bridge::TelegramBridge;
 use crate::config::Config;
 use crate::outbound::OutboundProcessor;
+
+struct GatewayListenerState {
+    messages: async_nats::jetstream::consumer::pull::Stream,
+    stop_token: teloxide::stop::StopToken,
+}
+
+fn transform_gateway_stream(
+    state: &mut GatewayListenerState,
+) -> impl Stream<Item = Result<teloxide::types::Update, std::convert::Infallible>> + Send + '_ {
+    futures::stream::unfold(&mut state.messages, |messages| async move {
+        loop {
+            let msg = match messages.next().await {
+                Some(Ok(msg)) => msg,
+                Some(Err(e)) => {
+                    tracing::warn!("Error receiving message from gateway stream: {}", e);
+                    continue;
+                }
+                None => return None,
+            };
+            let body_len = msg.payload.len();
+            if let Err(e) = msg.ack().await {
+                tracing::warn!("Failed to ack gateway message: {}", e);
+            }
+            match serde_json::from_slice::<teloxide::types::Update>(&msg.payload) {
+                Ok(update) => return Some((Ok(update), messages)),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to parse Telegram Update from gateway message (body_len={}): {}",
+                        body_len,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+    })
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -110,6 +126,27 @@ async fn main() -> Result<()> {
     let kv = telegram_nats::nats::setup_session_kv(&js, &config.prefix).await?;
     let dedup_kv = telegram_nats::nats::setup_dedup_kv(&js, &config.prefix).await?;
     info!("JetStream setup complete");
+
+    let inbound_stream = js.get_stream(&config.inbound_stream_name).await.map_err(|e| {
+        anyhow::anyhow!(
+            "Gateway inbound stream '{}' not found; the trogon-gateway Telegram source must provision it: {e}",
+            config.inbound_stream_name
+        )
+    })?;
+
+    let consumer_name = format!("telegram-bot-{}", config.prefix);
+    let consumer = inbound_stream
+        .get_or_create_consumer(
+            &consumer_name,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(consumer_name.clone()),
+                ack_wait: std::time::Duration::from_secs(30),
+                max_deliver: 5,
+                ..Default::default()
+            },
+        )
+        .await?;
+    let messages = consumer.messages().await?;
 
     info!("Initializing Telegram bot...");
     let bot = Bot::new(&config.telegram.bot_token);
@@ -334,72 +371,28 @@ async fn main() -> Result<()> {
         .enable_ctrlc_handler()
         .build();
 
-    match &config.telegram.update_mode {
-        crate::config::UpdateModeConfig::Polling { timeout, limit } => {
-            info!(
-                "Starting bot in POLLING mode (timeout: {}s, limit: {})",
-                timeout, limit
-            );
-            let listener = teloxide::update_listeners::polling_default(bot).await;
-            dispatcher
-                .dispatch_with_listener(listener, std::sync::Arc::new(PollingErrorHandler))
-                .await;
-        }
-        crate::config::UpdateModeConfig::Webhook {
-            url,
-            port,
-            path,
-            secret_token,
-            bind_address,
-            max_connections,
-        } => {
-            info!("Starting bot in WEBHOOK mode");
-            info!("Webhook URL: {}{}", url, path);
-            info!("Listening on: {}:{}", bind_address, port);
+    info!(
+        "Consuming Telegram updates from gateway stream '{}' via consumer '{}'",
+        config.inbound_stream_name, consumer_name
+    );
 
-            let webhook_url = format!("{}{}", url, path);
-            let parsed_url = match webhook_url.parse::<url::Url>() {
-                Ok(u) => u,
-                Err(e) => {
-                    error!("Invalid webhook URL '{}': {}", webhook_url, e);
-                    return Err(e.into());
-                }
-            };
+    let (stop_token, _stop_flag) = teloxide::stop::mk_stop_token();
+    let listener_state = GatewayListenerState {
+        messages,
+        stop_token,
+    };
+    let listener = teloxide::update_listeners::StatefulListener::new(
+        listener_state,
+        transform_gateway_stream,
+        |state: &mut GatewayListenerState| state.stop_token.clone(),
+    );
 
-            let bind_addr: std::net::SocketAddr =
-                format!("{}:{}", bind_address, port).parse().map_err(
-                    |e: std::net::AddrParseError| anyhow::anyhow!("Invalid bind address: {}", e),
-                )?;
-
-            let mut options =
-                teloxide::update_listeners::webhooks::Options::new(bind_addr, parsed_url);
-
-            if let Some(token) = secret_token {
-                options = options.secret_token(token.clone());
-            }
-
-            if *max_connections > 0 {
-                options = options.max_connections(*max_connections);
-            }
-
-            let listener = match teloxide::update_listeners::webhooks::axum(bot, options).await {
-                Ok(l) => l,
-                Err(e) => {
-                    error!("Failed to set up webhook: {}", e);
-                    return Err(e.into());
-                }
-            };
-
-            info!("Webhook listener started, waiting for updates from Telegram");
-
-            dispatcher
-                .dispatch_with_listener(
-                    listener,
-                    std::sync::Arc::new(teloxide::error_handlers::IgnoringErrorHandlerSafe),
-                )
-                .await;
-        }
-    }
+    dispatcher
+        .dispatch_with_listener(
+            listener,
+            std::sync::Arc::new(teloxide::error_handlers::IgnoringErrorHandlerSafe),
+        )
+        .await;
 
     info!("Telegram bot stopped");
     if let Err(e) = trogon_telemetry::shutdown_otel() {

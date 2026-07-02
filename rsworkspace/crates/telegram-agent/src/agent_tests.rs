@@ -91,7 +91,7 @@ async fn test_error_consumer_purges_session_on_bot_blocked() {
     // Publish a BotBlocked CommandErrorEvent to the event stream
     let error_subject = telegram_nats::subjects::bot::command_error(&prefix);
     let error_event = telegram_types::errors::CommandErrorEvent {
-        command_subject: format!("telegram.{}.agent.message.send", prefix),
+        command_subject: format!("tgbot.{}.agent.message.send", prefix),
         message: "Forbidden: bot was blocked by the user".to_string(),
         error_code: telegram_types::errors::TelegramErrorCode::BotBlocked,
         category: telegram_types::errors::ErrorCategory::BotBlocked,
@@ -167,7 +167,7 @@ async fn test_error_consumer_purges_session_on_chat_migrated() {
 
     let error_subject = telegram_nats::subjects::bot::command_error(&prefix);
     let error_event = telegram_types::errors::CommandErrorEvent {
-        command_subject: format!("telegram.{}.agent.message.send", prefix),
+        command_subject: format!("tgbot.{}.agent.message.send", prefix),
         message: "Bad Request: group chat was upgraded to a supergroup chat".to_string(),
         error_code: telegram_types::errors::TelegramErrorCode::MigrateToChatId,
         category: telegram_types::errors::ErrorCategory::ChatMigrated,

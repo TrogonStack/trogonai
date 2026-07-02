@@ -235,7 +235,7 @@ impl TelegramAgent {
         use telegram_nats::subjects::bot;
 
         let prefix = &self.prefix;
-        let command_prefix = format!("telegram.{}.bot.command.", prefix);
+        let command_prefix = format!("tgbot.{}.bot.command.", prefix);
 
         // ── Dedup guard ────────────────────────────────────────────────────────
         // Extract event_id from the shared EventMetadata envelope.  Any event

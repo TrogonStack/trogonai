@@ -119,7 +119,7 @@ mod nats_tests {
         json["text"] = serde_json::json!("Hello NATS");
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_text_message(&message, 1).await.unwrap();
 
@@ -141,7 +141,7 @@ mod nats_tests {
         json["text"] = serde_json::json!("should not arrive");
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -169,7 +169,7 @@ mod nats_tests {
         json["caption"] = serde_json::json!("nice shot");
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let subject = format!("tgbot.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_photo_message(&message, 2).await.unwrap();
 
@@ -197,7 +197,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let subject = format!("tgbot.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_video_message(&message, 3).await.unwrap();
 
@@ -225,7 +225,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let subject = format!("tgbot.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_audio_message(&message, 4).await.unwrap();
 
@@ -253,7 +253,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let subject = format!("tgbot.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_document_message(&message, 5).await.unwrap();
 
@@ -280,7 +280,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.voice", prefix);
+        let subject = format!("tgbot.{}.bot.message.voice", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_voice_message(&message, 6).await.unwrap();
 
@@ -307,7 +307,7 @@ mod nats_tests {
         ]);
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let subject = format!("tgbot.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_photo_message(&message, 20).await.unwrap();
 
@@ -334,7 +334,7 @@ mod nats_tests {
         ]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let subject = format!("tgbot.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_photo_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -362,7 +362,7 @@ mod nats_tests {
         json["caption"] = serde_json::json!("watch this");
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let subject = format!("tgbot.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_video_message(&message, 30).await.unwrap();
 
@@ -388,7 +388,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let subject = format!("tgbot.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_video_message(&message, 31).await.unwrap();
 
@@ -416,7 +416,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let subject = format!("tgbot.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_video_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -444,7 +444,7 @@ mod nats_tests {
         json["caption"] = serde_json::json!("great track");
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let subject = format!("tgbot.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_audio_message(&message, 40).await.unwrap();
 
@@ -471,7 +471,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let subject = format!("tgbot.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_audio_message(&message, 41).await.unwrap();
 
@@ -499,7 +499,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.audio", prefix);
+        let subject = format!("tgbot.{}.bot.message.audio", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_audio_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -527,7 +527,7 @@ mod nats_tests {
         json["caption"] = serde_json::json!("Q3 report");
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let subject = format!("tgbot.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_document_message(&message, 50).await.unwrap();
 
@@ -554,7 +554,7 @@ mod nats_tests {
         });
         let message = msg(json);
 
-        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let subject = format!("tgbot.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         bridge.publish_document_message(&message, 51).await.unwrap();
 
@@ -582,7 +582,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let subject = format!("tgbot.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_document_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -608,7 +608,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.voice", prefix);
+        let subject = format!("tgbot.{}.bot.message.voice", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_voice_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -653,7 +653,7 @@ mod nats_tests {
         json["text"] = serde_json::json!("routed text");
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -679,7 +679,7 @@ mod nats_tests {
         ]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let subject = format!("tgbot.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_photo_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -734,7 +734,7 @@ mod nats_tests {
         json["text"] = serde_json::json!("should not arrive");
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -768,7 +768,7 @@ mod nats_tests {
         ]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -799,7 +799,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let subject = format!("tgbot.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -826,7 +826,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 5}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.help", prefix);
+        let subject = format!("tgbot.{}.bot.command.help", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -851,7 +851,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 7}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.search", prefix);
+        let subject = format!("tgbot.{}.bot.command.search", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -880,7 +880,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let subject = format!("tgbot.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -932,7 +932,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 6}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let subject = format!("tgbot.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -981,7 +981,7 @@ mod nats_tests {
         json["entities"] = serde_json::json!([{"type": "bot_command", "offset": 0, "length": 14}]);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.command.start", prefix);
+        let subject = format!("tgbot.{}.bot.command.start", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_text_message(fake_bot(), fake_update(42), message, bridge, health())
@@ -1028,7 +1028,7 @@ mod nats_tests {
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
         let query = callback_query_json(42, "action:confirm", 1, 42);
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1051,7 +1051,7 @@ mod nats_tests {
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
         let query = callback_query_json(99, "action:deny", 1, 99);
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1084,7 +1084,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1124,7 +1124,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1145,7 +1145,7 @@ mod nats_tests {
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
         let query = callback_query_json(42, "click", 77, 42);
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1189,7 +1189,7 @@ mod nats_tests {
         );
 
         let query = callback_query_json(ADMIN_ID, "admin:action", 1, ADMIN_ID as i64);
-        let subject = format!("telegram.{}.bot.callback.query", prefix);
+        let subject = format!("tgbot.{}.bot.callback.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_callback_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1223,7 +1223,7 @@ mod nats_tests {
         let bridge = make_bridge(client.clone(), js, prefix).await;
 
         let query = inline_query_json(42, "rust async");
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1246,7 +1246,7 @@ mod nats_tests {
         let bridge = make_bridge_restricted(client.clone(), js, prefix).await;
 
         let query = inline_query_json(99, "should be denied");
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1292,7 +1292,7 @@ mod nats_tests {
         );
 
         let query = inline_query_json(ADMIN_ID, "admin query");
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1314,7 +1314,7 @@ mod nats_tests {
 
         // User types just "@bot" with no search text
         let query = inline_query_json(42, "");
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1344,7 +1344,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1375,7 +1375,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1410,7 +1410,7 @@ mod nats_tests {
             }))
             .unwrap();
 
-        let subject = format!("telegram.{}.bot.inline.chosen", prefix);
+        let subject = format!("tgbot.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_chosen_inline_result(
@@ -1448,7 +1448,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.inline.query", prefix);
+        let subject = format!("tgbot.{}.bot.inline.query", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         handlers::handle_inline_query(fake_bot(), fake_update(42), query, bridge, health())
@@ -1478,7 +1478,7 @@ mod nats_tests {
         json["location"] = serde_json::json!({"longitude": 2.3514, "latitude": 48.8566});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.location", prefix);
+        let subject = format!("tgbot.{}.bot.message.location", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_location_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1506,7 +1506,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.venue", prefix);
+        let subject = format!("tgbot.{}.bot.message.venue", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_venue_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1530,7 +1530,7 @@ mod nats_tests {
         json["contact"] = serde_json::json!({"phone_number": "+1234567890", "first_name": "Alice"});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.contact", prefix);
+        let subject = format!("tgbot.{}.bot.message.contact", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_contact_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1558,7 +1558,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1591,7 +1591,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.animation", prefix);
+        let subject = format!("tgbot.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1620,7 +1620,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.video_note", prefix);
+        let subject = format!("tgbot.{}.bot.message.video_note", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_video_note_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1653,7 +1653,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1682,7 +1682,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1709,7 +1709,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1737,7 +1737,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1765,7 +1765,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1792,7 +1792,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.sticker", prefix);
+        let subject = format!("tgbot.{}.bot.message.sticker", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_sticker_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1829,7 +1829,7 @@ mod nats_tests {
         json["caption"] = serde_json::json!("haha");
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.animation", prefix);
+        let subject = format!("tgbot.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1861,7 +1861,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.animation", prefix);
+        let subject = format!("tgbot.{}.bot.message.animation", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_animation_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -1893,7 +1893,7 @@ mod nats_tests {
             }))
             .unwrap();
 
-        let subject = format!("telegram.{}.bot.inline.chosen", prefix);
+        let subject = format!("tgbot.{}.bot.inline.chosen", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_chosen_inline_result(
             fake_bot(),
@@ -1946,7 +1946,7 @@ mod nats_tests {
 
         let update = chat_member_updated_json(-100111, 42, "member", "left");
 
-        let subject = format!("telegram.{}.bot.chat.member_updated", prefix);
+        let subject = format!("tgbot.{}.bot.chat.member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_chat_member_updated(fake_bot(), fake_update(42), update, bridge, health())
             .await
@@ -1969,7 +1969,7 @@ mod nats_tests {
         // Bot (id=1) added to a group
         let update = chat_member_updated_json(-100222, 1, "left", "member");
 
-        let subject = format!("telegram.{}.bot.chat.my_member_updated", prefix);
+        let subject = format!("tgbot.{}.bot.chat.my_member_updated", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_my_chat_member_updated(
             fake_bot(),
@@ -2005,7 +2005,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.payment.pre_checkout", prefix);
+        let subject = format!("tgbot.{}.bot.payment.pre_checkout", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_pre_checkout_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
@@ -2038,7 +2038,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.payment.shipping", prefix);
+        let subject = format!("tgbot.{}.bot.payment.shipping", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_shipping_query(fake_bot(), fake_update(42), query, bridge, health())
             .await
@@ -2067,7 +2067,7 @@ mod nats_tests {
         });
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.payment.successful", prefix);
+        let subject = format!("tgbot.{}.bot.payment.successful", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_successful_payment(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2107,7 +2107,7 @@ mod nats_tests {
         json["poll"] = poll_json();
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.poll", prefix);
+        let subject = format!("tgbot.{}.bot.message.poll", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_poll_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2129,7 +2129,7 @@ mod nats_tests {
 
         let poll: teloxide::types::Poll = serde_json::from_value(poll_json()).unwrap();
 
-        let subject = format!("telegram.{}.bot.poll.update", prefix);
+        let subject = format!("tgbot.{}.bot.poll.update", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_poll_update(fake_bot(), fake_update(42), poll, bridge, health())
             .await
@@ -2156,7 +2156,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.poll.answer", prefix);
+        let subject = format!("tgbot.{}.bot.poll.answer", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_poll_answer(fake_bot(), fake_update(42), answer, bridge, health())
             .await
@@ -2184,7 +2184,7 @@ mod nats_tests {
         json["edit_date"] = serde_json::json!(1_700_001_000i64);
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.edited", prefix);
+        let subject = format!("tgbot.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_edited_message(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2232,7 +2232,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2287,7 +2287,7 @@ mod nats_tests {
             "photo": [{"file_id": "ph1", "file_unique_id": "uph1", "width": 320, "height": 240, "file_size": 2000}]
         })).unwrap();
 
-        let subject = format!("telegram.{}.bot.message.photo", prefix);
+        let subject = format!("tgbot.{}.bot.message.photo", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2318,7 +2318,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.message.video", prefix);
+        let subject = format!("tgbot.{}.bot.message.video", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2345,7 +2345,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.message.document", prefix);
+        let subject = format!("tgbot.{}.bot.message.document", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_channel_post(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2394,7 +2394,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.message.edited", prefix);
+        let subject = format!("tgbot.{}.bot.message.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_edited_channel_post(
             fake_bot(),
@@ -2429,7 +2429,7 @@ mod nats_tests {
         }))
         .unwrap();
 
-        let subject = format!("telegram.{}.bot.chat.join_request", prefix);
+        let subject = format!("tgbot.{}.bot.chat.join_request", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_chat_join_request(fake_bot(), fake_update(42), request, bridge, health())
             .await
@@ -2464,7 +2464,7 @@ mod nats_tests {
         json["forum_topic_created"] = serde_json::json!({"name": "Help", "icon_color": 7322096});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.created", prefix);
+        let subject = format!("tgbot.{}.bot.forum.created", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_forum_topic_created(
             fake_bot(),
@@ -2493,7 +2493,7 @@ mod nats_tests {
         json["forum_topic_edited"] = serde_json::json!({"name": "Help v2"});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.edited", prefix);
+        let subject = format!("tgbot.{}.bot.forum.edited", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_forum_topic_edited(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2516,7 +2516,7 @@ mod nats_tests {
         json["forum_topic_closed"] = serde_json::json!({});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.closed", prefix);
+        let subject = format!("tgbot.{}.bot.forum.closed", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_forum_topic_closed(fake_bot(), fake_update(42), message, bridge, health())
             .await
@@ -2538,7 +2538,7 @@ mod nats_tests {
         json["forum_topic_reopened"] = serde_json::json!({});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.reopened", prefix);
+        let subject = format!("tgbot.{}.bot.forum.reopened", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_forum_topic_reopened(
             fake_bot(),
@@ -2566,7 +2566,7 @@ mod nats_tests {
         json["general_forum_topic_hidden"] = serde_json::json!({});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.general_hidden", prefix);
+        let subject = format!("tgbot.{}.bot.forum.general_hidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_general_forum_topic_hidden(
             fake_bot(),
@@ -2594,7 +2594,7 @@ mod nats_tests {
         json["general_forum_topic_unhidden"] = serde_json::json!({});
         let message: Message = serde_json::from_value(json).unwrap();
 
-        let subject = format!("telegram.{}.bot.forum.general_unhidden", prefix);
+        let subject = format!("tgbot.{}.bot.forum.general_unhidden", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
         handlers::handle_general_forum_topic_unhidden(
             fake_bot(),
@@ -2623,7 +2623,7 @@ mod nats_tests {
         let prefix = format!("bridge-dedup-same-{}", uuid::Uuid::new_v4().simple());
         let bridge = make_bridge(client.clone(), js, &prefix).await;
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         let mut json = private_base(1);
@@ -2656,7 +2656,7 @@ mod nats_tests {
         let prefix = format!("bridge-dedup-diff-{}", uuid::Uuid::new_v4().simple());
         let bridge = make_bridge(client.clone(), js, &prefix).await;
 
-        let subject = format!("telegram.{}.bot.message.text", prefix);
+        let subject = format!("tgbot.{}.bot.message.text", prefix);
         let mut sub = client.subscribe(subject).await.unwrap();
 
         let mut json = private_base(1);

@@ -20,12 +20,12 @@ File IDs can be obtained from various message types:
 ## NATS Subjects
 
 ### Agent Commands (Agents → Bot)
-- `telegram.{prefix}.agent.file.get` - Get file information
-- `telegram.{prefix}.agent.file.download` - Download file
+- `tgbot.{prefix}.agent.file.get` - Get file information
+- `tgbot.{prefix}.agent.file.download` - Download file
 
 ### Bot Responses (Bot → Agents)
-- `telegram.{prefix}.bot.file.info` - File information response
-- `telegram.{prefix}.bot.file.downloaded` - File download completion response
+- `tgbot.{prefix}.bot.file.info` - File information response
+- `tgbot.{prefix}.bot.file.downloaded` - File download completion response
 
 ## Usage Examples
 
@@ -40,7 +40,7 @@ Send a `GetFileCommand` to retrieve file metadata:
 }
 ```
 
-**Response** on `telegram.{prefix}.bot.file.info`:
+**Response** on `tgbot.{prefix}.bot.file.info`:
 
 ```json
 {
@@ -65,7 +65,7 @@ Send a `DownloadFileCommand` to download and save a file:
 }
 ```
 
-**Response** on `telegram.{prefix}.bot.file.downloaded`:
+**Response** on `tgbot.{prefix}.bot.file.downloaded`:
 
 **Success:**
 ```json
@@ -151,7 +151,7 @@ let download_cmd = DownloadFileCommand {
 
 // 4. Publish download command
 nats_client.publish(
-    "telegram.prod.agent.file.download",
+    "tgbot.prod.agent.file.download",
     serde_json::to_vec(&download_cmd)?
 ).await?;
 
@@ -176,7 +176,7 @@ let get_file_cmd = GetFileCommand {
 
 // 2. Publish command
 nats_client.publish(
-    "telegram.prod.agent.file.get",
+    "tgbot.prod.agent.file.get",
     serde_json::to_vec(&get_file_cmd)?
 ).await?;
 
