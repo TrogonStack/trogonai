@@ -1,0 +1,48 @@
+suite: tier2-cel sample bundle
+bundle: policy
+fixtures:
+  - id: allow-planner-message-send
+    input:
+      request:
+        method: message/send
+        params: {}
+      caller:
+        id: planner-1
+      agent:
+        id: planner
+      task: {}
+      headers:
+        x-tenant-id: acme
+    expected_verdict: allow
+
+  - id: deny-guest-message-send
+    input:
+      request:
+        method: message/send
+        params: {}
+      caller:
+        id: guest
+      agent:
+        id: planner
+      task: {}
+      headers:
+        x-tenant-id: acme
+    expected_verdict:
+      deny:
+        rule: deny_guest_message_send
+
+  - id: deny-missing-tenant-header
+    input:
+      request:
+        method: tasks/get
+        params: {}
+      caller:
+        id: planner-1
+      agent:
+        id: planner
+      task:
+        id: task-9
+      headers: {}
+    expected_verdict:
+      deny:
+        rule: require_tenant_header

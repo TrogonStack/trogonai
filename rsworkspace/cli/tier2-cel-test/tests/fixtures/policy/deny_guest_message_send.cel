@@ -1,0 +1,1 @@
+!(caller.id == "guest" && request.method == "message/send")

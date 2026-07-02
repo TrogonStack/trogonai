@@ -1,0 +1,29 @@
+[package]
+name = "tier2-cel-test"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Fixture-replay CLI and lint pass for a2a-gateway Tier-2 CEL policy bundles"
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "tier2-cel-test"
+path = "src/main.rs"
+
+[dependencies]
+a2a-auth-callout = { workspace = true }
+a2a-gateway = { path = "../../crates/a2a-gateway" }
+a2a-nats = { workspace = true }
+anyhow = { workspace = true }
+cel-interpreter = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

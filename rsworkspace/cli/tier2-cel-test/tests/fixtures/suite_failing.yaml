@@ -1,0 +1,16 @@
+suite: tier2-cel sample bundle (deliberately wrong expectation)
+bundle: policy
+fixtures:
+  - id: wrongly-expects-allow-for-guest
+    input:
+      request:
+        method: message/send
+        params: {}
+      caller:
+        id: guest
+      agent:
+        id: planner
+      task: {}
+      headers:
+        x-tenant-id: acme
+    expected_verdict: allow
