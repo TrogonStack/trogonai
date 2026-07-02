@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
 use crate::source::gitlab::GitLabSigningToken;
@@ -19,6 +20,7 @@ use crate::source::telegram::config::{
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use axum::http::HeaderName;
 use confique::Config;
 #[cfg(test)]
 use trogon_nats::NatsAuth;
@@ -350,6 +352,8 @@ struct SourcesConfig {
     notion: NotionConfig,
     #[config(nested)]
     sentry: SentryConfig,
+    #[config(nested)]
+    datadog: DatadogConfig,
 }
 
 #[derive(Config)]
@@ -448,6 +452,14 @@ struct SentryConfig {
     integrations: BTreeMap<String, SourceIntegrationInput<SentryWebhookConfig>>,
 }
 
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct DatadogConfig {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<DatadogWebhookConfig>>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceIntegrationInput<T> {
@@ -544,6 +556,14 @@ struct SentryWebhookConfig {
     client_secret: Option<SecretInput>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatadogWebhookConfig {
+    webhook_token: Option<SecretInput>,
+    webhook_token_header: Option<String>,
+    timestamp_tolerance_secs: Option<u64>,
+}
+
 pub struct ResolvedHttpServerConfig {
     pub port: u16,
 }
@@ -573,6 +593,7 @@ pub struct ResolvedConfig {
     pub microsoft_graph: Vec<SourceIntegration<crate::source::microsoft_graph::MicrosoftGraphConfig>>,
     pub notion: Vec<SourceIntegration<crate::source::notion::NotionConfig>>,
     pub sentry: Vec<SourceIntegration<crate::source::sentry::SentryConfig>>,
+    pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
 }
 
 impl ResolvedConfig {
@@ -588,6 +609,7 @@ impl ResolvedConfig {
             || !self.microsoft_graph.is_empty()
             || !self.notion.is_empty()
             || !self.sentry.is_empty()
+            || !self.datadog.is_empty()
     }
 }
 
@@ -620,6 +642,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let microsoft_graph = resolve_microsoft_graph_integrations(cfg.sources.microsoft_graph, &env, &mut errors);
     let notion = resolve_notion_integrations(cfg.sources.notion, &env, &mut errors);
     let sentry = resolve_sentry_integrations(cfg.sources.sentry, &env, &mut errors);
+    let datadog = resolve_datadog_integrations(cfg.sources.datadog, &env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(ValidationErrors(errors)));
@@ -641,6 +664,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
         microsoft_graph,
         notion,
         sentry,
+        datadog,
     })
 }
 
@@ -1697,6 +1721,97 @@ fn resolve_sentry_integrations(
                 stream_name,
                 stream_max_age,
                 nats_ack_timeout,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_datadog_integrations(
+    section: DatadogConfig,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<crate::source::datadog::DatadogConfig>> {
+    let DatadogConfig {
+        status,
+        integrations: configured_integrations,
+    } = section;
+    let mut integrations = Vec::new();
+    if !resolve_source_status("datadog", status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in configured_integrations {
+        let Some(id) = resolve_integration_id("datadog", raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status("datadog", &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let Some(webhook) = integration.webhook else {
+            errors.push(ConfigValidationError::missing_integration("datadog", &id, "webhook"));
+            continue;
+        };
+        let Some(token) =
+            require_integration_value("datadog", &id, "webhook_token", webhook.webhook_token, env, errors)
+        else {
+            continue;
+        };
+        let webhook_token = match DatadogWebhookToken::new(token) {
+            Ok(token) => token,
+            Err(error) => {
+                errors.push(ConfigValidationError::invalid_integration(
+                    "datadog",
+                    &id,
+                    "webhook_token",
+                    error,
+                ));
+                continue;
+            }
+        };
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: "datadog",
+                id: &id,
+                subject_source_prefix: "datadog",
+                stream_source_prefix: "DATADOG",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        ) else {
+            continue;
+        };
+        let webhook_token_header = match webhook.webhook_token_header {
+            Some(raw) => match HeaderName::try_from(raw.trim()) {
+                Ok(header) => header,
+                Err(error) => {
+                    errors.push(ConfigValidationError::invalid_integration(
+                        "datadog",
+                        &id,
+                        "webhook_token_header",
+                        error,
+                    ));
+                    continue;
+                }
+            },
+            None => HeaderName::from_static(crate::source::datadog::constants::DEFAULT_HEADER_WEBHOOK_TOKEN),
+        };
+        let timestamp_tolerance = webhook
+            .timestamp_tolerance_secs
+            .and_then(|secs| NonZeroDuration::from_secs(secs).ok());
+        integrations.push(SourceIntegration::new(
+            id,
+            crate::source::datadog::DatadogConfig {
+                webhook_token,
+                webhook_token_header,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+                timestamp_tolerance,
             },
         ));
     }

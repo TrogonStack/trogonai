@@ -81,6 +81,17 @@ webhook_secret = { env = "TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET" }
 # [sources.sentry.integrations.primary.webhook]
 # client_secret = { env = "SENTRY_PRIMARY_CLIENT_SECRET" }
 #
+# [sources.datadog.integrations.primary]
+# subject_prefix = "datadog-primary"
+# stream_name = "DATADOG_PRIMARY"
+# stream_max_age_secs = 604800
+# nats_ack_timeout_secs = 10
+#
+# [sources.datadog.integrations.primary.webhook]
+# webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
+# webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
+# timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
+#
 # [sources.discord]
 # bot_token = { env = "DISCORD_BOT_TOKEN" }
 # gateway_intents = "guilds,guild_members,guild_messages,guild_message_reactions,direct_messages,message_content,guild_voice_states"

@@ -21,7 +21,7 @@ groups:
       - id: event_id
         type: string
         stability: development
-        brief: Webhook event identifier (Slack, Notion).
+        brief: Webhook event identifier (Slack, Notion, Datadog).
       - id: event
         type: string
         stability: development
@@ -156,4 +156,13 @@ groups:
     brief: Microsoft Graph webhook ingestion.
     attributes:
       - ref: notification_count
+      - ref: subject
+  - id: span.datadog.webhook
+    type: span
+    span_kind: server
+    stability: development
+    brief: Datadog webhook ingestion.
+    attributes:
+      - ref: event_type
+      - ref: event_id
       - ref: subject

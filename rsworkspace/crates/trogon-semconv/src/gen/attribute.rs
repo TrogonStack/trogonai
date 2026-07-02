@@ -177,7 +177,7 @@ pub const DELIVERY: &str = "delivery";
 /// Webhook event name (GitHub, GitLab)
 pub const EVENT: &str = "event";
 
-/// Webhook event identifier (Slack, Notion)
+/// Webhook event identifier (Slack, Notion, Datadog)
 pub const EVENT_ID: &str = "event_id";
 
 /// Event type discriminator. Reused by scheduler reconciliation and several gateway webhook spans with different value spaces
