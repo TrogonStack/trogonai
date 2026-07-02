@@ -55,7 +55,7 @@ cel-interpreter = "=0.10.0"
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 
 # MCP
-rmcp = { version = "=1.6.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
+rmcp = { version = "2.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
 
 # Async runtime & networking
 async-compat = "=0.2.5"

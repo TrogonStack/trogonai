@@ -302,7 +302,9 @@ async fn handle_remote_message<N>(
             }
         }
         ServerJsonRpcMessage::Error(error) => {
-            if let Some(entry) = pending.remove(&error.id) {
+            if let Some(id) = &error.id
+                && let Some(entry) = pending.remove(id)
+            {
                 let _ = entry.response_tx.send(Err(error.error));
             }
         }
@@ -333,11 +335,11 @@ async fn forward_server_request_to_http_client<N>(
     let message = match peer {
         Some(peer) => match peer.send_request(request).await {
             Ok(result) => ClientJsonRpcMessage::response(result, request_id),
-            Err(error) => ClientJsonRpcMessage::error(service_error_to_error_data(error), request_id),
+            Err(error) => ClientJsonRpcMessage::error(service_error_to_error_data(error), Some(request_id)),
         },
         None => ClientJsonRpcMessage::error(
             ErrorData::internal_error("MCP HTTP client is not available", None),
-            request_id,
+            Some(request_id),
         ),
     };
 

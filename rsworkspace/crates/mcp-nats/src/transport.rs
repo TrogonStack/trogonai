@@ -176,7 +176,7 @@ where
                     Ok(())
                 }
                 JsonRpcMessage::Error(error) => {
-                    let request_id = error.id.clone();
+                    let request_id = error.id.clone().ok_or(NatsTransportError::MissingReplySubject)?;
                     let subject = reply_subject_for_response(&request_id, &pending_replies)
                         .await
                         .ok_or(NatsTransportError::MissingReplySubject)?;

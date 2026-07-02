@@ -268,7 +268,7 @@ async fn server_transport_publishes_error_to_remembered_reply_subject() {
     transport
         .send(ServerJsonRpcMessage::error(
             ErrorData::internal_error("request failed", None),
-            RequestId::Number(9),
+            Some(RequestId::Number(9)),
         ))
         .await
         .unwrap();
