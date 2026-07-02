@@ -124,6 +124,41 @@ async fn request_fails_when_nats_response_id_never_matches() {
     assert!(body.contains("timed out"));
 }
 
+#[tokio::test]
+async fn handle_remote_message_delivers_error_to_pending_request() {
+    let nats = trogon_nats::AdvancedMockNatsClient::new();
+    let _inbound = nats.inject_messages();
+    let mut transport = mcp_nats::client::connect(
+        nats,
+        &mcp_config(),
+        McpPeerId::new("http-test").unwrap(),
+        McpPeerId::new("default").unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let (response_tx, response_rx) = oneshot::channel();
+    let mut pending: HashMap<RequestId, PendingEntry> = HashMap::new();
+    pending.insert(
+        RequestId::Number(7),
+        PendingEntry {
+            response_tx,
+            deadline: Instant::now(),
+        },
+    );
+
+    let message = ServerJsonRpcMessage::error(
+        ErrorData::internal_error("remote failure", None),
+        Some(RequestId::Number(7)),
+    );
+
+    handle_remote_message(message, &mut transport, None, &mut pending).await;
+
+    assert!(pending.is_empty());
+    let delivered = response_rx.await.unwrap();
+    assert_eq!(delivered.unwrap_err().message.as_ref(), "remote failure");
+}
+
 #[test]
 fn client_id_factory_generates_valid_unique_peer_ids() {
     let factory = ClientIdFactory::new(McpPeerId::new("http").unwrap());
