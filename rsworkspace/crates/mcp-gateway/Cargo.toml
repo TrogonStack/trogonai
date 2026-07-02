@@ -1,0 +1,41 @@
+[package]
+name = "mcp-gateway"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "mcp_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mcp-gateway"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+mcp-nats = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+rmcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }

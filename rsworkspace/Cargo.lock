@@ -76,6 +76,8 @@ dependencies = [
  "base64",
  "bytes",
  "cel-interpreter",
+ "chrono",
+ "chrono-tz",
  "clap",
  "filetime",
  "futures",
@@ -3331,6 +3333,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
+name = "mcp-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "clap",
+ "futures",
+ "mcp-nats",
+ "reqwest 0.12.28",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-std",
+ "wiremock",
+]
+
+[[package]]
 name = "mcp-nats"
 version = "0.1.0"
 dependencies = [
@@ -5770,6 +5795,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tier2-cel-test"
+version = "0.1.0"
+dependencies = [
+ "a2a-auth-callout",
+ "a2a-gateway",
+ "a2a-nats",
+ "anyhow",
+ "cel-interpreter",
+ "clap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "time"
 version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6284,6 +6326,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-audit-chain"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.8",
+ "thiserror 2.0.18",
+ "tokio",
+ "trogon-nats",
+]
+
+[[package]]
 name = "trogon-decider"
 version = "0.1.0"
 dependencies = [
@@ -6446,6 +6503,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "trogon-kill-switch"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "trogon-decider",
+ "trogon-nats",
 ]
 
 [[package]]
