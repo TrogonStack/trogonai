@@ -6,8 +6,10 @@ use std::time::SystemTime;
 
 use cel_interpreter::Program;
 
+use super::bundle_load_error::Tier2BundleLoadError;
 use super::compiler::{self, CelCompileError};
 use crate::policy::tier2::rule_name::RuleName;
+use crate::policy::tier2_dynamic::{Tier2DynamicCondition, load_dynamic_condition_sidecar};
 
 #[derive(Clone, Debug)]
 pub struct CelProgramHandle(Arc<Program>);
@@ -27,6 +29,7 @@ struct CachedRule {
     path: PathBuf,
     mtime: SystemTime,
     program: CelProgramHandle,
+    dynamic_condition: Option<Tier2DynamicCondition>,
 }
 
 #[derive(Debug)]
@@ -43,7 +46,7 @@ impl Tier2CompiledBundle {
     /// directory is a misconfiguration and fails fast — without this
     /// check the runtime would silently default-allow with no rules
     /// loaded.
-    pub fn load_from_dir(tier2_dir: impl Into<PathBuf>) -> Result<Self, CelCompileError> {
+    pub fn load_from_dir(tier2_dir: impl Into<PathBuf>) -> Result<Self, Tier2BundleLoadError> {
         let tier2_dir = tier2_dir.into();
         let mut rules = BTreeMap::new();
         if !tier2_dir.exists() {
@@ -60,7 +63,8 @@ impl Tier2CompiledBundle {
                     std::io::ErrorKind::InvalidInput,
                     "tier-2 bundle path exists but is not a directory",
                 ),
-            });
+            }
+            .into());
         }
         // Collect first, sort by path, THEN parse. `read_dir` order is
         // filesystem-dependent — sorting paths up front keeps rule load
@@ -93,7 +97,16 @@ impl Tier2CompiledBundle {
             }
             let rule = RuleName::new_unchecked(stem);
             let (program, mtime) = compiler::compile_cel_file(&path)?;
-            rules.insert(rule, CachedRule { path, mtime, program });
+            let dynamic_condition = load_dynamic_condition_sidecar(&path)?;
+            rules.insert(
+                rule,
+                CachedRule {
+                    path,
+                    mtime,
+                    program,
+                    dynamic_condition,
+                },
+            );
         }
         Ok(Self { tier2_dir, rules })
     }
@@ -102,7 +115,13 @@ impl Tier2CompiledBundle {
     /// drops cached entries whose source file was removed/renamed
     /// (otherwise the policy would keep enforcing a rule the operator
     /// deleted), and adds entries for new `.cel` files in the directory.
-    pub fn refresh_if_stale(&mut self) -> Result<(), CelCompileError> {
+    ///
+    /// A `.dynamic.toml` sidecar is reloaded whenever its `.cel` sibling's
+    /// mtime changes -- sidecar-only edits (no `.cel` content change) are
+    /// picked up on the next full bundle reload rather than tracked with
+    /// a second mtime, keeping the staleness check to one filesystem stat
+    /// per rule.
+    pub fn refresh_if_stale(&mut self) -> Result<(), Tier2BundleLoadError> {
         let mut removed: Vec<RuleName> = Vec::new();
         for (name, cached) in self.rules.iter_mut() {
             match fs::metadata(&cached.path) {
@@ -113,6 +132,7 @@ impl Tier2CompiledBundle {
                     })?;
                     if current_mtime != cached.mtime {
                         let (program, mtime) = compiler::compile_cel_file(&cached.path)?;
+                        cached.dynamic_condition = load_dynamic_condition_sidecar(&cached.path)?;
                         cached.program = program;
                         cached.mtime = mtime;
                     }
@@ -124,7 +144,8 @@ impl Tier2CompiledBundle {
                     return Err(CelCompileError::Metadata {
                         path: cached.path.clone(),
                         source,
-                    });
+                    }
+                    .into());
                 }
             }
         }
@@ -141,11 +162,13 @@ impl Tier2CompiledBundle {
 
     /// Snapshot the current rule set as cheap-to-clone Arc handles so an
     /// evaluator can iterate without holding the bundle lock across the
-    /// CEL execution path.
-    pub fn snapshot(&self) -> Vec<(RuleName, CelProgramHandle)> {
+    /// CEL execution path. Each entry carries its optional dynamic
+    /// condition alongside the compiled program so the evaluator can
+    /// apply AND semantics without a second lookup.
+    pub fn snapshot(&self) -> Vec<(RuleName, CelProgramHandle, Option<Tier2DynamicCondition>)> {
         self.rules
             .iter()
-            .map(|(name, cached)| (name.clone(), cached.program.clone()))
+            .map(|(name, cached)| (name.clone(), cached.program.clone(), cached.dynamic_condition.clone()))
             .collect()
     }
 
@@ -153,7 +176,7 @@ impl Tier2CompiledBundle {
         &self.tier2_dir
     }
 
-    fn reload_new_files(&mut self) -> Result<(), CelCompileError> {
+    fn reload_new_files(&mut self) -> Result<(), Tier2BundleLoadError> {
         if !self.tier2_dir.is_dir() {
             return Ok(());
         }
@@ -185,7 +208,16 @@ impl Tier2CompiledBundle {
                 continue;
             }
             let (program, mtime) = compiler::compile_cel_file(&path)?;
-            self.rules.insert(rule, CachedRule { path, mtime, program });
+            let dynamic_condition = load_dynamic_condition_sidecar(&path)?;
+            self.rules.insert(
+                rule,
+                CachedRule {
+                    path,
+                    mtime,
+                    program,
+                    dynamic_condition,
+                },
+            );
         }
         Ok(())
     }

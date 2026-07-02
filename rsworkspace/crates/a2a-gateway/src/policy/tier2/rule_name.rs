@@ -41,6 +41,26 @@ impl RuleName {
         // Static literal — known non-empty.
         Self::new_unchecked("evaluation_error")
     }
+
+    /// Sentinel for a Tier-2 resource-limit breach (oversized headers,
+    /// oversized params, or excessive JSON nesting). Distinct from
+    /// [`Self::evaluation_error`] so operators can tell a DoS-guard trip
+    /// apart from a CEL rule crash in logs and audit envelopes.
+    pub fn resource_limit_exceeded() -> Self {
+        // Static literal — known non-empty.
+        Self::new_unchecked("resource_limit_exceeded")
+    }
+
+    /// Sentinel for a rule whose CEL predicate evaluated `true` but whose
+    /// attached dynamic condition (`time_window`, `day_of_week`,
+    /// `token_count_per_window`, or `cost_per_window`) evaluated `false`.
+    /// Suffixing the base rule's name (rather than reusing a single
+    /// generic sentinel) lets operators see which specific rule's
+    /// dynamic condition tripped in logs and audit envelopes.
+    pub fn dynamic_condition_failed(base: &Self) -> Self {
+        // Non-empty base + static suffix — known non-empty.
+        Self::new_unchecked(format!("{base}.dynamic_condition"))
+    }
 }
 
 impl fmt::Display for RuleName {

@@ -6,13 +6,18 @@ use a2a_nats::server::A2aMethod;
 use a2a_nats::{A2aAgentId, A2aTaskId};
 use async_nats::HeaderMap;
 use cel_interpreter::{Context, Value, to_value};
+use chrono::Datelike;
 use tracing::warn;
 
 use crate::policy::error::Tier2EvalError;
 
 use super::bundle::{CelProgramHandle, Tier2CompiledBundle};
+use crate::policy::tier2::resource_limits::{
+    Tier2ResourceLimits, headers_byte_size, json_nesting_depth_exceeds, params_byte_size,
+};
 use crate::policy::tier2::rule_name::RuleName;
 use crate::policy::tier2::{Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext};
+use crate::policy::tier2_dynamic::{BudgetMetric, SystemTier2Clock, Tier2Clock, Tier2DynamicCondition, WindowedBudget};
 
 pub trait CelEngine: Send + Sync {
     fn evaluate_bool(
@@ -49,6 +54,8 @@ impl CelEngine for CelInterpreterEngine {
 pub struct RealTier2CelEvaluator {
     bundle: Mutex<Tier2CompiledBundle>,
     engine: Arc<dyn CelEngine>,
+    clock: Arc<dyn Tier2Clock>,
+    budget: WindowedBudget,
 }
 
 impl RealTier2CelEvaluator {
@@ -56,6 +63,8 @@ impl RealTier2CelEvaluator {
         Self {
             bundle: Mutex::new(bundle),
             engine: Arc::new(CelInterpreterEngine),
+            clock: Arc::new(SystemTier2Clock),
+            budget: WindowedBudget::new(),
         }
     }
 
@@ -63,6 +72,25 @@ impl RealTier2CelEvaluator {
         Self {
             bundle: Mutex::new(bundle),
             engine,
+            clock: Arc::new(SystemTier2Clock),
+            budget: WindowedBudget::new(),
+        }
+    }
+
+    /// Full constructor for injecting the dynamic-condition clock and
+    /// budget tracker (tests use a `FixedTier2Clock` to make
+    /// `time_window`/`day_of_week` assertions deterministic).
+    pub fn with_engine_and_dynamic_deps(
+        bundle: Tier2CompiledBundle,
+        engine: Arc<dyn CelEngine>,
+        clock: Arc<dyn Tier2Clock>,
+        budget: WindowedBudget,
+    ) -> Self {
+        Self {
+            bundle: Mutex::new(bundle),
+            engine,
+            clock,
+            budget,
         }
     }
 
@@ -75,6 +103,35 @@ impl RealTier2CelEvaluator {
             let _guard = self.bundle.lock().expect("bundle lock");
             panic!("intentional poison");
         }));
+    }
+
+    fn dynamic_condition_allows(
+        &self,
+        rule: &RuleName,
+        condition: &Tier2DynamicCondition,
+        ctx: &Tier2EvaluationContext,
+    ) -> bool {
+        let now = self.clock.now();
+        match condition {
+            Tier2DynamicCondition::TimeWindow(window) => window.contains(now),
+            Tier2DynamicCondition::DayOfWeek(days) => days.contains(now.date_naive().weekday()),
+            Tier2DynamicCondition::TokenCountPerWindow { window, limit } => self.budget.check_and_record(
+                rule,
+                BudgetMetric::TokenCount,
+                *window,
+                *limit,
+                ctx.dynamic_context().budget_token_count(),
+                now,
+            ),
+            Tier2DynamicCondition::CostPerWindow { window, limit } => self.budget.check_and_record(
+                rule,
+                BudgetMetric::Cost,
+                *window,
+                *limit,
+                ctx.dynamic_context().budget_cost(),
+                now,
+            ),
+        }
     }
 }
 
@@ -103,9 +160,17 @@ impl Tier2CelEvaluator for RealTier2CelEvaluator {
             bundle.snapshot()
         };
 
-        for (rule, program) in &snapshot {
+        for (rule, program, dynamic_condition) in &snapshot {
             match self.engine.evaluate_bool(rule, program, ctx) {
-                Ok(true) => {}
+                Ok(true) => {
+                    if let Some(condition) = dynamic_condition
+                        && !self.dynamic_condition_allows(rule, condition, ctx)
+                    {
+                        return Tier2Decision::Deny {
+                            rule: RuleName::dynamic_condition_failed(rule),
+                        };
+                    }
+                }
                 Ok(false) => return Tier2Decision::Deny { rule: rule.clone() },
                 Err(err) => {
                     warn!(rule = %rule, error = %err, "tier-2 CEL rule evaluation failed; denying request");
@@ -160,23 +225,46 @@ fn bind_evaluation_context(cel_ctx: &mut Context, ctx: &Tier2EvaluationContext) 
 /// parsed from the JSON-RPC params and wrapped in `A2aTaskId`; an
 /// unparseable id silently becomes `None` (the rule can still fire on
 /// other matchers).
+///
+/// Enforces `limits` BEFORE constructing the context so a hostile or
+/// broken caller can't hand the CEL evaluator oversized headers, an
+/// oversized params payload, or pathologically deep JSON nesting -- the
+/// checks run headers-size, then params-size, then params-nesting-depth,
+/// returning the first breach encountered.
 pub fn tier2_evaluation_context_from_ingress(
     method: A2aMethod,
     agent_id: &A2aAgentId,
     caller_id: Option<&SpiceDbSubject>,
     headers: &HeaderMap,
     payload: &[u8],
-) -> Tier2EvaluationContext {
-    let (params, task_id) = parse_json_rpc_params(payload);
+    limits: &Tier2ResourceLimits,
+) -> Result<Tier2EvaluationContext, Tier2EvalError> {
     let header_map = headers_to_map(headers);
-    Tier2EvaluationContext::new(
+    let headers_size = headers_byte_size(header_map.iter());
+    if headers_size > limits.max_headers_bytes() {
+        return Err(Tier2EvalError::headers_too_large(
+            headers_size,
+            limits.max_headers_bytes(),
+        ));
+    }
+
+    let (params, task_id) = parse_json_rpc_params(payload);
+    let params_size = params_byte_size(&params);
+    if params_size > limits.max_params_bytes() {
+        return Err(Tier2EvalError::params_too_large(params_size, limits.max_params_bytes()));
+    }
+    if json_nesting_depth_exceeds(&params, limits.max_nesting_depth()) {
+        return Err(Tier2EvalError::nesting_too_deep(limits.max_nesting_depth()));
+    }
+
+    Ok(Tier2EvaluationContext::new(
         method,
         params,
         caller_id.cloned(),
         agent_id.clone(),
         task_id,
         header_map,
-    )
+    ))
 }
 
 fn parse_json_rpc_params(payload: &[u8]) -> (serde_json::Value, Option<A2aTaskId>) {
@@ -236,6 +324,9 @@ impl CelEngine for MockCelEngine {
                 Tier2EvalError::Binding { binding, message } => {
                     Tier2EvalError::binding(binding.clone(), message.clone())
                 }
+                Tier2EvalError::HeadersTooLarge { actual, limit } => Tier2EvalError::headers_too_large(*actual, *limit),
+                Tier2EvalError::ParamsTooLarge { actual, limit } => Tier2EvalError::params_too_large(*actual, *limit),
+                Tier2EvalError::NestingTooDeep { limit } => Tier2EvalError::nesting_too_deep(*limit),
             }),
             None => Ok(true),
         }

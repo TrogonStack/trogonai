@@ -50,6 +50,7 @@ use crate::policy::tier1_declarative::{
     Tier1DeclarativeDecision, Tier1DeclarativeGate, tier1_declarative_audit_rule_fired,
 };
 use crate::policy::tier2::Tier2Decision;
+use crate::policy::tier2::rule_name::RuleName;
 use crate::policy::tier2_cel::tier2_evaluation_context_from_ingress;
 use crate::policy::tier3_redaction::{
     Tier3EvaluationContext, Tier3RedactionDecision, gateway_tier3_redaction_enabled, merge_forward_audit_rewrites,
@@ -326,13 +327,64 @@ async fn dispatch_routed<E: ReadEnv>(
         && let Some(method) = A2aMethod::from_dotted_suffix(method_dots.as_str())
     {
         let caller_subject = SpiceDbSubject::new(audit_caller_id.as_str());
-        let eval_ctx = tier2_evaluation_context_from_ingress(
+        let eval_ctx = match tier2_evaluation_context_from_ingress(
             method,
             &agent_id,
             Some(&caller_subject),
             &headers_owned,
             payload.as_ref(),
-        );
+            &policy.tier2_resource_limits,
+        ) {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                let rule = RuleName::resource_limit_exceeded();
+                tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_POLICY_DENIED);
+                warn!(
+                    ingress.subject = %ingress_subject,
+                    agent_subject = %agent_subject,
+                    rule = %rule,
+                    error = %err,
+                    routing_outcome = "policy_denied",
+                    "gateway tier-2 resource limit rejected ingress envelope",
+                );
+                let Ok(body) = ingress_gateway_policy_denied_response_bytes(
+                    &headers_owned,
+                    payload.as_ref(),
+                    "tier-2 resource limit rejected envelope",
+                ) else {
+                    return;
+                };
+                reply_error(client, reply, HeaderMap::new(), body).await;
+                spawn_gateway_audit_publish(
+                    audit_enabled,
+                    client.clone(),
+                    config.a2a_prefix.clone(),
+                    agent_id.clone(),
+                    AuditEnvelope::new(
+                        &agent_id,
+                        method_slashes.clone(),
+                        json_rpc_audit_req_id(payload.as_ref()),
+                        started_wall_ms,
+                        elapsed_ms(started_mono),
+                        AuditOutcome::Err {
+                            code: -32_801,
+                            message: "tier-2 resource limit rejected envelope".into(),
+                        },
+                        Some(payload.as_ref()),
+                        enrich_audit_caller(
+                            AuditEnvelopeFields {
+                                trace_id: Some(trace_id.clone()),
+                                rules_fired: Some(vec![format!("gateway.tier2.{}", rule.as_str())]),
+                                ..Default::default()
+                            },
+                            audit_caller_id.as_str(),
+                            &audit_caller_source,
+                        ),
+                    ),
+                );
+                return;
+            }
+        };
         match evaluator.evaluate(&eval_ctx) {
             Tier2Decision::Allow => {}
             Tier2Decision::Deny { rule } => {

@@ -44,6 +44,19 @@ pub enum Tier2EvalError {
     /// headers) failed to serialize into the CEL context.
     #[error("CEL binding `{binding}` failed: {message}")]
     Binding { binding: Box<str>, message: Box<str> },
+    /// Ingress headers exceeded [`Tier2ResourceLimits::max_headers_bytes`](
+    /// crate::policy::tier2::resource_limits::Tier2ResourceLimits::max_headers_bytes).
+    #[error("tier-2 headers size {actual} bytes exceeds limit {limit} bytes")]
+    HeadersTooLarge { actual: usize, limit: usize },
+    /// Ingress request params exceeded [`Tier2ResourceLimits::max_params_bytes`](
+    /// crate::policy::tier2::resource_limits::Tier2ResourceLimits::max_params_bytes).
+    #[error("tier-2 params size {actual} bytes exceeds limit {limit} bytes")]
+    ParamsTooLarge { actual: usize, limit: usize },
+    /// Ingress request params' JSON nesting exceeded
+    /// [`Tier2ResourceLimits::max_nesting_depth`](
+    /// crate::policy::tier2::resource_limits::Tier2ResourceLimits::max_nesting_depth).
+    #[error("tier-2 params JSON nesting depth exceeds limit {limit}")]
+    NestingTooDeep { limit: usize },
 }
 
 impl Tier2EvalError {
@@ -70,6 +83,24 @@ impl Tier2EvalError {
             binding: binding.into(),
             message: message.into(),
         }
+    }
+
+    /// Convenience for the headers-too-large resource-limit breach.
+    #[must_use]
+    pub fn headers_too_large(actual: usize, limit: usize) -> Self {
+        Self::HeadersTooLarge { actual, limit }
+    }
+
+    /// Convenience for the params-too-large resource-limit breach.
+    #[must_use]
+    pub fn params_too_large(actual: usize, limit: usize) -> Self {
+        Self::ParamsTooLarge { actual, limit }
+    }
+
+    /// Convenience for the params-nesting-too-deep resource-limit breach.
+    #[must_use]
+    pub fn nesting_too_deep(limit: usize) -> Self {
+        Self::NestingTooDeep { limit }
     }
 }
 

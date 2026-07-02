@@ -1,3 +1,4 @@
+pub mod resource_limits;
 pub mod rule_name;
 
 use std::collections::BTreeMap;
@@ -7,6 +8,8 @@ use a2a_nats::server::A2aMethod;
 use a2a_nats::{A2aAgentId, A2aTaskId};
 
 use rule_name::RuleName;
+
+use crate::policy::tier2_dynamic::Tier2DynamicContext;
 
 /// Input to a Tier-2 CEL rule evaluation.
 ///
@@ -28,6 +31,7 @@ pub struct Tier2EvaluationContext {
     agent_id: A2aAgentId,
     task_id: Option<A2aTaskId>,
     headers: BTreeMap<String, String>,
+    dynamic_context: Tier2DynamicContext,
 }
 
 impl Tier2EvaluationContext {
@@ -46,7 +50,23 @@ impl Tier2EvaluationContext {
             agent_id,
             task_id,
             headers,
+            dynamic_context: Tier2DynamicContext::empty(),
         }
+    }
+
+    /// Attach runtime budget-consumption data for this call (see
+    /// `Tier2DynamicContext`) so `token_count_per_window` /
+    /// `cost_per_window` dynamic conditions can evaluate against it.
+    /// Callers that don't track budget usage can skip this — `new`
+    /// already defaults to `Tier2DynamicContext::empty()`.
+    #[must_use]
+    pub fn with_dynamic_context(mut self, dynamic_context: Tier2DynamicContext) -> Self {
+        self.dynamic_context = dynamic_context;
+        self
+    }
+
+    pub fn dynamic_context(&self) -> &Tier2DynamicContext {
+        &self.dynamic_context
     }
 
     pub fn request_method(&self) -> &A2aMethod {

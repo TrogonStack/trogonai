@@ -35,6 +35,8 @@ a2a-redaction = { workspace = true }
 async-nats = { workspace = true }
 bytes = { workspace = true }
 cel-interpreter = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
 jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }

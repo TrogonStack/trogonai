@@ -17,6 +17,7 @@ use a2a_redaction::{SkillId, WasmBundlePath};
 use tracing::{error, warn};
 use trogon_std::env::ReadEnv;
 
+use crate::policy::tier2::resource_limits::Tier2ResourceLimits;
 use crate::policy::tier2::{DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator};
 use crate::policy::tier2_cel::{RealTier2CelEvaluator, Tier2CompiledBundle};
 use crate::policy::tier3_redaction::load_tier3_manifests_from_bundle;
@@ -45,6 +46,12 @@ pub struct GatewayPolicyStack {
     pub substrate: Option<Arc<WasmtimeSubstrate>>,
     pub tier3_gate: Arc<dyn Tier3RedactionGate>,
     pub tier3_manifests: BTreeMap<SkillId, Tier3SkillManifest>,
+    /// Resource caps applied to Tier-2 evaluation-context construction at
+    /// the dispatch call site (see `tier2_evaluation_context_from_ingress`).
+    /// Always present -- even the Noop stack enforces the safe defaults so
+    /// a caller can't rely on "no bundle configured" to also mean
+    /// "no resource limits enforced".
+    pub tier2_resource_limits: Tier2ResourceLimits,
 }
 
 impl GatewayPolicyStack {
@@ -58,6 +65,7 @@ impl GatewayPolicyStack {
             substrate: None,
             tier3_gate: Arc::new(NoopTier3RedactionGate),
             tier3_manifests: BTreeMap::new(),
+            tier2_resource_limits: Tier2ResourceLimits::default(),
         }
     }
 }
@@ -126,6 +134,7 @@ pub fn gateway_policy_stack_from_env<E: ReadEnv>(env: &E) -> GatewayPolicyStack 
         substrate: Some(substrate),
         tier3_gate,
         tier3_manifests,
+        tier2_resource_limits: Tier2ResourceLimits::from_env(env),
     }
 }
 

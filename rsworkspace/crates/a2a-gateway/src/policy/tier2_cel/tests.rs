@@ -6,16 +6,19 @@ use std::time::Duration;
 use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::server::A2aMethod;
 use a2a_nats::{A2aAgentId, A2aTaskId};
+use chrono::{NaiveDate, TimeZone, Utc};
 
 use super::bundle::Tier2CompiledBundle;
 use super::compiler::{CelCompileError, compile_cel_file, compile_cel_source};
 use super::evaluator::{CelEngine, CelInterpreterEngine, MockCelEngine, RealTier2CelEvaluator};
 use crate::policy::RuleName;
 use crate::policy::error::Tier2EvalError;
+use crate::policy::tier2::resource_limits::Tier2ResourceLimits;
 use crate::policy::tier2::rule_name::RuleNameError;
 use crate::policy::tier2::{
     DenyAllTier2Evaluator, NoopTier2Evaluator, Tier2CelEvaluator, Tier2Decision, Tier2EvaluationContext,
 };
+use crate::policy::tier2_dynamic::{FixedTier2Clock, Tier2DynamicContext, WindowedBudget};
 
 fn sample_ctx(_method_label: &str) -> Tier2EvaluationContext {
     Tier2EvaluationContext::new(
@@ -183,7 +186,9 @@ fn evaluation_context_from_ingress_parses_json_rpc_params() {
         Some(&caller),
         &headers,
         payload,
-    );
+        &Tier2ResourceLimits::default(),
+    )
+    .expect("within limits");
     assert_eq!(ctx.request_method().as_str(), "message/send");
     assert_eq!(ctx.task_id().map(A2aTaskId::as_str), Some("t-9"));
     assert_eq!(ctx.caller_id().map(SpiceDbSubject::as_str), Some("caller-1"));
@@ -201,7 +206,9 @@ fn evaluation_context_from_ingress_accepts_snake_case_task_id() {
         None,
         &async_nats::HeaderMap::new(),
         payload,
-    );
+        &Tier2ResourceLimits::default(),
+    )
+    .expect("within limits");
     assert_eq!(ctx.task_id().map(A2aTaskId::as_str), Some("snake-id"));
 }
 
@@ -214,7 +221,9 @@ fn evaluation_context_from_ingress_handles_invalid_json() {
         None,
         &async_nats::HeaderMap::new(),
         payload,
-    );
+        &Tier2ResourceLimits::default(),
+    )
+    .expect("within limits");
     assert_eq!(*ctx.request_params(), serde_json::Value::Null);
     assert!(ctx.task_id().is_none());
 }
@@ -461,5 +470,356 @@ fn mock_engine_unspecified_rule_defaults_allow() {
     let outcomes = BTreeMap::new();
     let (_dir, bundle) = bundle_with_rule("unmapped", "true");
     let evaluator = RealTier2CelEvaluator::with_engine(bundle, Arc::new(MockCelEngine::new(outcomes)));
+    assert_eq!(evaluator.evaluate(&sample_ctx("any")), Tier2Decision::Allow);
+}
+
+#[test]
+fn evaluation_context_from_ingress_at_headers_limit_passes() {
+    // "acme" (4 bytes) + "x-tenant-id" (11 bytes) = 15 bytes exactly.
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("x-tenant-id", "acme");
+    let limits = Tier2ResourceLimits::new(15, usize::MAX, 64);
+    let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &headers,
+        b"{}",
+        &limits,
+    );
+    assert!(ctx.is_ok());
+}
+
+#[test]
+fn evaluation_context_from_ingress_over_headers_limit_denies() {
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert("x-tenant-id", "acme");
+    let limits = Tier2ResourceLimits::new(14, usize::MAX, 64);
+    let err = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &headers,
+        b"{}",
+        &limits,
+    )
+    .expect_err("headers over limit rejected");
+    assert!(matches!(err, Tier2EvalError::HeadersTooLarge { actual: 15, limit: 14 }));
+}
+
+#[test]
+fn evaluation_context_from_ingress_at_params_limit_passes() {
+    let payload = br#"{"params":{"a":1}}"#;
+    let params_size = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &async_nats::HeaderMap::new(),
+        payload,
+        &Tier2ResourceLimits::default(),
+    )
+    .map(|ctx| serde_json::to_vec(ctx.request_params()).expect("serialize").len())
+    .expect("within default limits");
+
+    let limits = Tier2ResourceLimits::new(usize::MAX, params_size, 64);
+    let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &async_nats::HeaderMap::new(),
+        payload,
+        &limits,
+    );
+    assert!(ctx.is_ok());
+}
+
+#[test]
+fn evaluation_context_from_ingress_over_params_limit_denies() {
+    let payload = br#"{"params":{"a":1}}"#;
+    let limits = Tier2ResourceLimits::new(usize::MAX, 1, 64);
+    let err = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &async_nats::HeaderMap::new(),
+        payload,
+        &limits,
+    )
+    .expect_err("params over limit rejected");
+    assert!(matches!(err, Tier2EvalError::ParamsTooLarge { limit: 1, .. }));
+}
+
+#[test]
+fn evaluation_context_from_ingress_deep_nesting_denies() {
+    let mut nested = serde_json::json!(1);
+    for _ in 0..100 {
+        nested = serde_json::Value::Array(vec![nested]);
+    }
+    let payload = serde_json::to_vec(&serde_json::json!({ "params": { "a": nested } })).expect("serialize payload");
+    let err = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &async_nats::HeaderMap::new(),
+        &payload,
+        &Tier2ResourceLimits::default(),
+    )
+    .expect_err("deep nesting rejected");
+    assert!(matches!(err, Tier2EvalError::NestingTooDeep { limit: 64 }));
+}
+
+#[test]
+fn evaluation_context_from_ingress_at_max_nesting_depth_passes() {
+    // `params.a` nested `max_depth` levels deep as arrays: the params
+    // object itself is depth 1, so `max_depth - 1` further array levels
+    // land the innermost array exactly at `max_depth`.
+    let max_depth = 4;
+    let mut nested = serde_json::json!(1);
+    for _ in 0..(max_depth - 1) {
+        nested = serde_json::Value::Array(vec![nested]);
+    }
+    let payload = serde_json::to_vec(&serde_json::json!({ "params": { "a": nested } })).expect("serialize payload");
+    let limits = Tier2ResourceLimits::new(usize::MAX, usize::MAX, max_depth);
+    let ctx = super::evaluator::tier2_evaluation_context_from_ingress(
+        A2aMethod::MessageSend,
+        &A2aAgentId::new("planner").expect("agent"),
+        None,
+        &async_nats::HeaderMap::new(),
+        &payload,
+        &limits,
+    );
+    assert!(ctx.is_ok());
+}
+
+#[test]
+fn resource_limit_exceeded_rule_name_is_distinct_from_evaluation_error() {
+    assert_ne!(RuleName::resource_limit_exceeded(), RuleName::evaluation_error());
+    assert_eq!(RuleName::resource_limit_exceeded().as_str(), "resource_limit_exceeded");
+}
+
+fn bundle_with_rule_and_sidecar(
+    name: &str,
+    cel_source: &str,
+    sidecar_toml: &str,
+) -> (tempfile::TempDir, Tier2CompiledBundle) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cel_path = dir.path().join(format!("{name}.cel"));
+    std::fs::write(&cel_path, cel_source).expect("write cel");
+    let sidecar_path = dir.path().join(format!("{name}.dynamic.toml"));
+    std::fs::write(&sidecar_path, sidecar_toml).expect("write sidecar");
+    let bundle = Tier2CompiledBundle::load_from_dir(dir.path()).expect("load");
+    (dir, bundle)
+}
+
+fn fixed_clock_at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> Arc<FixedTier2Clock> {
+    let instant = Utc.from_utc_datetime(
+        &NaiveDate::from_ymd_opt(y, mo, d)
+            .and_then(|date| date.and_hms_opt(h, mi, 0))
+            .expect("valid test datetime"),
+    );
+    Arc::new(FixedTier2Clock::new(instant))
+}
+
+#[test]
+fn bundle_load_from_dir_loads_dynamic_condition_sidecar() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "business_hours",
+        "true",
+        "type = \"time_window\"\nstart_time = \"09:00\"\nend_time = \"17:00\"\n",
+    );
+    assert_eq!(bundle.rules().count(), 1);
+}
+
+#[test]
+fn bundle_load_from_dir_fails_closed_on_malformed_sidecar() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("bad_sidecar.cel"), "true").expect("write cel");
+    std::fs::write(dir.path().join("bad_sidecar.dynamic.toml"), "type = \"day_of_week\"\n").expect("write sidecar");
+    let err = Tier2CompiledBundle::load_from_dir(dir.path()).expect_err("missing days_of_week rejected");
+    assert!(matches!(
+        err,
+        super::bundle_load_error::Tier2BundleLoadError::DynamicSidecar(_)
+    ));
+}
+
+#[test]
+fn evaluator_allows_when_cel_true_and_time_window_matches() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "business_hours",
+        "true",
+        "type = \"time_window\"\nstart_time = \"09:00\"\nend_time = \"17:00\"\n",
+    );
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    assert_eq!(evaluator.evaluate(&sample_ctx("any")), Tier2Decision::Allow);
+}
+
+#[test]
+fn evaluator_denies_with_distinct_rule_when_time_window_does_not_match() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "business_hours",
+        "true",
+        "type = \"time_window\"\nstart_time = \"09:00\"\nend_time = \"17:00\"\n",
+    );
+    // 22:00 UTC is outside the 09:00-17:00 window.
+    let clock = fixed_clock_at(2026, 7, 2, 22, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    let decision = evaluator.evaluate(&sample_ctx("any"));
+    assert_eq!(
+        decision,
+        Tier2Decision::Deny {
+            rule: RuleName::new("business_hours.dynamic_condition").expect("non-empty test rule name")
+        }
+    );
+    // Distinct from both a plain CEL-false deny and the generic evaluation_error sentinel.
+    assert_ne!(
+        decision,
+        Tier2Decision::Deny {
+            rule: RuleName::new("business_hours").expect("non-empty test rule name")
+        }
+    );
+    assert_ne!(
+        decision,
+        Tier2Decision::Deny {
+            rule: RuleName::evaluation_error()
+        }
+    );
+}
+
+#[test]
+fn evaluator_dynamic_condition_not_checked_when_cel_already_false() {
+    // If CEL evaluates false, the dynamic condition must NOT flip the
+    // decision back to allow or change the reported rule -- AND
+    // semantics only add restrictions, they never relax the base CEL
+    // predicate's deny.
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "always_false",
+        "false",
+        "type = \"time_window\"\nstart_time = \"00:00\"\nend_time = \"23:59\"\n",
+    );
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::new("always_false").expect("non-empty test rule name")
+        }
+    );
+}
+
+#[test]
+fn evaluator_day_of_week_dynamic_condition_allows_matching_day() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "weekday_only",
+        "true",
+        "type = \"day_of_week\"\ndays_of_week = [1, 2, 3, 4, 5]\n",
+    );
+    // 2026-07-02 is a Thursday.
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    assert_eq!(evaluator.evaluate(&sample_ctx("any")), Tier2Decision::Allow);
+}
+
+#[test]
+fn evaluator_day_of_week_dynamic_condition_denies_non_matching_day() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "weekday_only",
+        "true",
+        "type = \"day_of_week\"\ndays_of_week = [1, 2, 3, 4, 5]\n",
+    );
+    // 2026-07-04 is a Saturday.
+    let clock = fixed_clock_at(2026, 7, 4, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    assert_eq!(
+        evaluator.evaluate(&sample_ctx("any")),
+        Tier2Decision::Deny {
+            rule: RuleName::new("weekday_only.dynamic_condition").expect("non-empty test rule name")
+        }
+    );
+}
+
+#[test]
+fn evaluator_token_budget_allows_then_denies_across_calls() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "token_capped",
+        "true",
+        "type = \"token_count_per_window\"\nwindow = \"1h\"\nlimit = 100\n",
+    );
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+
+    let ctx_60 = sample_ctx("any").with_dynamic_context(Tier2DynamicContext::empty().with_budget_token_count(60.0));
+    assert_eq!(evaluator.evaluate(&ctx_60), Tier2Decision::Allow);
+
+    // Second call consumes another 60 tokens; cumulative 120 > limit 100.
+    let decision = evaluator.evaluate(&ctx_60);
+    assert_eq!(
+        decision,
+        Tier2Decision::Deny {
+            rule: RuleName::new("token_capped.dynamic_condition").expect("non-empty test rule name")
+        }
+    );
+}
+
+#[test]
+fn evaluator_cost_budget_allows_at_exact_limit() {
+    let (_dir, bundle) = bundle_with_rule_and_sidecar(
+        "cost_capped",
+        "true",
+        "type = \"cost_per_window\"\nwindow = \"1h\"\nlimit = 10\n",
+    );
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
+    let ctx = sample_ctx("any").with_dynamic_context(Tier2DynamicContext::empty().with_budget_cost(10.0));
+    assert_eq!(evaluator.evaluate(&ctx), Tier2Decision::Allow);
+}
+
+#[test]
+fn evaluator_without_sidecar_ignores_dynamic_condition_path_entirely() {
+    // A rule with no `.dynamic.toml` sidecar must behave exactly as
+    // before WI-09 -- CEL alone drives the decision.
+    let (_dir, bundle) = bundle_with_rule("no_sidecar", "true");
+    let clock = fixed_clock_at(2026, 7, 2, 10, 0);
+    let evaluator = RealTier2CelEvaluator::with_engine_and_dynamic_deps(
+        bundle,
+        Arc::new(CelInterpreterEngine),
+        clock,
+        WindowedBudget::new(),
+    );
     assert_eq!(evaluator.evaluate(&sample_ctx("any")), Tier2Decision::Allow);
 }
