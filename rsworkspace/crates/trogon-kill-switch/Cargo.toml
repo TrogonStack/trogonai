@@ -1,0 +1,29 @@
+[package]
+name = "trogon-kill-switch"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+nats-projection = ["dep:trogon-nats", "dep:bytes", "dep:async-nats"]
+
+[dependencies]
+async-nats = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["formatting", "parsing"] }
+trogon-decider = { workspace = true }
+trogon-nats = { workspace = true, optional = true }
+
+[dev-dependencies]
+time = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+trogon-decider = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
