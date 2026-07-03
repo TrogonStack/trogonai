@@ -14,6 +14,8 @@ use trogon_decider_wasm_runtime::OpaqueSnapshotPayload;
 pub enum InfraError {
     #[error("append rejected by write precondition")]
     PreconditionFailed,
+    #[error("snapshot write failed")]
+    SnapshotWriteFailed,
 }
 
 #[derive(Default)]
@@ -49,6 +51,15 @@ impl InMemoryEventStore {
             .iter()
             .filter(|event| event.stream_id == stream_id)
             .map(|event| event.event.r#type.clone())
+            .collect()
+    }
+
+    pub fn stored_events(&self, stream_id: &str) -> Vec<trogon_decider_runtime::Event> {
+        self.lock()
+            .events
+            .iter()
+            .filter(|event| event.stream_id == stream_id)
+            .map(|event| event.event.clone())
             .collect()
     }
 
@@ -125,11 +136,16 @@ impl StreamAppend<str> for InMemoryEventStore {
 #[derive(Clone, Default)]
 pub struct InMemorySnapshotStore {
     snapshots: Arc<Mutex<HashMap<String, Snapshot<OpaqueSnapshotPayload>>>>,
+    fail_writes: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InMemorySnapshotStore {
     pub fn insert(&self, snapshot_id: &str, snapshot: Snapshot<OpaqueSnapshotPayload>) {
         self.lock().insert(snapshot_id.to_string(), snapshot);
+    }
+
+    pub fn fail_writes(&self) {
+        self.fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn get(&self, snapshot_id: &str) -> Option<Snapshot<OpaqueSnapshotPayload>> {
@@ -161,6 +177,9 @@ impl SnapshotWrite<OpaqueSnapshotPayload, str> for InMemorySnapshotStore {
         &self,
         request: WriteSnapshotRequest<'_, OpaqueSnapshotPayload, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
+        if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(InfraError::SnapshotWriteFailed);
+        }
         self.insert(request.snapshot_id, request.snapshot);
         Ok(WriteSnapshotResponse)
     }

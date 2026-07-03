@@ -237,6 +237,91 @@ async fn a_snapshot_ahead_of_the_stream_is_rejected() {
     assert!(matches!(error, WasmCommandError::SnapshotAheadOfStream(_)), "{error}");
 }
 
+#[tokio::test]
+async fn builder_overrides_shape_the_appended_events() {
+    #[derive(Debug, Clone, Copy)]
+    struct FixedUuidGenerator(uuid::Uuid);
+
+    impl trogon_std::NowV7 for FixedUuidGenerator {
+        fn now_v7(&self) -> uuid::Uuid {
+            self.0
+        }
+    }
+
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let fixed_id = uuid::Uuid::now_v7();
+    let header_name = trogon_decider_runtime::HeaderName::new("trace-id").expect("valid header name");
+    let headers = trogon_decider_runtime::Headers::one(header_name, "abc-123").expect("valid header value");
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .with_headers(headers)
+        .with_event_id_generator(FixedUuidGenerator(fixed_id))
+        .execute()
+        .await
+        .expect("create succeeds");
+
+    let stored = event_store.stored_events("backup");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].id, trogon_decider_runtime::EventId::new(fixed_id));
+    assert_eq!(stored[0].headers.get_str("trace-id"), Some("abc-123"));
+
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .with_write_precondition(StreamWritePrecondition::Any)
+        .execute()
+        .await
+        .expect("pause succeeds");
+
+    assert_eq!(result.stream_position, position(2));
+    assert_eq!(
+        event_store.write_preconditions(),
+        vec![StreamWritePrecondition::NoStream, StreamWritePrecondition::Any]
+    );
+}
+
+#[tokio::test]
+async fn an_empty_snapshot_store_falls_back_to_full_replay() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds");
+
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .execute()
+        .await
+        .expect("pause succeeds without a prior snapshot");
+
+    assert_eq!(result.stream_position, position(2));
+    assert_eq!(event_store.reads_from(), vec![ReadFrom::Beginning]);
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    assert!(snapshot_store.get(snapshot_id.as_str()).is_some());
+}
+
+#[tokio::test]
+async fn a_failing_snapshot_write_does_not_fail_the_command() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+    snapshot_store.fail_writes();
+
+    let result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .execute()
+        .await
+        .expect("create succeeds even when the snapshot write fails");
+
+    assert_eq!(result.stream_position, position(1));
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    assert!(snapshot_store.get(snapshot_id.as_str()).is_none());
+}
+
 #[test]
 fn an_exhausted_fuel_budget_fails_the_load_probe() {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default().with_fuel_per_call(1)).expect("engine builds");

@@ -29,10 +29,10 @@ impl OpaqueSnapshotPayload {
 }
 
 impl SnapshotType for OpaqueSnapshotPayload {
-    type Error = std::convert::Infallible;
+    type Error = trogon_decider_runtime::InvalidSnapshotTypeName;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
-        Ok(SNAPSHOT_TYPE_NAME.with(|name| name.clone()))
+        SnapshotTypeName::new("wasm-decider-opaque.v1")
     }
 }
 
@@ -50,16 +50,6 @@ impl SnapshotPayloadDecode for OpaqueSnapshotPayload {
     fn decode(payload: SnapshotPayloadData<'_>) -> Result<Self, Self::Error> {
         Ok(Self(payload.payload.to_vec()))
     }
-}
-
-thread_local! {
-    static SNAPSHOT_TYPE_NAME: SnapshotTypeName = {
-        #[allow(
-            clippy::unwrap_used,
-            reason = "fixed non-empty ASCII literal without control characters; construction cannot fail"
-        )]
-        SnapshotTypeName::new("wasm-decider-opaque.v1").unwrap()
-    };
 }
 
 #[cfg(test)]

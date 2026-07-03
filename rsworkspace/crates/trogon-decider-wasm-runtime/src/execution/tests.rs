@@ -104,6 +104,34 @@ fn encode_events_assigns_host_ids_and_headers() {
 }
 
 #[test]
+fn rejected_decide_errors_stay_rejections() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_decide_error(DecideError::Rejected(host::DomainError {
+            code: "already-exists".to_string(),
+            message: "schedule already exists".to_string(),
+        }));
+
+    let WasmCommandError::Rejected(detail) = error else {
+        panic!("expected rejected error");
+    };
+    assert_eq!(detail.code, "already-exists");
+}
+
+#[test]
+fn faulted_decide_errors_stay_faults() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_decide_error(DecideError::Faulted(host::DomainError {
+            code: "decode-failed".to_string(),
+            message: "payload did not decode".to_string(),
+        }));
+
+    let WasmCommandError::Faulted(detail) = error else {
+        panic!("expected faulted error");
+    };
+    assert_eq!(detail.code, "decode-failed");
+}
+
+#[test]
 fn stream_events_project_onto_guest_envelopes() {
     let stream_event = trogon_decider_runtime::StreamEvent {
         stream_id: "backup".to_string(),

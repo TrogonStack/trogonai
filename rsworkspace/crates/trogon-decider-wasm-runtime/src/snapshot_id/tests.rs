@@ -9,6 +9,10 @@ fn renders_module_and_stream_identity() {
     assert_eq!(snapshot_id.as_str(), "scheduler.schedules@0.1.0/alpha");
     assert_eq!(snapshot_id.to_string(), "scheduler.schedules@0.1.0/alpha");
     assert_eq!(snapshot_id.as_ref(), "scheduler.schedules@0.1.0/alpha");
+    assert_eq!(
+        <WasmSnapshotId as std::borrow::Borrow<str>>::borrow(&snapshot_id),
+        "scheduler.schedules@0.1.0/alpha"
+    );
 }
 
 #[test]

@@ -13,6 +13,7 @@ fn snapshot_type_name_is_stable() {
 #[test]
 fn encode_decode_round_trips_bytes_untouched() {
     let payload = OpaqueSnapshotPayload::new(vec![9, 8, 7]);
+    assert_eq!(payload.as_bytes(), &[9, 8, 7]);
     let encoded = payload.encode().expect("encode is infallible");
     assert_eq!(encoded, vec![9, 8, 7]);
 

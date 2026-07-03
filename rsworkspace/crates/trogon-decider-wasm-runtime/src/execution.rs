@@ -30,7 +30,7 @@ use trogon_decider_wit::host::{self, AnyEnvelope, CommandEnvelope, DecideError};
 use trogon_std::NowV7;
 use wasmtime::Store;
 
-use crate::{CommandType, DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderModule, WasmSnapshotId};
+use crate::{DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderModule, WasmSnapshotId};
 
 /// Result of a successful WASM command execution.
 #[derive(Debug, Clone)]
@@ -65,9 +65,6 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     /// The module could not be instantiated for this command.
     #[error("failed to instantiate wasm component")]
     Instantiate(#[source] wasmtime::Error),
-    /// No registered module declares handling for this command type.
-    #[error("no wasm decider module handles command type '{command_type}'")]
-    UnknownCommandType { command_type: CommandType },
     /// Snapshot loading failed before replaying stream history.
     #[error("command snapshot read failed: {0}")]
     ReadSnapshot(#[source] ReadSnapshotError),
@@ -447,10 +444,16 @@ fn decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
         .map_err(WasmCommandError::Trap)?;
     host::decide(bindings, store, session, command)
         .map_err(WasmCommandError::Trap)?
-        .map_err(|error| match error {
-            DecideError::Rejected(detail) => WasmCommandError::Rejected(detail.into()),
-            DecideError::Faulted(detail) => WasmCommandError::Faulted(detail.into()),
-        })
+        .map_err(map_decide_error)
+}
+
+fn map_decide_error<ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    error: DecideError,
+) -> WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError> {
+    match error {
+        DecideError::Rejected(detail) => WasmCommandError::Rejected(detail.into()),
+        DecideError::Faulted(detail) => WasmCommandError::Faulted(detail.into()),
+    }
 }
 
 /// Folds the guest's own newly decided events back into session state before
