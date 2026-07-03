@@ -20,7 +20,7 @@ base64 = { workspace = true }
 # crate's parser only models cleanly from jsonwebtoken 10.x; keep the
 # version pin local to this crate so main's other jsonwebtoken 9.3
 # consumers (auth-callout, etc.) are not forced to upgrade in lockstep.
-jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -32,6 +32,6 @@ trogon-identity-types = { workspace = true }
 [dev-dependencies]
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core", "pkcs8"] }
 p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
-pkcs8 = { version = "=0.10.2", features = ["pem"] }
-rand_core = { version = "=0.6.4" }
+pkcs8 = { version = "=0.11.0", features = ["pem"] }
+rand_core = { version = "=0.10.1" }
 tokio = { workspace = true, features = ["rt", "macros", "sync"] }
