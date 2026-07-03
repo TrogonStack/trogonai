@@ -3,21 +3,17 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::{CommandType, CommandTypeError, WasmDeciderModule};
+use crate::{CommandType, ModuleName, WasmDeciderModule};
 
 /// Failure registering a [`WasmDeciderModule`] into a [`DeciderRegistry`].
-#[derive(Debug, Error)]
-pub enum RegisterModuleError {
-    #[error("module descriptor declares an invalid command type")]
-    InvalidCommandType(#[from] CommandTypeError),
-    #[error(
-        "command type '{command_type}' is already routed to module '{existing_module}'; module '{new_module}' cannot also claim it"
-    )]
-    DuplicateCommandType {
-        command_type: CommandType,
-        existing_module: String,
-        new_module: String,
-    },
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error(
+    "command type '{command_type}' is already routed to module '{existing_module}'; module '{new_module}' cannot also claim it"
+)]
+pub struct RegisterModuleError {
+    pub command_type: CommandType,
+    pub existing_module: ModuleName,
+    pub new_module: ModuleName,
 }
 
 /// Failure routing a command to a registered [`WasmDeciderModule`].
@@ -62,13 +58,12 @@ impl DeciderRegistryBuilder {
     /// Registers every command type declared by the module's descriptor.
     pub fn register(mut self, module: WasmDeciderModule) -> Result<Self, RegisterModuleError> {
         let module = Arc::new(module);
-        for raw_command_type in module.command_types() {
-            let command_type = CommandType::new(raw_command_type)?;
+        for command_type in module.command_types().cloned().collect::<Vec<_>>() {
             if let Some(existing) = self.modules_by_command.get(&command_type) {
-                return Err(RegisterModuleError::DuplicateCommandType {
+                return Err(RegisterModuleError {
                     command_type,
-                    existing_module: existing.name().to_string(),
-                    new_module: module.name().to_string(),
+                    existing_module: existing.name().clone(),
+                    new_module: module.name().clone(),
                 });
             }
             self.modules_by_command.insert(command_type, Arc::clone(&module));

@@ -42,6 +42,7 @@
 //! module version bump changes the id every snapshot lookup uses, so an old
 //! snapshot is simply not found and execution falls back to a full replay.
 
+mod command_spec;
 mod command_type;
 mod domain_error_detail;
 mod engine;
@@ -56,6 +57,7 @@ mod snapshot_id;
 #[cfg(test)]
 mod test_fixture;
 
+pub use command_spec::WasmCommandSpec;
 pub use command_type::{CommandType, CommandTypeError};
 pub use domain_error_detail::DomainErrorDetail;
 pub use engine::{

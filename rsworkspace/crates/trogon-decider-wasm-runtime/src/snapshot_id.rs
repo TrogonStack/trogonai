@@ -12,6 +12,11 @@ use crate::{ModuleName, ModuleVersion};
 /// old snapshot is simply not found on the next read, and execution falls back
 /// to a full replay from the beginning of the stream. No migration step is
 /// required.
+///
+/// The rendered id is collision-free without escaping: [`ModuleName`] and
+/// [`ModuleVersion`] reject `@` and `/`, so the first `@` and the first `/`
+/// after it delimit the segments unambiguously, and the stream id is the
+/// trailing segment where any content is safe.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WasmSnapshotId(String);
 

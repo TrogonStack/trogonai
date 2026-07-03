@@ -20,6 +20,9 @@ impl ModuleVersion {
         if value.chars().any(char::is_control) {
             return Err(ModuleVersionError::ContainsControlCharacter);
         }
+        if value.contains(['@', '/']) {
+            return Err(ModuleVersionError::ContainsReservedCharacter);
+        }
         Ok(Self(value))
     }
 
@@ -80,6 +83,9 @@ pub enum ModuleVersionError {
     /// Module versions cannot contain control characters.
     #[error("module version cannot contain control characters")]
     ContainsControlCharacter,
+    /// Module versions cannot contain '@' or '/', which delimit snapshot id segments.
+    #[error("module version cannot contain '@' or '/'")]
+    ContainsReservedCharacter,
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@ use thiserror::Error;
 use trogon_decider_wit::host::{DeciderPre, ModuleDescriptor};
 use wasmtime::component::{Component, Linker};
 
-use crate::{ModuleName, ModuleVersion, WasmDeciderEngine};
+use crate::{CommandType, ModuleName, ModuleVersion, WasmCommandSpec, WasmDeciderEngine};
 
 /// Failure loading a compiled WASM decider component.
 #[derive(Debug, Error)]
@@ -44,8 +44,10 @@ pub enum InvalidDescriptorError {
     InvalidName(#[source] crate::ModuleNameError),
     #[error("wasm component descriptor has an invalid module version")]
     InvalidVersion(#[source] crate::ModuleVersionError),
+    #[error("wasm component descriptor declares an invalid command type")]
+    InvalidCommandType(#[source] crate::CommandTypeError),
     #[error("wasm component descriptor declares command type '{command_type}' more than once")]
-    DuplicateCommandType { command_type: String },
+    DuplicateCommandType { command_type: CommandType },
 }
 
 /// A compiled, load-time-validated WASM decider component.
@@ -58,7 +60,7 @@ pub enum InvalidDescriptorError {
 pub struct WasmDeciderModule {
     engine: WasmDeciderEngine,
     decider_pre: DeciderPre<crate::engine::GuestState>,
-    descriptor: ModuleDescriptor,
+    commands: Vec<WasmCommandSpec>,
     name: ModuleName,
     version: ModuleVersion,
 }
@@ -79,12 +81,12 @@ impl WasmDeciderModule {
         let descriptor = probe_descriptor(&engine, &decider_pre)?;
         let name = ModuleName::new(&descriptor.name).map_err(InvalidDescriptorError::InvalidName)?;
         let version = ModuleVersion::new(&descriptor.version).map_err(InvalidDescriptorError::InvalidVersion)?;
-        ensure_unique_command_types(&descriptor)?;
+        let commands = validate_commands(descriptor)?;
 
         Ok(Self {
             engine,
             decider_pre,
-            descriptor,
+            commands,
             name,
             version,
         })
@@ -100,14 +102,14 @@ impl WasmDeciderModule {
         &self.version
     }
 
-    /// Returns the cached module descriptor probed at load time.
-    pub fn descriptor(&self) -> &ModuleDescriptor {
-        &self.descriptor
+    /// Returns the load-time-validated command declarations.
+    pub fn commands(&self) -> &[WasmCommandSpec] {
+        &self.commands
     }
 
     /// Returns the command types this module declares handling.
-    pub fn command_types(&self) -> impl Iterator<Item = &str> {
-        self.descriptor.commands.iter().map(|spec| spec.command_type.as_str())
+    pub fn command_types(&self) -> impl Iterator<Item = &CommandType> {
+        self.commands.iter().map(WasmCommandSpec::command_type)
     }
 
     pub(crate) fn engine(&self) -> &WasmDeciderEngine {
@@ -134,16 +136,17 @@ fn probe_descriptor(
         .map_err(|source| LoadWasmDeciderError::Descriptor { source })
 }
 
-fn ensure_unique_command_types(descriptor: &ModuleDescriptor) -> Result<(), InvalidDescriptorError> {
+fn validate_commands(descriptor: ModuleDescriptor) -> Result<Vec<WasmCommandSpec>, InvalidDescriptorError> {
     let mut seen = HashSet::with_capacity(descriptor.commands.len());
-    for spec in &descriptor.commands {
-        if !seen.insert(spec.command_type.as_str()) {
-            return Err(InvalidDescriptorError::DuplicateCommandType {
-                command_type: spec.command_type.clone(),
-            });
+    let mut commands = Vec::with_capacity(descriptor.commands.len());
+    for spec in descriptor.commands {
+        let command_type = CommandType::new(spec.command_type).map_err(InvalidDescriptorError::InvalidCommandType)?;
+        if !seen.insert(command_type.clone()) {
+            return Err(InvalidDescriptorError::DuplicateCommandType { command_type });
         }
+        commands.push(WasmCommandSpec::new(command_type, spec.write_precondition));
     }
-    Ok(())
+    Ok(commands)
 }
 
 #[cfg(test)]

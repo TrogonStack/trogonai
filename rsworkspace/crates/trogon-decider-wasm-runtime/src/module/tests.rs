@@ -12,9 +12,15 @@ fn loads_a_zero_import_component_and_probes_its_descriptor() {
 
     assert_eq!(module.name().as_str(), "scheduler.schedules");
     assert_eq!(module.version().as_str(), "0.1.0");
-    let command_types: Vec<&str> = module.command_types().collect();
+    let command_types: Vec<&str> = module.command_types().map(CommandType::as_str).collect();
     assert!(command_types.contains(&trogonai_proto::scheduler::schedules::CREATE_SCHEDULE_TYPE_URL));
     assert!(command_types.contains(&trogonai_proto::scheduler::schedules::PAUSE_SCHEDULE_TYPE_URL));
+    let create_spec = module
+        .commands()
+        .iter()
+        .find(|spec| spec.command_type().as_str() == trogonai_proto::scheduler::schedules::CREATE_SCHEDULE_TYPE_URL)
+        .expect("create command is declared");
+    assert!(create_spec.write_precondition().is_some());
 }
 
 #[test]
@@ -40,11 +46,11 @@ fn duplicate_command_type_error_names_the_offending_type() {
         ],
     };
 
-    let error = ensure_unique_command_types(&descriptor).unwrap_err();
+    let error = validate_commands(descriptor).unwrap_err();
     assert_eq!(
         error,
         InvalidDescriptorError::DuplicateCommandType {
-            command_type: "Foo".to_string()
+            command_type: CommandType::new("Foo").expect("valid command type")
         }
     );
 }
@@ -60,7 +66,26 @@ fn unique_command_types_pass_validation() {
         }],
     };
 
-    assert!(ensure_unique_command_types(&descriptor).is_ok());
+    let commands = validate_commands(descriptor).expect("unique command types validate");
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].command_type().as_str(), "Foo");
+    assert!(commands[0].write_precondition().is_none());
+}
+
+#[test]
+fn an_invalid_command_type_preserves_the_validation_source() {
+    let descriptor = ModuleDescriptor {
+        name: "module".to_string(),
+        version: "1.0.0".to_string(),
+        commands: vec![trogon_decider_wit::host::CommandSpec {
+            command_type: String::new(),
+            write_precondition: None,
+        }],
+    };
+
+    let error = validate_commands(descriptor).unwrap_err();
+    assert!(matches!(error, InvalidDescriptorError::InvalidCommandType(_)));
+    assert!(std::error::Error::source(&error).is_some());
 }
 
 #[test]

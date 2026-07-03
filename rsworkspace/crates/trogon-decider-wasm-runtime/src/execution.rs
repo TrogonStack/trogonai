@@ -497,11 +497,10 @@ where
 
 fn command_write_precondition(module: &WasmDeciderModule, command_type: &str) -> Option<host::WritePrecondition> {
     module
-        .descriptor()
-        .commands
+        .commands()
         .iter()
-        .find(|spec| spec.command_type == command_type)
-        .and_then(|spec| spec.write_precondition)
+        .find(|spec| spec.command_type().as_str() == command_type)
+        .and_then(|spec| spec.write_precondition())
 }
 
 fn is_no_stream(write_precondition: Option<host::WritePrecondition>) -> bool {

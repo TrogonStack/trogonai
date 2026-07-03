@@ -35,3 +35,15 @@ fn borrows_and_derefs_as_str() {
     assert_eq!(borrowed, "a");
     assert_eq!(module_version.as_ref(), "a");
 }
+
+#[test]
+fn rejects_snapshot_id_delimiters() {
+    assert_eq!(
+        ModuleVersion::new("1@2").expect_err("'@' must be rejected"),
+        ModuleVersionError::ContainsReservedCharacter
+    );
+    assert_eq!(
+        ModuleVersion::new("1/2").expect_err("'/' must be rejected"),
+        ModuleVersionError::ContainsReservedCharacter
+    );
+}

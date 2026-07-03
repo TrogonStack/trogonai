@@ -43,5 +43,6 @@ fn duplicate_command_type_across_modules_is_rejected() {
     let Err(error) = builder.register(schedules_module()) else {
         panic!("expected duplicate command type error");
     };
-    assert!(matches!(error, RegisterModuleError::DuplicateCommandType { .. }));
+    assert_eq!(error.existing_module.as_str(), "scheduler.schedules");
+    assert_eq!(error.new_module.as_str(), "scheduler.schedules");
 }

@@ -19,6 +19,9 @@ impl ModuleName {
         if value.chars().any(char::is_control) {
             return Err(ModuleNameError::ContainsControlCharacter);
         }
+        if value.contains(['@', '/']) {
+            return Err(ModuleNameError::ContainsReservedCharacter);
+        }
         Ok(Self(value))
     }
 
@@ -79,6 +82,9 @@ pub enum ModuleNameError {
     /// Module names cannot contain control characters.
     #[error("module name cannot contain control characters")]
     ContainsControlCharacter,
+    /// Module names cannot contain '@' or '/', which delimit snapshot id segments.
+    #[error("module name cannot contain '@' or '/'")]
+    ContainsReservedCharacter,
 }
 
 #[cfg(test)]
