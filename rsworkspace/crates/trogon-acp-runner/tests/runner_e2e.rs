@@ -12,14 +12,14 @@ use acp_nats::acp_prefix::AcpPrefix;
 mod agent_subjects {
     use acp_nats::{AcpPrefix, AcpSessionId};
     pub fn session_prompt(prefix: &str, session_id: &str) -> String {
-        acp_nats::nats::session::agent::PromptSubject::new(
+        acp_nats::nats::commands::PromptSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
         )
         .to_string()
     }
     pub fn session_cancel(prefix: &str, session_id: &str) -> String {
-        acp_nats::nats::session::agent::CancelSubject::new(
+        acp_nats::nats::commands::CancelSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
         )
@@ -30,7 +30,7 @@ mod agent_subjects {
 mod client_subjects {
     use acp_nats::{AcpPrefix, AcpSessionId};
     pub fn session_update(prefix: &str, session_id: &str) -> String {
-        acp_nats::nats::session::client::SessionUpdateSubject::new(
+        acp_nats::nats::client_ops::SessionUpdateSubject::new(
             &AcpPrefix::new(prefix).expect("valid prefix"),
             &AcpSessionId::new(session_id).expect("valid session_id"),
         )

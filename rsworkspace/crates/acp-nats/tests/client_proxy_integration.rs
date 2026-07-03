@@ -10,10 +10,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use acp_nats::client;
-use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig, StdJsonSerialize};
+use acp_nats::{AcpPrefix, Bridge, Config, NatsAuth, NatsConfig};
 use agent_client_protocol::{
     Client, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, PromptResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, Request, RequestId,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
     StopReason, TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate,
     ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
@@ -157,6 +157,41 @@ fn make_bridge(
     )
 }
 
+/// Encodes `params` as an ADR-0011 JSON-RPC-over-NATS request (method + id in
+/// headers, params in body) and sends it request-reply over the raw NATS client.
+async fn wire_request<P: serde::Serialize>(
+    nats: &async_nats::Client,
+    subject: &str,
+    method: &str,
+    params: &P,
+) -> async_nats::Message {
+    let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+        id: jsonrpc_nats::RequestId::Number(1),
+        method: method.to_string(),
+        params: serde_json::to_value(params).unwrap(),
+    })
+    .unwrap();
+    nats.request_with_headers(subject.to_string(), encoded.headers, encoded.body)
+        .await
+        .expect("request must succeed")
+}
+
+/// Decodes a JSON-RPC-over-NATS success reply and returns its `result` value,
+/// panicking with the decoded message when the reply is not a success.
+fn wire_success_result(reply: &async_nats::Message) -> serde_json::Value {
+    let decoded = jsonrpc_nats::decode(
+        jsonrpc_nats::Direction::Response,
+        None,
+        reply.headers.as_ref().expect("reply must carry headers"),
+        &reply.payload,
+    )
+    .expect("reply must decode");
+    match decoded {
+        jsonrpc_nats::Message::Success { result, .. } => result,
+        other => panic!("expected success reply, got: {other:?}"),
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -175,32 +210,21 @@ async fn fs_read_text_file_through_proxy_returns_file_content() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(1),
-                method: std::sync::Arc::from("fs/read_text_file"),
-                params: Some(ReadTextFileRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "/tmp/test.txt",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.fs.read_text_file", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.fs.read_text_file",
+                "fs/read_text_file",
+                &ReadTextFileRequest::new(agent_client_protocol::SessionId::from("sess-1"), "/tmp/test.txt"),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
-            assert_eq!(response["result"]["content"].as_str().unwrap(), "file content");
+            let result = wire_success_result(&reply);
+            assert_eq!(result["content"].as_str().unwrap(), "file content");
         })
         .await;
 }
@@ -221,37 +245,25 @@ async fn fs_write_text_file_through_proxy_returns_success() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(2),
-                method: std::sync::Arc::from("fs/write_text_file"),
-                params: Some(WriteTextFileRequest::new(
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.fs.write_text_file",
+                "fs/write_text_file",
+                &WriteTextFileRequest::new(
                     agent_client_protocol::SessionId::from("sess-1"),
                     "/tmp/test.txt",
                     "hello",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.fs.write_text_file", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+                ),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
         })
         .await;
 }
@@ -272,25 +284,22 @@ async fn request_permission_through_proxy_returns_outcome() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            // request_permission uses raw JSON protocol (not JSON-RPC), matching NatsClientProxy.
             let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
-            let req = RequestPermissionRequest::new("sess-1", tool_call, vec![]);
-            let payload = serde_json::to_vec(&req).unwrap();
-            let reply = nats1
-                .request(
-                    "acp.session.sess-1.client.session.request_permission",
-                    Bytes::from(payload),
-                )
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.session.request_permission",
+                "session/request_permission",
+                &RequestPermissionRequest::new("sess-1", tool_call, vec![]),
+            )
+            .await;
 
             let response: RequestPermissionResponse =
-                serde_json::from_slice(&reply.payload).expect("response must deserialize");
+                serde_json::from_value(wire_success_result(&reply)).expect("response must deserialize");
             assert_eq!(
                 response.outcome,
                 RequestPermissionOutcome::Cancelled,
@@ -340,7 +349,7 @@ async fn session_update_through_proxy_calls_client() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -384,32 +393,24 @@ async fn terminal_create_through_proxy_returns_terminal_id() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(5),
-                method: std::sync::Arc::from("terminal/create"),
-                params: Some(CreateTerminalRequest::new("sess-1", "echo hello")),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.terminal.create", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.terminal.create",
+                "terminal/create",
+                &CreateTerminalRequest::new("sess-1", "echo hello"),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
             assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].get("terminalId").is_some(),
-                "expected terminalId field, got: {}",
-                response["result"]
+                result.get("terminalId").is_some(),
+                "expected terminalId field, got: {result}"
             );
         })
         .await;
@@ -431,36 +432,21 @@ async fn terminal_output_through_proxy_returns_success() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(7),
-                method: std::sync::Arc::from("terminal/output"),
-                params: Some(TerminalOutputRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "term-001",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.terminal.output", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.terminal.output",
+                "terminal/output",
+                &TerminalOutputRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001"),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
         })
         .await;
 }
@@ -481,36 +467,21 @@ async fn terminal_release_through_proxy_returns_success() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(8),
-                method: std::sync::Arc::from("terminal/release"),
-                params: Some(ReleaseTerminalRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "term-001",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.terminal.release", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.terminal.release",
+                "terminal/release",
+                &ReleaseTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001"),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
         })
         .await;
 }
@@ -531,36 +502,21 @@ async fn terminal_wait_for_exit_through_proxy_returns_exit_code() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(9),
-                method: std::sync::Arc::from("terminal/wait_for_exit"),
-                params: Some(WaitForTerminalExitRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "term-001",
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.terminal.wait_for_exit", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.terminal.wait_for_exit",
+                "terminal/wait_for_exit",
+                &WaitForTerminalExitRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001"),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
         })
         .await;
 }
@@ -581,7 +537,7 @@ async fn ext_session_prompt_response_through_proxy_does_not_panic() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -620,36 +576,21 @@ async fn terminal_kill_through_proxy_returns_success() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats2, client_rc, bridge_rc, StdJsonSerialize).await;
+                client::run(nats2, client_rc, bridge_rc).await;
             });
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let envelope = Request {
-                id: RequestId::Number(10),
-                method: std::sync::Arc::from("terminal/kill"),
-                params: Some(KillTerminalRequest::new(
-                    agent_client_protocol::SessionId::from("sess-1"),
-                    "term-001".to_string(),
-                )),
-            };
-            let payload = serde_json::to_vec(&envelope).unwrap();
-            let reply = nats1
-                .request("acp.session.sess-1.client.terminal.kill", Bytes::from(payload))
-                .await
-                .expect("request must succeed");
+            let reply = wire_request(
+                &nats1,
+                "acp.session.sess-1.client.terminal.kill",
+                "terminal/kill",
+                &KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string()),
+            )
+            .await;
 
-            let response: serde_json::Value = serde_json::from_slice(&reply.payload).unwrap();
-            assert!(
-                response.get("error").is_none(),
-                "expected no error in reply, got: {}",
-                response
-            );
-            assert!(
-                response["result"].is_object(),
-                "expected result in reply, got: {}",
-                response
-            );
+            let result = wire_success_result(&reply);
+            assert!(result.is_object(), "expected object result, got: {result}");
         })
         .await;
 }

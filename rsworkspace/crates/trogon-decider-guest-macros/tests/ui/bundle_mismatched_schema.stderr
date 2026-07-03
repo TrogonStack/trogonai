@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: all export_decider! commands must declare the same state_schema_version
+  --> tests/ui/bundle_mismatched_schema.rs:9:1
+   |
+ 9 | / export_decider!(
+10 | |     CreateSchedule {
+11 | |         type_url = CREATE_SCHEDULE_TYPE_URL,
+12 | |         proto = v1::CreateSchedule,
+...  |
+23 | |     },
+24 | | );
+   | |_^ evaluation of `_` failed here

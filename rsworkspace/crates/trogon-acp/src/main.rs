@@ -327,7 +327,7 @@ async fn main() -> anyhow::Result<()> {
                 let client_run = relay_client.clone();
                 tracing::info!(prefix = %prefix, "trogon-acp: permission relay listening for external runner");
                 tokio::task::spawn_local(async move {
-                    acp_nats::client::run(nats_run, client_run, bridge, acp_nats::StdJsonSerialize).await;
+                    acp_nats::client::run(nats_run, client_run, bridge).await;
                 });
             }
 

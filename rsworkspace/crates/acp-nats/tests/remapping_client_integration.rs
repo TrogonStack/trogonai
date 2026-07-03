@@ -20,13 +20,12 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use acp_nats::{AcpPrefix, Bridge, Config, IdRemap, NatsAuth, NatsConfig, RemappingClient, StdJsonSerialize, client};
+use acp_nats::{AcpPrefix, Bridge, Config, IdRemap, NatsAuth, NatsConfig, RemappingClient, client};
 use agent_client_protocol::{
     Client, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionId,
     SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_trait::async_trait;
-use bytes::Bytes;
 use testcontainers_modules::nats::Nats;
 use testcontainers_modules::testcontainers::{ContainerAsync, runners::AsyncRunner};
 use trogon_std::time::SystemClock;
@@ -120,7 +119,7 @@ async fn permission_request_is_relayed_with_remapped_session_id() {
             let bridge_rc = Rc::new(bridge);
 
             tokio::task::spawn_local(async move {
-                client::run(nats_relay, relay_client, bridge_rc, StdJsonSerialize).await;
+                client::run(nats_relay, relay_client, bridge_rc).await;
             });
 
             // Let the proxy subscribe before publishing.
@@ -134,15 +133,31 @@ async fn permission_request_is_relayed_with_remapped_session_id() {
                 ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
                 vec![],
             );
-            let payload = serde_json::to_vec(&req).unwrap();
+            let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+                id: jsonrpc_nats::RequestId::Number(1),
+                method: "session/request_permission".to_string(),
+                params: serde_json::to_value(&req).unwrap(),
+            })
+            .unwrap();
             let subject = format!("{runner_prefix}.session.{runner_sid}.client.session.request_permission");
             let reply = nats_runner
-                .request(subject, Bytes::from(payload))
+                .request_with_headers(subject, encoded.headers, encoded.body)
                 .await
                 .expect("permission request must get a reply");
 
+            let decoded = jsonrpc_nats::decode(
+                jsonrpc_nats::Direction::Response,
+                None,
+                reply.headers.as_ref().expect("reply must carry headers"),
+                &reply.payload,
+            )
+            .expect("reply must decode");
+            let result = match decoded {
+                jsonrpc_nats::Message::Success { result, .. } => result,
+                other => panic!("expected success reply, got: {other:?}"),
+            };
             let response: RequestPermissionResponse =
-                serde_json::from_slice(&reply.payload).expect("response must deserialize");
+                serde_json::from_value(result).expect("response must deserialize");
             assert_eq!(
                 response.outcome,
                 RequestPermissionOutcome::Cancelled,

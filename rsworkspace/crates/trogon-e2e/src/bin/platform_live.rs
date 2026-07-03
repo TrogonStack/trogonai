@@ -42,7 +42,7 @@ use uuid::Uuid;
 
 fn prompt_subject(prefix: &str, session_id: &str) -> String {
     use acp_nats::AcpSessionId;
-    acp_nats::nats::session::agent::PromptSubject::new(
+    acp_nats::nats::commands::PromptSubject::new(
         &AcpPrefix::new(prefix).unwrap(),
         &AcpSessionId::new(session_id).unwrap(),
     )

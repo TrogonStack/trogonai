@@ -5,10 +5,23 @@ debug = 0
 rustflags = ["-C", "link-arg=-fuse-ld=bfd"]
 
 [alias]
+# Exclude sources the host coverage run cannot meaningfully measure:
+#   - Codegen output (proto/semconv `src/gen`) is not hand-authored.
+#   - The WASM decider guest (`trogon-decider-guest-sdk` glue + `wasm-components/*`)
+#     executes inside the component, so host `llvm-cov` never instruments it; its
+#     behavior is covered by the sim host integration tests and the YAML conformance
+#     suite instead.
+#   - `trogon-decider-test` is the conformance CLI / test harness, not shipped logic.
 cov = [
     "llvm-cov",
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/trogonai-proto/src/gen/.*",
+    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*|crates/trogon-decider-guest-sdk/.*|wasm-components/.*|cli/trogon-decider-test/.*",
 ]
+
+[target.wasm32-wasip2]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

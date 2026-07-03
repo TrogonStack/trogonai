@@ -1,0 +1,43 @@
+groups:
+  # mcp-nats: MCP-over-NATS transport (spans only). The two transport spans have
+  # no explicit name today, so they are emitted as the Rust function names
+  # `send` and `receive`.
+  - id: registry.trogonai.mcp
+    type: attribute_group
+    display_name: MCP Transport Attributes
+    brief: Custom attributes emitted by mcp-nats transport spans today.
+    attributes:
+      - id: mcp.nats.subject
+        type: string
+        stability: development
+        brief: NATS subject for an MCP transport message.
+      - id: mcp.nats.direction
+        type:
+          members:
+            - id: send
+              value: "send"
+              brief: Outbound transport message.
+              stability: development
+            - id: receive
+              value: "receive"
+              brief: Inbound transport message.
+              stability: development
+        stability: development
+        brief: Direction of the MCP NATS transport message.
+
+  - id: span.send
+    type: span
+    span_kind: internal
+    stability: development
+    brief: MCP transport send. Span name is `send` (no namespace) today.
+    attributes:
+      - ref: mcp.nats.subject
+      - ref: mcp.nats.direction
+  - id: span.receive
+    type: span
+    span_kind: internal
+    stability: development
+    brief: MCP transport receive. Span name is `receive` (no namespace) today.
+    attributes:
+      - ref: mcp.nats.subject
+      - ref: mcp.nats.direction

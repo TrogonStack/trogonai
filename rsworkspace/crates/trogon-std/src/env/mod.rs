@@ -25,10 +25,12 @@
 //! );
 //! ```
 
+mod enumerate_env;
 mod in_memory;
 mod read_env;
 mod system;
 
+pub use enumerate_env::EnumerateEnv;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory::InMemoryEnv;
 pub use read_env::ReadEnv;

@@ -7,6 +7,7 @@
 
 use opentelemetry::metrics::Counter;
 use opentelemetry::{KeyValue, global};
+use trogon_semconv::{attribute, metric};
 
 const METER_NAME: &str = "trogon-scheduler";
 
@@ -24,28 +25,16 @@ impl ProcessorMetrics {
     pub fn new() -> Self {
         let meter = global::meter(METER_NAME);
         Self {
-            records: meter
-                .u64_counter("scheduler.processor.records")
-                .with_description("schedule event records processed, by reconciliation outcome")
-                .build(),
-            publishes: meter
-                .u64_counter("scheduler.processor.execution_publishes")
-                .with_description("execution schedule messages published")
-                .build(),
-            purges: meter
-                .u64_counter("scheduler.processor.execution_purges")
-                .with_description("execution schedule subjects purged")
-                .build(),
-            redeliveries: meter
-                .u64_counter("scheduler.processor.redeliveries")
-                .with_description("schedule event records observed as NATS redeliveries")
-                .build(),
+            records: metric::build_scheduler_processor_records(&meter),
+            publishes: metric::build_scheduler_processor_execution_publishes(&meter),
+            purges: metric::build_scheduler_processor_execution_purges(&meter),
+            redeliveries: metric::build_scheduler_processor_redeliveries(&meter),
         }
     }
 
     /// Records one processed record with its outcome label.
     pub fn record_outcome(&self, outcome: &'static str) {
-        self.records.add(1, &[KeyValue::new("outcome", outcome)]);
+        self.records.add(1, &[KeyValue::new(attribute::OUTCOME, outcome)]);
     }
 
     /// Records one execution schedule publish.
@@ -77,25 +66,4 @@ impl std::fmt::Debug for ProcessorMetrics {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recording_metrics_is_infallible() {
-        let metrics = ProcessorMetrics::new();
-        metrics.record_outcome("published");
-        metrics.record_publish();
-        metrics.record_purge();
-        metrics.record_redelivery();
-    }
-
-    #[test]
-    fn default_metrics_match_new() {
-        let _ = ProcessorMetrics::default();
-    }
-
-    #[test]
-    fn debug_fmt_is_non_exhaustive() {
-        let _ = format!("{:?}", ProcessorMetrics::new());
-    }
-}
+mod tests;

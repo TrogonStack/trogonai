@@ -1,0 +1,19 @@
+error: manual `std::error::Error` implementation
+  --> $DIR/manual_error_impl.rs:15:6
+   |
+LL | impl std::error::Error for ManualError {}
+   |      ^^^^^^^^^^^^^^^^^
+   |
+   = help: derive the error with `#[derive(thiserror::Error)]` and `#[error("...")]` instead of implementing `std::error::Error` by hand
+   = note: `#[deny(manual_error_impl)]` on by default
+
+error: manual `std::error::Error` implementation
+  --> $DIR/manual_error_impl.rs:27:6
+   |
+LL | impl std::error::Error for ManualWithSource {
+   |      ^^^^^^^^^^^^^^^^^
+   |
+   = help: derive the error with `#[derive(thiserror::Error)]` and `#[error("...")]` instead of implementing `std::error::Error` by hand
+
+error: aborting due to 2 previous errors
+

@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use crate::config::Config;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
-    SubscribeClient, session,
+    SubscribeClient, responses,
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
@@ -116,7 +116,7 @@ async fn publish_session_ready<N: PublishClient + FlushClient>(
             return;
         }
     };
-    let subject = session::agent::ExtReadySubject::new(prefix, &acp_session_id);
+    let subject = responses::ExtReadySubject::new(prefix, &acp_session_id);
     info!(session_id = %session_id, subject = %subject, "Publishing session.ready");
 
     let message = ExtSessionReady::new(session_id.clone());
@@ -146,6 +146,7 @@ where
     pub(crate) async fn session_request<Req, Res>(
         &self,
         subject: &impl crate::nats::markers::SessionCommand,
+        method: &str,
         args: &Req,
         session_id: &crate::session_id::AcpSessionId,
     ) -> Result<Res>
@@ -155,11 +156,11 @@ where
     {
         let subject_str = subject.to_string();
         let req_id = crate::req_id::ReqId::new();
-        js_request::js_request::<J, _, Res, _>(
+        js_request::js_request::<J, _, Res>(
             self.js(),
             &subject_str,
+            method,
             args,
-            &trogon_std::StdJsonSerialize,
             self.config.acp_prefix_ref(),
             session_id,
             &req_id,
@@ -208,7 +209,7 @@ where
 
     #[cfg_attr(coverage, coverage(off))]
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        prompt::handle(self, args, &trogon_std::StdJsonSerialize).await
+        prompt::handle(self, args).await
     }
 
     #[cfg_attr(coverage, coverage(off))]

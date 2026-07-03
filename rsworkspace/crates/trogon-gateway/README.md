@@ -44,6 +44,7 @@ configured as a named integration and mounted at its integration path.
 | Microsoft Graph change notifications | `/sources/microsoft-graph/{integration}/webhook` |
 | Notion | `/sources/notion/{integration}/webhook` |
 | Sentry | `/sources/sentry/{integration}/webhook` |
+| Datadog | `/sources/datadog/{integration}/webhook` |
 
 Integration IDs must contain only ASCII letters, numbers, `_`, or `-`. They cannot be empty, contain path
 separators, or exceed 64 characters.
@@ -70,6 +71,7 @@ or explicit environment reference shape.
 | Microsoft Graph change notifications | `client_state` |
 | Notion | `verification_token` |
 | Sentry | `client_secret` |
+| Datadog | `webhook_token` |
 
 ## Core configuration
 
@@ -103,6 +105,8 @@ Source-specific extras:
 - Telegram `webhook_registration_mode = "startup"` attempts registration on startup and requires `bot_token` plus `public_webhook_url`
 - Linear `timestamp_tolerance_secs` (default: `60`, `0` disables tolerance)
 - Twitter/X `consumer_secret` is used for both CRC responses and `x-twitter-webhooks-signature` validation
+- Datadog webhooks are not signed. `webhook_token` is a shared secret the operator sends as a custom header (configured in the Datadog webhook's *Custom Headers*), verified in constant time. The header name defaults to `X-Datadog-Webhook-Token` and can be overridden per integration with `webhook_token_header`. Routing keys off an `event_type` field in the payload template, falling back to `.unroutable` when it is absent or invalid; an optional `id` field is used as the NATS message ID for deduplication
+- Datadog `timestamp_tolerance_secs` (optional, disabled by default) enables a freshness/anti-replay check. Datadog sends no timestamp header, so the operator must template a `timestamp` field carrying `$DATE_POSIX` (POSIX seconds) into the payload. When enabled, requests whose `timestamp` is outside the window are rejected (`401`), and requests missing/with an unparseable `timestamp` are rejected (`400`). `0` or unset disables the check
 
 ## Config file shape
 
@@ -163,7 +167,33 @@ verification_token = "notion-verification-token-example"
 
 [sources.sentry.integrations.primary.webhook]
 client_secret = "sentry-client-secret"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = { env = "DATADOG_PRIMARY_WEBHOOK_TOKEN" }
+# webhook_token_header = "X-Datadog-Webhook-Token"  # optional; override the custom header name
+# timestamp_tolerance_secs = 300  # optional anti-replay window; requires "timestamp": "$DATE_POSIX" in the payload
 ```
+
+Configure the matching Datadog webhook (Integrations > Webhooks) with a custom header and a payload template, for example:
+
+```json
+{
+  "X-Datadog-Webhook-Token": "$WEBHOOK_TOKEN"
+}
+```
+
+```json
+{
+  "id": "$ID",
+  "event_type": "$EVENT_TYPE",
+  "timestamp": "$DATE_POSIX",
+  "title": "$EVENT_TITLE",
+  "body": "$EVENT_MSG",
+  "alert_transition": "$ALERT_TRANSITION"
+}
+```
+
+`timestamp` is only required when `timestamp_tolerance_secs` is set; `$DATE_POSIX` is POSIX epoch seconds (`$DATE` is epoch milliseconds, which this source does not accept).
 
 ## Microsoft Graph change notifications
 

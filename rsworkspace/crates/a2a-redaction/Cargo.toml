@@ -1,0 +1,34 @@
+[package]
+name = "a2a-redaction"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "A2A redaction primitives, redactor trait, and Tier-3 refusal sentinel"
+publish = false
+
+[lib]
+name = "a2a_redaction"
+path = "src/lib.rs"
+
+[[bin]]
+name = "a2a-sign-bundle"
+path = "src/bin/sign-bundle.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+ed25519-dalek = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+wasmtime = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

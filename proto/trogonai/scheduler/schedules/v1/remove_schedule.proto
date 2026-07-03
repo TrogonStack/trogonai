@@ -1,0 +1,7 @@
+edition = "2024";
+
+package trogonai.scheduler.schedules.v1;
+
+message RemoveSchedule {
+  string schedule_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

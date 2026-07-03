@@ -26,7 +26,7 @@ use agent_client_protocol::{
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{info, warn};
 
-use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, session as session_subjects};
+use acp_nats::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use acp_nats::{AcpPrefix, AcpSessionId, Bridge};
 use agent_client_protocol::McpServer;
 use trogon_acp_runner::{
@@ -598,10 +598,10 @@ where
         }
         let acp_prefix = AcpPrefix::new(&self.prefix).expect("valid prefix");
         let acp_session_id = AcpSessionId::new(session_id).expect("valid session_id");
-        let cancel_subject = session_subjects::agent::CancelSubject::new(&acp_prefix, &acp_session_id).to_string();
+        let cancel_subject = commands::CancelSubject::new(&acp_prefix, &acp_session_id).to_string();
         self.notifier.publish(cancel_subject, bytes::Bytes::new()).await;
         let cancelled_subject =
-            session_subjects::agent::CancelledSubject::new(&acp_prefix, &acp_session_id).to_string();
+            responses::CancelledSubject::new(&acp_prefix, &acp_session_id).to_string();
         self.notifier.publish(cancelled_subject, bytes::Bytes::new()).await;
         if let Err(e) = self.store.delete(session_id).await {
             Self::warn_delete_session_failed(session_id, &e);

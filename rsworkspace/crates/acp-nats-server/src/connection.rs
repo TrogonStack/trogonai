@@ -1,4 +1,4 @@
-use acp_nats::{StdJsonSerialize, agent::Bridge, client, spawn_notification_forwarder};
+use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::{AgentSideConnection, SessionNotification};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
@@ -79,12 +79,7 @@ pub async fn handle<N, J>(
     let recv_pump = tokio::task::spawn_local(run_recv_pump(ws_receiver, ws_recv_write));
     let send_pump = tokio::task::spawn_local(run_send_pump(ws_sender, ws_send_read));
 
-    let mut client_task = tokio::task::spawn_local(client::run(
-        nats_client,
-        connection.clone(),
-        bridge.clone(),
-        StdJsonSerialize,
-    ));
+    let mut client_task = tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge.clone()));
 
     let mut io_task = tokio::task::spawn_local(io_task);
 
@@ -196,97 +191,4 @@ async fn run_send_pump(mut ws_sender: SplitSink<WebSocket, Message>, ws_send_rea
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::extract::State;
-    use axum::extract::ws::WebSocketUpgrade;
-    use axum::response::Response;
-    use std::error::Error;
-    use std::io;
-    use std::time::Duration;
-    use tokio::net::TcpListener;
-    use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
-
-    use crate::constants::ACP_ENDPOINT;
-
-    #[derive(Clone)]
-    struct EchoState;
-
-    async fn echo_handler(ws: WebSocketUpgrade, State(_): State<EchoState>) -> Response {
-        ws.on_upgrade(|socket| async move {
-            let (ws_sender, ws_receiver) = socket.split();
-            let (duplex_write, duplex_read) = tokio::io::duplex(DUPLEX_BUFFER_SIZE);
-            let recv = run_recv_pump(ws_receiver, duplex_write);
-            let send = run_send_pump(ws_sender, duplex_read);
-            tokio::join!(recv, send);
-        })
-    }
-
-    async fn start_echo_server() -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = axum::Router::new()
-            .route(ACP_ENDPOINT, axum::routing::get(echo_handler))
-            .with_state(EchoState);
-        tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
-        format!("ws://{}{}", addr, ACP_ENDPOINT)
-    }
-
-    #[test]
-    fn shutdown_error_display_includes_source_details() {
-        let error = ConnectionShutdownError::IoTask {
-            source: Box::new(io::Error::other("duplex closed")),
-        };
-
-        assert_eq!(error.to_string(), "io task error: duplex closed");
-        assert_eq!(error.source().unwrap().to_string(), "duplex closed");
-    }
-
-    #[tokio::test]
-    async fn multiple_messages_round_trip() {
-        let url = start_echo_server().await;
-        let (mut ws, _) = connect_async(&url).await.unwrap();
-
-        let messages = vec!["alpha", "beta", "gamma"];
-        for msg in &messages {
-            ws.send(TungsteniteMessage::Text((*msg).into())).await.unwrap();
-        }
-
-        for expected in &messages {
-            let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
-                .await
-                .expect("timeout")
-                .expect("stream ended")
-                .unwrap();
-            match msg {
-                TungsteniteMessage::Text(t) => assert_eq!(t, *expected),
-                other => panic!("expected Text('{expected}'), got {other:?}"),
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn binary_messages_are_ignored() {
-        let url = start_echo_server().await;
-        let (mut ws, _) = connect_async(&url).await.unwrap();
-
-        ws.send(TungsteniteMessage::Binary(bytes::Bytes::from_static(b"ignored")))
-            .await
-            .unwrap();
-        ws.send(TungsteniteMessage::Text("kept".into())).await.unwrap();
-
-        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
-            .await
-            .expect("timeout")
-            .expect("stream ended")
-            .unwrap();
-
-        match msg {
-            TungsteniteMessage::Text(text) => assert_eq!(text, "kept"),
-            other => panic!("expected text frame, got {other:?}"),
-        }
-    }
-}
+mod tests;

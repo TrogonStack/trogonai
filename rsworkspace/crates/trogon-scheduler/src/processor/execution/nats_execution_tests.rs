@@ -31,6 +31,7 @@ use trogon_decider_nats::{
 use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, StreamRead};
 use trogon_nats::NatsConfig;
 use trogon_nats::jetstream::JetStreamSubjectPurger;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleCheckpointStore, ScheduleStatus};
 use super::execution_schedules::ExecutionScheduleWriter;
@@ -73,7 +74,7 @@ impl StreamSubjectResolver<str> for ScheduleEventSubjectResolver {
 }
 
 async fn context() -> Option<jetstream::Context> {
-    let url = std::env::var("SCHEDULER_NATS_URL").ok()?;
+    let url = SystemEnv.var("SCHEDULER_NATS_URL").ok()?;
     let config = NatsConfig::from_url(url);
     let client = trogon_nats::connect(&config, Duration::from_secs(5))
         .await

@@ -16,11 +16,18 @@ use std::sync::OnceLock;
 
 use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
-use opentelemetry_semantic_conventions::attribute::{
-    GEN_AI_OPERATION_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_RESPONSE_MODEL, GEN_AI_SYSTEM,
-    GEN_AI_TOKEN_TYPE,
-};
-use opentelemetry_semantic_conventions::metric::GEN_AI_CLIENT_TOKEN_USAGE;
+
+// `opentelemetry-semantic-conventions` deprecated its `gen_ai.*` re-exports in
+// favor of the standalone GenAI semantic conventions repository, but the
+// attribute/metric key strings themselves are unchanged. Inline them here to
+// keep emitting the conventional keys without depending on the deprecated
+// constants (the workspace denies `deprecated` as a warning).
+const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
+const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
+const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";
+const GEN_AI_SYSTEM: &str = "gen_ai.system";
+const GEN_AI_TOKEN_TYPE: &str = "gen_ai.token.type";
+const GEN_AI_CLIENT_TOKEN_USAGE: &str = "gen_ai.client.token.usage";
 
 /// `gen_ai.operation.name` value for context compaction.
 const OPERATION: &str = "compact";

@@ -2,7 +2,7 @@
 //!
 //! See `docs/permission-ui-design.md` §9.
 
-use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig, StdJsonSerialize, agent::Bridge, client};
+use acp_nats::{AcpPrefix, Config, NatsAuth, NatsConfig, agent::Bridge, client};
 use agent_client_protocol::SessionNotification;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -75,7 +75,7 @@ impl AcpClientSupervisor {
         let nats = inner.nats.clone();
         let tui_client = inner.tui_client.clone();
         inner.client_task = Some(tokio::task::spawn_local(async move {
-            client::run(nats, tui_client, bridge, StdJsonSerialize).await;
+            client::run(nats, tui_client, bridge).await;
         }));
         Ok(())
     }

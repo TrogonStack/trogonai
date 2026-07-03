@@ -29,6 +29,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "sync"] }
 tracing = { workspace = true }
+jsonrpc-nats = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 

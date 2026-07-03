@@ -1,0 +1,28 @@
+error: metric instrument constructed outside `trogon_semconv`
+  --> $DIR/telemetry_metric_name_literal.rs:10:26
+   |
+LL |     let _counter = meter.u64_counter("acp.requests").build();
+   |                          ^^^^^^^^^^^
+   |
+   = help: construct the instrument with a generated `trogon_semconv::metric::build_*` constructor instead of opening the builder inline
+   = note: `#[deny(telemetry_metric_construction)]` on by default
+
+error: metric instrument name written as an inline string literal
+  --> $DIR/telemetry_metric_name_literal.rs:10:38
+   |
+LL |     let _counter = meter.u64_counter("acp.requests").build();
+   |                                      ^^^^^^^^^^^^^^
+   |
+   = help: name the instrument with a generated `trogon_semconv::metric` constant instead of an inline string
+   = note: `#[deny(telemetry_metric_name_literal)]` on by default
+
+error: metric instrument constructed outside `trogon_semconv`
+  --> $DIR/telemetry_metric_name_literal.rs:14:26
+   |
+LL |     let _counter = meter.u64_counter(ACP_REQUESTS).build();
+   |                          ^^^^^^^^^^^
+   |
+   = help: construct the instrument with a generated `trogon_semconv::metric::build_*` constructor instead of opening the builder inline
+
+error: aborting due to 3 previous errors
+

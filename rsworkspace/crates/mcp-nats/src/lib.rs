@@ -10,6 +10,7 @@ pub mod nats;
 pub mod server;
 pub(crate) mod telemetry;
 pub mod transport;
+pub mod wire;
 
 pub use config::{Config, apply_timeout_overrides, nats_connect_timeout};
 pub use constants::{DEFAULT_MCP_PREFIX, ENV_MCP_PREFIX};
@@ -22,8 +23,8 @@ pub use mcp_peer_id::{McpPeerId, McpPeerIdError};
 pub use mcp_prefix::{McpPrefix, McpPrefixError};
 pub use nats::{
     ClientNotificationMethod, ClientRequestMethod, FlushClient, ParsedClientSubject, ParsedServerSubject,
-    PublishClient, RequestClient, ServerNotificationMethod, ServerRequestMethod, SubscribeClient, markers, mcp_client,
-    mcp_server, parse_client_subject, parse_server_subject,
+    PublishClient, RequestClient, ServerNotificationMethod, ServerRequestMethod, SubscribeClient, markers,
+    parse_client_subject, parse_server_subject,
 };
 pub use transport::{NatsTransport, NatsTransportError};
 pub use trogon_nats::{NatsAuth, NatsConfig};

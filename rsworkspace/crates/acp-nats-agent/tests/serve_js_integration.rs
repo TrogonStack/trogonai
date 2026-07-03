@@ -10,6 +10,8 @@
 //! Run with:
 //!   cargo test -p acp-nats-agent --test serve_js_integration
 
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -31,6 +33,41 @@ use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::
 use trogon_nats::jetstream::NatsJetStreamClient;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Encodes `params` as an ADR-0011 JSON-RPC-over-NATS request (method + id in
+/// headers, params in body) and sends it request-reply over core NATS.
+async fn wire_request<P: serde::Serialize>(
+    nats: &async_nats::Client,
+    subject: &str,
+    method: &str,
+    params: &P,
+) -> async_nats::Message {
+    let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+        id: jsonrpc_nats::RequestId::Number(1),
+        method: method.to_string(),
+        params: serde_json::to_value(params).unwrap(),
+    })
+    .unwrap();
+    nats.request_with_headers(subject.to_string(), encoded.headers, encoded.body)
+        .await
+        .expect("request must succeed")
+}
+
+/// Decodes a JSON-RPC-over-NATS success reply and returns its `result` value,
+/// panicking with the decoded message when the reply is not a success.
+fn wire_success_result(reply: &async_nats::Message) -> serde_json::Value {
+    let decoded = jsonrpc_nats::decode(
+        jsonrpc_nats::Direction::Response,
+        None,
+        reply.headers.as_ref().expect("reply must carry headers"),
+        &reply.payload,
+    )
+    .expect("reply must decode");
+    match decoded {
+        jsonrpc_nats::Message::Success { result, .. } => result,
+        other => panic!("expected success reply, got: {other:?}"),
+    }
+}
 
 async fn start_nats() -> (ContainerAsync<Nats>, u16) {
     let c = Nats::default()
@@ -185,15 +222,23 @@ async fn serve_js_dispatches_prompt_command_to_agent() {
             // Let serve_js create its COMMANDS consumer before we publish.
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            // Publish the prompt command to the COMMANDS stream.
-            let mut headers = async_nats::HeaderMap::new();
+            // Publish the prompt command to the COMMANDS stream. Both the jsonrpc
+            // `HEADER_ID` (required by `decode_request_params`) and the legacy
+            // `X-Req-Id` header (used by serve_js for reply-subject routing) must
+            // be present.
+            let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+                id: jsonrpc_nats::RequestId::Number(1),
+                method: "prompt".to_string(),
+                params: serde_json::to_value(PromptRequest::new(session_id, vec![])).unwrap(),
+            })
+            .unwrap();
+            let mut headers = encoded.headers;
             headers.insert("X-Req-Id", req_id);
-            let payload = serde_json::to_vec(&PromptRequest::new(session_id, vec![])).unwrap();
             js_ctx
                 .publish_with_headers(
                     format!("acp.session.{}.agent.prompt", session_id),
                     headers,
-                    payload.into(),
+                    encoded.body,
                 )
                 .await
                 .unwrap()
@@ -206,7 +251,7 @@ async fn serve_js_dispatches_prompt_command_to_agent() {
                 .expect("timed out waiting for prompt response")
                 .expect("response subscription closed unexpectedly");
 
-            let response: PromptResponse = serde_json::from_slice(&msg.payload).expect("invalid PromptResponse JSON");
+            let response: PromptResponse = serve_js_success(&msg);
             assert_eq!(
                 response.stop_reason,
                 StopReason::EndTurn,
@@ -251,17 +296,15 @@ async fn serve_global_dispatches_initialize_to_agent() {
 
             // Send a core-NATS request — serve_global handles it via the acp.agent.> sub.
             let req = InitializeRequest::new(ProtocolVersion::V0);
-            let payload = serde_json::to_vec(&req).unwrap();
-            let msg = tokio::time::timeout(
+            let reply = tokio::time::timeout(
                 Duration::from_secs(5),
-                nats.request("acp.agent.initialize", payload.into()),
+                wire_request(&nats, "acp.agent.initialize", "initialize", &req),
             )
             .await
-            .expect("timed out waiting for initialize response")
-            .expect("request failed");
+            .expect("timed out waiting for initialize response");
 
             let resp: InitializeResponse =
-                serde_json::from_slice(&msg.payload).expect("invalid InitializeResponse JSON");
+                serde_json::from_value(wire_success_result(&reply)).expect("invalid InitializeResponse JSON");
             assert_eq!(
                 resp.protocol_version,
                 ProtocolVersion::V0,
@@ -305,22 +348,21 @@ async fn serve_global_dispatches_session_ext_method_to_agent() {
 
             // Session-scoped ext subject is caught by AllAgentExtSubject subscription
             // and parsed as GlobalAgentMethod::Ext — serve_global calls ext_method().
-            let payload = serde_json::to_vec(&ExtRequest::new(
+            let req = ExtRequest::new(
                 "my_op",
                 serde_json::value::RawValue::from_string("{}".to_string())
                     .unwrap()
                     .into(),
-            ))
-            .unwrap();
-            let msg = tokio::time::timeout(
+            );
+            let reply = tokio::time::timeout(
                 Duration::from_secs(5),
-                nats.request("acp.session.sess-ext.agent.ext.my_op", payload.into()),
+                wire_request(&nats, "acp.session.sess-ext.agent.ext.my_op", "ext", &req),
             )
             .await
-            .expect("timed out waiting for ext_method response")
-            .expect("request failed");
+            .expect("timed out waiting for ext_method response");
 
-            let _resp: ExtResponse = serde_json::from_slice(&msg.payload).expect("invalid ExtResponse JSON");
+            let _resp: ExtResponse =
+                serde_json::from_value(wire_success_result(&reply)).expect("invalid ExtResponse JSON");
         })
         .await;
 
@@ -475,20 +517,26 @@ async fn serve_global_dispatches_authenticate_to_agent() {
 
     let nats2 = nats.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&AuthenticateRequest::new("secret")).unwrap();
-        let msg = tokio::time::timeout(
+        let req = AuthenticateRequest::new("secret");
+        let reply = tokio::time::timeout(
             Duration::from_secs(5),
-            nats2.request("acp.agent.authenticate", payload.into()),
+            wire_request(&nats2, "acp.agent.authenticate", "authenticate", &req),
         )
         .await
-        .expect("timed out")
-        .expect("request failed");
+        .expect("timed out");
 
-        // MockAgent.authenticate() returns method_not_found; verify a JSON
-        // response arrived (error or success).
+        // MockAgent.authenticate() returns method_not_found; verify serve_global
+        // relayed a JSON-RPC error reply rather than dropping the request.
+        let decoded = jsonrpc_nats::decode(
+            jsonrpc_nats::Direction::Response,
+            None,
+            reply.headers.as_ref().expect("reply must carry headers"),
+            &reply.payload,
+        )
+        .expect("reply must decode");
         assert!(
-            !msg.payload.is_empty(),
-            "serve_global must publish a reply to authenticate"
+            matches!(decoded, jsonrpc_nats::Message::Error { .. }),
+            "serve_global must relay the agent's method_not_found error, got: {decoded:?}"
         );
     })
     .await;
@@ -507,16 +555,16 @@ async fn serve_global_dispatches_logout_to_agent() {
 
     let nats2 = nats.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&LogoutRequest::new()).unwrap();
-        let msg = tokio::time::timeout(
+        let req = LogoutRequest::new();
+        let reply = tokio::time::timeout(
             Duration::from_secs(5),
-            nats2.request("acp.agent.logout", payload.into()),
+            wire_request(&nats2, "acp.agent.logout", "logout", &req),
         )
         .await
-        .expect("timed out")
-        .expect("request failed");
+        .expect("timed out");
 
-        let _resp: LogoutResponse = serde_json::from_slice(&msg.payload).expect("invalid LogoutResponse JSON");
+        let _resp: LogoutResponse =
+            serde_json::from_value(wire_success_result(&reply)).expect("invalid LogoutResponse JSON");
     })
     .await;
 }
@@ -534,16 +582,16 @@ async fn serve_global_dispatches_new_session_to_agent() {
 
     let nats2 = nats.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&NewSessionRequest::new(".")).unwrap();
-        let msg = tokio::time::timeout(
+        let req = NewSessionRequest::new(".");
+        let reply = tokio::time::timeout(
             Duration::from_secs(5),
-            nats2.request("acp.agent.session.new", payload.into()),
+            wire_request(&nats2, "acp.agent.session.new", "session/new", &req),
         )
         .await
-        .expect("timed out")
-        .expect("request failed");
+        .expect("timed out");
 
-        let resp: NewSessionResponse = serde_json::from_slice(&msg.payload).expect("invalid NewSessionResponse JSON");
+        let resp: NewSessionResponse =
+            serde_json::from_value(wire_success_result(&reply)).expect("invalid NewSessionResponse JSON");
         assert_eq!(
             resp.session_id.to_string().as_str(),
             "test-session",
@@ -566,39 +614,47 @@ async fn serve_global_dispatches_list_sessions_to_agent() {
 
     let nats2 = nats.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&ListSessionsRequest::new()).unwrap();
-        let msg = tokio::time::timeout(
+        let req = ListSessionsRequest::new();
+        let reply = tokio::time::timeout(
             Duration::from_secs(5),
-            nats2.request("acp.agent.session.list", payload.into()),
+            wire_request(&nats2, "acp.agent.session.list", "session/list", &req),
         )
         .await
-        .expect("timed out")
-        .expect("request failed");
+        .expect("timed out");
 
         let _resp: ListSessionsResponse =
-            serde_json::from_slice(&msg.payload).expect("invalid ListSessionsResponse JSON");
+            serde_json::from_value(wire_success_result(&reply)).expect("invalid ListSessionsResponse JSON");
     })
     .await;
 }
 
 // ── serve_js: helpers ─────────────────────────────────────────────────────────
 
-/// Publish a JetStream command with an `X-Req-Id` header and wait for the
-/// response that `serve_js` publishes to core NATS.
-async fn serve_js_round_trip(
+/// Publish a JSON-RPC-over-NATS command carrying BOTH the jsonrpc `HEADER_ID`
+/// (required by `decode_request_params`) and the legacy `X-Req-Id` header
+/// (used by `serve_js` for reply-subject routing), then wait for the response
+/// that `serve_js` publishes to core NATS.
+async fn serve_js_round_trip<P: serde::Serialize>(
     nats: &async_nats::Client,
     js_ctx: &async_nats::jetstream::Context,
     subject: &str,
+    method: &str,
     req_id: &str,
-    payload: Vec<u8>,
+    params: &P,
     response_subject: &str,
 ) -> async_nats::Message {
     let mut sub = nats.subscribe(response_subject.to_string()).await.unwrap();
 
-    let mut headers = async_nats::HeaderMap::new();
+    let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+        id: jsonrpc_nats::RequestId::Number(1),
+        method: method.to_string(),
+        params: serde_json::to_value(params).unwrap(),
+    })
+    .unwrap();
+    let mut headers = encoded.headers;
     headers.insert("X-Req-Id", req_id);
     js_ctx
-        .publish_with_headers(subject.to_string(), headers, payload.into())
+        .publish_with_headers(subject.to_string(), headers, encoded.body)
         .await
         .unwrap()
         .await
@@ -608,6 +664,24 @@ async fn serve_js_round_trip(
         .await
         .expect("timed out waiting for serve_js response")
         .expect("response subscription closed")
+}
+
+/// Decodes a `serve_js` JSON-RPC-over-NATS success reply and deserializes its
+/// `result` value into `T`.
+fn serve_js_success<T: serde::de::DeserializeOwned>(msg: &async_nats::Message) -> T {
+    let decoded = jsonrpc_nats::decode(
+        jsonrpc_nats::Direction::Response,
+        None,
+        msg.headers.as_ref().expect("reply must carry headers"),
+        &msg.payload,
+    )
+    .expect("reply must decode");
+    match decoded {
+        jsonrpc_nats::Message::Success { result, .. } => {
+            serde_json::from_value(result).expect("result must deserialize")
+        }
+        other => panic!("expected success reply, got: {other:?}"),
+    }
 }
 
 // ── serve_js: load_session ────────────────────────────────────────────────────
@@ -628,17 +702,18 @@ async fn serve_js_dispatches_load_session_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&LoadSessionRequest::new(session_id, ".")).unwrap();
+        let req = LoadSessionRequest::new(session_id, ".");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.load", session_id),
+            "session/load",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: LoadSessionResponse = serde_json::from_slice(&msg.payload).expect("invalid LoadSessionResponse");
+        let _resp: LoadSessionResponse = serve_js_success(&msg);
     })
     .await;
 }
@@ -661,18 +736,18 @@ async fn serve_js_dispatches_set_session_mode_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&SetSessionModeRequest::new(session_id, "edit")).unwrap();
+        let req = SetSessionModeRequest::new(session_id, "edit");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.set_mode", session_id),
+            "session/set_mode",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: SetSessionModeResponse =
-            serde_json::from_slice(&msg.payload).expect("invalid SetSessionModeResponse");
+        let _resp: SetSessionModeResponse = serve_js_success(&msg);
     })
     .await;
 }
@@ -695,18 +770,18 @@ async fn serve_js_dispatches_set_session_config_option_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&SetSessionConfigOptionRequest::new(session_id, "theme", "dark")).unwrap();
+        let req = SetSessionConfigOptionRequest::new(session_id, "theme", "dark");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.set_config_option", session_id),
+            "session/set_config_option",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: SetSessionConfigOptionResponse =
-            serde_json::from_slice(&msg.payload).expect("invalid SetSessionConfigOptionResponse");
+        let _resp: SetSessionConfigOptionResponse = serve_js_success(&msg);
     })
     .await;
 }
@@ -729,18 +804,18 @@ async fn serve_js_dispatches_set_session_model_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&SetSessionModelRequest::new(session_id, "claude-sonnet-4-6")).unwrap();
+        let req = SetSessionModelRequest::new(session_id, "claude-sonnet-4-6");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.set_model", session_id),
+            "session/set_model",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: SetSessionModelResponse =
-            serde_json::from_slice(&msg.payload).expect("invalid SetSessionModelResponse");
+        let _resp: SetSessionModelResponse = serve_js_success(&msg);
     })
     .await;
 }
@@ -763,17 +838,18 @@ async fn serve_js_dispatches_fork_session_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&ForkSessionRequest::new(session_id, ".")).unwrap();
+        let req = ForkSessionRequest::new(session_id, ".");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.fork", session_id),
+            "session/fork",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let resp: ForkSessionResponse = serde_json::from_slice(&msg.payload).expect("invalid ForkSessionResponse");
+        let resp: ForkSessionResponse = serve_js_success(&msg);
         assert_eq!(
             resp.session_id.to_string().as_str(),
             "forked-in-serve-js",
@@ -801,17 +877,18 @@ async fn serve_js_dispatches_resume_session_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&ResumeSessionRequest::new(session_id, ".")).unwrap();
+        let req = ResumeSessionRequest::new(session_id, ".");
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.resume", session_id),
+            "session/resume",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: ResumeSessionResponse = serde_json::from_slice(&msg.payload).expect("invalid ResumeSessionResponse");
+        let _resp: ResumeSessionResponse = serve_js_success(&msg);
     })
     .await;
 }
@@ -835,15 +912,16 @@ async fn serve_js_deliver_new_ignores_pre_existing_messages() {
     // Publish 3 prompt commands into the stream BEFORE any consumer exists.
     for i in 0..3_u32 {
         let req_id = format!("stale-req-{i}");
-        let mut headers = async_nats::HeaderMap::new();
+        let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Request {
+            id: jsonrpc_nats::RequestId::Number(1),
+            method: "prompt".to_string(),
+            params: serde_json::to_value(PromptRequest::new(session_id, vec![])).unwrap(),
+        })
+        .unwrap();
+        let mut headers = encoded.headers;
         headers.insert("X-Req-Id", req_id.as_str());
-        let payload = serde_json::to_vec(&PromptRequest::new(session_id, vec![])).unwrap();
         js_ctx
-            .publish_with_headers(
-                format!("acp.session.{session_id}.agent.prompt"),
-                headers,
-                payload.into(),
-            )
+            .publish_with_headers(format!("acp.session.{session_id}.agent.prompt"), headers, encoded.body)
             .await
             .unwrap()
             .await
@@ -903,16 +981,18 @@ async fn serve_js_deliver_new_receives_messages_published_after_consumer_creatio
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, agent, async move {
         // Consumer is now active.  Publish one fresh message.
+        let req = PromptRequest::new(session_id, vec![]);
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{session_id}.agent.prompt"),
+            "prompt",
             req_id,
-            serde_json::to_vec(&PromptRequest::new(session_id, vec![])).unwrap(),
+            &req,
             &response_subject,
         )
         .await;
-        let resp: PromptResponse = serde_json::from_slice(&msg.payload).expect("invalid PromptResponse");
+        let resp: PromptResponse = serve_js_success(&msg);
         assert_eq!(resp.stop_reason, StopReason::EndTurn);
     })
     .await;
@@ -941,17 +1021,18 @@ async fn serve_js_dispatches_close_session_to_agent() {
     let nats2 = nats.clone();
     let js2 = js_ctx.clone();
     run_with_jetstream(nats, js_ctx, MockAgent::default(), async move {
-        let payload = serde_json::to_vec(&CloseSessionRequest::new(session_id)).unwrap();
+        let req = CloseSessionRequest::new(session_id);
         let msg = serve_js_round_trip(
             &nats2,
             &js2,
             &format!("acp.session.{}.agent.close", session_id),
+            "session/close",
             req_id,
-            payload,
+            &req,
             &response_subject,
         )
         .await;
-        let _resp: CloseSessionResponse = serde_json::from_slice(&msg.payload).expect("invalid CloseSessionResponse");
+        let _resp: CloseSessionResponse = serve_js_success(&msg);
     })
     .await;
 }

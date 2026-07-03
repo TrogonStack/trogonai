@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use acp_nats::acp_prefix::AcpPrefix;
-use acp_nats::nats::{ExtSessionReady, session as session_subjects};
+use acp_nats::nats::{ExtSessionReady, commands, responses};
 use acp_nats::session_id::AcpSessionId;
 use agent_client_protocol::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse, CancelNotification,
@@ -434,7 +434,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<()> {
         let acp_prefix = self.make_acp_prefix()?;
         let acp_session_id = AcpSessionId::new(session_id).map_err(invalid_session_id)?;
-        let subject = session_subjects::agent::ExtReadySubject::new(
+        let subject = responses::ExtReadySubject::new(
             &acp_prefix,
             &acp_session_id,
         )
@@ -2076,7 +2076,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
         // Cancel any running prompt for this session.
         let acp_prefix = self.make_acp_prefix()?;
         let acp_session_id = self.make_acp_session_id(&req.session_id)?;
-        let cancel_subject = session_subjects::agent::CancelSubject::new(
+        let cancel_subject = commands::CancelSubject::new(
             &acp_prefix,
             &acp_session_id,
         )
@@ -2111,7 +2111,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         let acp_prefix = self.make_acp_prefix()?;
         let acp_session_id = self.make_acp_session_id(&req.session_id)?;
-        let cancel_subject = session_subjects::agent::CancelSubject::new(
+        let cancel_subject = commands::CancelSubject::new(
             &acp_prefix,
             &acp_session_id,
         )
@@ -2119,7 +2119,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
 
         let cancel_sub = self.notifier.subscribe_cancel(cancel_subject).await;
 
-        let steer_subject = session_subjects::agent::SteerSubject::new(
+        let steer_subject = commands::SteerSubject::new(
             &acp_prefix,
             &acp_session_id,
         )
@@ -2138,7 +2138,7 @@ impl<S: SessionStore, A: AgentRunner + 'static, N: SessionNotifier, M: TrogonMdL
     ) -> agent_client_protocol::Result<()> {
         let acp_prefix = self.make_acp_prefix()?;
         let acp_session_id = self.make_acp_session_id(&req.session_id)?;
-        let subject = session_subjects::agent::CancelSubject::new(
+        let subject = commands::CancelSubject::new(
             &acp_prefix,
             &acp_session_id,
         )

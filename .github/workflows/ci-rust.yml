@@ -10,13 +10,21 @@ on:
       - 'rsworkspace/**'
       - 'LICENSE'
       - '.mise.toml'
+      - 'rust-toolchain.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/enforce-cargo-license/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
 
+concurrency:
+  group: ci-rust-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  # Source-built mise tools (dylint-link, cargo-component, ...) fetch crates from
+  # crates.io during install; raise retry tolerance for spurious network errors.
+  CARGO_NET_RETRY: '10'
 
 permissions:
   contents: read
@@ -28,17 +36,21 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
-          components: rustfmt,clippy
+          dylint-toolchain-dir: rsworkspace/dylints/trogon_lints
 
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
+
+      - name: Enforce TLS policy (ADR 0015)
+        run: cargo deny check bans
+        working-directory: rsworkspace
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -50,6 +62,22 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+        working-directory: rsworkspace
+
+      - name: Test repo Rust policy lints
+        run: |
+          dylint_toolchain="$(python - <<'PY'
+          import tomllib
+
+          with open("rust-toolchain.toml", "rb") as toolchain_file:
+              print(tomllib.load(toolchain_file)["toolchain"]["channel"])
+          PY
+          )"
+          rustup run "$dylint_toolchain" cargo test
+        working-directory: rsworkspace/dylints/trogon_lints
+
+      - name: Run repo Rust policy lints
+        run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
         working-directory: rsworkspace
 
       - name: Run clippy
@@ -65,15 +93,13 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: true
 
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
-        with:
-          components: llvm-tools-preview
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -84,9 +110,13 @@ jobs:
           cache-workspace-crates: true
 
       - name: Install coverage tools
-        uses: taiki-e/install-action@25435dc8dd3baed7417e0c96d3fe89013a5b2e09 # v2.81.3
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-llvm-cov,nextest
+
+      - name: Build decider components for sim fixtures
+        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
+        working-directory: rsworkspace
 
       - name: Run documentation tests
         run: cargo test --doc
@@ -101,7 +131,7 @@ jobs:
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
         # _xml_coverage_reports, but fork PR tokens cannot push to the base repo.
-        uses: insightsengineering/coverage-action@f3f8cdb7a8863fb60236982ac44b9ae63c768cd4 # v3.0.3
+        uses: insightsengineering/coverage-action@3179498004cf3a28cbd5b496ce580767888375b9 # v3.0.4
         with:
           path: rsworkspace/coverage.xml
           threshold: 95
@@ -121,7 +151,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -138,4 +168,50 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+        working-directory: rsworkspace
+
+  wasm-decider:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: rsworkspace -> target
+          save-if: always
+
+      - name: Build schedules decider component
+        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
+        working-directory: rsworkspace
+
+      - name: Assert zero imports and validate
+        run: |
+          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
+            wasm-tools component wit "$WASM" | tee /tmp/wit.txt
+            if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
+              echo "component declares imports: $WASM"
+              exit 1
+            fi
+            wasm-tools validate "$WASM"
+          done
+
+      - name: Run decider-test suites
+        run: |
+          cd rsworkspace
+          cargo test -p trogon-decider-sim --test schedules --features test-support
+          cargo test -p trogon-decider-guest-macros --test compile_fail
+          cargo build -p trogon-decider-test --release
+          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml
+
+      - name: Run wasm decider runtime tests
+        run: cargo test -p trogon-decider-wasm-runtime
         working-directory: rsworkspace

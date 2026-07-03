@@ -19,8 +19,9 @@ use futures::stream::{Iter, iter};
 use std::vec::IntoIter;
 use time::OffsetDateTime;
 use trogon_decider_runtime::{
-    AppendStreamRequest, AppendStreamResponse, Event, EventId, Headers, ReadFrom, ReadStreamRequest,
-    ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, Event, EventEncode, EventId, EventType, Headers, ReadFrom,
+    ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamEvent, StreamPosition, StreamRead,
+    StreamWritePrecondition,
 };
 use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamPublisher,
@@ -357,8 +358,6 @@ pub fn stream_event_with_headers(
     position: u64,
     headers: Headers,
 ) -> StreamEvent {
-    use trogon_decider_runtime::{EventEncode, EventType};
-
     let content = event.encode().expect("schedule event encodes");
     let r#type = event.event_type().expect("schedule event has a type").to_string();
     StreamEvent {
@@ -503,36 +502,4 @@ impl StreamAppend<str> for MemoryEventStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use futures::StreamExt;
-
-    use super::*;
-
-    #[test]
-    fn debug_fmt_is_non_exhaustive() {
-        let _ = format!("{:?}", InMemoryKv::new());
-        let _ = format!("{:?}", InMemoryExecution::new());
-    }
-
-    #[tokio::test]
-    async fn kv_get_create_update_and_keys_are_observable() {
-        let kv = InMemoryKv::new();
-        assert!(kv.get("missing".to_string()).await.unwrap().is_none());
-
-        kv.create("v1.orders", Bytes::from_static(b"{}")).await.unwrap();
-        assert_eq!(
-            kv.get("v1.orders".to_string()).await.unwrap(),
-            Some(Bytes::from_static(b"{}"))
-        );
-
-        let duplicate = kv.create("v1.orders", Bytes::from_static(b"x")).await;
-        assert_eq!(duplicate.unwrap_err().kind(), kv::CreateErrorKind::AlreadyExists);
-
-        kv.update("v1.orders", Bytes::from_static(b"v2"), 99).await.unwrap_err();
-        kv.update("v1.orders", Bytes::from_static(b"v2"), 1).await.unwrap();
-
-        let mut keys = kv.keys().await.unwrap();
-        assert_eq!(keys.next().await.transpose().unwrap(), Some("v1.orders".to_string()));
-        assert!(keys.next().await.is_none());
-    }
-}
+mod tests;
