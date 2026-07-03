@@ -6391,6 +6391,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-decider-wasm-runtime"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "buffa-types",
+ "chrono",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "trogon-decider-runtime",
+ "trogon-decider-wit",
+ "trogon-std",
+ "trogonai-proto",
+ "uuid",
+ "wasmtime",
+]
+
+[[package]]
 name = "trogon-decider-wit"
 version = "0.1.0"
 dependencies = [

@@ -39,6 +39,7 @@ trogon-decider-guest-macros = { path = "crates/trogon-decider-guest-macros" }
 trogon-decider-guest-sdk = { path = "crates/trogon-decider-guest-sdk" }
 trogon-decider-sim = { path = "crates/trogon-decider-sim" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
+trogon-decider-wasm-runtime = { path = "crates/trogon-decider-wasm-runtime" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
 trogon-semconv = { path = "crates/trogon-semconv" }
 trogon-service-config = { path = "crates/trogon-service-config" }

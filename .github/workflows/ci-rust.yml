@@ -209,3 +209,7 @@ jobs:
           cargo test -p trogon-decider-guest-macros --test compile_fail
           cargo build -p trogon-decider-test --release
           ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml
+
+      - name: Run wasm decider runtime tests
+        run: cargo test -p trogon-decider-wasm-runtime
+        working-directory: rsworkspace
