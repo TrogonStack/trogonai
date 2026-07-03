@@ -426,11 +426,23 @@ fn replay_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
         return Ok(());
     }
     store
-        .set_fuel(engine.config().fuel_per_call())
+        .set_fuel(replay_fuel(engine.config().fuel_per_call(), events.len()))
         .map_err(WasmCommandError::Trap)?;
     host::evolve(bindings, store, session, events)
         .map_err(WasmCommandError::Trap)?
         .map_err(|error| WasmCommandError::Evolve(error.into()))
+}
+
+/// Fuel budget for one batched replay `evolve` call.
+///
+/// The batch grows with stream length while `fuel_per_call` is fixed, so a
+/// flat budget would trap legitimate commands on long streams. Scaling
+/// linearly keeps fuel a per-event bound, which is the guarantee the sandbox
+/// actually needs.
+fn replay_fuel(fuel_per_call: u64, event_count: usize) -> u64 {
+    u64::try_from(event_count)
+        .map(|count| fuel_per_call.saturating_mul(count))
+        .unwrap_or(u64::MAX)
 }
 
 fn decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(

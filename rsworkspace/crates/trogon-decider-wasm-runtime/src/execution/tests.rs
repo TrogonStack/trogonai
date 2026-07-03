@@ -104,6 +104,18 @@ fn encode_events_assigns_host_ids_and_headers() {
 }
 
 #[test]
+fn replay_fuel_scales_linearly_with_event_count() {
+    assert_eq!(replay_fuel(10, 1), 10);
+    assert_eq!(replay_fuel(10, 250), 2_500);
+}
+
+#[test]
+fn replay_fuel_saturates_instead_of_overflowing() {
+    assert_eq!(replay_fuel(u64::MAX, 2), u64::MAX);
+    assert_eq!(replay_fuel(u64::MAX, usize::MAX), u64::MAX);
+}
+
+#[test]
 fn rejected_decide_errors_stay_rejections() {
     let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
         map_decide_error(DecideError::Rejected(host::DomainError {
