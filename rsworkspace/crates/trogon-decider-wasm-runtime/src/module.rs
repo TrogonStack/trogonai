@@ -40,10 +40,10 @@ pub enum LoadWasmDeciderError {
 /// A structurally invalid [`ModuleDescriptor`] reported by a guest component.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InvalidDescriptorError {
-    #[error("wasm component descriptor has an empty module name")]
-    EmptyName,
-    #[error("wasm component descriptor has an empty module version")]
-    EmptyVersion,
+    #[error("wasm component descriptor has an invalid module name")]
+    InvalidName(#[source] crate::ModuleNameError),
+    #[error("wasm component descriptor has an invalid module version")]
+    InvalidVersion(#[source] crate::ModuleVersionError),
     #[error("wasm component descriptor declares command type '{command_type}' more than once")]
     DuplicateCommandType { command_type: String },
 }
@@ -77,8 +77,8 @@ impl WasmDeciderModule {
             DeciderPre::new(instance_pre).map_err(|source| LoadWasmDeciderError::Instantiate { source })?;
 
         let descriptor = probe_descriptor(&engine, &decider_pre)?;
-        let name = ModuleName::new(&descriptor.name).map_err(|_| InvalidDescriptorError::EmptyName)?;
-        let version = ModuleVersion::new(&descriptor.version).map_err(|_| InvalidDescriptorError::EmptyVersion)?;
+        let name = ModuleName::new(&descriptor.name).map_err(InvalidDescriptorError::InvalidName)?;
+        let version = ModuleVersion::new(&descriptor.version).map_err(InvalidDescriptorError::InvalidVersion)?;
         ensure_unique_command_types(&descriptor)?;
 
         Ok(Self {

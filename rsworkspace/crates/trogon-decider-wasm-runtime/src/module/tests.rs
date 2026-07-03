@@ -62,3 +62,26 @@ fn unique_command_types_pass_validation() {
 
     assert!(ensure_unique_command_types(&descriptor).is_ok());
 }
+
+#[test]
+fn invalid_name_and_version_preserve_the_validation_source() {
+    let Err(name_error) = crate::ModuleName::new("") else {
+        panic!("empty module name must be invalid");
+    };
+    let error = InvalidDescriptorError::InvalidName(name_error);
+    assert_eq!(
+        error.to_string(),
+        "wasm component descriptor has an invalid module name"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+
+    let Err(version_error) = crate::ModuleVersion::new("") else {
+        panic!("empty module version must be invalid");
+    };
+    let error = InvalidDescriptorError::InvalidVersion(version_error);
+    assert_eq!(
+        error.to_string(),
+        "wasm component descriptor has an invalid module version"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}

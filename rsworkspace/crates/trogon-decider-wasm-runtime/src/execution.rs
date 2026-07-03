@@ -224,7 +224,8 @@ where
         let session = create_session(&mut store, &bindings, engine, None)?;
         replay_events(&mut store, &bindings, engine, session, &replayed_envelopes)?;
         let decided_envelopes = decide(&mut store, &bindings, engine, session, self.command)?;
-        fold_decided_events(&mut store, &bindings, engine, session, &decided_envelopes)?;
+        // No snapshot observes this session, so the decided events are not
+        // folded back into it; folding here would only burn guest fuel.
         host::drop_session(&bindings, &mut store, session).map_err(WasmCommandError::Trap)?;
 
         let precondition = resolve_write_precondition(write_precondition, self.write_precondition, current_position);

@@ -58,7 +58,9 @@ mod test_fixture;
 
 pub use command_type::{CommandType, CommandTypeError};
 pub use domain_error_detail::DomainErrorDetail;
-pub use engine::{DEFAULT_FUEL_PER_CALL, DEFAULT_MAX_MEMORY_BYTES, WasmDeciderEngine, WasmEngineConfig};
+pub use engine::{
+    DEFAULT_FUEL_PER_CALL, DEFAULT_MAX_MEMORY_BYTES, WasmDeciderEngine, WasmEngineConfig, WasmEngineError,
+};
 pub use execution::{
     WasmCommandError, WasmCommandExecution, WasmExecutionResult, WithSnapshotStore, WithoutSnapshotStore,
 };

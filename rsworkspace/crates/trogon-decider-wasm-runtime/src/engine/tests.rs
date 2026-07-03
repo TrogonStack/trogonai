@@ -21,3 +21,11 @@ fn new_builds_a_component_model_engine() {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default());
     assert!(engine.is_ok());
 }
+
+#[test]
+fn engine_error_preserves_the_wasmtime_source() {
+    let error = WasmEngineError(wasmtime::Error::msg("boom"));
+    assert_eq!(error.to_string(), "failed to configure wasmtime engine");
+    let source = std::error::Error::source(&error).expect("source is preserved");
+    assert_eq!(source.to_string(), "boom");
+}

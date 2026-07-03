@@ -77,13 +77,18 @@ pub struct WasmDeciderEngine {
     config: WasmEngineConfig,
 }
 
+/// Failure building the shared wasmtime engine.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to configure wasmtime engine")]
+pub struct WasmEngineError(#[source] wasmtime::Error);
+
 impl WasmDeciderEngine {
     /// Builds a new engine with the given resource limits.
-    pub fn new(config: WasmEngineConfig) -> Result<Self, wasmtime::Error> {
+    pub fn new(config: WasmEngineConfig) -> Result<Self, WasmEngineError> {
         let mut wasmtime_config = wasmtime::Config::new();
         wasmtime_config.wasm_component_model(true);
         wasmtime_config.consume_fuel(true);
-        let engine = Engine::new(&wasmtime_config)?;
+        let engine = Engine::new(&wasmtime_config).map_err(WasmEngineError)?;
         Ok(Self { engine, config })
     }
 
