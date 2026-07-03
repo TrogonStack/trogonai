@@ -8,237 +8,222 @@ pub struct ScheduleView<'a> {
         super::super::__buffa::view::oneof::schedule::Kind<'a>,
     >,
 }
-impl<'a> ScheduleView<'a> {
-    /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
-    ///
-    /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
-    /// and by generated sub-message decode arms with `depth - 1`.
-    ///
-    /// **Not part of the public API.** Named with a leading underscore to
-    /// signal that it is for generated-code use only.
-    #[doc(hidden)]
-    pub fn _decode_depth(
-        buf: &'a [u8],
-        depth: u32,
-    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        let mut view = Self::default();
-        view._merge_into_view(buf, depth)?;
-        ::core::result::Result::Ok(view)
-    }
-    /// Merge fields from `buf` into this view (proto merge semantics).
-    ///
-    /// Repeated fields append; singular fields last-wins; singular
-    /// MESSAGE fields merge recursively. Used by sub-message decode
-    /// arms when the same field appears multiple times on the wire.
-    ///
-    /// **Not part of the public API.**
-    #[doc(hidden)]
-    pub fn _merge_into_view(
-        &mut self,
-        buf: &'a [u8],
-        depth: u32,
-    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-        let _ = depth;
-        #[allow(unused_variables)]
-        let view = self;
-        let mut cur: &'a [u8] = buf;
-        while !cur.is_empty() {
-            let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
-            match tag.field_number() {
-                1u32 => {
-                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                            field_number: 1u32,
-                            expected: 2u8,
-                            actual: tag.wire_type() as u8,
-                        });
-                    }
-                    if depth == 0 {
-                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                    }
-                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                    if let Some(
-                        super::super::__buffa::view::oneof::schedule::Kind::At(
-                            ref mut existing,
-                        ),
-                    ) = view.kind
-                    {
-                        existing._merge_into_view(sub, depth - 1)?;
-                    } else {
-                        view.kind = Some(
-                            super::super::__buffa::view::oneof::schedule::Kind::At(
-                                ::buffa::alloc::boxed::Box::new(
-                                    super::super::__buffa::view::schedule::AtView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                2u32 => {
-                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                            field_number: 2u32,
-                            expected: 2u8,
-                            actual: tag.wire_type() as u8,
-                        });
-                    }
-                    if depth == 0 {
-                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                    }
-                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                    if let Some(
-                        super::super::__buffa::view::oneof::schedule::Kind::Every(
-                            ref mut existing,
-                        ),
-                    ) = view.kind
-                    {
-                        existing._merge_into_view(sub, depth - 1)?;
-                    } else {
-                        view.kind = Some(
-                            super::super::__buffa::view::oneof::schedule::Kind::Every(
-                                ::buffa::alloc::boxed::Box::new(
-                                    super::super::__buffa::view::schedule::EveryView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                3u32 => {
-                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                            field_number: 3u32,
-                            expected: 2u8,
-                            actual: tag.wire_type() as u8,
-                        });
-                    }
-                    if depth == 0 {
-                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                    }
-                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                    if let Some(
-                        super::super::__buffa::view::oneof::schedule::Kind::Cron(
-                            ref mut existing,
-                        ),
-                    ) = view.kind
-                    {
-                        existing._merge_into_view(sub, depth - 1)?;
-                    } else {
-                        view.kind = Some(
-                            super::super::__buffa::view::oneof::schedule::Kind::Cron(
-                                ::buffa::alloc::boxed::Box::new(
-                                    super::super::__buffa::view::schedule::CronView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                4u32 => {
-                    if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                        return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                            field_number: 4u32,
-                            expected: 2u8,
-                            actual: tag.wire_type() as u8,
-                        });
-                    }
-                    if depth == 0 {
-                        return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                    }
-                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                    if let Some(
-                        super::super::__buffa::view::oneof::schedule::Kind::Rrule(
-                            ref mut existing,
-                        ),
-                    ) = view.kind
-                    {
-                        existing._merge_into_view(sub, depth - 1)?;
-                    } else {
-                        view.kind = Some(
-                            super::super::__buffa::view::oneof::schedule::Kind::Rrule(
-                                ::buffa::alloc::boxed::Box::new(
-                                    super::super::__buffa::view::schedule::RRuleView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                _ => {
-                    ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
-                }
-            }
-        }
-        ::core::result::Result::Ok(())
-    }
-}
 impl<'a> ::buffa::MessageView<'a> for ScheduleView<'a> {
     type Owned = super::super::Schedule;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
     }
-    fn decode_view_with_limit(
+    fn decode_view_with_ctx(
         buf: &'a [u8],
-        depth: u32,
+        ctx: ::buffa::DecodeContext<'_>,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-        Self::_decode_depth(buf, depth)
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
-    fn to_owned_message(&self) -> super::super::Schedule {
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::schedule::Kind::At(
+                        ref mut existing,
+                    ),
+                ) = view.kind
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.kind = Some(
+                        super::super::__buffa::view::oneof::schedule::Kind::At(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::schedule::AtView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::schedule::Kind::Every(
+                        ref mut existing,
+                    ),
+                ) = view.kind
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.kind = Some(
+                        super::super::__buffa::view::oneof::schedule::Kind::Every(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::schedule::EveryView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::schedule::Kind::Cron(
+                        ref mut existing,
+                    ),
+                ) = view.kind
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.kind = Some(
+                        super::super::__buffa::view::oneof::schedule::Kind::Cron(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::schedule::CronView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::schedule::Kind::Rrule(
+                        ref mut existing,
+                    ),
+                ) = view.kind
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.kind = Some(
+                        super::super::__buffa::view::oneof::schedule::Kind::Rrule(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::schedule::RRuleView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::Schedule, ::buffa::DecodeError> {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
     fn to_owned_from_source(
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-    ) -> super::super::Schedule {
+    ) -> ::core::result::Result<super::super::Schedule, ::buffa::DecodeError> {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        super::super::Schedule {
-            kind: self
-                .kind
-                .as_ref()
-                .map(|v| match v {
-                    super::super::__buffa::view::oneof::schedule::Kind::At(v) => {
-                        super::super::__buffa::oneof::schedule::Kind::At(
-                            ::buffa::alloc::boxed::Box::new(
-                                v.to_owned_from_source(__buffa_src),
-                            ),
-                        )
-                    }
-                    super::super::__buffa::view::oneof::schedule::Kind::Every(v) => {
-                        super::super::__buffa::oneof::schedule::Kind::Every(
-                            ::buffa::alloc::boxed::Box::new(
-                                v.to_owned_from_source(__buffa_src),
-                            ),
-                        )
-                    }
-                    super::super::__buffa::view::oneof::schedule::Kind::Cron(v) => {
-                        super::super::__buffa::oneof::schedule::Kind::Cron(
-                            ::buffa::alloc::boxed::Box::new(
-                                v.to_owned_from_source(__buffa_src),
-                            ),
-                        )
-                    }
-                    super::super::__buffa::view::oneof::schedule::Kind::Rrule(v) => {
-                        super::super::__buffa::oneof::schedule::Kind::Rrule(
-                            ::buffa::alloc::boxed::Box::new(
-                                v.to_owned_from_source(__buffa_src),
-                            ),
-                        )
-                    }
-                }),
+        ::core::result::Result::Ok(super::super::Schedule {
+            kind: match self.kind.as_ref() {
+                ::core::option::Option::Some(v) => {
+                    ::core::option::Option::Some(
+                        match v {
+                            super::super::__buffa::view::oneof::schedule::Kind::At(v) => {
+                                super::super::__buffa::oneof::schedule::Kind::At(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::schedule::Kind::Every(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::schedule::Kind::Every(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::schedule::Kind::Cron(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::schedule::Kind::Cron(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::schedule::Kind::Rrule(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::schedule::Kind::Rrule(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                }
+                ::core::option::Option::None => ::core::option::Option::None,
+            },
             ..::core::default::Default::default()
-        }
+        })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
@@ -296,39 +281,35 @@ impl<'a> ::buffa::ViewEncode<'a> for ScheduleView<'a> {
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 super::super::__buffa::view::oneof::schedule::Kind::At(x) => {
-                    ::buffa::encoding::Tag::new(
-                            1u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        1u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Every(x) => {
-                    ::buffa::encoding::Tag::new(
-                            2u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        2u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Cron(x) => {
-                    ::buffa::encoding::Tag::new(
-                            3u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        3u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
                 super::super::__buffa::view::oneof::schedule::Kind::Rrule(x) => {
-                    ::buffa::encoding::Tag::new(
-                            4u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        4u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
             }
@@ -378,24 +359,8 @@ impl<'a> ::buffa::MessageName for ScheduleView<'a> {
     const FULL_NAME: &'static str = "trogonai.scheduler.schedules.checkpoints.v1.Schedule";
     const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.checkpoints.v1.Schedule";
 }
-impl<'v> ::buffa::DefaultViewInstance for ScheduleView<'v> {
-    fn default_view_instance<'a>() -> &'a Self
-    where
-        Self: 'a,
-    {
-        static VALUE: ::buffa::__private::OnceBox<ScheduleView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE
-            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                <ScheduleView<'static>>::default(),
-            ))
-    }
-}
-impl ::buffa::ViewReborrow for ScheduleView<'static> {
-    type Reborrowed<'b> = ScheduleView<'b>;
-    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
-        this
-    }
-}
+::buffa::impl_default_view_instance!(ScheduleView);
+::buffa::impl_view_reborrow!(ScheduleView);
 /** Self-contained, `'static` owned view of a `Schedule` message.
 
  Wraps [`::buffa::OwnedView`]`<`[`ScheduleView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
@@ -452,8 +417,14 @@ impl ScheduleOwnedView {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
-    #[must_use]
-    pub fn to_owned_message(&self) -> super::super::Schedule {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::Schedule, ::buffa::DecodeError> {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -517,74 +488,13 @@ pub mod schedule {
         >,
     }
     impl<'a> AtView<'a> {
-        /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
-        ///
-        /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
-        /// and by generated sub-message decode arms with `depth - 1`.
-        ///
-        /// **Not part of the public API.** Named with a leading underscore to
-        /// signal that it is for generated-code use only.
-        #[doc(hidden)]
-        pub fn _decode_depth(
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            let mut view = Self::default();
-            view._merge_into_view(buf, depth)?;
-            ::core::result::Result::Ok(view)
-        }
-        /// Merge fields from `buf` into this view (proto merge semantics).
-        ///
-        /// Repeated fields append; singular fields last-wins; singular
-        /// MESSAGE fields merge recursively. Used by sub-message decode
-        /// arms when the same field appears multiple times on the wire.
-        ///
-        /// **Not part of the public API.**
-        #[doc(hidden)]
-        pub fn _merge_into_view(
-            &mut self,
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-            let _ = depth;
-            #[allow(unused_variables)]
-            let view = self;
-            let mut cur: &'a [u8] = buf;
-            while !cur.is_empty() {
-                let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
-                match tag.field_number() {
-                    1u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 1u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        match view.at.as_mut() {
-                            Some(existing) => existing._merge_into_view(sub, depth - 1)?,
-                            None => {
-                                view.at = ::buffa::MessageFieldView::set(
-                                    ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
-                    }
-                }
-            }
-            ::core::result::Result::Ok(())
+        /**Whether required field `at` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_at(&self) -> bool {
+            self.at.is_set()
         }
     }
     impl<'a> ::buffa::MessageView<'a> for AtView<'a> {
@@ -592,36 +502,91 @@ pub mod schedule {
         fn decode_view(
             buf: &'a [u8],
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+            let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+            <Self as ::buffa::MessageView>::decode_view_ctx(
+                buf,
+                ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            )
         }
-        fn decode_view_with_limit(
+        fn decode_view_with_ctx(
             buf: &'a [u8],
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, depth)
+            <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
-        fn to_owned_message(&self) -> super::super::super::schedule::At {
+        fn merge_view_field(
+            &mut self,
+            tag: ::buffa::encoding::Tag,
+            cur: &'a [u8],
+            _before_tag: &'a [u8],
+            ctx: ::buffa::DecodeContext<'_>,
+        ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+            let _ = ctx;
+            #[allow(unused_variables)]
+            let view = self;
+            let mut cur = cur;
+            match tag.field_number() {
+                1u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.at.as_mut() {
+                        Some(existing) => {
+                            ::buffa::MessageView::merge_into_view(
+                                existing,
+                                sub,
+                                __sub_ctx,
+                            )?
+                        }
+                        None => {
+                            view.at = ::buffa::MessageFieldView::set(
+                                <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+                }
+            }
+            ::core::result::Result::Ok(cur)
+        }
+        fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::At,
+            ::buffa::DecodeError,
+        > {
             self.to_owned_from_source(None)
         }
         #[allow(clippy::useless_conversion, clippy::needless_update)]
         fn to_owned_from_source(
             &self,
             __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-        ) -> super::super::super::schedule::At {
+        ) -> ::core::result::Result<
+            super::super::super::schedule::At,
+            ::buffa::DecodeError,
+        > {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
             let _ = __buffa_src;
-            super::super::super::schedule::At {
+            ::core::result::Result::Ok(super::super::super::schedule::At {
                 at: match self.at.as_option() {
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Timestamp,
-                        >::some(v.to_owned_from_source(__buffa_src))
+                        >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
                 },
                 ..::core::default::Default::default()
-            }
+            })
         }
     }
     impl<'a> ::buffa::ViewEncode<'a> for AtView<'a> {
@@ -649,12 +614,11 @@ pub mod schedule {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.at.is_set() {
-                ::buffa::encoding::Tag::new(
-                        1u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    1u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 self.at.write_to(__cache, buf);
             }
         }
@@ -691,24 +655,8 @@ pub mod schedule {
         const FULL_NAME: &'static str = "trogonai.scheduler.schedules.checkpoints.v1.Schedule.At";
         const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.checkpoints.v1.Schedule.At";
     }
-    impl<'v> ::buffa::DefaultViewInstance for AtView<'v> {
-        fn default_view_instance<'a>() -> &'a Self
-        where
-            Self: 'a,
-        {
-            static VALUE: ::buffa::__private::OnceBox<AtView<'static>> = ::buffa::__private::OnceBox::new();
-            VALUE
-                .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                    <AtView<'static>>::default(),
-                ))
-        }
-    }
-    impl ::buffa::ViewReborrow for AtView<'static> {
-        type Reborrowed<'b> = AtView<'b>;
-        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
-            this
-        }
-    }
+    ::buffa::impl_default_view_instance!(AtView);
+    ::buffa::impl_view_reborrow!(AtView);
     /** Self-contained, `'static` owned view of a `At` message.
 
  Wraps [`::buffa::OwnedView`]`<`[`AtView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
@@ -763,8 +711,17 @@ pub mod schedule {
             self.0.reborrow()
         }
         /// Convert to the owned message type.
-        #[must_use]
-        pub fn to_owned_message(&self) -> super::super::super::schedule::At {
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if re-materializing preserved unknown fields
+        /// fails (e.g. the unknown-field limit is exceeded).
+        pub fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::At,
+            ::buffa::DecodeError,
+        > {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -822,74 +779,13 @@ pub mod schedule {
         >,
     }
     impl<'a> EveryView<'a> {
-        /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
-        ///
-        /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
-        /// and by generated sub-message decode arms with `depth - 1`.
-        ///
-        /// **Not part of the public API.** Named with a leading underscore to
-        /// signal that it is for generated-code use only.
-        #[doc(hidden)]
-        pub fn _decode_depth(
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            let mut view = Self::default();
-            view._merge_into_view(buf, depth)?;
-            ::core::result::Result::Ok(view)
-        }
-        /// Merge fields from `buf` into this view (proto merge semantics).
-        ///
-        /// Repeated fields append; singular fields last-wins; singular
-        /// MESSAGE fields merge recursively. Used by sub-message decode
-        /// arms when the same field appears multiple times on the wire.
-        ///
-        /// **Not part of the public API.**
-        #[doc(hidden)]
-        pub fn _merge_into_view(
-            &mut self,
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-            let _ = depth;
-            #[allow(unused_variables)]
-            let view = self;
-            let mut cur: &'a [u8] = buf;
-            while !cur.is_empty() {
-                let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
-                match tag.field_number() {
-                    1u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 1u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        match view.every.as_mut() {
-                            Some(existing) => existing._merge_into_view(sub, depth - 1)?,
-                            None => {
-                                view.every = ::buffa::MessageFieldView::set(
-                                    ::buffa_types::google::protobuf::__buffa::view::DurationView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
-                    }
-                }
-            }
-            ::core::result::Result::Ok(())
+        /**Whether required field `every` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_every(&self) -> bool {
+            self.every.is_set()
         }
     }
     impl<'a> ::buffa::MessageView<'a> for EveryView<'a> {
@@ -897,36 +793,91 @@ pub mod schedule {
         fn decode_view(
             buf: &'a [u8],
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+            let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+            <Self as ::buffa::MessageView>::decode_view_ctx(
+                buf,
+                ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            )
         }
-        fn decode_view_with_limit(
+        fn decode_view_with_ctx(
             buf: &'a [u8],
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, depth)
+            <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
-        fn to_owned_message(&self) -> super::super::super::schedule::Every {
+        fn merge_view_field(
+            &mut self,
+            tag: ::buffa::encoding::Tag,
+            cur: &'a [u8],
+            _before_tag: &'a [u8],
+            ctx: ::buffa::DecodeContext<'_>,
+        ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+            let _ = ctx;
+            #[allow(unused_variables)]
+            let view = self;
+            let mut cur = cur;
+            match tag.field_number() {
+                1u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.every.as_mut() {
+                        Some(existing) => {
+                            ::buffa::MessageView::merge_into_view(
+                                existing,
+                                sub,
+                                __sub_ctx,
+                            )?
+                        }
+                        None => {
+                            view.every = ::buffa::MessageFieldView::set(
+                                <::buffa_types::google::protobuf::__buffa::view::DurationView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+                }
+            }
+            ::core::result::Result::Ok(cur)
+        }
+        fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Every,
+            ::buffa::DecodeError,
+        > {
             self.to_owned_from_source(None)
         }
         #[allow(clippy::useless_conversion, clippy::needless_update)]
         fn to_owned_from_source(
             &self,
             __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-        ) -> super::super::super::schedule::Every {
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Every,
+            ::buffa::DecodeError,
+        > {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
             let _ = __buffa_src;
-            super::super::super::schedule::Every {
+            ::core::result::Result::Ok(super::super::super::schedule::Every {
                 every: match self.every.as_option() {
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Duration,
-                        >::some(v.to_owned_from_source(__buffa_src))
+                        >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
                 },
                 ..::core::default::Default::default()
-            }
+            })
         }
     }
     impl<'a> ::buffa::ViewEncode<'a> for EveryView<'a> {
@@ -954,12 +905,11 @@ pub mod schedule {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.every.is_set() {
-                ::buffa::encoding::Tag::new(
-                        1u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    1u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 self.every.write_to(__cache, buf);
             }
         }
@@ -996,24 +946,8 @@ pub mod schedule {
         const FULL_NAME: &'static str = "trogonai.scheduler.schedules.checkpoints.v1.Schedule.Every";
         const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.checkpoints.v1.Schedule.Every";
     }
-    impl<'v> ::buffa::DefaultViewInstance for EveryView<'v> {
-        fn default_view_instance<'a>() -> &'a Self
-        where
-            Self: 'a,
-        {
-            static VALUE: ::buffa::__private::OnceBox<EveryView<'static>> = ::buffa::__private::OnceBox::new();
-            VALUE
-                .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                    <EveryView<'static>>::default(),
-                ))
-        }
-    }
-    impl ::buffa::ViewReborrow for EveryView<'static> {
-        type Reborrowed<'b> = EveryView<'b>;
-        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
-            this
-        }
-    }
+    ::buffa::impl_default_view_instance!(EveryView);
+    ::buffa::impl_view_reborrow!(EveryView);
     /** Self-contained, `'static` owned view of a `Every` message.
 
  Wraps [`::buffa::OwnedView`]`<`[`EveryView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
@@ -1072,8 +1006,17 @@ pub mod schedule {
             self.0.reborrow()
         }
         /// Convert to the owned message type.
-        #[must_use]
-        pub fn to_owned_message(&self) -> super::super::super::schedule::Every {
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if re-materializing preserved unknown fields
+        /// fails (e.g. the unknown-field limit is exceeded).
+        pub fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Every,
+            ::buffa::DecodeError,
+        > {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -1136,88 +1079,25 @@ pub mod schedule {
                 'a,
             >,
         >,
+        #[doc(hidden)]
+        pub __buffa_required_seen_0: u64,
     }
     impl<'a> CronView<'a> {
-        /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
-        ///
-        /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
-        /// and by generated sub-message decode arms with `depth - 1`.
-        ///
-        /// **Not part of the public API.** Named with a leading underscore to
-        /// signal that it is for generated-code use only.
-        #[doc(hidden)]
-        pub fn _decode_depth(
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            let mut view = Self::default();
-            view._merge_into_view(buf, depth)?;
-            ::core::result::Result::Ok(view)
+        /**Whether required field `expr` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_expr(&self) -> bool {
+            self.__buffa_required_seen_0 & 1u64 != 0
         }
-        /// Merge fields from `buf` into this view (proto merge semantics).
-        ///
-        /// Repeated fields append; singular fields last-wins; singular
-        /// MESSAGE fields merge recursively. Used by sub-message decode
-        /// arms when the same field appears multiple times on the wire.
-        ///
-        /// **Not part of the public API.**
-        #[doc(hidden)]
-        pub fn _merge_into_view(
-            &mut self,
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-            let _ = depth;
-            #[allow(unused_variables)]
-            let view = self;
-            let mut cur: &'a [u8] = buf;
-            while !cur.is_empty() {
-                let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
-                match tag.field_number() {
-                    1u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 1u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        view.expr = ::buffa::types::borrow_str(&mut cur)?;
-                    }
-                    2u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 2u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        match view.timezone.as_mut() {
-                            Some(existing) => existing._merge_into_view(sub, depth - 1)?,
-                            None => {
-                                view.timezone = ::buffa::MessageFieldView::set(
-                                    super::super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
-                    }
-                }
-            }
-            ::core::result::Result::Ok(())
+        /**Whether required field `timezone` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_timezone(&self) -> bool {
+            self.timezone.is_set()
         }
     }
     impl<'a> ::buffa::MessageView<'a> for CronView<'a> {
@@ -1225,37 +1105,100 @@ pub mod schedule {
         fn decode_view(
             buf: &'a [u8],
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+            let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+            <Self as ::buffa::MessageView>::decode_view_ctx(
+                buf,
+                ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            )
         }
-        fn decode_view_with_limit(
+        fn decode_view_with_ctx(
             buf: &'a [u8],
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, depth)
+            <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
-        fn to_owned_message(&self) -> super::super::super::schedule::Cron {
+        fn merge_view_field(
+            &mut self,
+            tag: ::buffa::encoding::Tag,
+            cur: &'a [u8],
+            _before_tag: &'a [u8],
+            ctx: ::buffa::DecodeContext<'_>,
+        ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+            let _ = ctx;
+            #[allow(unused_variables)]
+            let view = self;
+            let mut cur = cur;
+            match tag.field_number() {
+                1u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    view.expr = ::buffa::types::borrow_str(&mut cur)?;
+                    view.__buffa_required_seen_0 |= 1u64;
+                }
+                2u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.timezone.as_mut() {
+                        Some(existing) => {
+                            ::buffa::MessageView::merge_into_view(
+                                existing,
+                                sub,
+                                __sub_ctx,
+                            )?
+                        }
+                        None => {
+                            view.timezone = ::buffa::MessageFieldView::set(
+                                <super::super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+                }
+            }
+            ::core::result::Result::Ok(cur)
+        }
+        fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Cron,
+            ::buffa::DecodeError,
+        > {
             self.to_owned_from_source(None)
         }
         #[allow(clippy::useless_conversion, clippy::needless_update)]
         fn to_owned_from_source(
             &self,
             __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-        ) -> super::super::super::schedule::Cron {
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Cron,
+            ::buffa::DecodeError,
+        > {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
             let _ = __buffa_src;
-            super::super::super::schedule::Cron {
+            ::core::result::Result::Ok(super::super::super::schedule::Cron {
                 expr: self.expr.to_string(),
                 timezone: match self.timezone.as_option() {
                     Some(v) => {
                         ::buffa::MessageField::<
                             super::super::super::super::super::super::super::super::google::r#type::TimeZone,
-                        >::some(v.to_owned_from_source(__buffa_src))
+                        >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
                 },
                 ..::core::default::Default::default()
-            }
+            })
         }
     }
     impl<'a> ::buffa::ViewEncode<'a> for CronView<'a> {
@@ -1283,19 +1226,13 @@ pub mod schedule {
         ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
-            ::buffa::encoding::Tag::new(
-                    1u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(&self.expr, buf);
+            ::buffa::types::put_string_field(1u32, &self.expr, buf);
             if self.timezone.is_set() {
-                ::buffa::encoding::Tag::new(
-                        2u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    2u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 self.timezone.write_to(__cache, buf);
             }
         }
@@ -1335,24 +1272,8 @@ pub mod schedule {
         const FULL_NAME: &'static str = "trogonai.scheduler.schedules.checkpoints.v1.Schedule.Cron";
         const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.checkpoints.v1.Schedule.Cron";
     }
-    impl<'v> ::buffa::DefaultViewInstance for CronView<'v> {
-        fn default_view_instance<'a>() -> &'a Self
-        where
-            Self: 'a,
-        {
-            static VALUE: ::buffa::__private::OnceBox<CronView<'static>> = ::buffa::__private::OnceBox::new();
-            VALUE
-                .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                    <CronView<'static>>::default(),
-                ))
-        }
-    }
-    impl ::buffa::ViewReborrow for CronView<'static> {
-        type Reborrowed<'b> = CronView<'b>;
-        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
-            this
-        }
-    }
+    ::buffa::impl_default_view_instance!(CronView);
+    ::buffa::impl_view_reborrow!(CronView);
     /** Self-contained, `'static` owned view of a `Cron` message.
 
  Wraps [`::buffa::OwnedView`]`<`[`CronView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
@@ -1409,8 +1330,17 @@ pub mod schedule {
             self.0.reborrow()
         }
         /// Convert to the owned message type.
-        #[must_use]
-        pub fn to_owned_message(&self) -> super::super::super::schedule::Cron {
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if re-materializing preserved unknown fields
+        /// fails (e.g. the unknown-field limit is exceeded).
+        pub fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::Cron,
+            ::buffa::DecodeError,
+        > {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.
@@ -1492,158 +1422,33 @@ pub mod schedule {
             'a,
             ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
         >,
+        #[doc(hidden)]
+        pub __buffa_required_seen_0: u64,
     }
     impl<'a> RRuleView<'a> {
-        /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
-        ///
-        /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
-        /// and by generated sub-message decode arms with `depth - 1`.
-        ///
-        /// **Not part of the public API.** Named with a leading underscore to
-        /// signal that it is for generated-code use only.
-        #[doc(hidden)]
-        pub fn _decode_depth(
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            let mut view = Self::default();
-            view._merge_into_view(buf, depth)?;
-            ::core::result::Result::Ok(view)
+        /**Whether required field `dtstart` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_dtstart(&self) -> bool {
+            self.dtstart.is_set()
         }
-        /// Merge fields from `buf` into this view (proto merge semantics).
-        ///
-        /// Repeated fields append; singular fields last-wins; singular
-        /// MESSAGE fields merge recursively. Used by sub-message decode
-        /// arms when the same field appears multiple times on the wire.
-        ///
-        /// **Not part of the public API.**
-        #[doc(hidden)]
-        pub fn _merge_into_view(
-            &mut self,
-            buf: &'a [u8],
-            depth: u32,
-        ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-            let _ = depth;
-            #[allow(unused_variables)]
-            let view = self;
-            let mut cur: &'a [u8] = buf;
-            while !cur.is_empty() {
-                let tag = ::buffa::encoding::Tag::decode(&mut cur)?;
-                match tag.field_number() {
-                    1u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 1u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        match view.dtstart.as_mut() {
-                            Some(existing) => existing._merge_into_view(sub, depth - 1)?,
-                            None => {
-                                view.dtstart = ::buffa::MessageFieldView::set(
-                                    ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                );
-                            }
-                        }
-                    }
-                    2u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 2u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        view.rrule = ::buffa::types::borrow_str(&mut cur)?;
-                    }
-                    3u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 3u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        match view.timezone.as_mut() {
-                            Some(existing) => existing._merge_into_view(sub, depth - 1)?,
-                            None => {
-                                view.timezone = ::buffa::MessageFieldView::set(
-                                    super::super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView::_decode_depth(
-                                        sub,
-                                        depth - 1,
-                                    )?,
-                                );
-                            }
-                        }
-                    }
-                    4u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 4u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        view.rdate
-                            .push(
-                                ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
-                                    sub,
-                                    depth - 1,
-                                )?,
-                            );
-                    }
-                    5u32 => {
-                        if tag.wire_type()
-                            != ::buffa::encoding::WireType::LengthDelimited
-                        {
-                            return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                                field_number: 5u32,
-                                expected: 2u8,
-                                actual: tag.wire_type() as u8,
-                            });
-                        }
-                        if depth == 0 {
-                            return Err(::buffa::DecodeError::RecursionLimitExceeded);
-                        }
-                        let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                        view.exdate
-                            .push(
-                                ::buffa_types::google::protobuf::__buffa::view::TimestampView::_decode_depth(
-                                    sub,
-                                    depth - 1,
-                                )?,
-                            );
-                    }
-                    _ => {
-                        ::buffa::encoding::skip_field_depth(tag, &mut cur, depth)?;
-                    }
-                }
-            }
-            ::core::result::Result::Ok(())
+        /**Whether required field `rrule` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_rrule(&self) -> bool {
+            self.__buffa_required_seen_0 & 1u64 != 0
+        }
+        /**Whether required field `timezone` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+        #[must_use]
+        #[inline]
+        pub const fn has_timezone(&self) -> bool {
+            self.timezone.is_set()
         }
     }
     impl<'a> ::buffa::MessageView<'a> for RRuleView<'a> {
@@ -1651,31 +1456,149 @@ pub mod schedule {
         fn decode_view(
             buf: &'a [u8],
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
+            let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+            <Self as ::buffa::MessageView>::decode_view_ctx(
+                buf,
+                ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            )
         }
-        fn decode_view_with_limit(
+        fn decode_view_with_ctx(
             buf: &'a [u8],
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
-            Self::_decode_depth(buf, depth)
+            <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
         }
-        fn to_owned_message(&self) -> super::super::super::schedule::RRule {
+        fn merge_view_field(
+            &mut self,
+            tag: ::buffa::encoding::Tag,
+            cur: &'a [u8],
+            _before_tag: &'a [u8],
+            ctx: ::buffa::DecodeContext<'_>,
+        ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+            let _ = ctx;
+            #[allow(unused_variables)]
+            let view = self;
+            let mut cur = cur;
+            match tag.field_number() {
+                1u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.dtstart.as_mut() {
+                        Some(existing) => {
+                            ::buffa::MessageView::merge_into_view(
+                                existing,
+                                sub,
+                                __sub_ctx,
+                            )?
+                        }
+                        None => {
+                            view.dtstart = ::buffa::MessageFieldView::set(
+                                <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                2u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    view.rrule = ::buffa::types::borrow_str(&mut cur)?;
+                    view.__buffa_required_seen_0 |= 1u64;
+                }
+                3u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    match view.timezone.as_mut() {
+                        Some(existing) => {
+                            ::buffa::MessageView::merge_into_view(
+                                existing,
+                                sub,
+                                __sub_ctx,
+                            )?
+                        }
+                        None => {
+                            view.timezone = ::buffa::MessageFieldView::set(
+                                <super::super::super::super::super::super::super::super::google::r#type::__buffa::view::TimeZoneView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            );
+                        }
+                    }
+                }
+                4u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    view.rdate
+                        .push(
+                            <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                }
+                5u32 => {
+                    ::buffa::encoding::check_wire_type(
+                        tag,
+                        ::buffa::encoding::WireType::LengthDelimited,
+                    )?;
+                    let __sub_ctx = ctx.descend()?;
+                    let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                    view.exdate
+                        .push(
+                            <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                }
+                _ => {
+                    ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+                }
+            }
+            ::core::result::Result::Ok(cur)
+        }
+        fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::RRule,
+            ::buffa::DecodeError,
+        > {
             self.to_owned_from_source(None)
         }
         #[allow(clippy::useless_conversion, clippy::needless_update)]
         fn to_owned_from_source(
             &self,
             __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-        ) -> super::super::super::schedule::RRule {
+        ) -> ::core::result::Result<
+            super::super::super::schedule::RRule,
+            ::buffa::DecodeError,
+        > {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
             let _ = __buffa_src;
-            super::super::super::schedule::RRule {
+            ::core::result::Result::Ok(super::super::super::schedule::RRule {
                 dtstart: match self.dtstart.as_option() {
                     Some(v) => {
                         ::buffa::MessageField::<
                             ::buffa_types::google::protobuf::Timestamp,
-                        >::some(v.to_owned_from_source(__buffa_src))
+                        >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
                 },
@@ -1684,7 +1607,7 @@ pub mod schedule {
                     Some(v) => {
                         ::buffa::MessageField::<
                             super::super::super::super::super::super::super::super::google::r#type::TimeZone,
-                        >::some(v.to_owned_from_source(__buffa_src))
+                        >::some(v.to_owned_from_source(__buffa_src)?)
                     }
                     None => ::buffa::MessageField::none(),
                 },
@@ -1692,14 +1615,14 @@ pub mod schedule {
                     .rdate
                     .iter()
                     .map(|v| v.to_owned_from_source(__buffa_src))
-                    .collect(),
+                    .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
                 exdate: self
                     .exdate
                     .iter()
                     .map(|v| v.to_owned_from_source(__buffa_src))
-                    .collect(),
+                    .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
                 ..::core::default::Default::default()
-            }
+            })
         }
     }
     impl<'a> ::buffa::ViewEncode<'a> for RRuleView<'a> {
@@ -1752,45 +1675,36 @@ pub mod schedule {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.dtstart.is_set() {
-                ::buffa::encoding::Tag::new(
-                        1u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    1u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 self.dtstart.write_to(__cache, buf);
             }
-            ::buffa::encoding::Tag::new(
-                    2u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(&self.rrule, buf);
+            ::buffa::types::put_string_field(2u32, &self.rrule, buf);
             if self.timezone.is_set() {
-                ::buffa::encoding::Tag::new(
-                        3u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    3u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 self.timezone.write_to(__cache, buf);
             }
             for v in &self.rdate {
-                ::buffa::encoding::Tag::new(
-                        4u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    4u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 v.write_to(__cache, buf);
             }
             for v in &self.exdate {
-                ::buffa::encoding::Tag::new(
-                        5u32,
-                        ::buffa::encoding::WireType::LengthDelimited,
-                    )
-                    .encode(buf);
-                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                ::buffa::types::put_len_delimited_header(
+                    5u32,
+                    __cache.consume_next(),
+                    buf,
+                );
                 v.write_to(__cache, buf);
             }
         }
@@ -1841,24 +1755,8 @@ pub mod schedule {
         const FULL_NAME: &'static str = "trogonai.scheduler.schedules.checkpoints.v1.Schedule.RRule";
         const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.checkpoints.v1.Schedule.RRule";
     }
-    impl<'v> ::buffa::DefaultViewInstance for RRuleView<'v> {
-        fn default_view_instance<'a>() -> &'a Self
-        where
-            Self: 'a,
-        {
-            static VALUE: ::buffa::__private::OnceBox<RRuleView<'static>> = ::buffa::__private::OnceBox::new();
-            VALUE
-                .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                    <RRuleView<'static>>::default(),
-                ))
-        }
-    }
-    impl ::buffa::ViewReborrow for RRuleView<'static> {
-        type Reborrowed<'b> = RRuleView<'b>;
-        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
-            this
-        }
-    }
+    ::buffa::impl_default_view_instance!(RRuleView);
+    ::buffa::impl_view_reborrow!(RRuleView);
     /** Self-contained, `'static` owned view of a `RRule` message.
 
  Wraps [`::buffa::OwnedView`]`<`[`RRuleView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
@@ -1917,8 +1815,17 @@ pub mod schedule {
             self.0.reborrow()
         }
         /// Convert to the owned message type.
-        #[must_use]
-        pub fn to_owned_message(&self) -> super::super::super::schedule::RRule {
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if re-materializing preserved unknown fields
+        /// fails (e.g. the unknown-field limit is exceeded).
+        pub fn to_owned_message(
+            &self,
+        ) -> ::core::result::Result<
+            super::super::super::schedule::RRule,
+            ::buffa::DecodeError,
+        > {
             self.0.to_owned_message()
         }
         /// The underlying bytes buffer.

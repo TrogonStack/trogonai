@@ -1,4 +1,4 @@
-use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair};
+use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair};
 use time::OffsetDateTime;
 use x509_parser::pem::Pem;
 
@@ -32,7 +32,9 @@ async fn verifies_rcgen_chain() {
     let mut ee_params = CertificateParams::default();
     ee_params.distinguished_name = ee_dn;
 
-    let ee = ee_params.signed_by(&ee_key, &ca, &ca_key).expect("ee");
+    let ee = ee_params
+        .signed_by(&ee_key, &Issuer::from_params(&ca_params, &ca_key))
+        .expect("ee");
     let leaf_pem = ee.pem();
     let anchors = ca.pem();
 
@@ -60,11 +62,10 @@ async fn rejects_wrong_anchor() {
     let mut ca_params = CertificateParams::default();
     ca_params.distinguished_name = ca_dn;
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    let ca = ca_params.self_signed(&ca_key).expect("ca");
 
     let ee_key = KeyPair::generate().expect("ee");
     let ee = CertificateParams::default()
-        .signed_by(&ee_key, &ca, &ca_key)
+        .signed_by(&ee_key, &Issuer::from_params(&ca_params, &ca_key))
         .expect("ee");
 
     let v = X509MtlsVerifier::new(TrustAnchorPem::new(unrelated_ca.pem()));
@@ -120,7 +121,9 @@ async fn rejects_expired_certificate() {
     ee_dn.push(DnType::CommonName, "test-service");
     let mut ee_params = CertificateParams::default();
     ee_params.distinguished_name = ee_dn;
-    let ee = ee_params.signed_by(&ee_key, &ca, &ca_key).expect("ee");
+    let ee = ee_params
+        .signed_by(&ee_key, &Issuer::from_params(&ca_params, &ca_key))
+        .expect("ee");
 
     let v = X509MtlsVerifier::new(TrustAnchorPem::new(ca.pem()));
     // Use a `now` far in the past so the cert is outside its validity window.

@@ -62,11 +62,18 @@ impl PostgresSchedulesProjection {
     }
 }
 
-const SELECT_COLUMNS: &str = "SELECT schedule_id, status, completed, next_occurrence_at, last_occurrence_at, \
-     schedule_kind, at_at, every_seconds, cron_expr, rrule, rrule_dtstart, timezone, rrule_rdate, rrule_exdate, \
-     delivery_kind, delivery_subject, delivery_ttl_seconds, delivery_source_subject, \
-     message_content_type, message_body, message_headers \
-     FROM schedules_projection";
+macro_rules! select_columns {
+    () => {
+        "SELECT schedule_id, status, completed, next_occurrence_at, last_occurrence_at, \
+         schedule_kind, at_at, every_seconds, cron_expr, rrule, rrule_dtstart, timezone, rrule_rdate, rrule_exdate, \
+         delivery_kind, delivery_subject, delivery_ttl_seconds, delivery_source_subject, \
+         message_content_type, message_body, message_headers \
+         FROM schedules_projection"
+    };
+}
+
+const SELECT_PROJECTION_BY_ID: &str = concat!(select_columns!(), " WHERE schedule_id = $1");
+const SELECT_ALL_PROJECTIONS: &str = concat!(select_columns!(), " ORDER BY schedule_id");
 
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(
@@ -298,7 +305,7 @@ impl PostgresSchedulesProjection {
         &self,
         schedule_id: &ScheduleId,
     ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
-        let row = sqlx::query(&format!("{SELECT_COLUMNS} WHERE schedule_id = $1"))
+        let row = sqlx::query(SELECT_PROJECTION_BY_ID)
             .bind(schedule_id.as_str())
             .fetch_optional(&self.pool)
             .await
@@ -310,7 +317,7 @@ impl PostgresSchedulesProjection {
     }
 
     pub async fn list_projections(&self) -> Result<Vec<projections_v1::ScheduleProjection>, SchedulerError> {
-        let rows = sqlx::query(&format!("{SELECT_COLUMNS} ORDER BY schedule_id"))
+        let rows = sqlx::query(SELECT_ALL_PROJECTIONS)
             .fetch_all(&self.pool)
             .await
             .map_err(|source| SchedulerError::kv_source("failed to list projected schedules", source))?;

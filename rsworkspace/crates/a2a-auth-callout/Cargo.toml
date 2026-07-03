@@ -47,7 +47,7 @@ data-encoding = "=2.11.0"
 [dev-dependencies]
 tempfile = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
-rand_core = "=0.10.1"
+rand_core = "=0.6.4"
 rcgen = "=0.14.8"
 rsa = { version = "=0.9.10", features = ["pem"] }
 testcontainers = "=0.27.3"
