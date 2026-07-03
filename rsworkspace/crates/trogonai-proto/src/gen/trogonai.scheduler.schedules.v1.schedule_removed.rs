@@ -30,12 +30,7 @@ impl ScheduleRemoved {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved";
 }
-impl ::buffa::DefaultInstance for ScheduleRemoved {
-    fn default_instance() -> &'static Self {
-        static VALUE: ::buffa::__private::OnceBox<ScheduleRemoved> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
-    }
-}
+::buffa::impl_default_instance!(ScheduleRemoved);
 impl ::buffa::MessageName for ScheduleRemoved {
     const PACKAGE: &'static str = "trogonai.scheduler.schedules.v1";
     const NAME: &'static str = "ScheduleRemoved";
@@ -63,15 +58,13 @@ impl ::buffa::Message for ScheduleRemoved {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::encoding::Tag::new(1u32, ::buffa::encoding::WireType::LengthDelimited)
-            .encode(buf);
-        ::buffa::types::encode_string(&self.schedule_id, buf);
+        ::buffa::types::put_string_field(1u32, &self.schedule_id, buf);
     }
     fn merge_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
         buf: &mut impl ::buffa::bytes::Buf,
-        depth: u32,
+        ctx: ::buffa::DecodeContext<'_>,
     ) -> ::core::result::Result<(), ::buffa::DecodeError> {
         #[allow(unused_imports)]
         use ::buffa::bytes::Buf as _;
@@ -79,17 +72,14 @@ impl ::buffa::Message for ScheduleRemoved {
         use ::buffa::Enumeration as _;
         match tag.field_number() {
             1u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 1u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 ::buffa::types::merge_string(&mut self.schedule_id, buf)?;
             }
             _ => {
-                ::buffa::encoding::skip_field_depth(tag, buf, depth)?;
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
         }
         ::core::result::Result::Ok(())

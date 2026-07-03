@@ -25,12 +25,7 @@ impl ScheduleStatus {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.projections.v1.ScheduleStatus";
 }
-impl ::buffa::DefaultInstance for ScheduleStatus {
-    fn default_instance() -> &'static Self {
-        static VALUE: ::buffa::__private::OnceBox<ScheduleStatus> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
-    }
-}
+::buffa::impl_default_instance!(ScheduleStatus);
 impl ::buffa::MessageName for ScheduleStatus {
     const PACKAGE: &'static str = "trogonai.scheduler.schedules.projections.v1";
     const NAME: &'static str = "ScheduleStatus";
@@ -80,21 +75,19 @@ impl ::buffa::Message for ScheduleStatus {
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 __buffa::oneof::schedule_status::Kind::Scheduled(x) => {
-                    ::buffa::encoding::Tag::new(
-                            1u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        1u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
                 __buffa::oneof::schedule_status::Kind::Paused(x) => {
-                    ::buffa::encoding::Tag::new(
-                            2u32,
-                            ::buffa::encoding::WireType::LengthDelimited,
-                        )
-                        .encode(buf);
-                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        2u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
                     x.write_to(__cache, buf);
                 }
             }
@@ -104,7 +97,7 @@ impl ::buffa::Message for ScheduleStatus {
         &mut self,
         tag: ::buffa::encoding::Tag,
         buf: &mut impl ::buffa::bytes::Buf,
-        depth: u32,
+        ctx: ::buffa::DecodeContext<'_>,
     ) -> ::core::result::Result<(), ::buffa::DecodeError> {
         #[allow(unused_imports)]
         use ::buffa::bytes::Buf as _;
@@ -112,25 +105,18 @@ impl ::buffa::Message for ScheduleStatus {
         use ::buffa::Enumeration as _;
         match tag.field_number() {
             1u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 1u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 if let ::core::option::Option::Some(
                     __buffa::oneof::schedule_status::Kind::Scheduled(ref mut existing),
                 ) = self.kind
                 {
-                    ::buffa::Message::merge_length_delimited(
-                        &mut **existing,
-                        buf,
-                        depth,
-                    )?;
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
                 } else {
                     let mut val = ::core::default::Default::default();
-                    ::buffa::Message::merge_length_delimited(&mut val, buf, depth)?;
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.kind = ::core::option::Option::Some(
                         __buffa::oneof::schedule_status::Kind::Scheduled(
                             ::buffa::alloc::boxed::Box::new(val),
@@ -139,25 +125,18 @@ impl ::buffa::Message for ScheduleStatus {
                 }
             }
             2u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 2u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
                 if let ::core::option::Option::Some(
                     __buffa::oneof::schedule_status::Kind::Paused(ref mut existing),
                 ) = self.kind
                 {
-                    ::buffa::Message::merge_length_delimited(
-                        &mut **existing,
-                        buf,
-                        depth,
-                    )?;
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
                 } else {
                     let mut val = ::core::default::Default::default();
-                    ::buffa::Message::merge_length_delimited(&mut val, buf, depth)?;
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.kind = ::core::option::Option::Some(
                         __buffa::oneof::schedule_status::Kind::Paused(
                             ::buffa::alloc::boxed::Box::new(val),
@@ -166,7 +145,7 @@ impl ::buffa::Message for ScheduleStatus {
                 }
             }
             _ => {
-                ::buffa::encoding::skip_field_depth(tag, buf, depth)?;
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
         }
         ::core::result::Result::Ok(())
@@ -296,12 +275,7 @@ pub mod schedule_status {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.projections.v1.ScheduleStatus.Scheduled";
     }
-    impl ::buffa::DefaultInstance for Scheduled {
-        fn default_instance() -> &'static Self {
-            static VALUE: ::buffa::__private::OnceBox<Scheduled> = ::buffa::__private::OnceBox::new();
-            VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
-        }
-    }
+    ::buffa::impl_default_instance!(Scheduled);
     impl ::buffa::MessageName for Scheduled {
         const PACKAGE: &'static str = "trogonai.scheduler.schedules.projections.v1";
         const NAME: &'static str = "ScheduleStatus.Scheduled";
@@ -333,7 +307,7 @@ pub mod schedule_status {
             &mut self,
             tag: ::buffa::encoding::Tag,
             buf: &mut impl ::buffa::bytes::Buf,
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<(), ::buffa::DecodeError> {
             #[allow(unused_imports)]
             use ::buffa::bytes::Buf as _;
@@ -341,7 +315,7 @@ pub mod schedule_status {
             use ::buffa::Enumeration as _;
             match tag.field_number() {
                 _ => {
-                    ::buffa::encoding::skip_field_depth(tag, buf, depth)?;
+                    ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
                 }
             }
             ::core::result::Result::Ok(())
@@ -385,12 +359,7 @@ pub mod schedule_status {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.scheduler.schedules.projections.v1.ScheduleStatus.Paused";
     }
-    impl ::buffa::DefaultInstance for Paused {
-        fn default_instance() -> &'static Self {
-            static VALUE: ::buffa::__private::OnceBox<Paused> = ::buffa::__private::OnceBox::new();
-            VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
-        }
-    }
+    ::buffa::impl_default_instance!(Paused);
     impl ::buffa::MessageName for Paused {
         const PACKAGE: &'static str = "trogonai.scheduler.schedules.projections.v1";
         const NAME: &'static str = "ScheduleStatus.Paused";
@@ -422,7 +391,7 @@ pub mod schedule_status {
             &mut self,
             tag: ::buffa::encoding::Tag,
             buf: &mut impl ::buffa::bytes::Buf,
-            depth: u32,
+            ctx: ::buffa::DecodeContext<'_>,
         ) -> ::core::result::Result<(), ::buffa::DecodeError> {
             #[allow(unused_imports)]
             use ::buffa::bytes::Buf as _;
@@ -430,7 +399,7 @@ pub mod schedule_status {
             use ::buffa::Enumeration as _;
             match tag.field_number() {
                 _ => {
-                    ::buffa::encoding::skip_field_depth(tag, buf, depth)?;
+                    ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
                 }
             }
             ::core::result::Result::Ok(())
