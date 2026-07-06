@@ -71,10 +71,24 @@ subscription and is unroutable at the client.
 ### 3. Success and error discriminate on the micro error header
 
 A reply is an error if, and only if, `Nats-Service-Error-Code` is present. On
-success the reply body is the response message; on a service error the body may be
-empty and the failure is carried by `Nats-Service-Error` (message) and
-`Nats-Service-Error-Code` (numeric). Middleware routes on the subject and meters on
-the error header without decoding the body, exactly as ADR 0011 requires for
+success the reply body is the response message. On a service error the reply body
+is a serialized
+[`google.rpc.Status`](https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto),
+encoded per the negotiated `Content-Type`, and the micro error headers are
+projections of that status:
+
+| `google.rpc.Status` field | NATS location | Rule |
+| --- | --- | --- |
+| `code` | `Nats-Service-Error-Code` header | The canonical [`google.rpc.Code`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto) numeric value; never `OK` (0) |
+| `message` | `Nats-Service-Error` header | The developer-facing description |
+| `details` | reply payload only | [`google.rpc` error details](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto) (`ErrorInfo`, `BadRequest`, `RetryInfo`, `QuotaFailure`, ...) |
+
+The shared binding layer builds the headers and the body from one `Status` value,
+so they agree by construction; on any disagreement the headers are authoritative.
+Error codes use the canonical `google.rpc.Code` space; HTTP familiarity comes from
+the canonical-to-HTTP mapping documented in `code.proto`, not from a second
+vocabulary on the wire. Middleware routes on the subject and meters on the error
+header without decoding the body, exactly as ADR 0011 requires for
 `Jsonrpc-Error-Code`.
 
 The micro error channel signals **service faults**: malformed input, timeouts,
@@ -114,6 +128,9 @@ messages, the subject prefix, and any outcome taxonomy layered on the error rule
 
 - A reply is a service error if, and only if, `Nats-Service-Error-Code` is
   present. Never infer success or failure by structurally deserializing the body.
+- An error reply's body is a `google.rpc.Status` whose `code` and `message` match
+  the micro error headers; the headers are authoritative on disagreement. The
+  code space is canonical `google.rpc.Code`, never `OK` (0) on an error reply.
 - The method is carried by the subject; the request message type is a property of
   the endpoint, never parsed from the subject.
 - The registered micro service exposes exactly the annotated `service`'s methods
@@ -158,6 +175,9 @@ gain. gRPC is referenced only as a naming idiom.
 
 - [`trogon.nats.micro.v1alpha1` options](https://github.com/TrogonStack/trogon-proto/blob/main/proto/trogon/nats/micro/v1alpha1/options.proto)
 - [NATS Service API (ADR-32)](https://github.com/nats-io/nats-architecture-and-design/blob/main/adr/ADR-32.md)
+- [`google.rpc.Status`](https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto),
+  [`google.rpc.Code`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto),
+  and [`google.rpc` error details](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto)
 - [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
 - [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
