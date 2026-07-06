@@ -70,26 +70,34 @@ subscription and is unroutable at the client.
 
 ### 3. Success and error discriminate on the micro error header
 
-A reply is an error if, and only if, `Nats-Service-Error-Code` is present. On
-success the reply body is the response message. On a service error the reply body
-is a serialized
-[`google.rpc.Status`](https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto),
-encoded per the negotiated `Content-Type`, and the micro error headers are
-projections of that status:
+A reply is an error if, and only if, `Nats-Service-Error-Code` is present. That
+header is also the decode rule for the body: when it is absent the body is the
+method's response message; when it is present the body is one **complete**
+serialized
+[`google.rpc.Status`](https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto)
+(`code`, `message`, and `details` together), encoded per the negotiated
+`Content-Type` under the same rule as any other payload (section 4). The body is
+never a fragment of `Status`: `details` is a `repeated google.protobuf.Any` field
+*inside* the one `Status` message and is never serialized on its own.
 
-| `google.rpc.Status` field | NATS location | Rule |
+The micro error headers are copies of two `Status` fields, not replacements for
+them; the fields stay in the body so the payload is self-contained:
+
+| `google.rpc.Status` field | Header mirror | Rule |
 | --- | --- | --- |
-| `code` | `Nats-Service-Error-Code` header | The canonical [`google.rpc.Code`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto) numeric value; never `OK` (0) |
-| `message` | `Nats-Service-Error` header | The developer-facing description |
-| `details` | reply payload only | [`google.rpc` error details](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto) (`ErrorInfo`, `BadRequest`, `RetryInfo`, `QuotaFailure`, ...) |
+| `code` | `Nats-Service-Error-Code` | The canonical [`google.rpc.Code`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto) numeric value; never `OK` (0) |
+| `message` | `Nats-Service-Error` | The developer-facing description |
+| `details` | none | [`google.rpc` error details](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto) (`ErrorInfo`, `BadRequest`, `RetryInfo`, `QuotaFailure`, ...); read only by decoding the body |
 
-The shared binding layer builds the headers and the body from one `Status` value,
-so they agree by construction; on any disagreement the headers are authoritative.
-Error codes use the canonical `google.rpc.Code` space; HTTP familiarity comes from
-the canonical-to-HTTP mapping documented in `code.proto`, not from a second
-vocabulary on the wire. Middleware routes on the subject and meters on the error
-header without decoding the body, exactly as ADR 0011 requires for
-`Jsonrpc-Error-Code`.
+The duplication is deliberate. The headers exist so middleware can route on the
+subject and meter on the error header without decoding the body, exactly as
+ADR 0011 requires for `Jsonrpc-Error-Code`; the body exists so a client, a log
+pipeline, or a dead-letter inspector holding only the payload still has the whole
+error. The shared binding layer builds the headers and the body from one `Status`
+value, so they agree by construction; on any disagreement the headers are
+authoritative. Error codes use the canonical `google.rpc.Code` space; HTTP
+familiarity comes from the canonical-to-HTTP mapping documented in `code.proto`,
+not from a second vocabulary on the wire.
 
 The micro error channel signals **service faults**: malformed input, timeouts,
 and handler failures, which micro also counts in `num_errors`. A defined
@@ -128,9 +136,10 @@ messages, the subject prefix, and any outcome taxonomy layered on the error rule
 
 - A reply is a service error if, and only if, `Nats-Service-Error-Code` is
   present. Never infer success or failure by structurally deserializing the body.
-- An error reply's body is a `google.rpc.Status` whose `code` and `message` match
-  the micro error headers; the headers are authoritative on disagreement. The
-  code space is canonical `google.rpc.Code`, never `OK` (0) on an error reply.
+- An error reply's body is one complete `google.rpc.Status`, never a fragment of
+  it, whose `code` and `message` match the micro error headers; the headers are
+  authoritative on disagreement. The code space is canonical `google.rpc.Code`,
+  never `OK` (0) on an error reply.
 - The method is carried by the subject; the request message type is a property of
   the endpoint, never parsed from the subject.
 - The registered micro service exposes exactly the annotated `service`'s methods
