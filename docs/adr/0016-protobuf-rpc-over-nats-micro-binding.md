@@ -177,8 +177,8 @@ gain. gRPC is referenced only as a naming idiom.
   header without decoding protobuf payloads.
 - The `trogon.nats.micro.v1alpha1` options proto now has a governing wire
   contract; annotating a service is sufficient to define its NATS binding.
-- [ADR 0017](./0017-decider-command-over-nats-binding.md) specializes this binding
-  for decider commands; future first-party service APIs inherit it.
+- Future first-party service APIs inherit this binding; specializations (for
+  example decider commands) are defined in their own ADRs.
 
 ## References
 
@@ -190,4 +190,3 @@ gain. gRPC is referenced only as a naming idiom.
 - [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
 - [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
-- [ADR 0017: Decider Command over NATS Binding](./0017-decider-command-over-nats-binding.md)
