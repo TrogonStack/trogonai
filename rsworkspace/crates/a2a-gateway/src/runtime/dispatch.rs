@@ -294,14 +294,24 @@ async fn dispatch_routed<E: ReadEnv>(
                 // NATS binding discriminates errors via the Jsonrpc-Error-Code
                 // and Jsonrpc-Id headers, so the deny must carry them for
                 // clients to see -32118 at all.
-                let Ok(encoded) = ingress_error_response_wire(
+                let encoded = match ingress_error_response_wire(
                     &headers_owned,
                     payload.as_ref(),
                     deny.code,
                     "aauth verification rejected envelope",
                     None,
-                ) else {
-                    return;
+                ) {
+                    Ok(encoded) => encoded,
+                    Err(err) => {
+                        // The caller is left to time out on its inbox, so at
+                        // minimum the drop must be visible to operators.
+                        error!(
+                            ingress.subject = %ingress_subject,
+                            error = %err,
+                            "failed to encode aauth deny reply; dropping error response",
+                        );
+                        return;
+                    }
                 };
                 let mut reply_headers = encoded.headers;
                 if let Some((name, value)) = deny.to_requirement_header() {

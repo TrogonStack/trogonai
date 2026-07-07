@@ -194,7 +194,10 @@ pub fn gateway_caller_identity_after_aauth(
     existing: GatewayCallerIdentity,
     principal: Option<&str>,
 ) -> GatewayCallerIdentity {
-    let Some(principal) = principal else {
+    // An empty or whitespace principal is treated as absent: superseding
+    // with "user/" would attribute the request to a nameless person and
+    // hand Tier-1 an empty slug.
+    let Some(principal) = principal.map(str::trim).filter(|p| !p.is_empty()) else {
         return existing;
     };
     GatewayCallerIdentity {

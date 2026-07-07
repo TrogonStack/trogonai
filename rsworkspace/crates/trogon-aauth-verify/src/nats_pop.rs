@@ -118,6 +118,10 @@ const SECURITY_HEADERS: &[&str] = &[
     headers::NATS_SIG_CREATED,
     headers::NATS_SIG_NONCE,
     headers::CONTENT_DIGEST,
+    // Not part of the PoP envelope, but verification reads one value while
+    // downstream consumers could read another -- the same smuggling shape
+    // the six envelope headers are guarded against.
+    headers::NATS_AUTH_TOKEN,
 ];
 
 /// Header view: pick the first value for a given case-insensitive name.

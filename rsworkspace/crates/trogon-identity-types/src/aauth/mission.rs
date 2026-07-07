@@ -234,6 +234,30 @@ mod tests {
     }
 
     #[test]
+    fn mission_header_parse_skips_empty_segments_from_stray_semicolons() {
+        let raw = "approver=\"https://ps.example\";; s256=\"hash\";";
+        let header = MissionHeader::parse(raw).unwrap();
+        assert_eq!(header.approver, "https://ps.example");
+        assert_eq!(header.s256, "hash");
+    }
+
+    #[test]
+    fn mission_header_parse_ignores_unknown_parameters() {
+        let raw = "approver=\"https://ps.example\"; s256=\"hash\"; future-param=\"x\"";
+        let header = MissionHeader::parse(raw).unwrap();
+        assert_eq!(header.approver, "https://ps.example");
+        assert_eq!(header.s256, "hash");
+    }
+
+    #[test]
+    fn mission_header_parse_accepts_unquoted_values() {
+        let raw = "approver=https://ps.example; s256=hash";
+        let header = MissionHeader::parse(raw).unwrap();
+        assert_eq!(header.approver, "https://ps.example");
+        assert_eq!(header.s256, "hash");
+    }
+
+    #[test]
     fn mission_header_converts_into_mission_ref() {
         let header = MissionHeader {
             approver: "https://ps.example".into(),

@@ -470,3 +470,14 @@ fn principal_present_overrides_even_anonymous_existing_identity() {
     assert_eq!(result.audit_caller_source.as_deref(), Some("aauth"));
     assert_eq!(result.caller_slug.as_deref(), Some("bob"));
 }
+
+#[test]
+fn empty_or_whitespace_principal_does_not_supersede_identity() {
+    let unchanged = gateway_caller_identity_after_aauth(jwt_header_identity(), Some(""));
+    assert_eq!(unchanged.audit_caller_id, "user/jwt-header-caller");
+    assert_eq!(unchanged.audit_caller_source.as_deref(), Some("jwt_header"));
+
+    let unchanged = gateway_caller_identity_after_aauth(jwt_header_identity(), Some("   "));
+    assert_eq!(unchanged.audit_caller_id, "user/jwt-header-caller");
+    assert_eq!(unchanged.caller_slug.as_deref(), Some("jwt-header-caller"));
+}
