@@ -13,6 +13,8 @@ use trogon_identity_types::aauth::NatsSignatureEnvelope;
 use trogon_identity_types::aauth::headers;
 
 use crate::error::AgentSignerError;
+use rand_core::{OsRng, RngCore};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Order of covered components in the `AAuth-Sig-Input` header. Must match
 /// `NatsSignatureEnvelope::canonical_base` and what `NatsPopVerifier` expects.
@@ -151,7 +153,6 @@ impl AgentSigner {
 }
 
 fn now_unix_secs() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
@@ -162,7 +163,6 @@ fn now_unix_secs() -> i64 {
 /// requests. Not a cryptographic secret: its only job is to make the
 /// canonical signing base unique per request.
 fn random_nonce() -> String {
-    use rand_core::{OsRng, RngCore};
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)

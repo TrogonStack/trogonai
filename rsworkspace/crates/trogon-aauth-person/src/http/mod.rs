@@ -30,6 +30,7 @@ use crate::decision::PolicyEngine;
 use crate::error::PersonServerError;
 use crate::interaction::InteractionChannel;
 use crate::mission::MissionId;
+use crate::pending::PendingPhase;
 use crate::server::{PersonServer, TokenEndpointOutcome};
 use crate::store::PersonStateStore;
 
@@ -123,8 +124,6 @@ where
     I: InteractionChannel,
     S: PersonStateStore,
 {
-    use crate::pending::PendingPhase;
-
     match server.poll_pending(&crate::pending::PendingId(id.clone())).await {
         Ok(pending) => match pending.phase {
             PendingPhase::Granted { auth_token, expires_in } => (

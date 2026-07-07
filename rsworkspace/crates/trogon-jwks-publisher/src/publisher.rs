@@ -14,6 +14,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use base64::Engine as _;
 use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, Jwk,
     JwkSet, PublicKeyUse,
@@ -106,7 +107,6 @@ pub fn jwk_from_ec_pkcs8_pem(pem: &str, kid: &str) -> Result<Jwk, PublisherError
 }
 
 fn base64_url(bytes: impl AsRef<[u8]>) -> String {
-    use base64::Engine as _;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 

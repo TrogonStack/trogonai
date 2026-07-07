@@ -43,6 +43,7 @@ use trogon_identity_types::aauth::person_server::{
 };
 
 use super::core::{ExchangeAction, ExchangeEvent, ExchangeState, PendingHeaders, TerminalReason, step};
+use base64::Engine;
 
 /// Errors from driving an exchange over HTTP.
 #[derive(Debug, thiserror::Error)]
@@ -540,7 +541,6 @@ struct ResourceTokenIdentity {
 }
 
 fn decode_resource_claims_unverified(jwt: &str) -> Result<ResourceTokenIdentity, ExchangeError> {
-    use base64::Engine;
     let mut parts = jwt.splitn(3, '.');
     let _ = parts.next();
     let payload_b64 = parts

@@ -15,6 +15,8 @@
 //! claims JSON by [`extract_mission_claim`] rather than read off a typed
 //! struct field.
 
+use base64::Engine;
+use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::MissionRef;
 
 /// Errors verifying mission context.
@@ -83,9 +85,6 @@ pub fn verify_mission_header_matches_claim(header: &MissionRef, claim: &MissionR
 /// pass those bytes unmodified (no re-serialization) for this check to be
 /// meaningful.
 pub fn verify_mission_blob_hash(expected_s256: &str, blob_bytes: &[u8]) -> Result<(), MissionError> {
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
-
     let digest = Sha256::digest(blob_bytes);
     let computed = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
     if computed != expected_s256 {
