@@ -140,6 +140,8 @@ fn resource_and_auth_claims_serialize_expected_fields() {
         principal: Some("alice".into()),
         consent_id: None,
         resource: Some("resource".into()),
+        act: None,
+        cnf: None,
     };
     assert_eq!(serde_json::to_value(&resource).unwrap()["dwk"], DWK_RESOURCE);
     assert_eq!(serde_json::to_value(&auth).unwrap()["agent"], "agent-1");
