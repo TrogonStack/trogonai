@@ -654,3 +654,74 @@ async fn subagent_grant_binds_subagent_confirmation_key() {
     // parent's.
     assert_eq!(claims["cnf"]["jwk"], subagent_fixture.jwk);
 }
+
+#[tokio::test]
+async fn clarification_resume_preserves_upstream_delegation_chain() {
+    let (_agent_fixture, _resource_fixture, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(
+        vec![
+            PolicyDecision::NeedsClarification {
+                clarification: "why?".to_string(),
+                options: None,
+            },
+            PolicyDecision::Grant {
+                scope: "calendar.readwrite".to_string(),
+            },
+        ],
+        jwks,
+    );
+
+    let mut req = TokenRequest::new(resource_jwt);
+    req.justification = Some("initial".to_string());
+    let outcome = server.evaluate_token_request(&agent_jwt, &req).await.unwrap();
+    let pending_id = match outcome {
+        TokenEndpointOutcome::Pending { pending_id, .. } => pending_id,
+        other => panic!("expected Pending, got {other:?}"),
+    };
+
+    // Simulate the original request having carried a verified upstream
+    // token: the delegation chain must survive the pending round-trip.
+    let mut pending = server.store.get_pending(&pending_id).await.unwrap().unwrap();
+    pending.upstream = Some(trogon_aauth_verify::VerifiedAuth {
+        claims: trogon_identity_types::aauth::AuthClaims {
+            iss: "https://upstream-ps.example".to_string(),
+            sub: "user:upstream".to_string(),
+            aud: "https://calendar.example".to_string(),
+            jti: "up-jti".to_string(),
+            iat: 0,
+            exp: i64::MAX,
+            agent: "aauth:upstream@agent.example".to_string(),
+            agent_jkt: "up-jkt".to_string(),
+            scope: "*".to_string(),
+            principal: None,
+            consent_id: None,
+            resource: None,
+            act: None,
+            cnf: None,
+        },
+        raw_jwt: String::new(),
+    });
+    server.store.update_pending(pending).await.unwrap();
+
+    let outcome = server
+        .respond_to_clarification(
+            &pending_id,
+            trogon_identity_types::aauth::person_server::ClarificationAction::ClarificationResponse,
+            Some("because"),
+            None,
+        )
+        .await
+        .unwrap();
+    let auth_token = match outcome {
+        TokenEndpointOutcome::Grant { response } => response.auth_token,
+        other => panic!("expected Grant after clarification, got {other:?}"),
+    };
+
+    let payload_b64 = auth_token.split('.').nth(1).unwrap();
+    let payload = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload_b64).unwrap();
+    let claims: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(
+        claims["act"]["agent"], "aauth:assistant@agent.example",
+        "resumed grant must keep nesting the delegation chain"
+    );
+}

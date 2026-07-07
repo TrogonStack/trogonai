@@ -122,6 +122,11 @@ where
             verified.justification.clone(),
         );
         pending.mission_id = mission_id.clone();
+        // Carried through the pending round-trip: a clarification or
+        // interaction resume must mint with the same delegation chain and
+        // sub-agent confirmation key the original request verified.
+        pending.subagent = verified.subagent_claims.clone();
+        pending.upstream = verified.upstream.clone();
 
         // Atomic reservation per "Concurrent Requests": a find-then-insert
         // window would let two simultaneous requests for the same
@@ -241,7 +246,7 @@ where
             }
             PolicyDecision::NeedsInteraction => {
                 let notice = InteractionNotice {
-                    url: format!("https://ps.invalid/interact/{}", pending.id.0),
+                    url: format!("{}/interact/{}", self.iss, pending.id.0),
                     code: pending.id.0.clone(),
                     description: pending.justification.clone(),
                 };
@@ -421,8 +426,8 @@ where
         let verified = crate::agent::VerifiedRequest {
             resource_claims: pending.resource.clone(),
             agent_claims: pending.agent.clone(),
-            subagent_claims: None,
-            upstream: None,
+            subagent_claims: pending.subagent.clone(),
+            upstream: pending.upstream.clone(),
             binding,
             justification: pending.justification.clone(),
         };

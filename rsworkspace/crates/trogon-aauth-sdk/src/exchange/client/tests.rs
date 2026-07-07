@@ -30,7 +30,9 @@ fn fake_resource_token(iss: &str, agent: &str, agent_jkt: &str) -> String {
 fn client_for(server: &MockServer) -> PsTokenClient<SignatureKeyOnlyHttpSigner> {
     let http = reqwest::Client::new();
     let signer = SignatureKeyOnlyHttpSigner::new("agent-jwt-value");
-    PsTokenClient::new(http, signer, format!("{}/token", server.uri())).with_wait_secs(1)
+    PsTokenClient::new(http, signer, format!("{}/token", server.uri()))
+        .with_wait_secs(1)
+        .with_min_poll_interval_secs(0)
 }
 
 #[tokio::test]
@@ -322,5 +324,39 @@ async fn token_endpoint_error_maps_to_typed_expired_resource_token() {
             trogon_identity_types::aauth::error::TokenEndpointError::ExpiredResourceToken,
         )) => {}
         other => panic!("expected typed ExpiredResourceToken error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn poll_budget_exhaustion_fails_cleanly_instead_of_looping_forever() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/p1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    // The pending URL never resolves: always 202 pending.
+    Mock::given(method("GET"))
+        .and(path("/pending/p1"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/p1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).with_max_poll_iterations(3);
+    let request = TokenRequest::new("resource-token-value");
+    let outcome = client.request_token(&request).await;
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::PollBudgetExhausted { polls }) => assert_eq!(polls, 4),
+        other => panic!("expected PollBudgetExhausted, got {other:?}"),
     }
 }

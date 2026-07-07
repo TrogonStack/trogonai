@@ -51,6 +51,8 @@ pub enum ExchangeError {
     Transport(#[from] reqwest::Error),
     #[error("token endpoint error: {0:?}")]
     TokenEndpoint(TokenEndpointError),
+    #[error("exchange abandoned after {polls} polls without a terminal response")]
+    PollBudgetExhausted { polls: u32 },
     #[error("token endpoint returned an error body this SDK does not model: {0:?}")]
     UnrecognizedTokenEndpointError(Box<ErrorResponse>),
     #[error("response body could not be decoded as JSON: {0}")]
@@ -154,6 +156,12 @@ pub struct PsTokenClient<S: HttpRequestSigner> {
     signer: S,
     token_endpoint: String,
     wait_secs: u64,
+    /// Floor applied to every poll sleep so a PS answering
+    /// `Retry-After: 0` cannot turn the loop into an unthrottled storm.
+    min_poll_interval_secs: u64,
+    /// Hard cap on poll round-trips before the exchange fails cleanly
+    /// instead of running forever against a PS that never resolves.
+    max_poll_iterations: u32,
 }
 
 impl<S: HttpRequestSigner> PsTokenClient<S> {
@@ -164,7 +172,25 @@ impl<S: HttpRequestSigner> PsTokenClient<S> {
             signer,
             token_endpoint: token_endpoint.into(),
             wait_secs: 45,
+            min_poll_interval_secs: 1,
+            max_poll_iterations: 300,
         }
+    }
+
+    /// Override the minimum poll sleep. Zero disables the floor -- meant
+    /// for tests against a local mock, not production use.
+    #[must_use]
+    pub fn with_min_poll_interval_secs(mut self, secs: u64) -> Self {
+        self.min_poll_interval_secs = secs;
+        self
+    }
+
+    /// Override the maximum number of poll round-trips before the exchange
+    /// fails with [`ExchangeError::PollBudgetExhausted`].
+    #[must_use]
+    pub fn with_max_poll_iterations(mut self, iterations: u32) -> Self {
+        self.max_poll_iterations = iterations;
+        self
     }
 
     /// Override the `Prefer: wait=N` value sent on requests. Defaults to 45,
@@ -292,6 +318,7 @@ impl<S: HttpRequestSigner> PsTokenClient<S> {
     async fn handle_response(&self, response: reqwest::Response, state: ExchangeState) -> ExchangeOutcome {
         let mut state = state;
         let mut response = response;
+        let mut polls: u32 = 0;
         loop {
             let event = match event_from_response(response).await {
                 Ok(e) => e,
@@ -302,8 +329,13 @@ impl<S: HttpRequestSigner> PsTokenClient<S> {
             match action {
                 ExchangeAction::Stop => return outcome_from_state(state),
                 ExchangeAction::PollAfter { location, after_secs } => {
-                    if after_secs > 0 {
-                        tokio::time::sleep(Duration::from_secs(after_secs)).await;
+                    polls += 1;
+                    if polls > self.max_poll_iterations {
+                        return ExchangeOutcome::Error(ExchangeError::PollBudgetExhausted { polls });
+                    }
+                    let sleep_secs = after_secs.max(self.min_poll_interval_secs);
+                    if sleep_secs > 0 {
+                        tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
                     }
                     let builder = self
                         .http

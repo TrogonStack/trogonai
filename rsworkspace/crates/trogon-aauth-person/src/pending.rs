@@ -83,6 +83,12 @@ pub struct PendingRequest {
     pub resource: ResourceClaims,
     pub justification: Option<String>,
     pub mission_id: Option<MissionId>,
+    /// Sub-agent claims from the original request, preserved so a resumed
+    /// decision mints against the sub-agent's confirmation key.
+    pub subagent: Option<AgentClaims>,
+    /// Verified upstream auth token from the original request, preserved so
+    /// a resumed decision keeps nesting the delegation chain.
+    pub upstream: Option<trogon_aauth_verify::VerifiedAuth>,
     pub phase: PendingPhase,
     pub clarification_round: u32,
 }
@@ -103,6 +109,8 @@ impl PendingRequest {
             resource,
             justification,
             mission_id: None,
+            subagent: None,
+            upstream: None,
             phase: PendingPhase::Pending,
             clarification_round: 0,
         }
