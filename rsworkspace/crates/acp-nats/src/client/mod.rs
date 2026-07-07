@@ -15,11 +15,12 @@ pub(crate) mod terminal_wait_for_exit;
 pub(crate) mod test_support;
 
 use crate::agent::Bridge;
+use crate::client_handler::ClientHandler;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::nats::{ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject};
 use crate::wire::{encode_agent_error, merge_jsonrpc_headers, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode};
+use agent_client_protocol::ErrorCode;
 use async_nats::Message;
 use async_nats::header::HeaderMap;
 use bytes::Bytes;
@@ -65,7 +66,7 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 /// a `LocalSet` will panic at runtime when the first message is dispatched.
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client + 'static,
+    Cl: ClientHandler + Sync + 'static,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(
@@ -96,7 +97,7 @@ pub async fn run<
 
 async fn process_message<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client + 'static,
+    Cl: ClientHandler + Sync + 'static,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(
@@ -164,7 +165,7 @@ where
 #[instrument(name = DISPATCH_CLIENT_METHOD, skip(headers, payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client,
+    Cl: ClientHandler + Sync,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(

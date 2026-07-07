@@ -17,7 +17,10 @@ fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
 async fn handle_success_publishes_response_to_reply_subject() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
@@ -32,7 +35,10 @@ async fn handle_success_publishes_response_to_reply_subject() {
 async fn handle_no_reply_does_not_call_client_or_publish() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, None, &nats, "sess-1").await;
@@ -65,7 +71,10 @@ async fn handle_invalid_json_publishes_parse_error() {
 async fn handle_session_id_mismatch_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-b"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-b"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-a").await;
@@ -77,7 +86,10 @@ async fn handle_session_id_mismatch_publishes_error_reply() {
 async fn handle_client_error_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = TerminalKillFailingClient;
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "sess-1").await;
@@ -95,7 +107,10 @@ async fn handle_success_publish_failure_exercises_error_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let client = MockClient::new();
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;
@@ -108,7 +123,10 @@ async fn handle_success_flush_failure_exercises_warn_path() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_flush();
     let client = MockClient::new();
-    let request = KillTerminalRequest::new(agent_client_protocol::SessionId::from("sess-1"), "term-001".to_string());
+    let request = KillTerminalRequest::new(
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
+        "term-001".to_string(),
+    );
     let (headers, payload) = make_wire_request(&request);
 
     handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "sess-1").await;

@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::PromptResponse;
+use agent_client_protocol::schema::v1::PromptResponse;
 use bytes::Bytes;
 use jsonrpc_nats::{Message, ResponseId, encode};
 use trogon_nats::jetstream::mocks::*;
@@ -16,8 +16,8 @@ fn test_sid(s: &str) -> AcpSessionId {
     AcpSessionId::new(s).expect("test session id")
 }
 
-fn prompt_request() -> agent_client_protocol::PromptRequest {
-    agent_client_protocol::PromptRequest::new("s1", vec![])
+fn prompt_request() -> agent_client_protocol::schema::v1::PromptRequest {
+    agent_client_protocol::schema::v1::PromptRequest::new("s1", vec![])
 }
 
 fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> async_nats::Message {
@@ -58,7 +58,7 @@ async fn js_request_success() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let response = PromptResponse::new(agent_client_protocol::StopReason::EndTurn);
+    let response = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
     let msg = MockJsMessage::new(make_wire_success_msg("req-1", &response));
     tx.unbounded_send(Ok(msg)).unwrap();
 
@@ -75,7 +75,10 @@ async fn js_request_success() {
     .await;
 
     assert!(result.is_ok());
-    assert_eq!(result.unwrap().stop_reason, agent_client_protocol::StopReason::EndTurn);
+    assert_eq!(
+        result.unwrap().stop_reason,
+        agent_client_protocol::schema::v1::StopReason::EndTurn
+    );
 }
 
 #[tokio::test]

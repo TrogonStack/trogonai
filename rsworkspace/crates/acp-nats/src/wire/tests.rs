@@ -1,8 +1,10 @@
 use super::*;
-use agent_client_protocol::{
-    ClientCapabilities, ClientNesCapabilities, ElicitationCapabilities, ElicitationFormCapabilities, Error,
+use agent_client_protocol::Error;
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{
+    AgentCapabilities, ClientCapabilities, ClientNesCapabilities, ElicitationCapabilities, ElicitationFormCapabilities,
     InitializeRequest, InitializeResponse, LoadSessionRequest, NesCapabilities, NewSessionRequest,
-    PositionEncodingKind, ProtocolVersion,
+    PositionEncodingKind,
 };
 use std::path::PathBuf;
 
@@ -68,7 +70,7 @@ fn initialize_request_elicitation_and_nes_capabilities_survive_round_trip() {
 #[test]
 fn initialize_response_nes_capabilities_survive_round_trip() {
     let response = InitializeResponse::new(ProtocolVersion::LATEST).agent_capabilities(
-        agent_client_protocol::AgentCapabilities::new()
+        AgentCapabilities::new()
             .nes(NesCapabilities::new())
             .position_encoding(PositionEncodingKind::Utf16),
     );

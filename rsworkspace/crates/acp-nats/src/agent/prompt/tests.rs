@@ -168,9 +168,13 @@ async fn prompt_js_notification_forwarding() {
 
     let notification = SessionNotification::new(
         "s1",
-        agent_client_protocol::SessionUpdate::AgentThoughtChunk(agent_client_protocol::ContentChunk::new(
-            agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
-        )),
+        agent_client_protocol::schema::v1::SessionUpdate::AgentThoughtChunk(
+            agent_client_protocol::schema::v1::ContentChunk::new(
+                agent_client_protocol::schema::v1::ContentBlock::Text(
+                    agent_client_protocol::schema::v1::TextContent::new("thinking..."),
+                ),
+            ),
+        ),
     );
     let notif_msg = MockJsMessage::new(make_wire_notification_msg(&notification));
     notif_tx.unbounded_send(Ok(notif_msg)).unwrap();
@@ -446,9 +450,13 @@ async fn prompt_js_notification_receiver_dropped() {
 
     let notification = SessionNotification::new(
         "s1",
-        agent_client_protocol::SessionUpdate::AgentThoughtChunk(agent_client_protocol::ContentChunk::new(
-            agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("thinking...")),
-        )),
+        agent_client_protocol::schema::v1::SessionUpdate::AgentThoughtChunk(
+            agent_client_protocol::schema::v1::ContentChunk::new(
+                agent_client_protocol::schema::v1::ContentBlock::Text(
+                    agent_client_protocol::schema::v1::TextContent::new("thinking..."),
+                ),
+            ),
+        ),
     );
     let notif_msg = MockJsMessage::new(make_wire_notification_msg(&notification));
     notif_tx.unbounded_send(Ok(notif_msg)).unwrap();

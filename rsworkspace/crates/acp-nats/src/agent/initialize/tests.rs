@@ -1,10 +1,13 @@
 use super::Bridge;
+use crate::AgentHandler;
 use crate::agent::test_support::{
     MockJs, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
 };
 use crate::config::Config;
 use crate::error::AGENT_UNAVAILABLE;
-use agent_client_protocol::{Agent, ErrorCode, Implementation, InitializeRequest, InitializeResponse, ProtocolVersion};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{Implementation, InitializeRequest, InitializeResponse};
 use trogon_nats::AdvancedMockNatsClient;
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
@@ -19,15 +19,15 @@ fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
 
 fn sample_request() -> WriteTextFileRequest {
     WriteTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
         "data".to_string(),
     )
 }
 struct MockClient;
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -56,8 +56,8 @@ impl Client for MockClient {
 
 struct FailingClient;
 
-#[async_trait(?Send)]
-impl Client for FailingClient {
+#[async_trait]
+impl ClientHandler for FailingClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -323,7 +323,7 @@ async fn mock_client_request_permission_returns_err() {
 async fn mock_client_read_text_file_returns_err() {
     let client = MockClient;
     let req = ReadTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
         "/tmp/file.txt".to_string(),
     );
     let result = client.read_text_file(req).await;
@@ -334,7 +334,7 @@ async fn mock_client_read_text_file_returns_err() {
 async fn failing_client_read_text_file_returns_err() {
     let client = FailingClient;
     let req = ReadTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
         "/tmp/file.txt".to_string(),
     );
     let result = client.read_text_file(req).await;

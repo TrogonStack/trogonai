@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
@@ -29,8 +29,8 @@ impl MockClient {
     }
 }
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -52,8 +52,8 @@ impl Client for MockClient {
 
 struct FailingClient;
 
-#[async_trait(?Send)]
-impl Client for FailingClient {
+#[async_trait]
+impl ClientHandler for FailingClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }

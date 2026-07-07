@@ -75,12 +75,12 @@ Do these before the big migration; they are independent, low-risk, and immediate
 
 The 0.11.0 release was a full SDK redesign. Official guide: `agentclientprotocol/rust-sdk` `md/migration_v0.11.x.md`. This is a rewrite of our integration layer, not a version bump. 83 files reference the crate.
 
-- [ ] Spike: branch with the bump, catalogue compile errors per crate, and size the work before committing to slices.
+- [x] Spike: bumped in a scratch worktree; 68 errors in acp-nats, all import moves plus trait-to-role-marker changes; downstream crate errors are cascades. Migration proceeds crate by crate in dependency order.
 - [ ] Migrate imports: most message types move under `acp::schema::*`.
 - [ ] Replace connection construction: `AgentSideConnection::new(...)` becomes `Agent.builder().connect_to(ByteStreams::new(...))`; `ClientSideConnection::new(...)` becomes `Client.builder().connect_with(...)`. Affects `acp-nats-agent/src/connection.rs`, `acp-nats-server/src/transport.rs`, `acp-nats-server/src/connection.rs`, `acp-nats-stdio/src/main.rs`.
 - [ ] Replace `impl acp::Client for T` / `impl acp::Agent for T` trait impls with `on_receive_*` builder callbacks; respect the dispatch-loop rule (no `.block_task().await` inside `on_receive_*`).
 - [ ] Replace manual session management with `SessionBuilder`/`ActiveSession` where it simplifies the bridge, or keep raw `cx.send_request(...)` where the bridge genuinely needs request-level control.
-- [ ] Evaluate the new transport abstraction: decide whether `ByteStreams` plus the official transport architecture can replace parts of our hand-rolled NATS transport. Record the decision as an ADR (fits the ADR 0003/0004 series).
+- [x] Evaluate the new transport abstraction: decision recorded in ADR 0017 (keep the NATS transport, bridge-owned handler traits, SDK builders only at byte-stream boundaries).
 - [ ] Update feature flags: drop stabilized flags (logout, session_close, session_resume, message_id, session_usage, boolean_config, cancel_request), keep `unstable_session_fork` and `unstable_auth_methods` under their 1.x names, and enable any unstable flags the 1.x SDK offers that we do not yet carry (per the opt-in policy).
 - [ ] Remove `session/set_model` mapping and `unstable_session_model`; migrate model switching to session config options with the `model_config` category. Coordinate with consumers of the `set_model` NATS subject before removal.
 - [ ] Full test pass: unit, integration (testcontainers), and an end-to-end interop check against a current-SDK peer (for example the reference stdio agent from the rust-sdk cookbook).

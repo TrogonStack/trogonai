@@ -1,15 +1,16 @@
 use crate::acp_prefix::AcpPrefix;
+use crate::client_handler::ClientHandler;
 use crate::nats::client_ops;
 use crate::nats::{FlushClient, PublishClient, RequestClient, headers_with_trace_context};
 use crate::session_id::AcpSessionId;
 use crate::wire::{encode_notification, merge_jsonrpc_headers};
-use agent_client_protocol::{
-    Client, CreateTerminalRequest, CreateTerminalResponse, Error, ErrorCode, KillTerminalRequest, KillTerminalResponse,
-    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    RequestPermissionRequest, RequestPermissionResponse, Result, SessionNotification, TerminalOutputRequest,
-    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+use agent_client_protocol::schema::v1::{
+    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
+    RequestPermissionResponse, SessionNotification, TerminalOutputRequest, TerminalOutputResponse,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
+use agent_client_protocol::{Error, ErrorCode, Result};
 use std::time::Duration;
 
 pub struct NatsClientProxy<N> {
@@ -74,8 +75,8 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl<N: RequestClient + PublishClient + FlushClient> Client for NatsClientProxy<N> {
+#[async_trait::async_trait]
+impl<N: RequestClient + PublishClient + FlushClient + Sync> ClientHandler for NatsClientProxy<N> {
     async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse> {
         let s = client_ops::SessionRequestPermissionSubject::new(self.prefix(), self.session_id());
         self.request(&s, "session/request_permission", &args).await

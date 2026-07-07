@@ -1,5 +1,7 @@
+use crate::AgentHandler;
 use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_js_response};
-use agent_client_protocol::{Agent, CloseSessionRequest, CloseSessionResponse, ErrorCode};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{CloseSessionRequest, CloseSessionResponse};
 
 #[tokio::test]
 async fn close_session_forwards_request_and_returns_response() {

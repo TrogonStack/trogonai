@@ -108,14 +108,6 @@ fn parse_session_agent_set_config_option() {
 }
 
 #[test]
-fn parse_session_agent_set_model() {
-    assert_eq!(
-        parse_agent_subject("acp.session.s1.agent.set_model").unwrap(),
-        session("s1", SessionAgentMethod::SetModel)
-    );
-}
-
-#[test]
 fn parse_session_agent_fork() {
     assert_eq!(
         parse_agent_subject("acp.session.s1.agent.fork").unwrap(),

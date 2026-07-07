@@ -1,34 +1,33 @@
 use super::*;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ExtRequest, ExtResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification,
 };
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
-use std::cell::RefCell;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 
 struct MockClient {
-    notifications: RefCell<Vec<String>>,
+    notifications: Mutex<Vec<String>>,
 }
 
 impl MockClient {
     fn new() -> Self {
         Self {
-            notifications: RefCell::new(Vec::new()),
+            notifications: Mutex::new(Vec::new()),
         }
     }
 
     fn notification_count(&self) -> usize {
-        self.notifications.borrow().len()
+        self.notifications.lock().unwrap().len()
     }
 }
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -46,15 +45,15 @@ impl Client for MockClient {
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
-        self.notifications.borrow_mut().push(args.method.to_string());
+        self.notifications.lock().unwrap().push(args.method.to_string());
         Ok(())
     }
 }
 
 struct FailingClient;
 
-#[async_trait(?Send)]
-impl Client for FailingClient {
+#[async_trait]
+impl ClientHandler for FailingClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }

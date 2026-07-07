@@ -1,6 +1,6 @@
 use super::super::tests::{MockClient, TerminalWaitForExitFailingClient, TerminalWaitForExitTimeoutClient};
 use super::*;
-use agent_client_protocol::WaitForTerminalExitRequest;
+use agent_client_protocol::schema::v1::WaitForTerminalExitRequest;
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::RequestId;
 use std::error::Error;

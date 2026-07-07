@@ -53,10 +53,22 @@ a2a = { package = "a2a-lf", version = "=0.3.0" }
 cel-interpreter = "=0.10.0"
 
 # ACP
-# Pinned pre-1.x: the 0.11.0 SDK redesign is a breaking migration.
-# Tracking: https://github.com/TrogonStack/trogonai/issues/474 (plan in PLAN.md).
 # Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
-agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
+# Unstable flags are enabled ahead of stabilization by policy (protocol v2 is watch-only).
+agent-client-protocol = { version = "=1.2.0", features = [
+    "unstable_auth_methods",
+    "unstable_elicitation",
+    "unstable_end_turn_token_usage",
+    "unstable_mcp_over_acp",
+    "unstable_session_fork",
+] }
+# Direct schema dependency exists solely to enable schema-level unstable flags the
+# SDK facade does not forward (cargo feature unification applies them to the SDK's re-exports).
+agent-client-protocol-schema = { version = "=1.4.0", features = [
+    "unstable_llm_providers",
+    "unstable_nes",
+    "unstable_plan_operations",
+] }
 
 # MCP
 rmcp = { version = "2.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }

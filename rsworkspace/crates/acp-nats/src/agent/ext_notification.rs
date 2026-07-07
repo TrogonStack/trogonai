@@ -1,7 +1,8 @@
 use super::Bridge;
 use crate::ext_method_name::ExtMethodName;
 use crate::nats::{self, FlushClient, PublishClient, global};
-use agent_client_protocol::{Error, ErrorCode, ExtNotification, Result};
+use agent_client_protocol::schema::v1::ExtNotification;
+use agent_client_protocol::{Error, ErrorCode, Result};
 use tracing::{info, instrument, warn};
 use trogon_semconv::span::ACP_EXT_NOTIFICATION;
 use trogon_std::time::GetElapsed;

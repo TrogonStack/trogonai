@@ -60,10 +60,10 @@ impl std::ops::Deref for AcpSessionId {
     }
 }
 
-impl TryFrom<&agent_client_protocol::SessionId> for AcpSessionId {
+impl TryFrom<&agent_client_protocol::schema::v1::SessionId> for AcpSessionId {
     type Error = SessionIdError;
 
-    fn try_from(session_id: &agent_client_protocol::SessionId) -> Result<Self, Self::Error> {
+    fn try_from(session_id: &agent_client_protocol::schema::v1::SessionId) -> Result<Self, Self::Error> {
         AcpSessionId::new(session_id.to_string().as_str())
     }
 }

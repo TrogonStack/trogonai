@@ -1,4 +1,4 @@
-use agent_client_protocol::SessionId;
+use agent_client_protocol::schema::v1::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// Published by the bridge after successfully sending a `session/new` or

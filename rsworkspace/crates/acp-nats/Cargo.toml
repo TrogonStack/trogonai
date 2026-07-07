@@ -9,20 +9,8 @@ workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
-agent-client-protocol = { workspace = true, features = [
-    "unstable_auth_methods",
-    "unstable_boolean_config",
-    "unstable_cancel_request",
-    "unstable_elicitation",
-    "unstable_message_id",
-    "unstable_nes",
-    "unstable_session_additional_directories",
-    "unstable_session_close",
-    "unstable_session_fork",
-    "unstable_session_model",
-    "unstable_session_resume",
-    "unstable_session_usage",
-] }
+agent-client-protocol = { workspace = true }
+agent-client-protocol-schema = { workspace = true }
 opentelemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream"] }
 async-trait = { workspace = true }

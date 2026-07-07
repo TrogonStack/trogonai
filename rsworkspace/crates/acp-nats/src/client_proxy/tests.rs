@@ -1,7 +1,7 @@
 use super::*;
 use crate::agent::test_support::set_wire_json_response;
-use agent_client_protocol::{
-    Client, ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
+use agent_client_protocol::schema::v1::{
+    ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
     SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
 use trogon_nats::AdvancedMockNatsClient;
@@ -74,7 +74,7 @@ async fn request_returns_error_when_nats_fails() {
 #[tokio::test]
 async fn write_text_file_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
-    let response = agent_client_protocol::WriteTextFileResponse::default();
+    let response = agent_client_protocol::schema::v1::WriteTextFileResponse::default();
     set_wire_json_response(&nats, "acp.session.s1.client.fs.write_text_file", &response);
 
     let p = proxy(nats.clone());
@@ -136,7 +136,7 @@ async fn kill_terminal_publishes_to_correct_subject() {
 #[tokio::test]
 async fn wait_for_terminal_exit_publishes_to_correct_subject() {
     let nats = AdvancedMockNatsClient::new();
-    let response = WaitForTerminalExitResponse::new(agent_client_protocol::TerminalExitStatus::new());
+    let response = WaitForTerminalExitResponse::new(agent_client_protocol::schema::v1::TerminalExitStatus::new());
     set_wire_json_response(&nats, "acp.session.s1.client.terminal.wait_for_exit", &response);
 
     let p = proxy(nats.clone());

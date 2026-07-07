@@ -1,7 +1,9 @@
 use crate::client::rpc_reply;
+use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode, WaitForTerminalExitRequest, WaitForTerminalExitResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{WaitForTerminalExitRequest, WaitForTerminalExitResponse};
 use async_nats::header::HeaderMap;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -41,7 +43,7 @@ pub fn error_code_and_message(e: &TerminalWaitForExitError) -> (ErrorCode, Strin
     skip(headers, payload, client, nats),
     fields(session_id = %expected_session_id)
 )]
-pub async fn handle<N: PublishClient + FlushClient, C: Client>(
+pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
@@ -87,7 +89,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     }
 }
 
-async fn forward_to_client<C: Client>(
+async fn forward_to_client<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,

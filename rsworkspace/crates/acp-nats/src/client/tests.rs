@@ -1,6 +1,6 @@
 use super::*;
 use crate::session_id::AcpSessionId;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest,
     KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, SessionUpdate,
@@ -10,45 +10,45 @@ use agent_client_protocol::{
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
-use std::cell::RefCell;
+use std::sync::Mutex;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 use trogon_std::time::SystemClock;
 
 pub(super) struct MockClient {
-    notifications: RefCell<Vec<String>>,
-    kill_terminal_calls: RefCell<usize>,
-    terminal_output_calls: RefCell<usize>,
-    terminal_release_calls: RefCell<usize>,
-    wait_for_terminal_exit_calls: RefCell<usize>,
+    notifications: Mutex<Vec<String>>,
+    kill_terminal_calls: Mutex<usize>,
+    terminal_output_calls: Mutex<usize>,
+    terminal_release_calls: Mutex<usize>,
+    wait_for_terminal_exit_calls: Mutex<usize>,
 }
 
 impl MockClient {
     pub(super) fn new() -> Self {
         Self {
-            notifications: RefCell::new(Vec::new()),
-            kill_terminal_calls: RefCell::new(0),
-            terminal_output_calls: RefCell::new(0),
-            terminal_release_calls: RefCell::new(0),
-            wait_for_terminal_exit_calls: RefCell::new(0),
+            notifications: Mutex::new(Vec::new()),
+            kill_terminal_calls: Mutex::new(0),
+            terminal_output_calls: Mutex::new(0),
+            terminal_release_calls: Mutex::new(0),
+            wait_for_terminal_exit_calls: Mutex::new(0),
         }
     }
 
     pub(super) fn kill_terminal_call_count(&self) -> usize {
-        *self.kill_terminal_calls.borrow()
+        *self.kill_terminal_calls.lock().unwrap()
     }
 
     pub(super) fn wait_for_terminal_exit_call_count(&self) -> usize {
-        *self.wait_for_terminal_exit_calls.borrow()
+        *self.wait_for_terminal_exit_calls.lock().unwrap()
     }
 }
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::SessionNotification,
+        n: agent_client_protocol::schema::v1::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
-        self.notifications.borrow_mut().push(format!("{:?}", n));
+        self.notifications.lock().unwrap().push(format!("{:?}", n));
         Ok(())
     }
 
@@ -75,12 +75,12 @@ impl Client for MockClient {
     }
 
     async fn kill_terminal(&self, _: KillTerminalRequest) -> agent_client_protocol::Result<KillTerminalResponse> {
-        *self.kill_terminal_calls.borrow_mut() += 1;
+        *self.kill_terminal_calls.lock().unwrap() += 1;
         Ok(KillTerminalResponse::new())
     }
 
     async fn terminal_output(&self, _: TerminalOutputRequest) -> agent_client_protocol::Result<TerminalOutputResponse> {
-        *self.terminal_output_calls.borrow_mut() += 1;
+        *self.terminal_output_calls.lock().unwrap() += 1;
         Ok(TerminalOutputResponse::new("mock output".to_string(), false))
     }
 
@@ -88,7 +88,7 @@ impl Client for MockClient {
         &self,
         _: ReleaseTerminalRequest,
     ) -> agent_client_protocol::Result<ReleaseTerminalResponse> {
-        *self.terminal_release_calls.borrow_mut() += 1;
+        *self.terminal_release_calls.lock().unwrap() += 1;
         Ok(ReleaseTerminalResponse::new())
     }
 
@@ -96,7 +96,7 @@ impl Client for MockClient {
         &self,
         _: WaitForTerminalExitRequest,
     ) -> agent_client_protocol::Result<WaitForTerminalExitResponse> {
-        *self.wait_for_terminal_exit_calls.borrow_mut() += 1;
+        *self.wait_for_terminal_exit_calls.lock().unwrap() += 1;
         Ok(WaitForTerminalExitResponse::new(
             TerminalExitStatus::new().exit_code(0u32),
         ))
@@ -141,11 +141,11 @@ fn make_bridge_advanced(
 
 pub(super) struct TerminalKillFailingClient;
 
-#[async_trait(?Send)]
-impl Client for TerminalKillFailingClient {
+#[async_trait]
+impl ClientHandler for TerminalKillFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::SessionNotification,
+        n: agent_client_protocol::schema::v1::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -197,11 +197,11 @@ impl Client for TerminalKillFailingClient {
 
 pub(super) struct TerminalReleaseFailingClient;
 
-#[async_trait(?Send)]
-impl Client for TerminalReleaseFailingClient {
+#[async_trait]
+impl ClientHandler for TerminalReleaseFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::SessionNotification,
+        n: agent_client_protocol::schema::v1::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -259,11 +259,11 @@ impl Client for TerminalReleaseFailingClient {
 
 pub(super) struct TerminalWaitForExitFailingClient;
 
-#[async_trait(?Send)]
-impl Client for TerminalWaitForExitFailingClient {
+#[async_trait]
+impl ClientHandler for TerminalWaitForExitFailingClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::SessionNotification,
+        n: agent_client_protocol::schema::v1::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -319,11 +319,11 @@ impl Client for TerminalWaitForExitFailingClient {
 
 pub(super) struct TerminalWaitForExitTimeoutClient;
 
-#[async_trait(?Send)]
-impl Client for TerminalWaitForExitTimeoutClient {
+#[async_trait]
+impl ClientHandler for TerminalWaitForExitTimeoutClient {
     async fn session_notification(
         &self,
-        n: agent_client_protocol::SessionNotification,
+        n: agent_client_protocol::schema::v1::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         let _ = n;
         Ok(())
@@ -430,7 +430,7 @@ async fn run_processes_messages_then_exits_when_stream_ends() {
             run(nats, client.clone(), bridge).await;
 
             tokio::task::yield_now().await;
-            assert_eq!(client.notifications.borrow().len(), 1);
+            assert_eq!(client.notifications.lock().unwrap().len(), 1);
         })
         .await;
 }
@@ -470,7 +470,7 @@ async fn dispatch_client_method_dispatches_session_update() {
     )
     .await;
 
-    assert_eq!(client.notifications.borrow().len(), 1);
+    assert_eq!(client.notifications.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -688,8 +688,8 @@ async fn dispatch_client_method_dispatches_terminal_create_with_terminal_kill_fa
 #[derive(Debug)]
 struct RpcMockClient;
 
-#[async_trait(?Send)]
-impl Client for RpcMockClient {
+#[async_trait]
+impl ClientHandler for RpcMockClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -795,7 +795,10 @@ async fn dispatch_client_method_dispatches_request_permission() {
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+            "call-1",
+            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+        ),
         vec![],
     );
     let (headers, payload_bytes) =
@@ -866,7 +869,10 @@ async fn dispatch_client_method_dispatches_request_permission_client_error_publi
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+            "call-1",
+            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+        ),
         vec![],
     );
     let (headers, payload_bytes) =
@@ -905,7 +911,10 @@ async fn dispatch_client_method_dispatches_request_permission_with_advanced_mock
 
     let request = RequestPermissionRequest::new(
         "sess-1",
-        agent_client_protocol::ToolCallUpdate::new("call-1", agent_client_protocol::ToolCallUpdateFields::new()),
+        agent_client_protocol::schema::v1::ToolCallUpdate::new(
+            "call-1",
+            agent_client_protocol::schema::v1::ToolCallUpdateFields::new(),
+        ),
         vec![],
     );
     let (headers, payload_bytes) =
@@ -1096,7 +1105,7 @@ async fn process_message_valid_dispatch_spawns_task() {
             // Yield to allow the spawned local task to run.
             tokio::task::yield_now().await;
 
-            assert_eq!(client.notifications.borrow().len(), 1);
+            assert_eq!(client.notifications.lock().unwrap().len(), 1);
         })
         .await;
 }

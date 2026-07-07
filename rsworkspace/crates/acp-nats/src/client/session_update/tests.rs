@@ -1,45 +1,46 @@
 use super::*;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 struct MockClient {
-    notifications_received: RefCell<Vec<String>>,
+    notifications_received: Mutex<Vec<String>>,
     should_fail: bool,
 }
 
 impl MockClient {
     fn new() -> Self {
         Self {
-            notifications_received: RefCell::new(Vec::new()),
+            notifications_received: Mutex::new(Vec::new()),
             should_fail: false,
         }
     }
 
     fn failing() -> Self {
         Self {
-            notifications_received: RefCell::new(Vec::new()),
+            notifications_received: Mutex::new(Vec::new()),
             should_fail: true,
         }
     }
 
     fn notification_count(&self) -> usize {
-        self.notifications_received.borrow().len()
+        self.notifications_received.lock().unwrap().len()
     }
 }
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(&self, notification: SessionNotification) -> agent_client_protocol::Result<()> {
         if self.should_fail {
             return Err(agent_client_protocol::Error::new(-1, "mock failure"));
         }
         self.notifications_received
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .push(format!("{:?}", notification));
         Ok(())
     }

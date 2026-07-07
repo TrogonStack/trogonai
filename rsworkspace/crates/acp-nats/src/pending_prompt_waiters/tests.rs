@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use agent_client_protocol::{PromptResponse, SessionId, StopReason};
+use agent_client_protocol::schema::v1::{PromptResponse, SessionId, StopReason};
 use trogon_std::time::{GetNow, MockClock, MockInstant};
 
 use super::*;

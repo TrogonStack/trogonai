@@ -1,7 +1,9 @@
 use crate::client::rpc_reply;
+use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_notification_params, decode_request_params, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode, ExtNotification, ExtRequest, ExtResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, ExtResponse};
 use async_nats::header::HeaderMap;
 use serde_json::value::RawValue;
 use std::sync::Arc;
@@ -28,7 +30,7 @@ pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {
     skip(headers, payload, client, nats),
     fields(ext_method = %ext_method_name)
 )]
-pub async fn handle<N: PublishClient + FlushClient, C: Client>(
+pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
@@ -46,7 +48,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     }
 }
 
-async fn handle_request<N: PublishClient + FlushClient, C: Client>(
+async fn handle_request<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
@@ -68,7 +70,12 @@ async fn handle_request<N: PublishClient + FlushClient, C: Client>(
     }
 }
 
-async fn handle_notification<C: Client>(headers: &HeaderMap, payload: &[u8], client: &C, ext_method_name: &str) {
+async fn handle_notification<C: ClientHandler + Sync>(
+    headers: &HeaderMap,
+    payload: &[u8],
+    client: &C,
+    ext_method_name: &str,
+) {
     let wire_method = format!("ext/{ext_method_name}");
     let params: Arc<RawValue> = match decode_notification_params(&wire_method, headers, payload) {
         Ok(v) => v,
@@ -84,7 +91,7 @@ async fn handle_notification<C: Client>(headers: &HeaderMap, payload: &[u8], cli
     }
 }
 
-async fn forward_request<C: Client>(
+async fn forward_request<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,

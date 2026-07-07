@@ -33,7 +33,10 @@ export default async () => {
         },
         {
           text: "Architecture",
-          items: [{ text: "Event Metadata", link: "/architecture/event-metadata" }],
+          items: [
+            { text: "ACP Conformance", link: "/architecture/acp-conformance" },
+            { text: "Event Metadata", link: "/architecture/event-metadata" },
+          ],
         },
         {
           text: "Architecture Decision Records",

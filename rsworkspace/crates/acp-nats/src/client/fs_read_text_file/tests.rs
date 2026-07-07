@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::{
+use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
     RequestPermissionResponse, SessionNotification, SessionUpdate,
 };
@@ -19,7 +19,7 @@ fn make_wire_request<T: serde::Serialize>(params: &T) -> (HeaderMap, Vec<u8>) {
 
 fn sample_request() -> ReadTextFileRequest {
     ReadTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
     )
 }
@@ -35,8 +35,8 @@ impl MockClient {
     }
 }
 
-#[async_trait(?Send)]
-impl Client for MockClient {
+#[async_trait]
+impl ClientHandler for MockClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -58,8 +58,8 @@ impl Client for MockClient {
 
 struct FailingClient;
 
-#[async_trait(?Send)]
-impl Client for FailingClient {
+#[async_trait]
+impl ClientHandler for FailingClient {
     async fn session_notification(&self, _: SessionNotification) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -86,7 +86,7 @@ impl Client for FailingClient {
 async fn fs_read_text_file_forwards_request_and_returns_response() {
     let client = MockClient::new("hello world");
     let (headers, payload) = make_wire_request(&ReadTextFileRequest::new(
-        agent_client_protocol::SessionId::from("sess-1"),
+        agent_client_protocol::schema::v1::SessionId::from("sess-1"),
         "/tmp/foo.txt".to_string(),
     ));
 

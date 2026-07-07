@@ -1,41 +1,42 @@
 use super::*;
-use agent_client_protocol::{
-    Client, RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
+use agent_client_protocol::schema::v1::{
+    ContentBlock, ContentChunk, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
+    SessionUpdate, TextContent, ToolCallUpdate, ToolCallUpdateFields,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 struct MockClient {
-    received: Rc<RefCell<Vec<SessionNotification>>>,
+    received: Arc<Mutex<Vec<SessionNotification>>>,
     fail_after: Option<usize>,
 }
 
 impl MockClient {
     fn new(fail_after: Option<usize>) -> Self {
         Self {
-            received: Rc::new(RefCell::new(Vec::new())),
+            received: Arc::new(Mutex::new(Vec::new())),
             fail_after,
         }
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl agent_client_protocol::Client for MockClient {
+#[async_trait::async_trait]
+impl crate::ClientHandler for MockClient {
     async fn request_permission(
         &self,
-        _args: agent_client_protocol::RequestPermissionRequest,
-    ) -> agent_client_protocol::Result<agent_client_protocol::RequestPermissionResponse> {
+        _args: RequestPermissionRequest,
+    ) -> agent_client_protocol::Result<RequestPermissionResponse> {
         Err(agent_client_protocol::Error::internal_error())
     }
 
     async fn session_notification(&self, args: SessionNotification) -> agent_client_protocol::Result<()> {
-        let count = self.received.borrow().len();
+        let mut received = self.received.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = received.len();
         if let Some(limit) = self.fail_after
             && count >= limit
         {
             return Err(agent_client_protocol::Error::internal_error());
         }
-        self.received.borrow_mut().push(args);
+        received.push(args);
         Ok(())
     }
 }
@@ -53,9 +54,7 @@ async fn spawn_notification_forwarder_delivers_notifications() {
 
             let notif = SessionNotification::new(
                 "s1",
-                SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                    agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
-                )),
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new("hello")))),
             );
             tx.send(notif).await.unwrap();
             drop(tx);
@@ -65,7 +64,7 @@ async fn spawn_notification_forwarder_delivers_notifications() {
         })
         .await;
 
-    assert_eq!(received.borrow().len(), 1);
+    assert_eq!(received.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -91,9 +90,7 @@ async fn spawn_notification_forwarder_stops_on_client_error() {
 
             let notif = SessionNotification::new(
                 "s1",
-                SessionUpdate::AgentMessageChunk(agent_client_protocol::ContentChunk::new(
-                    agent_client_protocol::ContentBlock::Text(agent_client_protocol::TextContent::new("hello")),
-                )),
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new("hello")))),
             );
             let _ = tx.send(notif).await;
             drop(tx);
@@ -103,5 +100,5 @@ async fn spawn_notification_forwarder_stops_on_client_error() {
         })
         .await;
 
-    assert_eq!(received.borrow().len(), 0);
+    assert_eq!(received.lock().unwrap().len(), 0);
 }

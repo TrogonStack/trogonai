@@ -1,7 +1,7 @@
 use super::*;
 use crate::agent::Bridge;
 use crate::config::Config;
-use agent_client_protocol::StopReason;
+use agent_client_protocol::schema::v1::StopReason;
 use trogon_nats::MockNatsClient;
 use trogon_std::time::MockClock;
 

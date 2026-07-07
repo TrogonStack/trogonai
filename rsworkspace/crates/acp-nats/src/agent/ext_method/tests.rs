@@ -1,7 +1,9 @@
+use crate::AgentHandler;
 use crate::agent::test_support::{
     has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
 };
-use agent_client_protocol::{Agent, ErrorCode, ExtRequest, ExtResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
 use serde_json::value::RawValue;
 
 #[tokio::test]

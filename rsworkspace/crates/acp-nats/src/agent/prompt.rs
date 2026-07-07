@@ -1,4 +1,5 @@
-use agent_client_protocol::{Error, ErrorCode, PromptRequest, PromptResponse, SessionNotification, StopReason};
+use agent_client_protocol::schema::v1::{PromptRequest, PromptResponse, SessionNotification, StopReason};
+use agent_client_protocol::{Error, ErrorCode};
 use async_nats::jetstream::AckKind;
 use futures::StreamExt;
 use jsonrpc_nats::RequestId;

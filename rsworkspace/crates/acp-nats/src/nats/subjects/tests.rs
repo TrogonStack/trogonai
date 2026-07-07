@@ -139,14 +139,6 @@ fn session_agent_set_config_option() {
 }
 
 #[test]
-fn session_agent_set_model() {
-    assert_eq!(
-        commands::SetModelSubject::new(&p("acp"), &sid("s1")).to_string(),
-        "acp.session.s1.agent.set_model"
-    );
-}
-
-#[test]
 fn session_agent_fork() {
     assert_eq!(
         commands::ForkSubject::new(&p("acp"), &sid("s1")).to_string(),
@@ -356,7 +348,6 @@ fn stream_assignments() {
     assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetConfigOptionSubject::STREAM, Some(AcpStream::Commands));
-    assert_eq!(commands::SetModelSubject::STREAM, Some(AcpStream::Commands));
 
     assert_eq!(global::InitializeSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::AuthenticateSubject::STREAM, Some(AcpStream::Global));
@@ -446,11 +437,6 @@ fn session_scoped_agent_subjects_share_layout() {
     );
     assert!(
         commands::SetConfigOptionSubject::new(&prefix, &session_id)
-            .to_string()
-            .starts_with(&expected)
-    );
-    assert!(
-        commands::SetModelSubject::new(&prefix, &session_id)
             .to_string()
             .starts_with(&expected)
     );
@@ -558,10 +544,6 @@ fn to_subject_produces_correct_nats_subject() {
             .to_subject()
             .as_str(),
         "acp.session.s1.agent.set_config_option"
-    );
-    assert_eq!(
-        commands::SetModelSubject::new(&prefix, &sid).to_subject().as_str(),
-        "acp.session.s1.agent.set_model"
     );
     // ExtNotifySubject doesn't impl ToSubject — verify via Display
     assert_eq!(

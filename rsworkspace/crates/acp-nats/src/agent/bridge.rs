@@ -1,5 +1,6 @@
-use std::cell::RefCell;
+use std::sync::Mutex;
 
+use crate::agent_handler::AgentHandler;
 use crate::config::Config;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
@@ -7,14 +8,14 @@ use crate::nats::{
 };
 use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
-use agent_client_protocol::{
-    Agent, AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+use agent_client_protocol::Result;
+use agent_client_protocol::schema::v1::{
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
     ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, Result,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
     ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionModelRequest,
-    SetSessionModelResponse,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -26,7 +27,7 @@ use trogon_std::time::GetElapsed;
 use super::{
     authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize, js_request,
     list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
-    set_session_mode, set_session_model,
+    set_session_mode,
 };
 
 use crate::constants::SESSION_READY_DELAY;
@@ -39,7 +40,7 @@ pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) metrics: Metrics,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
     pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
-    pub(crate) background_tasks: RefCell<Vec<JoinHandle<()>>>,
+    pub(crate) background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
@@ -59,7 +60,7 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
             metrics: Metrics::new(meter),
             notification_sender,
             pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
-            background_tasks: RefCell::new(Vec::new()),
+            background_tasks: Mutex::new(Vec::new()),
         }
     }
 
@@ -72,11 +73,19 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
     }
 
     pub(crate) fn spawn_background(&self, task: JoinHandle<()>) {
-        self.background_tasks.borrow_mut().push(task);
+        self.background_tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(task);
     }
 
     pub async fn drain_background_tasks(&self) {
-        let tasks: Vec<_> = self.background_tasks.borrow_mut().drain(..).collect();
+        let tasks: Vec<_> = self
+            .background_tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain(..)
+            .collect();
         for task in tasks {
             let _ = task.await;
         }
@@ -165,14 +174,15 @@ where
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl<
-    N: RequestClient + PublishClient + SubscribeClient + FlushClient,
-    C: GetElapsed,
-    J: JetStreamPublisher + JetStreamGetStream,
-> Agent for Bridge<N, C, J>
+    N: RequestClient + PublishClient + SubscribeClient + FlushClient + Sync,
+    C: GetElapsed + Sync,
+    J: JetStreamPublisher + JetStreamGetStream + Sync,
+> AgentHandler for Bridge<N, C, J>
 where
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
+    C::Instant: Send,
 {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         initialize::handle(self, args).await
@@ -215,10 +225,6 @@ where
         args: SetSessionConfigOptionRequest,
     ) -> Result<SetSessionConfigOptionResponse> {
         set_session_config_option::handle(self, args).await
-    }
-
-    async fn set_session_model(&self, args: SetSessionModelRequest) -> Result<SetSessionModelResponse> {
-        set_session_model::handle(self, args).await
     }
 
     async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {

@@ -1,8 +1,10 @@
+use crate::AgentHandler;
 use crate::agent::test_support::{
     has_request_metric, mock_bridge, mock_bridge_with_metrics, set_wire_agent_error, set_wire_json_response,
 };
 use crate::error::AGENT_UNAVAILABLE;
-use agent_client_protocol::{Agent, AuthenticateRequest, AuthenticateResponse, ErrorCode};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{AuthenticateRequest, AuthenticateResponse};
 
 #[tokio::test]
 async fn authenticate_forwards_request_and_returns_response() {
