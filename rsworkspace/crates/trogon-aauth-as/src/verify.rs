@@ -100,6 +100,9 @@ where
             }
         }
         None => {
+            if resource.claims.agent != agent.claims.sub {
+                return Err(RequestVerificationError::ResourceTokenAgentIdentifierMismatch);
+            }
             if resource.claims.agent_jkt != agent.jkt {
                 return Err(RequestVerificationError::ResourceTokenAgentKeyMismatch);
             }

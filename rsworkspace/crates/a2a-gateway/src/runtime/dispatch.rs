@@ -23,7 +23,7 @@ use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::{
-    gateway_ingress_agent_and_method_dots, ingress_gateway_aauth_denied_response_bytes,
+    gateway_ingress_agent_and_method_dots, ingress_error_response_wire,
     ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
     ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
     ingress_invalid_request_response_bytes,
@@ -290,18 +290,24 @@ async fn dispatch_routed<E: ReadEnv>(
                     reason = %deny.reason,
                     "gateway aauth verification rejected ingress envelope",
                 );
-                let Ok(body) = ingress_gateway_aauth_denied_response_bytes(
+                // Full wire encoding, not just the body: the JSON-RPC-over-
+                // NATS binding discriminates errors via the Jsonrpc-Error-Code
+                // and Jsonrpc-Id headers, so the deny must carry them for
+                // clients to see -32118 at all.
+                let Ok(encoded) = ingress_error_response_wire(
                     &headers_owned,
                     payload.as_ref(),
+                    deny.code,
                     "aauth verification rejected envelope",
+                    None,
                 ) else {
                     return;
                 };
-                let mut reply_headers = HeaderMap::new();
+                let mut reply_headers = encoded.headers;
                 if let Some((name, value)) = deny.to_requirement_header() {
                     reply_headers.insert(name.as_str(), value.as_str());
                 }
-                reply_error(client, reply, reply_headers, body).await;
+                reply_error(client, reply, reply_headers, encoded.body).await;
                 spawn_gateway_audit_publish(
                     audit_enabled,
                     client.clone(),

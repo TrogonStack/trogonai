@@ -485,3 +485,56 @@ async fn verify_request_rejects_upstream_token_untrusted_issuer() {
         .unwrap_err();
     assert!(matches!(err, RequestVerificationError::UpstreamUntrustedIssuer(_)));
 }
+
+#[tokio::test]
+async fn verify_request_rejects_agent_identifier_binding_mismatch() {
+    let now = now_unix();
+    let as_key = key_fixture("as-kid");
+    let ap_key = key_fixture("ap-kid");
+    let resource_key = key_fixture("resource-kid");
+    let agent_key = key_fixture("agent-key");
+
+    let agent_token = mint_agent_jwt(
+        &ap_key,
+        "ap-kid",
+        AP_ISS,
+        "aauth:asst@agent.example",
+        &agent_key.jwk_json,
+        None,
+        now,
+    );
+    // resource_token carries the presenting agent's key thumbprint but names
+    // a different agent identifier: key match alone must not verify.
+    let agent_jkt = trogon_aauth_verify::jwk_thumbprint(&agent_key.jwk_json).unwrap();
+    let resource_token = mint_resource_jwt(
+        &resource_key,
+        "resource-kid",
+        RESOURCE_ISS,
+        AS_ISS,
+        "aauth:someone-else@agent.example",
+        &agent_jkt,
+        "documents:read",
+        now,
+    );
+
+    let jwks = StaticJwks::new()
+        .with(AP_ISS, jwk_set(&[&ap_key]))
+        .with(RESOURCE_ISS, jwk_set(&[&resource_key]))
+        .with(AS_ISS, jwk_set(&[&as_key]));
+    let verifier = TokenVerifier::new(jwks, SystemTimeSource);
+    let trust = TrustRegistry::from_entries([(PS_ISS.to_string(), TrustBasisRecord::PreEstablished)]).unwrap();
+    let req = AsTokenRequest {
+        resource_token,
+        agent_token,
+        subagent_token: None,
+        upstream_token: None,
+    };
+
+    let err = verify_request(&verifier, &trust, AS_ISS, PS_ISS, &req)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RequestVerificationError::ResourceTokenAgentIdentifierMismatch
+    ));
+}

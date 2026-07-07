@@ -147,6 +147,7 @@ fn verification_status(err: &RequestVerificationError) -> (StatusCode, &'static 
         | RequestVerificationError::SubagentTokenIsItselfSubagent
         | RequestVerificationError::ResourceTokenSubagentKeyMismatch
         | RequestVerificationError::ResourceTokenAgentKeyMismatch
+        | RequestVerificationError::ResourceTokenAgentIdentifierMismatch
         | RequestVerificationError::MalformedParentAgentClaim(_) => (StatusCode::BAD_REQUEST, "invalid_agent_token"),
         RequestVerificationError::UpstreamToken(_)
         | RequestVerificationError::UpstreamUntrustedIssuer(_)

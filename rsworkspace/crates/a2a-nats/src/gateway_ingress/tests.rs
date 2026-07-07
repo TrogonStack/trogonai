@@ -217,6 +217,13 @@ fn aauth_denied_emits_code_minus_32118() {
     let headers = HeaderMap::new();
     let encoded = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth", None).unwrap();
     assert_eq!(parse_error_code(&encoded), -32_118);
+    // The JSON-RPC-over-NATS binding discriminates errors via this header;
+    // a deny reply that drops it is unparseable as an error.
+    let code_header = encoded
+        .headers
+        .get(jsonrpc_nats::HEADER_ERROR_CODE)
+        .expect("error code header present");
+    assert_eq!(code_header.as_str(), "-32118");
 }
 
 #[test]

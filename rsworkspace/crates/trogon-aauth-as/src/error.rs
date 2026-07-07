@@ -49,6 +49,11 @@ pub enum RequestVerificationError {
     /// `resource_token.agent_jkt` MUST match the requesting agent's `cnf.jwk`.
     #[error("resource_token agent_jkt does not match agent_token cnf.jwk")]
     ResourceTokenAgentKeyMismatch,
+    /// "Resource Token Verification": `agent` must name the presenting
+    /// agent; a token whose `agent` and `agent_jkt` disagree must not
+    /// verify just because the key matches.
+    #[error("resource_token agent does not name the presenting agent")]
+    ResourceTokenAgentIdentifierMismatch,
     /// "Single-Level Depth": a sub-agent token itself carrying `parent_agent`
     /// cannot be re-delegated.
     #[error("subagent_token must not itself be a sub-agent (single-level depth)")]
