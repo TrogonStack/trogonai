@@ -244,3 +244,44 @@ async fn resolve_rejects_issuers_outside_the_allowlist_before_any_fetch() {
         .expect_err("unlisted issuer must be refused");
     assert!(matches!(err, JwksError::UnknownIssuer(_)));
 }
+
+#[test]
+fn default_impl_delegates_to_new() {
+    let resolver = HttpJwksResolver::default();
+    assert_eq!(
+        resolver.dwk_order.iter().map(WellKnownDwk::as_str).collect::<Vec<_>>(),
+        vec![DWK_AGENT, DWK_RESOURCE, DWK_PERSON]
+    );
+}
+
+#[tokio::test]
+async fn resolve_from_base_aborts_streamed_body_over_cap_without_content_length() {
+    // Set Transfer-Encoding: chunked explicitly so the response carries no
+    // Content-Length header at all -- this exercises the streamed-read
+    // abort path (the cap enforced per-chunk as bytes arrive), not the
+    // upfront Content-Length check.
+    let server = MockServer::start().await;
+    let big_body = format!(r#"{{"keys": [], "padding": "{}"}}"#, "a".repeat(64));
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(big_body, "application/json")
+                .append_header("Transfer-Encoding", "chunked"),
+        )
+        .mount(&server)
+        .await;
+
+    let resolver = HttpJwksResolver::with_config(
+        default_dwk_order(),
+        RequestTimeout::default(),
+        MaxResponseBytes::new(8).unwrap(),
+    );
+    let err = resolver
+        .resolve_from_base("https://issuer.example", &server.uri())
+        .await
+        .unwrap_err();
+    match err {
+        JwksError::Transport(msg) => assert!(msg.contains("response body exceeds cap")),
+        other => panic!("expected Transport error naming the streamed body cap, got {other:?}"),
+    }
+}

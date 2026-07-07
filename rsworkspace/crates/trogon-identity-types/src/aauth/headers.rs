@@ -159,6 +159,19 @@ mod tests {
     }
 
     #[test]
+    fn capability_other_as_str_returns_the_raw_token() {
+        let cap = Capability::Other("quantum-teleport".into());
+        assert_eq!(cap.as_str(), "quantum-teleport");
+    }
+
+    #[test]
+    fn capabilities_to_header_value_round_trips_unknown_capability() {
+        let raw = "interaction, quantum-teleport";
+        let caps = Capabilities::parse(raw);
+        assert_eq!(caps.to_header_value(), raw);
+    }
+
+    #[test]
     fn capabilities_contains_checks_membership() {
         let caps = Capabilities::parse("interaction");
         assert!(caps.contains(&Capability::Interaction));

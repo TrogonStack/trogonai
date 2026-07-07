@@ -173,4 +173,31 @@ mod tests {
         assert_eq!(parsed.ps, "%\u{20ac}");
         assert_eq!(parsed.login_hint.as_deref(), Some("a%zzb"));
     }
+
+    #[test]
+    fn to_query_string_includes_domain_hint_when_present() {
+        let req = LoginRequest {
+            ps: "https://ps.example".into(),
+            login_hint: None,
+            domain_hint: Some("corp.example".into()),
+            tenant: None,
+            start_path: None,
+        };
+        let query = req.to_query_string();
+        assert_eq!(query, "ps=https%3A%2F%2Fps.example&domain_hint=corp.example");
+        let parsed = LoginRequest::parse_query_string(&query).unwrap();
+        assert_eq!(parsed, req);
+    }
+
+    #[test]
+    fn parse_query_string_skips_empty_pairs_from_stray_ampersands() {
+        let parsed = LoginRequest::parse_query_string("ps=https%3A%2F%2Fps.example&&").unwrap();
+        assert_eq!(parsed.ps, "https://ps.example");
+    }
+
+    #[test]
+    fn parse_query_string_ignores_unknown_parameters() {
+        let parsed = LoginRequest::parse_query_string("ps=https%3A%2F%2Fps.example&unknown=1").unwrap();
+        assert_eq!(parsed.ps, "https://ps.example");
+    }
 }

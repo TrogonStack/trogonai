@@ -15,6 +15,7 @@ use trogon_aauth_verify::time_source::SystemTimeSource;
 use trogon_aauth_verify::{NatsHeaders, NatsPopVerifier, NatsRequest, StaticJwks};
 use trogon_identity_types::aauth::{Cnf, DWK_AGENT, TYP_AGENT};
 
+use crate::error::AgentSignerError;
 use crate::{AgentSigner, Requirement, parse_requirement};
 
 const AP_ISS: &str = "https://ap.test";
@@ -229,4 +230,22 @@ fn sign_nats_request_now_produces_headers_verifiable_shortly_after() {
             .expect("nonce header present")
     };
     assert_ne!(nonce_of(headers_a.as_pairs()), nonce_of(headers_b.as_pairs()));
+}
+
+#[test]
+fn from_pkcs8_pem_builds_a_signer_that_matches_the_in_memory_key() {
+    let signing_key = SigningKey::random(&mut OsRng);
+    let pem = pkcs8_pem(&signing_key);
+
+    let from_pem = AgentSigner::from_pkcs8_pem(&pem, "placeholder").expect("valid pkcs8 pem parses");
+    let from_key = AgentSigner::new(signing_key, "placeholder").expect("signer");
+
+    assert_eq!(from_pem.public_jwk(), from_key.public_jwk());
+    assert_eq!(from_pem.jkt(), from_key.jkt());
+}
+
+#[test]
+fn from_pkcs8_pem_rejects_a_malformed_pem() {
+    let result = AgentSigner::from_pkcs8_pem("not a pem at all", "placeholder");
+    assert!(matches!(result, Err(AgentSignerError::InvalidPkcs8(_))));
 }
