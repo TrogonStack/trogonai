@@ -1,4 +1,5 @@
 use super::*;
+use base64::Engine as _;
 
 #[test]
 fn accepts_valid_top_level_identifier() {
@@ -233,7 +234,6 @@ fn mint_produces_unique_jti_per_call() {
 }
 
 fn base64_decode(segment: &str) -> Vec<u8> {
-    use base64::Engine as _;
     base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(segment)
         .expect("valid base64url")

@@ -242,7 +242,7 @@ async fn with_jwks_surfaces_signature_invalid_when_jwt_signature_is_corrupted() 
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn with_jwks_runs_claims_checks_after_signature_and_surfaces_audience_mismatch() {
+async fn with_jwks_runs_claims_checks_after_signature_and_surfaces_agent_mismatch() {
     let verifier = verifier_with_key();
     let jwk = p256_jwk_for_test();
     let jwk_value = serde_json::to_value(&jwk).expect("jwk to value");

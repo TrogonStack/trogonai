@@ -13,6 +13,7 @@ use super::*;
 use crate::decision::DecisionRequest;
 use crate::interaction::NoopInteractionChannel;
 use crate::store::InMemoryStore;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn now_unix() -> i64 {
     SystemTimeSource.now()
@@ -89,7 +90,6 @@ fn mint_resource_jwt(
 }
 
 fn uuid_counter() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }

@@ -1,4 +1,6 @@
 use super::*;
+use base64::Engine;
+use sha2::{Digest, Sha256};
 
 fn mission_ref(approver: &str, s256: &str) -> MissionRef {
     MissionRef {
@@ -64,8 +66,6 @@ fn verify_mission_header_matches_claim_rejects_s256_mismatch() {
 
 #[test]
 fn verify_mission_blob_hash_accepts_correct_digest() {
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
     let blob = br#"{"approver":"https://ps.example"}"#;
     let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(blob));
     verify_mission_blob_hash(&expected, blob).expect("hash matches");
@@ -80,8 +80,6 @@ fn verify_mission_blob_hash_rejects_mismatch() {
 
 #[test]
 fn verify_mission_blob_hash_detects_tampered_bytes() {
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
     let original = br#"{"approver":"https://ps.example","description":"do X"}"#;
     let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(original));
     let tampered = br#"{"approver":"https://ps.example","description":"do Y"}"#;

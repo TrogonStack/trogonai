@@ -7,6 +7,8 @@ use crate::policy::{AlwaysIssuePolicy, Decision, GrantedScope, OrganizationPolic
 use crate::request::AsTokenContext;
 use crate::test_support::{jwk_set, key_fixture, mint_agent_jwt, mint_auth_jwt_raw, mint_resource_jwt, now_unix};
 use crate::trust::{PsIssuer, TrustBasisRecord, TrustedIssuer};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 const AS_ISS: &str = "https://as.example";
 const PS_ISS: &str = "https://ps.example";
@@ -375,8 +377,6 @@ async fn act_nesting_preserves_full_chain_across_chained_upstream_tokens() {
 }
 
 fn decode_claims_unverified(jwt: &str) -> serde_json::Value {
-    use base64::Engine;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     let mut parts = jwt.splitn(3, '.');
     let _header = parts.next().unwrap();
     let payload = parts.next().unwrap();
