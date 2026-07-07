@@ -344,20 +344,16 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                     .await;
             }
 
-            // Mission (draft "Mission Context at Resources"): when the
-            // request carries an `AAuth-Mission` header and the auth token
-            // has a `mission` claim, the two must agree. Absent either side,
-            // there is nothing to cross-check.
+            // Mission (draft "Mission Context at Resources"): a mission
+            // claim on the auth token binds the grant to its mission, so a
+            // malformed claim and a claim presented without the matching
+            // `AAuth-Mission` header are both denials, not skipped checks --
+            // silently ignoring either would let a mission-scoped token act
+            // as an unscoped one.
             let claims_raw = raw_claims_value(&auth.raw_jwt);
-            let mission_claim = claims_raw
-                .as_ref()
-                .and_then(|v| extract_mission_claim(v).ok().flatten());
-            if let (Some(header), Some(claim)) = (mission_header.as_ref(), mission_claim.as_ref()) {
-                let header_ref = MissionRef {
-                    approver: header.approver.clone(),
-                    s256: header.s256.clone(),
-                };
-                if let Err(e) = verify_mission_header_matches_claim(&header_ref, claim) {
+            let mission_claim = match claims_raw.as_ref().map(extract_mission_claim).transpose() {
+                Ok(claim) => claim.flatten(),
+                Err(e) => {
                     return self
                         .deny_or_shadow(
                             AAuthDenyReason::MissionMismatch(e),
@@ -365,7 +361,34 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                         )
                         .await;
                 }
-                resolution.mission_approver = Some(claim.approver.clone());
+            };
+            match (mission_header.as_ref(), mission_claim.as_ref()) {
+                (Some(header), Some(claim)) => {
+                    let header_ref = MissionRef {
+                        approver: header.approver.clone(),
+                        s256: header.s256.clone(),
+                    };
+                    if let Err(e) = verify_mission_header_matches_claim(&header_ref, claim) {
+                        return self
+                            .deny_or_shadow(
+                                AAuthDenyReason::MissionMismatch(e),
+                                Some(ChallengeBinding::from_agent(&agent)),
+                            )
+                            .await;
+                    }
+                    resolution.mission_approver = Some(claim.approver.clone());
+                }
+                (None, Some(claim)) => {
+                    return self
+                        .deny_or_shadow(
+                            AAuthDenyReason::MissionHeaderMissing {
+                                approver: claim.approver.clone(),
+                            },
+                            Some(ChallengeBinding::from_agent(&agent)),
+                        )
+                        .await;
+                }
+                (Some(_) | None, None) => {}
             }
 
             resolution.attach_auth(auth);
@@ -523,6 +546,12 @@ pub enum AAuthDenyReason {
     /// "Request-Context Binding" rule 9).
     #[error("aauth-mission header does not match auth token mission claim: {0}")]
     MissionMismatch(#[source] MissionError),
+    /// The verified `aa-auth+jwt` carries a `mission` claim but the request
+    /// has no parseable `AAuth-Mission` header. A mission-scoped grant is
+    /// only valid inside its mission context, so the binding check cannot be
+    /// skipped just because the presenter omitted the header.
+    #[error("aa-auth+jwt is mission-scoped (approver {approver:?}) but the request carries no AAuth-Mission header")]
+    MissionHeaderMissing { approver: String },
 }
 
 #[derive(Debug, thiserror::Error)]

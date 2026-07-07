@@ -32,7 +32,7 @@
 //! 6. Negative coda ("Scopes") -- the same auth token against a method
 //!    outside its granted scope denies with `ScopeNotCovered`.
 
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_arguments)]
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_arguments, clippy::panic)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

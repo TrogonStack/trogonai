@@ -153,6 +153,7 @@ pub fn aauth_deny_rule_fired(reason: &AAuthDenyReason) -> &'static str {
         AAuthDenyReason::AuthAgentMismatch { .. } => "gateway.aauth.denied.auth_agent_mismatch",
         AAuthDenyReason::ScopeNotCovered { .. } => "gateway.aauth.denied.scope",
         AAuthDenyReason::MissionMismatch(_) => "gateway.aauth.denied.mission",
+        AAuthDenyReason::MissionHeaderMissing { .. } => "gateway.aauth.denied.mission_header_missing",
     }
 }
 
@@ -235,6 +236,15 @@ fn well_known_resolver_from_env<E: ReadEnv>(
     env: &E,
 ) -> Result<CachedJwksResolver<HttpJwksResolver, SystemTimeSource>, AAuthEnvError> {
     let ttl_secs = optional_i64(env, ENV_AAUTH_JWKS_TTL_SECS, trogon_aauth_verify::DEFAULT_TTL_SECS)?;
+    // A negative TTL is not "expire immediately", it is a misconfiguration
+    // that would turn every verification into a discovery fetch -- reject it
+    // at startup like the other second-count vars.
+    let ttl_secs = NonNegativeSecs::new(ttl_secs)
+        .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs {
+            var: ENV_AAUTH_JWKS_TTL_SECS,
+            raw: env.var(ENV_AAUTH_JWKS_TTL_SECS).unwrap_or_default(),
+        })?
+        .get();
     Ok(CachedJwksResolver::new(HttpJwksResolver::new(), SystemTimeSource).with_ttl_secs(ttl_secs))
 }
 

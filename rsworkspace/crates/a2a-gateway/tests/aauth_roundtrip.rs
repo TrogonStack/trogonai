@@ -476,6 +476,143 @@ async fn resolve_nats_mission_header_matches_auth_claim() {
     assert_eq!(res.mission_approver.as_deref(), Some(mission_approver));
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_nats_denies_mission_claim_without_header() {
+    let ap_signing = SigningKey::random(&mut OsRng);
+    let agent = agent_fixture("agent-1", "agent-key-1");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(1_700_000_000);
+
+    let ap_iss = "https://ap.test";
+    let resource_iss = "https://resource.test";
+
+    let agent_jwt = mint_agent_jwt(&ap_signing, "ap-key-1", ap_iss, &agent, now);
+    let agent_jkt = trogon_aauth_verify::jwk_thumbprint(&agent.jwk_val).expect("jkt");
+    let mission_s256 = "a".repeat(64);
+    let auth_jwt = mint_auth_jwt_with(
+        &ap_signing,
+        "ap-key-1",
+        ap_iss,
+        resource_iss,
+        &agent.sub,
+        &agent_jkt,
+        "spicedb-principal",
+        "*",
+        Some(("approver-1", mission_s256.as_str())),
+        now,
+    );
+
+    let ap_public_jwk = {
+        let point = ap_signing.verifying_key().to_encoded_point(false);
+        let x = URL_SAFE_NO_PAD.encode(point.x().expect("x"));
+        let y = URL_SAFE_NO_PAD.encode(point.y().expect("y"));
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_id: Some("ap-key-1".into()),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x,
+                y,
+            }),
+        }
+    };
+    let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
+
+    let subject = "a2a.gateway.bot.message.send";
+    let reply = "_INBOX.x.1";
+    let payload = b"{}".to_vec();
+    // No AAuth-Mission header on the request: a mission-scoped token must
+    // not be usable outside its mission context.
+    let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
+
+    let err = ingress
+        .resolve_nats(subject, Some(reply), &payload, &pop, Some(&auth_jwt), "message.send")
+        .await
+        .expect_err("mission claim without header denies");
+    assert_eq!(err.code, AAUTH_REQUIRED_CODE);
+    assert!(matches!(
+        err.reason,
+        AAuthDenyReason::MissionHeaderMissing { ref approver } if approver == "approver-1"
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_nats_denies_malformed_mission_claim() {
+    let ap_signing = SigningKey::random(&mut OsRng);
+    let agent = agent_fixture("agent-1", "agent-key-1");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(1_700_000_000);
+
+    let ap_iss = "https://ap.test";
+    let resource_iss = "https://resource.test";
+
+    let agent_jwt = mint_agent_jwt(&ap_signing, "ap-key-1", ap_iss, &agent, now);
+    let agent_jkt = trogon_aauth_verify::jwk_thumbprint(&agent.jwk_val).expect("jkt");
+
+    // A `mission` claim that is not `{approver, s256}` must deny rather than
+    // silently degrade the token to an unscoped grant.
+    let enc = EncodingKey::from_ec_pem(pkcs8_pem(&ap_signing).as_bytes()).expect("enc");
+    let mut header = Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AUTH.into());
+    header.kid = Some("ap-key-1".into());
+    let claims = serde_json::json!({
+        "iss": ap_iss,
+        "sub": agent.sub,
+        "aud": resource_iss,
+        "jti": "auth-jti-malformed-mission",
+        "iat": now - 5,
+        "exp": now + 600,
+        "agent": agent.sub,
+        "agent_jkt": agent_jkt,
+        "scope": "*",
+        "principal": "spicedb-principal",
+        "mission": "not-an-object",
+    });
+    let auth_jwt = encode(&header, &claims, &enc).expect("encode auth jwt");
+
+    let ap_public_jwk = {
+        let point = ap_signing.verifying_key().to_encoded_point(false);
+        let x = URL_SAFE_NO_PAD.encode(point.x().expect("x"));
+        let y = URL_SAFE_NO_PAD.encode(point.y().expect("y"));
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_id: Some("ap-key-1".into()),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x,
+                y,
+            }),
+        }
+    };
+    let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
+
+    let subject = "a2a.gateway.bot.message.send";
+    let reply = "_INBOX.x.1";
+    let payload = b"{}".to_vec();
+    let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
+
+    let err = ingress
+        .resolve_nats(subject, Some(reply), &payload, &pop, Some(&auth_jwt), "message.send")
+        .await
+        .expect_err("malformed mission claim denies");
+    assert_eq!(err.code, AAUTH_REQUIRED_CODE);
+    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+}
+
 const _: () = {
     // Just reference DWK_RESOURCE so the import stays referenced even when
     // we don't decode the gateway-minted challenge below; keeps the test

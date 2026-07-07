@@ -247,6 +247,23 @@ fn discovery_with_non_numeric_ttl_errors() {
 }
 
 #[test]
+fn discovery_with_negative_ttl_errors() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "enforce");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    env.set(ENV_AAUTH_JWKS_TTL_SECS, "-1");
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::InvalidNonNegativeSecs {
+            var: ENV_AAUTH_JWKS_TTL_SECS,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn invalid_jwks_json_errors() {
     let jwks_file = write_temp_file("not json");
     let key_file = write_temp_file(&ec_pem());
@@ -402,6 +419,14 @@ fn aauth_deny_rule_fired_maps_all_variants() {
         trogon_aauth_verify::mission::verify_mission_header_matches_claim(&header, &claim).expect_err("mismatch");
     let mission = AAuthDenyReason::MissionMismatch(mission_err);
     assert_eq!(aauth_deny_rule_fired(&mission), "gateway.aauth.denied.mission");
+
+    let missing_header = AAuthDenyReason::MissionHeaderMissing {
+        approver: "approver-1".into(),
+    };
+    assert_eq!(
+        aauth_deny_rule_fired(&missing_header),
+        "gateway.aauth.denied.mission_header_missing"
+    );
 }
 
 fn jwt_header_identity() -> GatewayCallerIdentity {
