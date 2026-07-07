@@ -37,4 +37,4 @@ pub mod server;
 pub mod signature;
 
 pub use config::GithubConfig;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

@@ -20,6 +20,10 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::SENTRY_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Deserialize)]
 struct WebhookEnvelope {
     action: String,
@@ -97,6 +101,15 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &SentryConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
@@ -129,6 +142,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &SentryConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Sentry, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 #[instrument(
     name = SENTRY_WEBHOOK,
     skip_all,
@@ -154,6 +192,75 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        headers,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = "sentry.webhook",
+    skip_all,
+    fields(
+        resource = tracing::field::Empty,
+        action = tracing::field::Empty,
+        request_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let Some(signature) = header_value(&headers, HEADER_SIGNATURE) else {
+        warn!("Missing Sentry-Hook-Signature header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    let client_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ClientSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Sentry runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+
+    if let Err(error) = signature::verify(client_secret.as_str(), &body, signature) {
+        warn!(reason = %error, "Sentry webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode {
     let Some(resource) = header_value(&headers, HEADER_RESOURCE) else {
         warn!("Missing Sentry-Hook-Resource header");
         return StatusCode::BAD_REQUEST;
@@ -191,7 +298,7 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
-    let subject = format!("{}.{}.{}", state.subject_prefix, resource.as_str(), action_token);
+    let subject = format!("{}.{}.{}", subject_prefix, resource.as_str(), action_token);
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::RESOURCE, resource.as_str());
     span.record(trogon_semconv::attribute::ACTION, &payload.action);
@@ -205,13 +312,426 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     nats_headers.insert(NATS_HEADER_REQUEST_ID, request_id.as_str());
     nats_headers.insert(NATS_HEADER_TIMESTAMP, timestamp.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
 }
 
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+    }
+}
+
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::super::config::SentryConfig;
+    use super::super::constants::{
+        HEADER_REQUEST_ID, HEADER_RESOURCE, HEADER_SIGNATURE, HEADER_TIMESTAMP, NATS_HEADER_ACTION,
+        NATS_HEADER_REQUEST_ID, NATS_HEADER_RESOURCE, NATS_HEADER_TIMESTAMP,
+    };
+    use super::super::sentry_client_secret::SentryClientSecret;
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use trogon_nats::jetstream::StreamMaxAge;
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
+    };
+
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut};
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    const TEST_SECRET: &str = "test-secret";
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
+
+    fn compute_sig(secret: &str, body: &[u8]) -> String {
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn test_config() -> SentryConfig {
+        SentryConfig {
+            client_secret: SentryClientSecret::new(TEST_SECRET).unwrap(),
+            subject_prefix: NatsToken::new("sentry").unwrap(),
+            stream_name: NatsToken::new("SENTRY").unwrap(),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        }
+    }
+
+    fn tracing_guard() -> tracing::subscriber::DefaultGuard {
+        tracing_subscriber::fmt().with_test_writer().set_default()
+    }
+
+    fn mock_app(publisher: MockJetStreamPublisher) -> Router {
+        router(wrap_publisher(publisher), &test_config())
+    }
+
+    async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+        let config = test_config();
+        let store = MockOpenBaoSecretStore::default();
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Sentry,
+                    integration_id.clone(),
+                ),
+                CredentialKind::ClientSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &config,
+            integration_id,
+            registry.resolver(store),
+        )
+    }
+
+    fn webhook_request(
+        body: &[u8],
+        resource: &str,
+        timestamp: &str,
+        request_id: &str,
+        signature: Option<&str>,
+    ) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_RESOURCE, resource)
+            .header(HEADER_TIMESTAMP, timestamp)
+            .header(HEADER_REQUEST_ID, request_id);
+
+        if let Some(signature) = signature {
+            builder = builder.header(HEADER_SIGNATURE, signature);
+        }
+
+        builder.body(Body::from(body.to_vec())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn provision_creates_stream() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        let config = test_config();
+
+        provision(&js, &config).await.unwrap();
+
+        let streams = js.created_streams();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, "SENTRY");
+        assert_eq!(streams[0].subjects, vec!["sentry.>"]);
+        assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    }
+
+    #[tokio::test]
+    async fn provision_propagates_error() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        js.fail_next();
+        let config = test_config();
+
+        let result = provision(&js, &config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn valid_webhook_publishes_to_nats_and_returns_200() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created","data":{}}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "sentry.issue.created");
+        assert_eq!(messages[0].payload.as_ref(), body);
+        assert_eq!(
+            messages[0]
+                .headers
+                .get(async_nats::header::NATS_MESSAGE_ID)
+                .unwrap()
+                .as_str(),
+            "req-1"
+        );
+        assert_eq!(messages[0].headers.get(NATS_HEADER_RESOURCE).unwrap().as_str(), "issue");
+        assert_eq!(messages[0].headers.get(NATS_HEADER_ACTION).unwrap().as_str(), "created");
+        assert_eq!(
+            messages[0].headers.get(NATS_HEADER_REQUEST_ID).unwrap().as_str(),
+            "req-1"
+        );
+        assert_eq!(
+            messages[0].headers.get(NATS_HEADER_TIMESTAMP).unwrap().as_str(),
+            "1711315768"
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_client_secret_publishes_to_nats_and_rejects_static_secret() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), "runtime-secret").await;
+        let body = br#"{"action":"created","data":{}}"#;
+        let static_signature = compute_sig(TEST_SECRET, body);
+
+        let static_response = app
+            .clone()
+            .oneshot(webhook_request(
+                body,
+                "issue",
+                "1711315768",
+                "req-1",
+                Some(&static_signature),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+
+        let runtime_signature = compute_sig("runtime-secret", body);
+        let runtime_response = app
+            .oneshot(webhook_request(
+                body,
+                "issue",
+                "1711315768",
+                "req-1",
+                Some(&runtime_signature),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(runtime_response.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "sentry.issue.created");
+    }
+
+    #[tokio::test]
+    async fn missing_signature_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", None))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_signature_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some("not-valid")))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_resource_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_timestamp_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_RESOURCE, "issue")
+            .header(HEADER_REQUEST_ID, "req-1")
+            .header(HEADER_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_request_id_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/webhook")
+            .header(HEADER_RESOURCE, "issue")
+            .header(HEADER_TIMESTAMP, "1711315768")
+            .header(HEADER_SIGNATURE, signature)
+            .body(Body::from(body.to_vec()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_payload_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"not-json"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn unsupported_resource_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(
+                body,
+                "organization",
+                "1711315768",
+                "req-1",
+                Some(&signature),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[test]
+    fn sentry_resource_as_str_covers_all_documented_values() {
+        assert_eq!(SentryResource::Installation.as_str(), "installation");
+        assert_eq!(SentryResource::EventAlert.as_str(), "event_alert");
+        assert_eq!(SentryResource::Issue.as_str(), "issue");
+        assert_eq!(SentryResource::MetricAlert.as_str(), "metric_alert");
+        assert_eq!(SentryResource::Error.as_str(), "error");
+        assert_eq!(SentryResource::Comment.as_str(), "comment");
+        assert_eq!(SentryResource::Seer.as_str(), "seer");
+    }
+
+    #[tokio::test]
+    async fn invalid_action_token_returns_400() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = br#"{"action":"issue.created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(publisher.published_messages().is_empty());
+    }
+
+    #[tokio::test]
+    async fn publish_error_returns_500() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let app = mock_app(publisher);
+        let body = br#"{"action":"created"}"#;
+        let signature = compute_sig(TEST_SECRET, body);
+
+        let response = app
+            .oneshot(webhook_request(body, "issue", "1711315768", "req-1", Some(&signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}

@@ -8,6 +8,7 @@ pub struct CredentialRef {
     version: CredentialVersion,
     owner_id: CredentialOwnerId,
     source: SourceKind,
+    scope_key: String,
     kind: CredentialKind,
 }
 
@@ -18,6 +19,7 @@ impl CredentialRef {
             version,
             owner_id: scope.owner_id().clone(),
             source: scope.source_kind(),
+            scope_key: scope.scope_key(),
             kind,
         }
     }
@@ -38,16 +40,25 @@ impl CredentialRef {
         self.source
     }
 
+    pub fn scope_key(&self) -> &str {
+        &self.scope_key
+    }
+
     pub fn kind(&self) -> CredentialKind {
         self.kind
     }
 
     pub fn next_version(&self) -> Self {
+        self.with_version(self.version.next())
+    }
+
+    pub fn with_version(&self, version: CredentialVersion) -> Self {
         Self {
             id: self.id.clone(),
-            version: self.version.next(),
+            version,
             owner_id: self.owner_id.clone(),
             source: self.source,
+            scope_key: self.scope_key.clone(),
             kind: self.kind,
         }
     }
