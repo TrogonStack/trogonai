@@ -80,3 +80,12 @@ fn mission_context_from_mission_carries_status() {
     assert_eq!(ctx.status, MissionStatus::Terminated);
     assert_eq!(ctx.mission_ref.s256, mission.id.as_str());
 }
+
+#[test]
+fn approve_rejects_blank_field() {
+    let mut blob_with_blank_agent = blob();
+    blob_with_blank_agent.agent = "   ".to_string();
+    let bytes = serde_json::to_vec(&blob_with_blank_agent).unwrap();
+    let err = Mission::approve(bytes, blob_with_blank_agent).unwrap_err();
+    assert_eq!(err, MissionValidationError::EmptyField("agent"));
+}

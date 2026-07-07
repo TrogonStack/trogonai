@@ -137,6 +137,20 @@ fn client_detail_forwards_updated_request_identity_mismatch_display() {
 }
 
 #[test]
+fn resource_token_subagent_key_mismatch_maps_to_invalid_resource_token() {
+    let err = PersonServerError::Verification(RequestVerificationError::ResourceTokenSubagentKeyMismatch);
+    assert_eq!(err.token_endpoint_code(), TokenEndpointError::InvalidResourceToken);
+    assert_eq!(err.http_status(), 400);
+}
+
+#[test]
+fn upstream_token_error_maps_to_invalid_request() {
+    let err = PersonServerError::Verification(RequestVerificationError::UpstreamToken(TokenError::BadHeader));
+    assert_eq!(err.token_endpoint_code(), TokenEndpointError::InvalidRequest);
+    assert_eq!(err.http_status(), 400);
+}
+
+#[test]
 fn client_detail_forwards_mission_validation_display() {
     let err = PersonServerError::MissionValidation(crate::mission::MissionValidationError::EmptyField("approver"));
     assert_eq!(

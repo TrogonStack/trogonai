@@ -655,6 +655,43 @@ async fn subagent_grant_binds_subagent_confirmation_key() {
     assert_eq!(claims["cnf"]["jwk"], subagent_fixture.jwk);
 }
 
+/// Interaction channel that always succeeds, standing in for a deployment
+/// with a working push/chat channel to the person.
+struct AvailableInteractionChannel;
+
+#[async_trait]
+impl InteractionChannel for AvailableInteractionChannel {
+    async fn notify(&self, _notice: &InteractionNotice) -> Result<(), crate::error::InteractionRelayError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn needs_interaction_with_available_channel_begins_interaction() {
+    let (_a, _r, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    let ps_signing = SigningKey::random(&mut OsRng);
+    let ps_pem = ps_signing.to_pkcs8_pem(pkcs8::LineEnding::LF).unwrap();
+    let ps_encoding_key = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
+    let server = PersonServer::new(
+        TokenVerifier::new(jwks, SystemTimeSource),
+        SystemTimeSource,
+        ScriptedPolicy::new(vec![PolicyDecision::NeedsInteraction]),
+        AvailableInteractionChannel,
+        InMemoryStore::new(),
+        ps_encoding_key,
+        Algorithm::ES256,
+        "ps-kid",
+        "https://ps.example",
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let outcome = server.evaluate_token_request(&agent_jwt, &req).await.unwrap();
+    match outcome {
+        TokenEndpointOutcome::Pending { response, .. } => assert!(response.is_interacting()),
+        other => panic!("expected Pending, got {other:?}"),
+    }
+}
+
 /// Interaction channel that always reports the terminal
 /// [`InteractionRelayError::UserUnreachable`], standing in for a deployment
 /// with no channel at all and an agent that lacks the `interaction`
