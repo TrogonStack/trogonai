@@ -12,8 +12,8 @@ use trogon_std::env::ReadEnv;
 
 use crate::aauth::{
     AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, ChallengeKidError, GatewayAAuthIngress,
-    GatewayJwksResolver, LeewaySecs, NonNegativeSecs, PersonServerAudience, PersonServerAudienceError, ResourceIssuer,
-    ResourceIssuerError, StaticJwks,
+    GatewayJwksResolver, LeewaySecs, NonNegativeSecs, NonNegativeSecsError, PersonServerAudience,
+    PersonServerAudienceError, ResourceIssuer, ResourceIssuerError, StaticJwks,
 };
 
 pub const ENV_AAUTH_MODE: &str = "A2A_GATEWAY_AAUTH_MODE";
@@ -68,7 +68,19 @@ pub enum AAuthEnvError {
     #[error("{0}: {1}")]
     InvalidChallengeKid(&'static str, #[source] ChallengeKidError),
     #[error("{var} must be a non-negative integer, got {raw:?}")]
-    InvalidNonNegativeSecs { var: &'static str, raw: String },
+    InvalidNonNegativeSecs {
+        var: &'static str,
+        raw: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    #[error("{var} must be non-negative, got {raw:?}")]
+    NegativeSecs {
+        var: &'static str,
+        raw: String,
+        #[source]
+        source: NonNegativeSecsError,
+    },
     #[error(
         "exactly one of {ENV_AAUTH_JWKS_PATH} or {ENV_AAUTH_JWKS_DISCOVERY}=true must be configured when \
          {ENV_AAUTH_MODE} is shadow|enforce, got neither"
@@ -113,20 +125,14 @@ pub fn gateway_aauth_from_env<E: ReadEnv>(env: &E) -> Result<Option<GatewayAAuth
         .map_err(|e| AAuthEnvError::InvalidChallengeKid(ENV_AAUTH_CHALLENGE_KID, e))?;
 
     let leeway_secs = LeewaySecs::new(optional_u64(env, ENV_AAUTH_LEEWAY_SECS, DEFAULT_LEEWAY_SECS)?);
-    let challenge_ttl_secs = NonNegativeSecs::new(optional_i64(
-        env,
+    let challenge_ttl_secs = non_negative_secs(
         ENV_AAUTH_CHALLENGE_TTL_SECS,
-        DEFAULT_CHALLENGE_TTL_SECS,
-    )?)
-    .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs {
-        var: ENV_AAUTH_CHALLENGE_TTL_SECS,
-        raw: env.var(ENV_AAUTH_CHALLENGE_TTL_SECS).unwrap_or_default(),
-    })?;
-    let max_skew_secs = NonNegativeSecs::new(optional_i64(env, ENV_AAUTH_MAX_SKEW_SECS, DEFAULT_MAX_SKEW_SECS)?)
-        .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs {
-            var: ENV_AAUTH_MAX_SKEW_SECS,
-            raw: env.var(ENV_AAUTH_MAX_SKEW_SECS).unwrap_or_default(),
-        })?;
+        optional_i64(env, ENV_AAUTH_CHALLENGE_TTL_SECS, DEFAULT_CHALLENGE_TTL_SECS)?,
+    )?;
+    let max_skew_secs = non_negative_secs(
+        ENV_AAUTH_MAX_SKEW_SECS,
+        optional_i64(env, ENV_AAUTH_MAX_SKEW_SECS, DEFAULT_MAX_SKEW_SECS)?,
+    )?;
 
     let cfg = AAuthConfig {
         mode,
@@ -235,16 +241,14 @@ fn jwks_resolver_from_env<E: ReadEnv>(env: &E) -> Result<GatewayJwksResolver, AA
 fn well_known_resolver_from_env<E: ReadEnv>(
     env: &E,
 ) -> Result<CachedJwksResolver<HttpJwksResolver, SystemTimeSource>, AAuthEnvError> {
-    let ttl_secs = optional_i64(env, ENV_AAUTH_JWKS_TTL_SECS, trogon_aauth_verify::DEFAULT_TTL_SECS)?;
     // A negative TTL is not "expire immediately", it is a misconfiguration
     // that would turn every verification into a discovery fetch -- reject it
     // at startup like the other second-count vars.
-    let ttl_secs = NonNegativeSecs::new(ttl_secs)
-        .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs {
-            var: ENV_AAUTH_JWKS_TTL_SECS,
-            raw: env.var(ENV_AAUTH_JWKS_TTL_SECS).unwrap_or_default(),
-        })?
-        .get();
+    let ttl_secs = non_negative_secs(
+        ENV_AAUTH_JWKS_TTL_SECS,
+        optional_i64(env, ENV_AAUTH_JWKS_TTL_SECS, trogon_aauth_verify::DEFAULT_TTL_SECS)?,
+    )?
+    .get();
     Ok(CachedJwksResolver::new(HttpJwksResolver::new(), SystemTimeSource).with_ttl_secs(ttl_secs))
 }
 
@@ -264,8 +268,11 @@ fn optional_non_empty_var<E: ReadEnv>(env: &E, key: &str) -> Option<String> {
 }
 
 fn required_var<E: ReadEnv>(env: &E, key: &'static str) -> Result<String, AAuthEnvError> {
+    // Return the trimmed value, not the original: env vars mounted from
+    // secret files commonly carry a trailing newline, which would otherwise
+    // leak into file paths and issuer/kid values.
     match env.var(key) {
-        Ok(value) if !value.trim().is_empty() => Ok(value),
+        Ok(value) if !value.trim().is_empty() => Ok(value.trim().to_owned()),
         _ => Err(AAuthEnvError::MissingRequired(key)),
     }
 }
@@ -303,7 +310,7 @@ fn optional_u64<E: ReadEnv>(env: &E, key: &'static str, default: u64) -> Result<
         Ok(raw) => raw
             .trim()
             .parse::<u64>()
-            .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs { var: key, raw }),
+            .map_err(|source| AAuthEnvError::InvalidNonNegativeSecs { var: key, raw, source }),
         Err(_) => Ok(default),
     }
 }
@@ -313,9 +320,17 @@ fn optional_i64<E: ReadEnv>(env: &E, key: &'static str, default: i64) -> Result<
         Ok(raw) => raw
             .trim()
             .parse::<i64>()
-            .map_err(|_| AAuthEnvError::InvalidNonNegativeSecs { var: key, raw }),
+            .map_err(|source| AAuthEnvError::InvalidNonNegativeSecs { var: key, raw, source }),
         Err(_) => Ok(default),
     }
+}
+
+fn non_negative_secs(var: &'static str, secs: i64) -> Result<NonNegativeSecs, AAuthEnvError> {
+    NonNegativeSecs::new(secs).map_err(|source| AAuthEnvError::NegativeSecs {
+        var,
+        raw: secs.to_string(),
+        source,
+    })
 }
 
 #[cfg(test)]

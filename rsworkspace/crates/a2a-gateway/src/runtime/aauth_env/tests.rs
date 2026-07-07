@@ -256,7 +256,7 @@ fn discovery_with_negative_ttl_errors() {
     env.set(ENV_AAUTH_JWKS_TTL_SECS, "-1");
     assert!(matches!(
         gateway_aauth_from_env(&env),
-        Err(AAuthEnvError::InvalidNonNegativeSecs {
+        Err(AAuthEnvError::NegativeSecs {
             var: ENV_AAUTH_JWKS_TTL_SECS,
             ..
         })
@@ -359,7 +359,7 @@ fn negative_or_non_numeric_optional_secs_errors() {
     env2.set(ENV_AAUTH_CHALLENGE_TTL_SECS, "-5");
     assert!(matches!(
         gateway_aauth_from_env(&env2),
-        Err(AAuthEnvError::InvalidNonNegativeSecs {
+        Err(AAuthEnvError::NegativeSecs {
             var: ENV_AAUTH_CHALLENGE_TTL_SECS,
             ..
         })
@@ -375,7 +375,7 @@ fn negative_or_non_numeric_optional_secs_errors() {
     env3.set(ENV_AAUTH_MAX_SKEW_SECS, "-1");
     assert!(matches!(
         gateway_aauth_from_env(&env3),
-        Err(AAuthEnvError::InvalidNonNegativeSecs {
+        Err(AAuthEnvError::NegativeSecs {
             var: ENV_AAUTH_MAX_SKEW_SECS,
             ..
         })
