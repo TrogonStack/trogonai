@@ -158,3 +158,12 @@ fn pending_id_generate_produces_unique_ids() {
     let b = PendingId::generate();
     assert_ne!(a, b);
 }
+
+#[test]
+fn pending_ids_are_random_not_sequential() {
+    let a = PendingId::generate();
+    let b = PendingId::generate();
+    assert_ne!(a, b);
+    assert_eq!(a.0.len(), 32);
+    assert!(a.0.chars().all(|c| c.is_ascii_hexdigit()));
+}

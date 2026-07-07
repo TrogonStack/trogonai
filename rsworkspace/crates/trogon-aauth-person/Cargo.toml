@@ -25,6 +25,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 trogon-aauth-verify = { workspace = true }
 trogon-identity-types = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }

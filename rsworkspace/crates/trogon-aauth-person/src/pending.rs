@@ -35,15 +35,11 @@ impl std::fmt::Display for PendingId {
 /// leaves pending-id shape to the PS), just needs to be unpredictable and
 /// unique per process. Uses a counter + time to avoid pulling in a UUID
 /// crate for one call site.
+/// CSPRNG-backed: the pending id is the sole credential needed to poll a
+/// pending record, including the minted auth token once granted, so it must
+/// be unguessable.
 fn uuid_like() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{nanos:x}-{n:x}")
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Which interaction-shaped state a pending request is waiting in, per

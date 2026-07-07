@@ -537,6 +537,12 @@ impl crate::store::PersonStateStore for FailingStore {
     ) -> Result<Option<crate::pending::PendingId>, crate::store::StoreError> {
         Err(crate::store::StoreError("backend down".into()))
     }
+    async fn insert_pending_unless_correlated(
+        &self,
+        _pending: crate::pending::PendingRequest,
+    ) -> Result<Option<crate::pending::PendingId>, crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
     async fn insert_mission(&self, _mission: crate::mission::Mission) -> Result<(), crate::store::StoreError> {
         Err(crate::store::StoreError("backend down".into()))
     }

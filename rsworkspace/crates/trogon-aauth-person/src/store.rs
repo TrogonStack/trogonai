@@ -39,6 +39,14 @@ pub trait PersonStateStore: Send + Sync {
     /// pending flow instead of spawning parallel interactions.
     async fn find_pending_by_correlation(&self, key: &str) -> Result<Option<PendingId>, StoreError>;
 
+    /// Atomically inserts `pending` unless a non-terminal request with the
+    /// same correlation key already exists, returning the existing id when
+    /// one does. Implementations MUST make the check and the insert a single
+    /// atomic step -- a separate find-then-insert lets two concurrent
+    /// requests for the same agent+resource spawn parallel flows, breaking
+    /// "Concurrent Requests".
+    async fn insert_pending_unless_correlated(&self, pending: PendingRequest) -> Result<Option<PendingId>, StoreError>;
+
     async fn insert_mission(&self, mission: Mission) -> Result<(), StoreError>;
     async fn get_mission(&self, id: &MissionId) -> Result<Option<Mission>, StoreError>;
     async fn update_mission(&self, mission: Mission) -> Result<(), StoreError>;
@@ -116,6 +124,27 @@ impl PersonStateStore for InMemoryStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
             .cloned())
+    }
+
+    async fn insert_pending_unless_correlated(&self, pending: PendingRequest) -> Result<Option<PendingId>, StoreError> {
+        // Same lock order as insert_pending (pending, then correlation) so
+        // the two paths cannot deadlock against each other.
+        let mut entries = self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut correlation = self
+            .correlation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing_id) = correlation.get(&pending.correlation_key)
+            && let Some(existing) = entries.get(existing_id)
+            && !existing.is_terminal()
+        {
+            return Ok(Some(existing_id.clone()));
+        }
+        let key = pending.correlation_key.clone();
+        let id = pending.id.clone();
+        entries.insert(id.clone(), pending);
+        correlation.insert(key, id);
+        Ok(None)
     }
 
     async fn insert_mission(&self, mission: Mission) -> Result<(), StoreError> {

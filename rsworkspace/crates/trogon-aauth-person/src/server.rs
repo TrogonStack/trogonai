@@ -110,31 +110,11 @@ where
             .await
             .map_err(PersonServerError::Verification)?;
 
-        let correlation_key = PendingRequest::correlation_key_for(&verified.agent_claims, &verified.resource_claims);
-        if let Some(existing_id) = self
-            .store
-            .find_pending_by_correlation(&correlation_key)
-            .await
-            .map_err(PersonServerError::Store)?
-            && let Some(existing) = self
-                .store
-                .get_pending(&existing_id)
-                .await
-                .map_err(PersonServerError::Store)?
-            && !existing.is_terminal()
-        {
-            return Ok(TokenEndpointOutcome::Pending {
-                pending_id: existing.id.clone(),
-                response: PendingResponse::pending(),
-            });
-        }
-
         let mission_id = verified
             .resource_claims
             .mission
             .as_ref()
             .map(|m| MissionId::from_s256(m.s256.clone()));
-        let mission_ctx = self.load_mission_context(mission_id.as_ref()).await?;
 
         let mut pending = PendingRequest::new(
             verified.agent_claims.clone(),
@@ -143,6 +123,38 @@ where
         );
         pending.mission_id = mission_id.clone();
 
+        // Atomic reservation per "Concurrent Requests": a find-then-insert
+        // window would let two simultaneous requests for the same
+        // agent+resource spawn parallel flows. Whoever reserves first owns
+        // the flow; everyone else correlates onto it.
+        if let Some(existing_id) = self
+            .store
+            .insert_pending_unless_correlated(pending.clone())
+            .await
+            .map_err(PersonServerError::Store)?
+        {
+            return Ok(TokenEndpointOutcome::Pending {
+                pending_id: existing_id,
+                response: PendingResponse::pending(),
+            });
+        }
+
+        let outcome = self.decide_fresh(&mut pending, &verified, mission_id.as_ref()).await;
+        if outcome.is_err() {
+            // Release the reservation so a retry does not correlate onto a
+            // flow that never reached a decision.
+            let _ = self.store.remove_pending(&pending.id).await;
+        }
+        outcome
+    }
+
+    async fn decide_fresh(
+        &self,
+        pending: &mut PendingRequest,
+        verified: &crate::agent::VerifiedRequest,
+        mission_id: Option<&MissionId>,
+    ) -> Result<TokenEndpointOutcome, PersonServerError> {
+        let mission_ctx = self.load_mission_context(mission_id).await?;
         let decision = self
             .policy
             .decide(DecisionRequest {
@@ -155,8 +167,7 @@ where
             .await
             .map_err(|e| PersonServerError::Policy(Box::new(e)))?;
 
-        self.apply_decision(&mut pending, decision, &verified, mission_id.as_ref())
-            .await
+        self.apply_decision(pending, decision, verified, mission_id).await
     }
 
     /// Applies a policy decision to a (fresh or resumed) pending request,

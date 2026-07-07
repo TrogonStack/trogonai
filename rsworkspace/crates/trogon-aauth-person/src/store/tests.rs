@@ -108,3 +108,34 @@ async fn mission_insert_get_update_round_trips() {
     let after = store.get_mission(&id).await.unwrap().unwrap();
     assert!(!after.is_active());
 }
+
+#[tokio::test]
+async fn insert_unless_correlated_returns_existing_non_terminal_flow() {
+    let store = InMemoryStore::new();
+    let first = PendingRequest::new(agent_claims(), resource_claims(), None);
+    let first_id = first.id.clone();
+    assert!(
+        store.insert_pending_unless_correlated(first).await.unwrap().is_none(),
+        "first reservation owns the flow"
+    );
+
+    let duplicate = PendingRequest::new(agent_claims(), resource_claims(), None);
+    let existing = store.insert_pending_unless_correlated(duplicate).await.unwrap();
+    assert_eq!(existing, Some(first_id));
+}
+
+#[tokio::test]
+async fn insert_unless_correlated_replaces_a_terminal_flow() {
+    let store = InMemoryStore::new();
+    let mut first = PendingRequest::new(agent_claims(), resource_claims(), None);
+    first.grant("tok".to_string(), 60);
+    assert!(store.insert_pending_unless_correlated(first).await.unwrap().is_none());
+
+    let fresh = PendingRequest::new(agent_claims(), resource_claims(), None);
+    let fresh_id = fresh.id.clone();
+    assert!(
+        store.insert_pending_unless_correlated(fresh).await.unwrap().is_none(),
+        "a terminal flow must not block re-authorization"
+    );
+    assert!(store.get_pending(&fresh_id).await.unwrap().is_some());
+}
