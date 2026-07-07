@@ -20,6 +20,7 @@ pub const ENV_AAUTH_MODE: &str = "A2A_GATEWAY_AAUTH_MODE";
 pub const ENV_AAUTH_JWKS_PATH: &str = "A2A_GATEWAY_AAUTH_JWKS_PATH";
 pub const ENV_AAUTH_JWKS_DISCOVERY: &str = "A2A_GATEWAY_AAUTH_JWKS_DISCOVERY";
 pub const ENV_AAUTH_JWKS_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_JWKS_TTL_SECS";
+pub const ENV_AAUTH_JWKS_ALLOWED_ISSUERS: &str = "A2A_GATEWAY_AAUTH_JWKS_ALLOWED_ISSUERS";
 pub const ENV_AAUTH_RESOURCE_ISS: &str = "A2A_GATEWAY_AAUTH_RESOURCE_ISS";
 pub const ENV_AAUTH_PERSON_SERVER_AUD: &str = "A2A_GATEWAY_AAUTH_PERSON_SERVER_AUD";
 pub const ENV_AAUTH_CHALLENGE_KID: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KID";
@@ -249,7 +250,21 @@ fn well_known_resolver_from_env<E: ReadEnv>(
         optional_i64(env, ENV_AAUTH_JWKS_TTL_SECS, trogon_aauth_verify::DEFAULT_TTL_SECS)?,
     )?
     .get();
-    Ok(CachedJwksResolver::new(HttpJwksResolver::new(), SystemTimeSource).with_ttl_secs(ttl_secs))
+    // Optional but recommended: pin discovery to known federation partners
+    // so an attacker-minted iss cannot drive fetches at arbitrary hosts.
+    let mut resolver = HttpJwksResolver::new();
+    if let Some(raw) = optional_non_empty_var(env, ENV_AAUTH_JWKS_ALLOWED_ISSUERS) {
+        let issuers: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|i| !i.is_empty())
+            .map(str::to_owned)
+            .collect();
+        if !issuers.is_empty() {
+            resolver = resolver.with_allowed_issuers(issuers);
+        }
+    }
+    Ok(CachedJwksResolver::new(resolver, SystemTimeSource).with_ttl_secs(ttl_secs))
 }
 
 fn jwks_discovery_enabled<E: ReadEnv>(env: &E) -> Result<bool, AAuthEnvError> {

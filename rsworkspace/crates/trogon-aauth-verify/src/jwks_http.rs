@@ -135,6 +135,11 @@ pub struct HttpJwksResolver {
     client: reqwest::Client,
     dwk_order: Vec<WellKnownDwk>,
     max_response_bytes: MaxResponseBytes,
+    /// When set, only these exact issuers (trailing slash ignored) may be
+    /// resolved. `iss` is attacker-influenced, so deployments that know
+    /// their federation partners should pin them here rather than letting
+    /// any https URL drive an outbound fetch.
+    allowed_issuers: Option<Vec<String>>,
 }
 
 impl HttpJwksResolver {
@@ -176,7 +181,21 @@ impl HttpJwksResolver {
             client,
             dwk_order,
             max_response_bytes,
+            allowed_issuers: None,
         }
+    }
+
+    /// Restricts resolution to an exact issuer allowlist (trailing slashes
+    /// ignored). Any other `iss` is rejected before a network call is made.
+    #[must_use]
+    pub fn with_allowed_issuers(mut self, issuers: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.allowed_issuers = Some(
+            issuers
+                .into_iter()
+                .map(|i| i.into().trim_end_matches('/').to_owned())
+                .collect(),
+        );
+        self
     }
 }
 
@@ -190,6 +209,11 @@ impl Default for HttpJwksResolver {
 impl JwksResolver for HttpJwksResolver {
     async fn resolve(&self, iss: &str) -> Result<jsonwebtoken::jwk::JwkSet, JwksError> {
         let base = require_https_issuer(iss)?;
+        if let Some(allowed) = &self.allowed_issuers
+            && !allowed.iter().any(|a| a == base)
+        {
+            return Err(JwksError::UnknownIssuer(iss.to_string()));
+        }
         self.resolve_from_base(iss, base).await
     }
 }
@@ -215,13 +239,40 @@ impl HttpJwksResolver {
     }
 }
 
-/// Validates `iss` is an `https://` URL and returns it with any trailing
-/// slash stripped so `well_known_url` can join a single `/` deterministically.
+/// Validates `iss` is an `https://` URL with a public-looking DNS host and
+/// returns it with any trailing slash stripped so `well_known_url` can join
+/// a single `/` deterministically.
+///
+/// IP-literal hosts and localhost names are rejected outright: legitimate
+/// AAuth issuers are public DNS names, while an attacker-minted `iss`
+/// pointing at an IP or loopback is an SSRF attempt against whatever sits
+/// next to the verifier. This does not defend against a hostile public DNS
+/// name resolving to an internal address -- deployments that need that
+/// guarantee should pin issuers via [`HttpJwksResolver::with_allowed_issuers`].
 fn require_https_issuer(iss: &str) -> Result<&str, JwksError> {
-    if !iss.starts_with("https://") {
+    let parsed = url::Url::parse(iss).map_err(|e| JwksError::Transport(format!("issuer is not a valid URL: {e}")))?;
+    if parsed.scheme() != "https" {
         return Err(JwksError::Transport(format!(
             "issuer must be an https:// URL, got {iss:?}"
         )));
+    }
+    match parsed.host() {
+        Some(url::Host::Domain(domain)) => {
+            let lower = domain.to_ascii_lowercase();
+            if lower == "localhost" || lower.ends_with(".localhost") {
+                return Err(JwksError::Transport(format!(
+                    "issuer host {domain:?} is loopback; refusing well-known fetch"
+                )));
+            }
+        }
+        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) => {
+            return Err(JwksError::Transport(format!(
+                "issuer host in {iss:?} is an IP literal; AAuth issuers must be DNS names"
+            )));
+        }
+        None => {
+            return Err(JwksError::Transport(format!("issuer {iss:?} has no host")));
+        }
     }
     Ok(iss.trim_end_matches('/'))
 }
@@ -252,15 +303,18 @@ async fn fetch_jwks(
             max_response_bytes.get()
         ));
     }
-    let bytes = response.bytes().await.map_err(|e| format!("body read failed: {e}"))?;
-    if bytes.len() as u64 > max_response_bytes.get() {
-        return Err(format!(
-            "response body {} bytes exceeds cap {}",
-            bytes.len(),
-            max_response_bytes.get()
-        ));
+    // Stream the body so the cap holds even when Content-Length is absent
+    // or lies: buffering first would let a hostile issuer exhaust memory
+    // before the check runs.
+    let mut response = response;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("body read failed: {e}"))? {
+        if (body.len() + chunk.len()) as u64 > max_response_bytes.get() {
+            return Err(format!("response body exceeds cap {} bytes", max_response_bytes.get()));
+        }
+        body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice::<jsonwebtoken::jwk::JwkSet>(&bytes).map_err(|e| format!("malformed JWKS JSON: {e}"))
+    serde_json::from_slice::<jsonwebtoken::jwk::JwkSet>(&body).map_err(|e| format!("malformed JWKS JSON: {e}"))
 }
 
 #[cfg(test)]

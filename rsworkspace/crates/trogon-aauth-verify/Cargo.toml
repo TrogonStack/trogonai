@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 trogon-identity-types = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core", "pkcs8"] }

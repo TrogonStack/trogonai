@@ -216,3 +216,31 @@ async fn resolve_from_base_enforces_response_size_cap_via_content_length() {
         other => panic!("expected Transport error naming the size cap, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn resolve_rejects_ip_literal_issuers() {
+    let resolver = HttpJwksResolver::new();
+    for iss in ["https://127.0.0.1", "https://10.0.0.8:8443", "https://[::1]"] {
+        let err = resolver.resolve(iss).await.expect_err("IP literal must be refused");
+        assert!(err.to_string().contains("IP literal"), "{iss}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn resolve_rejects_localhost_issuers() {
+    let resolver = HttpJwksResolver::new();
+    for iss in ["https://localhost", "https://foo.localhost"] {
+        let err = resolver.resolve(iss).await.expect_err("loopback must be refused");
+        assert!(err.to_string().contains("loopback"), "{iss}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn resolve_rejects_issuers_outside_the_allowlist_before_any_fetch() {
+    let resolver = HttpJwksResolver::new().with_allowed_issuers(["https://ap.example"]);
+    let err = resolver
+        .resolve("https://evil.example")
+        .await
+        .expect_err("unlisted issuer must be refused");
+    assert!(matches!(err, JwksError::UnknownIssuer(_)));
+}

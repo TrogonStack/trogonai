@@ -103,13 +103,17 @@ fn urldecode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
-            out.push(byte);
-            i += 3;
-            continue;
+        // Decode the two hex digits from raw bytes, never by slicing the
+        // &str: a percent sign followed by a multi-byte code point would
+        // put the slice boundary inside a character and panic.
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
         }
         out.push(bytes[i]);
         i += 1;
@@ -158,5 +162,15 @@ mod tests {
     fn login_request_minimal_query_string_only_ps() {
         let req = LoginRequest::new("https://ps.example");
         assert_eq!(req.to_query_string(), "ps=https%3A%2F%2Fps.example");
+    }
+
+    #[test]
+    fn parse_query_string_survives_percent_before_multibyte_character() {
+        // A percent sign directly followed by a multi-byte code point used
+        // to panic via a mid-character &str slice in urldecode.
+        let parsed = LoginRequest::parse_query_string("ps=%\u{20ac}&login_hint=a%zzb");
+        let parsed = parsed.expect("malformed escapes fall through as literals");
+        assert_eq!(parsed.ps, "%\u{20ac}");
+        assert_eq!(parsed.login_hint.as_deref(), Some("a%zzb"));
     }
 }
