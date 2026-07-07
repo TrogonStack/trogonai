@@ -7141,6 +7141,7 @@ dependencies = [
  "sha2 0.11.0",
  "subtle",
  "tempfile",
+ "testcontainers-modules",
  "thiserror 2.0.19",
  "time",
  "tokio",
