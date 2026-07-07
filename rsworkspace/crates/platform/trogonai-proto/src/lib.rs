@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "agents", feature = "sessions"))]
 mod r#gen;
 
 #[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
@@ -11,6 +11,9 @@ pub mod constants;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
+
+#[cfg(feature = "gateway")]
+pub mod gateway;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;

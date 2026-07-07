@@ -18,6 +18,10 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::LINEAR_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
     InvalidJson,
@@ -84,6 +88,16 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    timestamp_tolerance: Option<NonZeroDuration>,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &LinearConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
@@ -117,12 +131,51 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &LinearConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Linear, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        timestamp_tolerance: config.timestamp_tolerance,
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
     Box::pin(handle_webhook_inner(state, headers, body))
+}
+
+fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Pin<Box<dyn Future<Output = StatusCode> + Send>>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    Box::pin(handle_runtime_webhook_inner(state, headers, body))
 }
 
 #[instrument(
@@ -155,30 +208,103 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     }
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.timestamp_tolerance,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = "linear.webhook",
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        action = tracing::field::Empty,
+        webhook_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+        messaging.message.body.size = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook_inner<P, S, G>(
+    state: RuntimeAppState<P, S, G>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let sig = headers.get("linear-signature").and_then(|v| v.to_str().ok());
+    let webhook_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::WebhookSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Linear runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+
+    match sig {
+        Some(sig) if signature::verify(webhook_secret.as_str(), &body, sig) => {}
+        Some(_) => {
+            warn!("Invalid Linear webhook signature");
+            return StatusCode::UNAUTHORIZED;
+        }
+        None => {
+            warn!("Missing linear-signature header");
+            return StatusCode::UNAUTHORIZED;
+        }
+    }
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.timestamp_tolerance,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    timestamp_tolerance: Option<NonZeroDuration>,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
             warn!(error = %e, "Failed to parse Linear webhook body as JSON");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
     };
 
-    if let Some(tolerance) = state.timestamp_tolerance {
+    if let Some(tolerance) = timestamp_tolerance {
         let Some(ts_ms) = parsed.get("webhookTimestamp").and_then(|v| v.as_u64()) else {
             warn!("Missing or malformed 'webhookTimestamp' field");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::MissingWebhookTimestamp,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         };
@@ -191,14 +317,14 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
             warn!(
                 age_ms,
                 tolerance_ms = Duration::from(tolerance).as_millis() as u64,
-                "Stale webhookTimestamp — potential replay attack"
+                "Stale webhookTimestamp - potential replay attack"
             );
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::StaleWebhookTimestamp,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -207,22 +333,22 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_type) = parsed.get("type").and_then(|v| v.as_str()) else {
         warn!("Missing 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::MissingType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
     let Ok(event_type) = NatsToken::new(raw_type) else {
         warn!("Invalid 'type' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::InvalidType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -230,22 +356,22 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_action) = parsed.get("action").and_then(|v| v.as_str()) else {
         warn!("Missing 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::MissingAction,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
     let Ok(action) = NatsToken::new(raw_action) else {
         warn!("Invalid 'action' field in Linear webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             RejectReason::InvalidAction,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -256,7 +382,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         .unwrap_or("unknown")
         .to_owned();
 
-    let subject = format!("{}.{}.{}", state.subject_prefix, event_type, action);
+    let subject = format!("{}.{}.{}", subject_prefix, event_type, action);
 
     let span = tracing::Span::current();
     span.record(trogon_semconv::attribute::EVENT_TYPE, event_type.as_str());
@@ -268,13 +394,480 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert("Nats-Msg-Id", webhook_id.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
 }
 
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+    }
+}
+
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use trogon_nats::jetstream::StreamMaxAge;
+    use trogon_nats::jetstream::{
+        ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
+    };
+
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut};
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    fn wrap_publisher(
+        publisher: MockJetStreamPublisher,
+    ) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
+        ClaimCheckPublisher::new(
+            publisher,
+            MockObjectStore::new(),
+            "test-bucket".to_string(),
+            MaxPayload::from_server_limit(usize::MAX),
+        )
+    }
+
+    const TEST_SECRET: &str = "test-secret";
+
+    fn compute_sig(secret: &str, body: &[u8]) -> String {
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("valid key length");
+        mac.update(body);
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn test_config() -> LinearConfig {
+        LinearConfig {
+            webhook_secret: LinearWebhookSecret::new(TEST_SECRET).unwrap(),
+            subject_prefix: NatsToken::new("linear").expect("valid token"),
+            stream_name: NatsToken::new("LINEAR").expect("valid token"),
+            stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
+            timestamp_tolerance: NonZeroDuration::from_secs(60).ok(),
+            nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
+        }
+    }
+
+    fn tracing_guard() -> tracing::subscriber::DefaultGuard {
+        tracing_subscriber::fmt().with_test_writer().set_default()
+    }
+
+    fn mock_app(publisher: MockJetStreamPublisher) -> Router {
+        router(wrap_publisher(publisher), &test_config())
+    }
+
+    async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+        let config = test_config();
+        let store = MockOpenBaoSecretStore::default();
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Linear,
+                    integration_id.clone(),
+                ),
+                CredentialKind::WebhookSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &config,
+            integration_id,
+            registry.resolver(store),
+        )
+    }
+
+    fn webhook_request(body: &[u8], sig: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder().method("POST").uri("/webhook");
+
+        if let Some(s) = sig {
+            builder = builder.header("linear-signature", s);
+        }
+
+        builder.body(Body::from(body.to_vec())).expect("valid request")
+    }
+
+    fn valid_body() -> Vec<u8> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_millis() as u64;
+
+        serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "action": "create",
+            "webhookId": "wh_test_123",
+            "webhookTimestamp": now_ms,
+            "data": {}
+        }))
+        .expect("valid JSON")
+    }
+
+    fn assert_unroutable(publisher: &MockJetStreamPublisher, expected_reason: &str) {
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1, "expected exactly one unroutable publish");
+        assert_eq!(messages[0].subject, "linear.unroutable");
+        assert_eq!(
+            messages[0].headers.get(NATS_HEADER_REJECT_REASON).map(|v| v.as_str()),
+            Some(expected_reason),
+        );
+    }
+
+    fn assert_no_publishes(publisher: &MockJetStreamPublisher) {
+        assert!(publisher.published_messages().is_empty(), "expected no publishes");
+    }
+
+    #[tokio::test]
+    async fn valid_webhook_returns_200() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = valid_body();
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "linear.Issue.create");
+    }
+
+    #[tokio::test]
+    async fn runtime_webhook_secret_publishes_to_nats_and_rejects_static_secret() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), "runtime-secret").await;
+        let body = valid_body();
+        let static_sig = compute_sig(TEST_SECRET, &body);
+
+        let static_response = app
+            .clone()
+            .oneshot(webhook_request(&body, Some(&static_sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+
+        let runtime_sig = compute_sig("runtime-secret", &body);
+        let runtime_response = app
+            .oneshot(webhook_request(&body, Some(&runtime_sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(runtime_response.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "linear.Issue.create");
+    }
+
+    #[tokio::test]
+    async fn provision_creates_stream() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        let config = test_config();
+
+        provision(&js, &config).await.unwrap();
+
+        let streams = js.created_streams();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, "LINEAR");
+        assert_eq!(streams[0].subjects, vec!["linear.>"]);
+        assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    }
+
+    #[tokio::test]
+    async fn provision_propagates_error() {
+        let _guard = tracing_guard();
+        let js = MockJetStreamContext::new();
+        js.fail_next();
+        let config = test_config();
+
+        let result = provision(&js, &config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn missing_signature_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = valid_body();
+
+        let resp = app
+            .oneshot(webhook_request(&body, None))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_no_publishes(&publisher);
+    }
+
+    #[tokio::test]
+    async fn invalid_signature_returns_401() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = valid_body();
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some("bad-sig")))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_no_publishes(&publisher);
+    }
+
+    #[tokio::test]
+    async fn invalid_json_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = b"not json";
+        let sig = compute_sig(TEST_SECRET, body);
+
+        let resp = app
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "invalid_json");
+    }
+
+    #[tokio::test]
+    async fn missing_webhook_timestamp_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "action": "create"
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "missing_webhook_timestamp");
+    }
+
+    #[tokio::test]
+    async fn stale_webhook_timestamp_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "action": "create",
+            "webhookTimestamp": 1_000_000_000_000_u64
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "stale_webhook_timestamp");
+    }
+
+    #[tokio::test]
+    async fn missing_type_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_millis() as u64;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "action": "create",
+            "webhookTimestamp": now_ms
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "missing_type");
+    }
+
+    #[tokio::test]
+    async fn invalid_type_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_millis() as u64;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "has space",
+            "action": "create",
+            "webhookTimestamp": now_ms
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "invalid_type");
+    }
+
+    #[tokio::test]
+    async fn missing_action_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_millis() as u64;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "webhookTimestamp": now_ms
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "missing_action");
+    }
+
+    #[tokio::test]
+    async fn invalid_action_publishes_unroutable() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = mock_app(publisher.clone());
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_millis() as u64;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "action": "has.dot",
+            "webhookTimestamp": now_ms
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_unroutable(&publisher, "invalid_action");
+    }
+
+    #[tokio::test]
+    async fn publish_failure_returns_500() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let app = mock_app(publisher.clone());
+        let body = valid_body();
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn dlq_publish_failure_returns_500() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        publisher.fail_next_js_publish();
+        let app = mock_app(publisher.clone());
+        let body = b"not json";
+        let sig = compute_sig(TEST_SECRET, body);
+
+        let resp = app
+            .oneshot(webhook_request(body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn timestamp_tolerance_disabled_skips_check() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let mut config = test_config();
+        config.timestamp_tolerance = None;
+        let app = router(wrap_publisher(publisher.clone()), &config);
+
+        let body = serde_json::to_vec(&serde_json::json!({
+            "type": "Issue",
+            "action": "create",
+            "webhookId": "wh_no_ts",
+            "webhookTimestamp": 1_000_000_000_000_u64
+        }))
+        .expect("valid JSON");
+        let sig = compute_sig(TEST_SECRET, &body);
+
+        let resp = app
+            .oneshot(webhook_request(&body, Some(&sig)))
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "linear.Issue.create");
+    }
+}

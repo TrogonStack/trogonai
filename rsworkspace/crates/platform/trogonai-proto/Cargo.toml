@@ -11,6 +11,7 @@ workspace = true
 [features]
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
+gateway = ["dep:buffa", "dep:buffa-types", "dep:serde"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
 sessions = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:serde_json", "dep:trogon-decider", "chrono"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
