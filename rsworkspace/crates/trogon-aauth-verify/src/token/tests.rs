@@ -478,3 +478,211 @@ async fn verify_agent_returns_no_compatible_jwk_when_set_is_empty() {
     let err = v.verify_agent(&jwt).await.unwrap_err();
     assert!(matches!(err, TokenError::NoCompatibleJwk), "got {err:?}");
 }
+
+fn verified_auth_with_cnf(cnf: Option<serde_json::Value>, act: Option<serde_json::Value>) -> VerifiedAuth {
+    let mut claims = serde_json::json!({
+        "iss": "iss.example",
+        "sub": "person-1",
+        "aud": "resource.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "agent": "aauth:asst@agent.example",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    if let Some(cnf) = cnf {
+        claims["cnf"] = cnf;
+    }
+    if let Some(act) = act {
+        claims["act"] = act;
+    }
+    VerifiedAuth {
+        claims: serde_json::from_value(claims).expect("valid AuthClaims shape"),
+        raw_jwt: "raw.jwt.token".to_string(),
+    }
+}
+
+fn signing_ctx(agent: &str, jkt: &str) -> RequestSigningContext {
+    RequestSigningContext {
+        agent: agent.to_string(),
+        signing_jkt: jkt.to_string(),
+    }
+}
+
+#[test]
+fn verify_auth_request_context_accepts_matching_context() {
+    let fixture = p256_fixture("k1");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": fixture.jwk_json})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    v.verify_auth_request_context(
+        &verified,
+        "resource.example",
+        &signing_ctx("aauth:asst@agent.example", &jkt),
+    )
+    .expect("matching context verifies");
+}
+
+#[test]
+fn verify_auth_request_context_rejects_audience_mismatch() {
+    let fixture = p256_fixture("k1");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": fixture.jwk_json})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "other-resource.example",
+            &signing_ctx("aauth:asst@agent.example", &jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::AudienceMismatch { .. }));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_agent_mismatch() {
+    let fixture = p256_fixture("k1");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": fixture.jwk_json})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:someone-else@agent.example", &jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::AgentMismatch { .. }));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_missing_confirmation_key() {
+    let verified = verified_auth_with_cnf(None, None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", "whatever"),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::MissingConfirmationKey));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_structurally_incomplete_key_distinct_from_invalid_key_material() {
+    // Rule 7: missing `kty` (or a required per-type member) is a distinct
+    // rejection from key material that is structurally complete but fails to
+    // decode (e.g. an unsupported/garbled curve).
+    let verified_missing_kty = verified_auth_with_cnf(Some(serde_json::json!({"jwk": {"crv": "P-256"}})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified_missing_kty,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", "whatever"),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::StructurallyIncompleteKey(_)));
+
+    // Structurally complete (has kty + required EC members) but `x` is not
+    // valid base64url, so `DecodingKey::from_jwk` fails to construct a key
+    // even though every rule-7-required member is present.
+    let verified_bad_key_material = verified_auth_with_cnf(
+        Some(serde_json::json!({"jwk": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "not valid base64!!",
+            "y": "AAAA",
+        }})),
+        None,
+    );
+    let err = v
+        .verify_auth_request_context(
+            &verified_bad_key_material,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", "whatever"),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::InvalidKeyMaterial(_)));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_confirmation_key_mismatch() {
+    let fixture = p256_fixture("k1");
+    let other_jkt = crate::jkt::jwk_thumbprint(&p256_fixture("k2").jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": fixture.jwk_json})), None);
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", &other_jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::ConfirmationKeyMismatch));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_invalid_act_chain() {
+    let fixture = p256_fixture("k1");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let verified = verified_auth_with_cnf(
+        Some(serde_json::json!({"jwk": fixture.jwk_json})),
+        Some(serde_json::json!({"agent": "not-a-valid-identifier"})),
+    );
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", &jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::InvalidActChain(_)));
+}
+
+#[test]
+fn verify_auth_request_context_rejects_missing_sub_and_scope() {
+    let fixture = p256_fixture("k1");
+    let jkt = crate::jkt::jwk_thumbprint(&fixture.jwk_json).expect("thumbprint");
+    let mut verified = verified_auth_with_cnf(Some(serde_json::json!({"jwk": fixture.jwk_json})), None);
+    verified.claims.sub = String::new();
+    verified.claims.scope = String::new();
+    let v = TokenVerifier::new(StaticJwks::new(), SystemTimeSource);
+    let err = v
+        .verify_auth_request_context(
+            &verified,
+            "resource.example",
+            &signing_ctx("aauth:asst@agent.example", &jkt),
+        )
+        .unwrap_err();
+    assert!(matches!(err, RequestContextError::MissingSubOrScope));
+}
+
+#[test]
+fn request_context_error_display_messages_are_distinct() {
+    let cases = [
+        format!(
+            "{}",
+            RequestContextError::AudienceMismatch {
+                expected: "a".into(),
+                actual: "b".into()
+            }
+        ),
+        format!(
+            "{}",
+            RequestContextError::AgentMismatch {
+                expected: "a".into(),
+                actual: "b".into()
+            }
+        ),
+        format!("{}", RequestContextError::MissingConfirmationKey),
+        format!("{}", RequestContextError::ConfirmationKeyMismatch),
+        format!("{}", RequestContextError::MissingSubOrScope),
+    ];
+    for window in cases.windows(2) {
+        assert_ne!(window[0], window[1]);
+    }
+}
