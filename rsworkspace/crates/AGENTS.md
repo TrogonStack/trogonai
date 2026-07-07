@@ -1,3 +1,5 @@
+ACP spec position and conformance matrix live in `docs/architecture/acp-conformance.md`. Any `agent-client-protocol` bump must follow the upgrade ritual documented there.
+
 Prefer domain-specific value objects over primitives (e.g. `AcpPrefix` not `String`). Each type's factory must guarantee correctness at construction—invalid instances should be unrepresentable. Validate per-type, not per-aggregate: avoid validating unrelated fields together in a single constructor.
 
 Untrusted input must use distinct `*Input` / `*Wire` / `*Request` types. Convert those boundary types into domain types exactly once. After conversion, domain values must be valid forever. Do not add `validate_foo(...)` helpers over a supposed domain struct; if a struct still needs a validator to be safe, it is not a domain type yet. Persist only validated domain types to storage, events, and runtime state. Never persist wire/input types.

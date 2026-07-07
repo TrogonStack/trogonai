@@ -53,6 +53,9 @@ a2a = { package = "a2a-lf", version = "=0.3.0" }
 cel-interpreter = "=0.10.0"
 
 # ACP
+# Pinned pre-1.x: the 0.11.0 SDK redesign is a breaking migration.
+# Tracking: https://github.com/TrogonStack/trogonai/issues/474 (plan in PLAN.md).
+# Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
 agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
 
 # MCP
