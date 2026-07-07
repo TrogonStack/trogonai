@@ -15,7 +15,7 @@
         reason = "buffa-codegen emits each message's view module beside the message it views, so the generated tree is cyclic by construction and is not edited here"
     )
 )]
-#[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "agents", feature = "decider"))]
 mod r#gen;
 
 #[cfg(any(feature = "schedules", feature = "agents"))]
@@ -25,6 +25,9 @@ pub mod constants;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
+
+#[cfg(feature = "gateway")]
+pub mod gateway;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;

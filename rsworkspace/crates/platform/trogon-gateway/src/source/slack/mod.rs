@@ -42,4 +42,4 @@ pub mod signature;
 pub mod socket_mode;
 
 pub use config::SlackConfig;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};
