@@ -175,6 +175,63 @@ This starts ngrok alongside the gateway. Check `docker compose logs ngrok`
 for the public URL. Append the integration path when configuring each platform's
 webhook settings (for example, `https://<ngrok-url>/sources/github/acme-main/webhook`).
 
+## OpenBao local secret store
+
+The compose stack starts OpenBao in dev mode at:
+
+```bash
+http://openbao.trogonai.orb.local:8200
+```
+
+The local dev token is:
+
+```bash
+dev-only-token
+```
+
+This OpenBao instance is in-memory and local-only. Do not use it for production
+or for any secret that matters outside the dev stack.
+
+### Copy-in and copy-out smoke test
+
+From `devops/docker/compose`:
+
+```bash
+docker compose up -d openbao
+docker compose exec openbao bao kv put -mount=secret trogonai/manual/copy-in-out value=copy-this-value-in-and-out
+docker compose exec openbao bao kv get -format=json -mount=secret trogonai/manual/copy-in-out
+```
+
+The JSON output should include:
+
+```json
+{
+  "data": {
+    "data": {
+      "value": "copy-this-value-in-and-out"
+    }
+  }
+}
+```
+
+Automated Rust tests start their own OpenBao container with Testcontainers:
+
+```bash
+cd ../../../rsworkspace
+mise exec -- cargo test -p trogon-gateway openbao_testcontainer_roundtrips_precise_value
+```
+
+To run the same gateway adapter round trip against this compose service:
+
+```bash
+cd ../../../rsworkspace
+OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=dev-only-token mise exec -- cargo test -p trogon-gateway openbao_dev_server_roundtrips_precise_value -- --ignored --nocapture
+```
+
+Both tests write `copy-this-value-in-and-out` into OpenBao and read it back
+through the `OpenBaoSecretStore` adapter. The compose-backed ignored test also
+prints the credential ref plus the API data and metadata paths.
+
 ## Verify
 
 Subscribe to NATS to see events flowing:

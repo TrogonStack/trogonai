@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::fmt;
 use std::path::Path;
 
+use crate::secret_store::{
+    CredentialKind, CredentialOwnerId, CredentialScope, SourceKind, StaticConfigSecretInput, StaticConfigSecretStore,
+    StaticConfigSecretStoreError,
+};
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
 use crate::source::gitlab::GitLabSigningToken;
@@ -71,31 +74,25 @@ enum SecretInput {
 }
 
 impl SecretInput {
-    fn resolve(self) -> Result<String, SecretInputError> {
-        match self {
-            Self::Literal(value) => Ok(value),
-            Self::Env { env } => {
-                let name = env.trim();
-                if name.is_empty() {
-                    return Err(SecretInputError::EmptyEnvName);
-                }
-                env::var(name).map_err(|error| match error {
-                    env::VarError::NotPresent => SecretInputError::MissingEnv { name: name.to_string() },
-                    env::VarError::NotUnicode(_) => SecretInputError::InvalidUnicodeEnv { name: name.to_string() },
-                })
-            }
-        }
+    fn resolve(self, scope: CredentialScope, kind: CredentialKind) -> Result<String, SecretInputError> {
+        let secret = StaticConfigSecretStore::resolve(scope, kind, self.into())?;
+        Ok(secret.into_plaintext()?.as_str().to_string())
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 enum SecretInputError {
-    #[error("env var name must not be empty")]
-    EmptyEnvName,
-    #[error("env var '{name}' is not set")]
-    MissingEnv { name: String },
-    #[error("env var '{name}' is not valid unicode")]
-    InvalidUnicodeEnv { name: String },
+    #[error(transparent)]
+    StaticConfig(#[from] StaticConfigSecretStoreError),
+}
+
+impl From<SecretInput> for StaticConfigSecretInput {
+    fn from(input: SecretInput) -> Self {
+        match input {
+            SecretInput::Literal(value) => Self::Literal(value),
+            SecretInput::Env { env } => Self::Env { name: env },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -670,8 +667,14 @@ fn resolve_github_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("github", &id, "webhook_secret", webhook.webhook_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::GitHub,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match GitHubWebhookSecret::new(secret) {
@@ -735,7 +738,10 @@ fn resolve_discord(
     }
 
     let token_str = match bot_token {
-        Some(input) => match input.resolve() {
+        Some(input) => match input.resolve(
+            static_config_source_scope(SourceKind::Discord),
+            CredentialKind::BotToken,
+        ) {
             Ok(value) => value,
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
@@ -894,7 +900,14 @@ fn resolve_slack_webhook_transport(
     webhook: SlackWebhookConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let secret = require_integration_value("slack", id, "signing_secret", webhook.signing_secret, errors)?;
+    let secret = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "signing_secret",
+        CredentialKind::SigningSecret,
+        webhook.signing_secret,
+        errors,
+    )?;
     let signing_secret = match SlackSigningSecret::new(secret) {
         Ok(secret) => secret,
         Err(error) => {
@@ -935,7 +948,14 @@ fn resolve_slack_socket_mode_transport(
     socket_mode: SlackSocketModeConfig,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<SlackTransportConfig> {
-    let token = require_integration_value("slack", id, "app_token", socket_mode.app_token, errors)?;
+    let token = require_integration_value(
+        SourceKind::Slack,
+        id,
+        "app_token",
+        CredentialKind::AppToken,
+        socket_mode.app_token,
+        errors,
+    )?;
     let app_token = match SlackAppToken::new(token) {
         Ok(token) => token,
         Err(error) => {
@@ -976,8 +996,14 @@ fn resolve_telegram_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("telegram", &id, "webhook_secret", webhook.webhook_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Telegram,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match TelegramWebhookSecret::new(secret) {
@@ -1060,7 +1086,10 @@ fn resolve_telegram_integration_registration(
 
     let public_webhook_url = public_webhook_url.filter(|value| !value.is_empty());
     let bot_token = match bot_token {
-        Some(input) => match input.resolve() {
+        Some(input) => match input.resolve(
+            static_config_integration_scope(SourceKind::Telegram, id),
+            CredentialKind::BotToken,
+        ) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(ConfigValidationError::invalid_integration(
@@ -1154,9 +1183,14 @@ fn resolve_twitter_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) =
-            require_integration_value("twitter", &id, "consumer_secret", webhook.consumer_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Twitter,
+            &id,
+            "consumer_secret",
+            CredentialKind::ConsumerSecret,
+            webhook.consumer_secret,
+            errors,
+        ) else {
             continue;
         };
         let consumer_secret = match TwitterConsumerSecret::new(secret) {
@@ -1223,8 +1257,14 @@ fn resolve_gitlab_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(token) = require_integration_value("gitlab", &id, "signing_token", webhook.signing_token, errors)
-        else {
+        let Some(token) = require_integration_value(
+            SourceKind::Gitlab,
+            &id,
+            "signing_token",
+            CredentialKind::SigningToken,
+            webhook.signing_token,
+            errors,
+        ) else {
             continue;
         };
         let signing_token = match GitLabSigningToken::new(token) {
@@ -1308,8 +1348,14 @@ fn resolve_linear_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("linear", &id, "webhook_secret", webhook.webhook_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Linear,
+            &id,
+            "webhook_secret",
+            CredentialKind::WebhookSecret,
+            webhook.webhook_secret,
+            errors,
+        ) else {
             continue;
         };
         let webhook_secret = match LinearWebhookSecret::new(secret) {
@@ -1382,9 +1428,14 @@ fn resolve_microsoft_graph_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(raw_client_state) =
-            require_integration_value("microsoft_graph", &id, "client_state", webhook.client_state, errors)
-        else {
+        let Some(raw_client_state) = require_integration_value(
+            SourceKind::MicrosoftGraph,
+            &id,
+            "client_state",
+            CredentialKind::ClientState,
+            webhook.client_state,
+            errors,
+        ) else {
             continue;
         };
         let client_state = match MicrosoftGraphClientState::new(raw_client_state) {
@@ -1451,9 +1502,14 @@ fn resolve_incidentio_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) =
-            require_integration_value("incidentio", &id, "signing_secret", webhook.signing_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Incidentio,
+            &id,
+            "signing_secret",
+            CredentialKind::SigningSecret,
+            webhook.signing_secret,
+            errors,
+        ) else {
             continue;
         };
         let signing_secret = match IncidentioSigningSecret::new(secret) {
@@ -1537,9 +1593,14 @@ fn resolve_notion_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(raw_token) =
-            require_integration_value("notion", &id, "verification_token", webhook.verification_token, errors)
-        else {
+        let Some(raw_token) = require_integration_value(
+            SourceKind::Notion,
+            &id,
+            "verification_token",
+            CredentialKind::VerificationToken,
+            webhook.verification_token,
+            errors,
+        ) else {
             continue;
         };
         let verification_token = match NotionVerificationToken::new(raw_token) {
@@ -1606,8 +1667,14 @@ fn resolve_sentry_integrations(
         let Some(webhook) = integration.webhook else {
             continue;
         };
-        let Some(secret) = require_integration_value("sentry", &id, "client_secret", webhook.client_secret, errors)
-        else {
+        let Some(secret) = require_integration_value(
+            SourceKind::Sentry,
+            &id,
+            "client_secret",
+            CredentialKind::ClientSecret,
+            webhook.client_secret,
+            errors,
+        ) else {
             continue;
         };
         let client_secret = match SentryClientSecret::new(secret) {
@@ -1676,25 +1743,39 @@ fn resolve_integration_id(
 }
 
 fn require_integration_value(
-    source: &'static str,
+    source: SourceKind,
     id: &SourceIntegrationId,
     field: &'static str,
+    kind: CredentialKind,
     value: Option<SecretInput>,
     errors: &mut Vec<ConfigValidationError>,
 ) -> Option<String> {
     match value {
-        Some(value) => match value.resolve() {
+        Some(value) => match value.resolve(static_config_integration_scope(source, id), kind) {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(ConfigValidationError::invalid_integration(source, id, field, error));
+                errors.push(ConfigValidationError::invalid_integration(
+                    source.as_str(),
+                    id,
+                    field,
+                    error,
+                ));
                 None
             }
         },
         None => {
-            errors.push(ConfigValidationError::missing_integration(source, id, field));
+            errors.push(ConfigValidationError::missing_integration(source.as_str(), id, field));
             None
         }
     }
+}
+
+fn static_config_source_scope(source: SourceKind) -> CredentialScope {
+    CredentialScope::source(CredentialOwnerId::static_config(), source)
+}
+
+fn static_config_integration_scope(source: SourceKind, id: &SourceIntegrationId) -> CredentialScope {
+    CredentialScope::integration(CredentialOwnerId::static_config(), source, id.clone())
 }
 
 struct CommonIntegrationFieldsInput<'a> {
@@ -1831,6 +1912,7 @@ fn resolve_integration_source_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
     use std::error::Error;
     use std::io::Write;
 

@@ -7,6 +7,10 @@ mod constants;
 #[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
+mod runtime_projection;
+#[cfg_attr(coverage, allow(dead_code))]
+mod secret_store;
+#[cfg_attr(coverage, allow(dead_code))]
 mod source;
 #[cfg_attr(coverage, allow(dead_code))]
 mod source_integration_id;

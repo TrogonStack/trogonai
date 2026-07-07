@@ -42,6 +42,7 @@ url = "2.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+testcontainers-modules = "0.15"
 time = { workspace = true }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
