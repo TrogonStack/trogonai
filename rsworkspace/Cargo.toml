@@ -31,6 +31,7 @@ mcp-nats-server = { path = "crates/mcp-nats-server" }
 mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
 jsonrpc-nats = { path = "crates/jsonrpc-nats" }
 trogon-nats = { path = "crates/trogon-nats" }
+trogon-aauth-sdk = { path = "crates/trogon-aauth-sdk" }
 trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
 trogon-decider = { path = "crates/trogon-decider" }
 trogon-decider-nats = { path = "crates/trogon-decider-nats" }
@@ -41,6 +42,7 @@ trogon-decider-sim = { path = "crates/trogon-decider-sim" }
 trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
 trogon-decider-wasm-runtime = { path = "crates/trogon-decider-wasm-runtime" }
 trogon-identity-types = { path = "crates/trogon-identity-types" }
+trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/trogon-semconv" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
