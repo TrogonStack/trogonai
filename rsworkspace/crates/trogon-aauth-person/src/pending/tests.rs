@@ -1,4 +1,4 @@
-use trogon_identity_types::aauth::person_server::ClarificationRequired;
+use trogon_identity_types::aauth::person_server::{ClarificationRequired, InteractionRequestType};
 use trogon_identity_types::aauth::{AgentClaims, Cnf, ResourceClaims};
 
 use super::*;
@@ -166,4 +166,24 @@ fn pending_ids_are_random_not_sequential() {
     assert_ne!(a, b);
     assert_eq!(a.0.len(), 32);
     assert!(a.0.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn interaction_type_starts_resource_interaction_for_interaction_and_payment() {
+    assert!(interaction_type_starts_resource_interaction(
+        &InteractionRequestType::Interaction
+    ));
+    assert!(interaction_type_starts_resource_interaction(
+        &InteractionRequestType::Payment
+    ));
+}
+
+#[test]
+fn interaction_type_does_not_start_resource_interaction_for_question_or_completion() {
+    assert!(!interaction_type_starts_resource_interaction(
+        &InteractionRequestType::Question
+    ));
+    assert!(!interaction_type_starts_resource_interaction(
+        &InteractionRequestType::Completion
+    ));
 }

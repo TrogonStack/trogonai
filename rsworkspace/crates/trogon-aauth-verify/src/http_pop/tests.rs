@@ -1,6 +1,6 @@
 use super::*;
 use crate::replay::InMemoryReplayStore;
-use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture};
+use crate::test_support::{ed25519_fixture, jwks_with_key, p256_fixture, p384_fixture};
 use jsonwebtoken::crypto::sign;
 use trogon_identity_types::aauth::{TYP_AGENT, TYP_AUTH};
 
@@ -354,6 +354,322 @@ fn verify_covered_components_requires_aauth_mission_when_header_present() {
     let components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
     let err = verify_covered_components(&req, &components).unwrap_err();
     assert!(matches!(err, HttpPopError::MissingMissionHeader));
+}
+
+#[test]
+fn http_pop_verifier_new_wires_shared_clock_into_token_verifier() {
+    let jwks = crate::jwks::StaticJwks::new();
+    let clock = FixedClock(42);
+    let verifier = HttpPopVerifier::new(jwks, clock, InMemoryReplayStore::default(), "resource.example");
+    assert_eq!(verifier.clock.now(), 42);
+    assert_eq!(verifier.max_skew_secs, 60);
+    assert_eq!(verifier.resource_identifier, "resource.example");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_negative_max_skew() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let mut verifier = verifier_at(jwks, 1000, "resource.example");
+    verifier.max_skew_secs = -1;
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::NegativeMaxSkew(-1)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_duplicate_security_header() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+    let dup = req.header(headers::SIGNATURE_KEY).unwrap().to_string();
+    req.headers.push((headers::SIGNATURE_KEY.to_string(), dup));
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::DuplicateHeader(headers::SIGNATURE_KEY)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_auth_presenter_with_structurally_incomplete_cnf_jwk() {
+    let fixture = p256_fixture("k1");
+    let mut header = jsonwebtoken::Header::new(fixture.alg);
+    header.typ = Some(TYP_AUTH.into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "as.example",
+        "sub": "person-1",
+        "aud": "resource.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9_999_999_999_i64,
+        "agent": "aauth:asst@agent.example",
+        "agent_jkt": "abc",
+        "scope": "read",
+        "cnf": {"jwk": {"kty": "EC"}},
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode auth jwt");
+    let jwks = jwks_with_key("as.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::StructurallyIncomplete(_))
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_unsupported_presenter_typ() {
+    let fixture = p256_fixture("k1");
+    let mut header = jsonwebtoken::Header::new(fixture.alg);
+    header.typ = Some("some+other+jwt".into());
+    header.kid = Some("k1".into());
+    let claims = serde_json::json!({
+        "iss": "agent-provider.example",
+        "sub": "aauth:asst@agent.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9_999_999_999_i64,
+        "dwk": "aauth-agent.json",
+        "cnf": {"jwk": fixture.jwk_json},
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedPresenterTyp(typ) if typ == "some+other+jwt"));
+}
+
+#[test]
+fn presenter_kind_rejects_missing_typ() {
+    let fixture = p256_fixture("k1");
+    let mut header = jsonwebtoken::Header::new(fixture.alg);
+    header.typ = None;
+    let claims = serde_json::json!({"iss": "x"});
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode");
+
+    let err = presenter_kind(&jwt).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedPresenterTyp(typ) if typ == "<none>"));
+}
+
+#[test]
+fn presenter_kind_rejects_malformed_jwt() {
+    let err = presenter_kind("not-a-jwt").unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedPresenterTyp(typ) if typ.is_empty()));
+}
+
+#[test]
+fn parse_signature_key_jwt_rejects_empty_token() {
+    let header = r#"sig=jwt;jwt="""#;
+    let err = parse_signature_key_jwt(header).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedSignatureKeyScheme));
+}
+
+#[test]
+fn parse_signature_key_jwt_rejects_missing_jwt_param() {
+    let header = "sig=jwt;other=1";
+    let err = parse_signature_key_jwt(header).unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedSignatureKeyScheme));
+}
+
+#[test]
+fn parse_signature_bytes_rejects_empty_inner() {
+    let header = "sig=::";
+    let err = parse_signature_bytes(header).unwrap_err();
+    assert!(matches!(err, HttpPopError::MalformedSignature));
+}
+
+#[test]
+fn parse_signature_bytes_rejects_missing_colon_wrapper() {
+    let header = "sig=BASE64";
+    let err = parse_signature_bytes(header).unwrap_err();
+    assert!(matches!(err, HttpPopError::MalformedSignature));
+}
+
+#[test]
+fn parse_signature_input_rejects_empty_component_list() {
+    let header = r#"sig=();created=1000"#;
+    let err = match parse_signature_input(header) {
+        Ok(_) => panic!("expected empty component list to be rejected"),
+        Err(e) => e,
+    };
+    assert!(matches!(err, HttpPopError::MalformedSignatureInput));
+}
+
+#[test]
+fn parse_signature_input_rejects_missing_created() {
+    let header = r#"sig=("@method")"#;
+    let err = match parse_signature_input(header) {
+        Ok(_) => panic!("expected missing created to be rejected"),
+        Err(e) => e,
+    };
+    assert!(matches!(err, HttpPopError::InvalidCreated));
+}
+
+#[test]
+fn extract_quoted_rejects_token_with_interior_quote() {
+    assert_eq!(extract_quoted("ab\"cd"), None);
+}
+
+#[test]
+fn extract_quoted_accepts_bare_token() {
+    assert_eq!(extract_quoted("jwt"), Some("jwt".to_string()));
+}
+
+#[test]
+fn verify_covered_components_rejects_missing_signature_key_component() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let err = verify_covered_components(
+        &req,
+        &["@method".to_string(), "@authority".to_string(), "@path".to_string()],
+    )
+    .unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingCoveredComponent("signature-key")));
+}
+
+#[test]
+fn verify_covered_components_rejects_when_content_digest_header_absent_despite_coverage() {
+    let mut req = base_request("sig=jwt;jwt=\"x\"");
+    req.body = Some(b"payload".to_vec());
+    let mut components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
+    components.push("content-digest".to_string());
+    let err = verify_covered_components(&req, &components).unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingContentDigest));
+}
+
+#[test]
+fn verify_covered_components_rejects_when_mission_component_covered_but_header_absent() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let mut components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
+    components.push("aauth-mission".to_string());
+    let err = verify_covered_components(&req, &components).unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingMissionHeader));
+}
+
+#[test]
+fn verify_covered_components_accepts_matching_mission_coverage() {
+    let mut req = base_request("sig=jwt;jwt=\"x\"");
+    req.headers
+        .push((headers::MISSION.to_string(), "approver=\"x\"; s256=\"y\"".to_string()));
+    let mut components: Vec<String> = REQUIRED_COMPONENTS.iter().map(|s| s.to_string()).collect();
+    components.push("aauth-mission".to_string());
+    verify_covered_components(&req, &components).expect("mission coverage matches header presence");
+}
+
+#[test]
+fn component_value_rejects_signature_key_header_absent() {
+    let req = HttpRequest {
+        method: "GET".to_string(),
+        authority: "resource.example".to_string(),
+        path: "/api/documents".to_string(),
+        headers: vec![],
+        body: None,
+    };
+    let err = component_value(&req, "signature-key").unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingHeader(headers::SIGNATURE_KEY)));
+}
+
+#[test]
+fn component_value_rejects_content_digest_header_absent() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let err = component_value(&req, "content-digest").unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingContentDigest));
+}
+
+#[test]
+fn component_value_rejects_aauth_mission_header_absent() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let err = component_value(&req, "aauth-mission").unwrap_err();
+    assert!(matches!(err, HttpPopError::MissingMissionHeader));
+}
+
+#[test]
+fn component_value_rejects_unsupported_component_name() {
+    let req = base_request("sig=jwt;jwt=\"x\"");
+    let err = component_value(&req, "x-custom-header").unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::MissingCoveredComponent("unsupported component")
+    ));
+}
+
+#[test]
+fn component_value_accepts_arbitrary_covered_header() {
+    let mut req = base_request("sig=jwt;jwt=\"x\"");
+    req.headers
+        .push(("x-custom-header".to_string(), "  a   b  ".to_string()));
+    let value = component_value(&req, "x-custom-header").expect("covered header resolves");
+    assert_eq!(value, "a b");
+}
+
+#[test]
+fn verify_signature_with_jwk_rejects_undeserializable_jwk() {
+    let jwk_val = serde_json::json!({"kty": "unsupported"});
+    let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(_))
+    ));
+}
+
+#[test]
+fn verify_signature_with_jwk_rejects_unsupported_curve() {
+    let jwk_val = serde_json::json!({
+        "kty": "EC",
+        "crv": "P-521",
+        "x": "AAAA",
+        "y": "AAAA",
+    });
+    let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::UnsupportedAlgorithm)
+    ));
+}
+
+#[test]
+fn verify_signature_with_jwk_accepts_p384_key_and_verifies_signature() {
+    let fixture = p384_fixture();
+    let base = b"some signature base";
+    let sig_b64 = jsonwebtoken::crypto::sign(base, &fixture.signing, fixture.alg).expect("sign");
+    verify_signature_with_jwk(&fixture.jwk_json, base, &sig_b64).expect("p384 signature verifies");
+}
+
+#[test]
+fn verify_signature_with_jwk_rejects_p384_signature_over_wrong_base() {
+    let fixture = p384_fixture();
+    let sig_b64 = jsonwebtoken::crypto::sign(b"expected base", &fixture.signing, fixture.alg).expect("sign");
+    let err = verify_signature_with_jwk(&fixture.jwk_json, b"different base", &sig_b64).unwrap_err();
+    assert!(matches!(err, HttpPopError::BadSignature));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_es384_agent_presenter() {
+    let fixture = p384_fixture();
+    let jwt = agent_jwt(&fixture, "p384-k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let mut req = base_request(&signature_key_header(&jwt));
+    sign_request(&fixture, &mut req, 1000, &REQUIRED_COMPONENTS);
+
+    let result = verifier.verify(&req).await.expect("es384 agent presenter verifies");
+    assert!(matches!(result, VerifiedPresenter::Agent(_)));
 }
 
 #[test]

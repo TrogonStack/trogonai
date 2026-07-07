@@ -27,8 +27,28 @@ fn is_valid_agent_identifier_rejects_missing_scheme() {
 }
 
 #[test]
+fn is_valid_agent_identifier_rejects_missing_at_separator() {
+    assert!(!is_valid_agent_identifier("aauth:assistant.agent.example"));
+}
+
+#[test]
 fn is_valid_agent_identifier_rejects_empty_local() {
     assert!(!is_valid_agent_identifier("aauth:@agent.example"));
+}
+
+#[test]
+fn is_valid_agent_identifier_rejects_uppercase_in_local() {
+    assert!(!is_valid_agent_identifier("aauth:Assistant@agent.example"));
+}
+
+#[test]
+fn is_valid_agent_identifier_rejects_empty_domain() {
+    assert!(!is_valid_agent_identifier("aauth:assistant@"));
+}
+
+#[test]
+fn is_valid_agent_identifier_rejects_domain_with_scheme_separator() {
+    assert!(!is_valid_agent_identifier("aauth:assistant@http://agent.example"));
 }
 
 #[test]
@@ -106,6 +126,17 @@ fn flatten_act_chain_single_hop() {
     let flat = flatten_act_chain(&a);
     assert_eq!(flat.len(), 1);
     assert_eq!(flat[0].depth, 0);
+}
+
+#[test]
+fn flatten_act_chain_truncates_at_max_depth_without_erroring() {
+    let mut current = act("aauth:leaf@agent.example", None);
+    for i in 0..MAX_CHAIN_DEPTH {
+        current = act(&format!("aauth:hop{i}@agent.example"), Some(current));
+    }
+    let flat = flatten_act_chain(&current);
+    assert_eq!(flat.len(), MAX_CHAIN_DEPTH);
+    assert_eq!(flat.last().unwrap().depth, MAX_CHAIN_DEPTH - 1);
 }
 
 #[test]

@@ -49,6 +49,13 @@ fn granted_scope_round_trips() {
 }
 
 #[test]
+fn denial_reason_display_matches_as_str() {
+    let reason = DenialReason::new("org policy denies this scope");
+    assert_eq!(reason.to_string(), "org policy denies this scope");
+    assert_eq!(reason.to_string(), reason.as_str());
+}
+
+#[test]
 fn required_claims_rejects_empty() {
     let err = RequiredClaims::new(Vec::<String>::new()).unwrap_err();
     assert_eq!(err, RequiredClaimsError::Empty);

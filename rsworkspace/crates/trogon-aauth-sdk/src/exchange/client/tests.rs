@@ -360,3 +360,545 @@ async fn poll_budget_exhaustion_fails_cleanly_instead_of_looping_forever() {
         other => panic!("expected PollBudgetExhausted, got {other:?}"),
     }
 }
+
+/// A loopback URI that nothing listens on: `TcpListener::bind` claims a free
+/// port from the OS, then drops it immediately, so a connection attempt gets
+/// an instant, deterministic "connection refused" without touching any real
+/// network or external host.
+fn unreachable_uri() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+    let addr = listener.local_addr().expect("local addr");
+    drop(listener);
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn transport_error_on_initial_post_is_surfaced_when_server_is_unreachable() {
+    let http = reqwest::Client::new();
+    let signer = SignatureKeyOnlyHttpSigner::new("agent-jwt-value");
+    let client = PsTokenClient::new(http, signer, format!("{}/token", unreachable_uri()))
+        .with_wait_secs(1)
+        .with_min_poll_interval_secs(0);
+
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::Transport(_)) => {}
+        other => panic!("expected Transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn transport_error_on_poll_is_surfaced_when_server_is_unreachable() {
+    let http = reqwest::Client::new();
+    let signer = SignatureKeyOnlyHttpSigner::new("agent-jwt-value");
+    let client = PsTokenClient::new(http, signer, format!("{}/token", unreachable_uri()))
+        .with_wait_secs(1)
+        .with_min_poll_interval_secs(0);
+
+    let outcome = client.poll(&format!("{}/pending/unreachable", unreachable_uri())).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::Transport(_)) => {}
+        other => panic!("expected Transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn transport_error_on_clarification_response_is_surfaced_when_server_is_unreachable() {
+    let http = reqwest::Client::new();
+    let signer = SignatureKeyOnlyHttpSigner::new("agent-jwt-value");
+    let client = PsTokenClient::new(http, signer, format!("{}/token", unreachable_uri()))
+        .with_wait_secs(1)
+        .with_min_poll_interval_secs(0);
+
+    let outcome = client
+        .respond_to_clarification(&format!("{}/pending/unreachable", unreachable_uri()), "answer")
+        .await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::Transport(_)) => {}
+        other => panic!("expected Transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn poll_interval_floor_sleeps_a_real_second_when_retry_after_is_nonzero() {
+    // Every other pending/poll test in this file uses `Retry-After: 0` with
+    // `with_min_poll_interval_secs(0)`, so `sleep_secs.max(min)` is always 0
+    // and the loop's actual `tokio::time::sleep` call never runs. Exercise
+    // that call for real with a 1s interval rather than mocking time away.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/slp1")
+                .insert_header("Retry-After", "1")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/slp1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "auth_token": "eyJ.granted.token",
+            "expires_in": 3600
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Granted(grant) => assert_eq!(grant.auth_token, "eyJ.granted.token"),
+        other => panic!("expected Granted after a real 1s poll sleep, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn unauthorized_with_unrecognized_error_code_is_surfaced_as_unrecognized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+            "error": "some_future_error_code",
+            "detail": "not modeled yet"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::UnrecognizedTokenEndpointError(err)) => {
+            assert_eq!(err.error, "some_future_error_code");
+        }
+        other => panic!("expected UnrecognizedTokenEndpointError, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn malformed_json_body_on_grant_is_surfaced_as_malformed_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::MalformedBody(_)) => {}
+        other => panic!("expected MalformedBody, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn pending_response_missing_location_header_is_surfaced_as_missing_location() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::MissingLocation) => {}
+        other => panic!("expected MissingLocation, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn payment_required_is_surfaced_as_pending_and_can_be_polled() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(402)
+                .insert_header("Location", "/pending/pay1")
+                .set_body_string(""),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/pay1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "auth_token": "eyJ.granted.token",
+            "expires_in": 3600
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    let poll_location = match outcome {
+        ExchangeOutcome::Pending { poll_location } => poll_location,
+        other => panic!("expected Pending after PaymentRequired, got {other:?}"),
+    };
+
+    let resumed = client.poll(&poll_location).await;
+    match resumed {
+        ExchangeOutcome::Granted(grant) => assert_eq!(grant.auth_token, "eyJ.granted.token"),
+        other => panic!("expected Granted after paying, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn denied_poll_with_recognized_code_maps_to_typed_polling_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/den1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/den1"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "abandoned"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Denied(TerminalReason::Denied(
+            trogon_identity_types::aauth::error::PollingError::Abandoned,
+        )) => {}
+        other => panic!("expected Denied(Abandoned), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn denied_poll_with_unrecognized_code_defaults_to_denied() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/den2")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/den2"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "error": "some_new_denial_reason"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Denied(TerminalReason::Denied(trogon_identity_types::aauth::error::PollingError::Denied)) => {}
+        other => panic!("expected Denied(Denied) default, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn expired_poll_maps_to_denied_expired() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/exp1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/exp1"))
+        .respond_with(ResponseTemplate::new(408))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Denied(TerminalReason::Expired) => {}
+        other => panic!("expected Denied(Expired), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn server_error_poll_maps_to_unexpected_status_500() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/err1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/err1"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::UnexpectedStatus(500)) => {}
+        other => panic!("expected UnexpectedStatus(500), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn slow_down_poll_without_retry_after_falls_back_to_default_interval_then_grants() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/sd1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/sd1"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/sd1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "auth_token": "eyJ.granted.token",
+            "expires_in": 3600
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Granted(grant) => assert_eq!(grant.auth_token, "eyJ.granted.token"),
+        other => panic!("expected Granted after service-unavailable retry, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn unexpected_status_code_on_poll_is_surfaced_typed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/weird1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/weird1"))
+        .respond_with(ResponseTemplate::new(418))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::UnexpectedStatus(418)) => {}
+        other => panic!("expected UnexpectedStatus(418), got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn relative_location_header_is_resolved_against_the_response_url() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/relative1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/relative1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "auth_token": "eyJ.granted.token",
+            "expires_in": 3600
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Granted(grant) => assert_eq!(grant.auth_token, "eyJ.granted.token"),
+        other => panic!("expected Granted via resolved relative Location, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn slow_down_on_poll_backs_off_then_grants_on_next_attempt() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "/pending/sd429")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/sd429"))
+        .respond_with(ResponseTemplate::new(429))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/pending/sd429"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "auth_token": "eyJ.granted.token",
+            "expires_in": 3600
+        })))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Granted(grant) => assert_eq!(grant.auth_token, "eyJ.granted.token"),
+        other => panic!("expected Granted after a 429 slow-down retry, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn malformed_location_header_that_fails_to_resolve_is_used_verbatim_and_then_fails_the_next_poll() {
+    // A `Location` value that cannot be joined against the response's own URL
+    // (e.g. an invalid IPv6 host literal) drives `resolve_location`'s error
+    // fallback: the raw header value is carried through as-is rather than
+    // failing outright. Since it has no clarification/interaction
+    // requirement, the core asks the driver to keep polling that (unusable)
+    // location, so the loop's own follow-up GET is what ultimately surfaces
+    // a Transport error building a request against the malformed URL.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", "http://[::1")
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::Transport(_)) => {}
+        other => panic!("expected Transport error from polling the unresolved Location, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn transport_error_on_follow_up_poll_inside_the_loop_is_surfaced() {
+    // The initial POST succeeds and hands back a Location on a host nothing
+    // listens on, so the loop's own follow-up GET (not the initial POST) is
+    // what hits the Transport error branch.
+    let server = MockServer::start().await;
+    let dead_location = format!("{}/pending/dead", unreachable_uri());
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(202)
+                .insert_header("Location", dead_location.as_str())
+                .insert_header("Retry-After", "0")
+                .set_body_json(serde_json::json!({"status": "pending"})),
+        )
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::Transport(_)) => {}
+        other => panic!("expected Transport error from the loop's follow-up poll, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn service_unavailable_on_initial_post_with_no_location_yet_is_surfaced_as_unexpected_status() {
+    // A 503 on the very first POST (before any Location exists to poll)
+    // leaves the core in `AwaitingInitial` with a `Stop` action; the driver
+    // has nothing to poll, so it surfaces this as a 503 UnexpectedStatus for
+    // the caller to retry the initial request from scratch.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server);
+    let request = TokenRequest::new("resource-token");
+    let outcome = client.request_token(&request).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::UnexpectedStatus(503)) => {}
+        other => panic!("expected UnexpectedStatus(503), got {other:?}"),
+    }
+}

@@ -96,3 +96,51 @@ fn client_detail_preserves_denied_reason() {
     let err = PersonServerError::Denied("not within mission scope".to_string());
     assert_eq!(err.client_detail().as_deref(), Some("denied: not within mission scope"));
 }
+
+#[test]
+fn client_detail_forwards_pending_not_found_display() {
+    let pending_id = crate::pending::PendingId("pending-123".to_string());
+    let err = PersonServerError::Pending(PendingRequestError::NotFound(pending_id));
+    assert_eq!(
+        err.client_detail().as_deref(),
+        Some("no pending request for id pending-123")
+    );
+}
+
+#[test]
+fn client_detail_forwards_pending_gone_display() {
+    let pending_id = crate::pending::PendingId("pending-456".to_string());
+    let err = PersonServerError::Pending(PendingRequestError::Gone(pending_id));
+    assert_eq!(
+        err.client_detail().as_deref(),
+        Some("pending request pending-456 is gone (canceled or already resolved)")
+    );
+}
+
+#[test]
+fn client_detail_forwards_clarification_limit_exceeded_display() {
+    let pending_id = crate::pending::PendingId("pending-789".to_string());
+    let err = PersonServerError::Pending(PendingRequestError::ClarificationLimitExceeded(pending_id, 3));
+    assert_eq!(
+        err.client_detail().as_deref(),
+        Some("clarification round limit (3) exceeded for pending request pending-789")
+    );
+}
+
+#[test]
+fn client_detail_forwards_updated_request_identity_mismatch_display() {
+    let err = PersonServerError::Pending(PendingRequestError::UpdatedRequestIdentityMismatch);
+    assert_eq!(
+        err.client_detail().as_deref(),
+        Some("updated_request resource_token does not match original iss/agent/agent_jkt")
+    );
+}
+
+#[test]
+fn client_detail_forwards_mission_validation_display() {
+    let err = PersonServerError::MissionValidation(crate::mission::MissionValidationError::EmptyField("approver"));
+    assert_eq!(
+        err.client_detail().as_deref(),
+        Some("mission blob field approver must not be empty")
+    );
+}

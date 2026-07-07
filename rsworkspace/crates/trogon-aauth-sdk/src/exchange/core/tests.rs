@@ -292,3 +292,119 @@ fn initial_service_unavailable_with_no_location_yet_stops_for_driver_to_retry_in
     assert_eq!(state, ExchangeState::AwaitingInitial);
     assert_eq!(action, ExchangeAction::Stop);
 }
+
+#[test]
+fn slow_down_while_awaiting_clarification_preserves_question_and_increases_interval() {
+    let state = ExchangeState::AwaitingClarification {
+        location: "/pending/clar1".to_string(),
+        interval_secs: 5,
+        question: "Why do you need calendar write access?".to_string(),
+        timeout: Some(120),
+        options: Some(vec!["yes".to_string(), "no".to_string()]),
+    };
+    let (new_state, action) = step(state, ExchangeEvent::SlowDown);
+    assert_eq!(
+        new_state,
+        ExchangeState::AwaitingClarification {
+            location: "/pending/clar1".to_string(),
+            interval_secs: 10,
+            question: "Why do you need calendar write access?".to_string(),
+            timeout: Some(120),
+            options: Some(vec!["yes".to_string(), "no".to_string()]),
+        }
+    );
+    assert_eq!(
+        action,
+        ExchangeAction::PollAfter {
+            location: "/pending/clar1".to_string(),
+            after_secs: 10,
+        }
+    );
+}
+
+#[test]
+fn slow_down_while_granted_is_a_no_op_that_stops() {
+    let grant = TokenGrantResponse {
+        auth_token: "eyJ...".to_string(),
+        expires_in: 3600,
+    };
+    let state = ExchangeState::Granted(grant.clone());
+    let (new_state, action) = step(state, ExchangeEvent::SlowDown);
+    assert_eq!(new_state, ExchangeState::Granted(grant));
+    assert_eq!(action, ExchangeAction::Stop);
+}
+
+#[test]
+fn slow_down_while_awaiting_initial_is_a_no_op_that_stops() {
+    let (new_state, action) = step(ExchangeState::AwaitingInitial, ExchangeEvent::SlowDown);
+    assert_eq!(new_state, ExchangeState::AwaitingInitial);
+    assert_eq!(action, ExchangeAction::Stop);
+}
+
+#[test]
+fn service_unavailable_while_interacting_preserves_url_and_code_and_backs_off() {
+    let state = ExchangeState::Interacting {
+        location: "/pending/int1".to_string(),
+        interval_secs: 5,
+        url: "https://ps.example/interaction".to_string(),
+        code: Some("A1B2-C3D4".to_string()),
+    };
+    let (new_state, action) = step(state, ExchangeEvent::ServiceUnavailable { retry_after_secs: 30 });
+    assert_eq!(
+        new_state,
+        ExchangeState::Interacting {
+            location: "/pending/int1".to_string(),
+            interval_secs: 30,
+            url: "https://ps.example/interaction".to_string(),
+            code: Some("A1B2-C3D4".to_string()),
+        }
+    );
+    assert_eq!(
+        action,
+        ExchangeAction::PollAfter {
+            location: "/pending/int1".to_string(),
+            after_secs: 30,
+        }
+    );
+}
+
+#[test]
+fn service_unavailable_while_awaiting_clarification_preserves_question_and_backs_off() {
+    let state = ExchangeState::AwaitingClarification {
+        location: "/pending/clar1".to_string(),
+        interval_secs: 5,
+        question: "Why do you need calendar write access?".to_string(),
+        timeout: Some(120),
+        options: None,
+    };
+    let (new_state, action) = step(state, ExchangeEvent::ServiceUnavailable { retry_after_secs: 30 });
+    assert_eq!(
+        new_state,
+        ExchangeState::AwaitingClarification {
+            location: "/pending/clar1".to_string(),
+            interval_secs: 30,
+            question: "Why do you need calendar write access?".to_string(),
+            timeout: Some(120),
+            options: None,
+        }
+    );
+    assert_eq!(
+        action,
+        ExchangeAction::PollAfter {
+            location: "/pending/clar1".to_string(),
+            after_secs: 30,
+        }
+    );
+}
+
+#[test]
+fn service_unavailable_while_granted_is_a_no_op_that_stops() {
+    let grant = TokenGrantResponse {
+        auth_token: "eyJ...".to_string(),
+        expires_in: 3600,
+    };
+    let state = ExchangeState::Granted(grant.clone());
+    let (new_state, action) = step(state, ExchangeEvent::ServiceUnavailable { retry_after_secs: 10 });
+    assert_eq!(new_state, ExchangeState::Granted(grant));
+    assert_eq!(action, ExchangeAction::Stop);
+}

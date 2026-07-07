@@ -655,6 +655,413 @@ async fn subagent_grant_binds_subagent_confirmation_key() {
     assert_eq!(claims["cnf"]["jwk"], subagent_fixture.jwk);
 }
 
+/// Interaction channel that always reports the terminal
+/// [`InteractionRelayError::UserUnreachable`], standing in for a deployment
+/// with no channel at all and an agent that lacks the `interaction`
+/// capability.
+struct UnreachableInteractionChannel;
+
+#[async_trait]
+impl InteractionChannel for UnreachableInteractionChannel {
+    async fn notify(&self, _notice: &InteractionNotice) -> Result<(), crate::error::InteractionRelayError> {
+        Err(crate::error::InteractionRelayError::UserUnreachable)
+    }
+}
+
+#[tokio::test]
+async fn needs_interaction_with_unreachable_channel_returns_user_unreachable() {
+    let (_a, _r, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    let ps_signing = SigningKey::random(&mut OsRng);
+    let ps_pem = ps_signing.to_pkcs8_pem(pkcs8::LineEnding::LF).unwrap();
+    let ps_encoding_key = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
+    let server = PersonServer::new(
+        TokenVerifier::new(jwks, SystemTimeSource),
+        SystemTimeSource,
+        ScriptedPolicy::new(vec![PolicyDecision::NeedsInteraction]),
+        UnreachableInteractionChannel,
+        InMemoryStore::new(),
+        ps_encoding_key,
+        Algorithm::ES256,
+        "ps-kid",
+        "https://ps.example",
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server
+        .evaluate_token_request(&agent_jwt, &req)
+        .await
+        .expect_err("unreachable user must not grant or return pending");
+    assert!(matches!(err, PersonServerError::UserUnreachable));
+}
+
+#[tokio::test]
+async fn iss_returns_configured_issuer() {
+    let (_a, _r, _agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(vec![], jwks);
+    assert_eq!(server.iss(), "https://ps.example");
+}
+
+#[tokio::test]
+async fn grant_with_active_mission_appends_token_request_log_entry() {
+    let mission_blob = trogon_identity_types::aauth::mission::MissionBlob {
+        approver: "https://ps.example".to_string(),
+        agent: "aauth:assistant@agent.example".to_string(),
+        approved_at: "2026-01-01T00:00:00Z".to_string(),
+        description: "Plan Japan vacation".to_string(),
+        approved_tools: None,
+        capabilities: None,
+    };
+
+    let (agent_fixture, resource_fixture, agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(
+        vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }],
+        jwks,
+    );
+
+    let blob_bytes = server.approve_mission(mission_blob.clone()).await.unwrap();
+    let mission_id = MissionId::from_blob_bytes(&blob_bytes);
+    let mission_ref = MissionRef {
+        approver: mission_blob.approver.clone(),
+        s256: mission_id.as_str().to_owned(),
+    };
+
+    let agent_jkt = jkt_of(&agent_fixture.jwk);
+    let resource_jwt = mint_resource_jwt(
+        &resource_fixture,
+        "https://calendar.example",
+        "https://ps.example",
+        "aauth:assistant@agent.example",
+        &agent_jkt,
+        "resource-kid",
+        Some(mission_ref),
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let outcome = server.evaluate_token_request(&agent_jwt, &req).await.unwrap();
+    assert!(matches!(outcome, TokenEndpointOutcome::Grant { .. }));
+
+    let mission = server.get_mission(&mission_id).await.unwrap().unwrap();
+    assert_eq!(mission.log.len(), 1);
+    assert!(matches!(
+        mission.log[0],
+        trogon_identity_types::aauth::mission::MissionLogEntry::TokenRequest { .. }
+    ));
+}
+
+#[tokio::test]
+async fn token_request_for_missing_mission_returns_mission_not_found() {
+    let missing_mission = MissionRef {
+        approver: "https://ps.example".to_string(),
+        s256: "does-not-exist".to_string(),
+    };
+    let (agent_fixture, resource_fixture, agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let agent_jkt = jkt_of(&agent_fixture.jwk);
+    let resource_jwt = mint_resource_jwt(
+        &resource_fixture,
+        "https://calendar.example",
+        "https://ps.example",
+        "aauth:assistant@agent.example",
+        &agent_jkt,
+        "resource-kid",
+        Some(missing_mission),
+    );
+    let server = build_server(
+        vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }],
+        jwks,
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server.evaluate_token_request(&agent_jwt, &req).await.unwrap_err();
+    assert!(matches!(err, PersonServerError::MissionNotFound(_)));
+}
+
+#[tokio::test]
+async fn token_request_for_completed_mission_returns_mission_not_active() {
+    let mission_blob = trogon_identity_types::aauth::mission::MissionBlob {
+        approver: "https://ps.example".to_string(),
+        agent: "aauth:assistant@agent.example".to_string(),
+        approved_at: "2026-01-01T00:00:00Z".to_string(),
+        description: "Plan Japan vacation".to_string(),
+        approved_tools: None,
+        capabilities: None,
+    };
+    let (agent_fixture, resource_fixture, agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(
+        vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }],
+        jwks,
+    );
+
+    let blob_bytes = server.approve_mission(mission_blob.clone()).await.unwrap();
+    let mission_id = MissionId::from_blob_bytes(&blob_bytes);
+    server.complete_mission(&mission_id).await.unwrap();
+
+    let mission_ref = MissionRef {
+        approver: mission_blob.approver.clone(),
+        s256: mission_id.as_str().to_owned(),
+    };
+    let agent_jkt = jkt_of(&agent_fixture.jwk);
+    let resource_jwt = mint_resource_jwt(
+        &resource_fixture,
+        "https://calendar.example",
+        "https://ps.example",
+        "aauth:assistant@agent.example",
+        &agent_jkt,
+        "resource-kid",
+        Some(mission_ref),
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server.evaluate_token_request(&agent_jwt, &req).await.unwrap_err();
+    assert!(matches!(err, PersonServerError::MissionNotActive(_, _)));
+}
+
+#[tokio::test]
+async fn respond_to_clarification_on_terminal_pending_returns_gone() {
+    let (_a, _r, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(
+        vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }],
+        jwks,
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let outcome = server.evaluate_token_request(&agent_jwt, &req).await.unwrap();
+    // Grant resolves the pending entry to a terminal phase directly (no
+    // Location the agent could poll), but we can still look it up by id to
+    // exercise the terminal-pending guard in respond_to_clarification.
+    let TokenEndpointOutcome::Grant { .. } = outcome else {
+        panic!("expected Grant");
+    };
+    let pendings = server
+        .store
+        .get_pending(&crate::pending::PendingId("nonexistent".into()))
+        .await;
+    assert!(pendings.unwrap().is_none());
+
+    // Build a terminal pending entry directly and confirm resume rejects it.
+    let mut pending = crate::pending::PendingRequest::new(
+        trogon_identity_types::aauth::AgentClaims {
+            iss: "https://ap.example".to_string(),
+            sub: "aauth:assistant@agent.example".to_string(),
+            jti: "agent-jti".to_string(),
+            iat: 0,
+            exp: 1000,
+            dwk: "aauth-agent.json".to_string(),
+            cnf: Cnf {
+                jwk: serde_json::json!({"kty": "EC"}),
+            },
+            ps: None,
+        },
+        trogon_identity_types::aauth::ResourceClaims {
+            iss: "https://calendar.example".to_string(),
+            aud: "https://ps.example".to_string(),
+            jti: "resource-jti-terminal".to_string(),
+            iat: 0,
+            exp: 1000,
+            dwk: "aauth-resource.json".to_string(),
+            agent: "aauth:assistant@agent.example".to_string(),
+            agent_jkt: "jkt".to_string(),
+            scope: "calendar.readwrite".to_string(),
+            mission: None,
+        },
+        None,
+    );
+    pending.deny("no".to_string());
+    server.store.insert_pending(pending.clone()).await.unwrap();
+
+    let err = server
+        .respond_to_clarification(
+            &pending.id,
+            trogon_identity_types::aauth::person_server::ClarificationAction::ClarificationResponse,
+            Some("still trying"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        PersonServerError::Pending(crate::error::PendingRequestError::Gone(_))
+    ));
+}
+
+/// Store double that fails only mission reads/writes, keeping the pending
+/// happy path intact so `load_mission_context`'s and `append_mission_log`'s
+/// own store-failure branches can be exercised without a fully failing
+/// store masking which call actually failed.
+struct MissionFailingStore {
+    inner: InMemoryStore,
+}
+
+impl MissionFailingStore {
+    fn new() -> Self {
+        Self {
+            inner: InMemoryStore::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl crate::store::PersonStateStore for MissionFailingStore {
+    async fn insert_pending(&self, pending: crate::pending::PendingRequest) -> Result<(), crate::store::StoreError> {
+        self.inner.insert_pending(pending).await
+    }
+    async fn get_pending(
+        &self,
+        id: &crate::pending::PendingId,
+    ) -> Result<Option<crate::pending::PendingRequest>, crate::store::StoreError> {
+        self.inner.get_pending(id).await
+    }
+    async fn update_pending(&self, pending: crate::pending::PendingRequest) -> Result<(), crate::store::StoreError> {
+        self.inner.update_pending(pending).await
+    }
+    async fn remove_pending(&self, id: &crate::pending::PendingId) -> Result<(), crate::store::StoreError> {
+        self.inner.remove_pending(id).await
+    }
+    async fn find_pending_by_correlation(
+        &self,
+        key: &str,
+    ) -> Result<Option<crate::pending::PendingId>, crate::store::StoreError> {
+        self.inner.find_pending_by_correlation(key).await
+    }
+    async fn insert_pending_unless_correlated(
+        &self,
+        pending: crate::pending::PendingRequest,
+    ) -> Result<Option<crate::pending::PendingId>, crate::store::StoreError> {
+        self.inner.insert_pending_unless_correlated(pending).await
+    }
+    async fn insert_mission(&self, _mission: crate::mission::Mission) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("mission backend down".into()))
+    }
+    async fn get_mission(
+        &self,
+        _id: &crate::mission::MissionId,
+    ) -> Result<Option<crate::mission::Mission>, crate::store::StoreError> {
+        Err(crate::store::StoreError("mission backend down".into()))
+    }
+    async fn update_mission(&self, _mission: crate::mission::Mission) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("mission backend down".into()))
+    }
+}
+
+#[tokio::test]
+async fn token_request_with_mission_surfaces_mission_store_failure() {
+    let mission_ref = MissionRef {
+        approver: "https://ps.example".to_string(),
+        s256: "some-mission".to_string(),
+    };
+    let (agent_fixture, resource_fixture, agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let agent_jkt = jkt_of(&agent_fixture.jwk);
+    let resource_jwt = mint_resource_jwt(
+        &resource_fixture,
+        "https://calendar.example",
+        "https://ps.example",
+        "aauth:assistant@agent.example",
+        &agent_jkt,
+        "resource-kid",
+        Some(mission_ref),
+    );
+    let ps_signing = SigningKey::random(&mut OsRng);
+    let ps_pem = ps_signing.to_pkcs8_pem(pkcs8::LineEnding::LF).unwrap();
+    let ps_encoding_key = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
+    let server = PersonServer::new(
+        TokenVerifier::new(jwks, SystemTimeSource),
+        SystemTimeSource,
+        ScriptedPolicy::new(vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }]),
+        NoopInteractionChannel,
+        MissionFailingStore::new(),
+        ps_encoding_key,
+        Algorithm::ES256,
+        "ps-kid",
+        "https://ps.example",
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server.evaluate_token_request(&agent_jwt, &req).await.unwrap_err();
+    assert!(matches!(err, PersonServerError::Store(_)));
+}
+
+#[tokio::test]
+async fn append_mission_log_appends_entry_for_active_mission() {
+    let mission_blob = trogon_identity_types::aauth::mission::MissionBlob {
+        approver: "https://ps.example".to_string(),
+        agent: "aauth:assistant@agent.example".to_string(),
+        approved_at: "2026-01-01T00:00:00Z".to_string(),
+        description: "Plan Japan vacation".to_string(),
+        approved_tools: None,
+        capabilities: None,
+    };
+    let (_a, _r, _agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(vec![], jwks);
+
+    let blob_bytes = server.approve_mission(mission_blob).await.unwrap();
+    let mission_id = MissionId::from_blob_bytes(&blob_bytes);
+
+    server
+        .append_mission_log(
+            &mission_id,
+            trogon_identity_types::aauth::mission::MissionLogEntry::TokenRequest {
+                justification: Some("audit entry".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+    let mission = server.get_mission(&mission_id).await.unwrap().unwrap();
+    assert_eq!(mission.log.len(), 1);
+}
+
+#[tokio::test]
+async fn append_mission_log_for_missing_mission_returns_mission_not_found() {
+    let (_a, _r, _agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(vec![], jwks);
+
+    let missing_id = MissionId::from_s256("does-not-exist");
+    let err = server
+        .append_mission_log(
+            &missing_id,
+            trogon_identity_types::aauth::mission::MissionLogEntry::TokenRequest { justification: None },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PersonServerError::MissionNotFound(_)));
+}
+
+#[tokio::test]
+async fn append_mission_log_for_completed_mission_returns_mission_not_active() {
+    let mission_blob = trogon_identity_types::aauth::mission::MissionBlob {
+        approver: "https://ps.example".to_string(),
+        agent: "aauth:assistant@agent.example".to_string(),
+        approved_at: "2026-01-01T00:00:00Z".to_string(),
+        description: "Plan Japan vacation".to_string(),
+        approved_tools: None,
+        capabilities: None,
+    };
+    let (_a, _r, _agent_jwt, _resource_jwt, jwks) = agent_and_resource(None);
+    let server = build_server(vec![], jwks);
+
+    let blob_bytes = server.approve_mission(mission_blob).await.unwrap();
+    let mission_id = MissionId::from_blob_bytes(&blob_bytes);
+    server.complete_mission(&mission_id).await.unwrap();
+
+    let err = server
+        .append_mission_log(
+            &mission_id,
+            trogon_identity_types::aauth::mission::MissionLogEntry::TokenRequest { justification: None },
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PersonServerError::MissionNotActive(_, _)));
+}
+
 #[tokio::test]
 async fn clarification_resume_preserves_upstream_delegation_chain() {
     let (_agent_fixture, _resource_fixture, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
