@@ -133,7 +133,7 @@ where
             .resource_claims
             .mission
             .as_ref()
-            .map(|m| MissionId(m.s256.clone()));
+            .map(|m| MissionId::from_s256(m.s256.clone()));
         let mission_ctx = self.load_mission_context(mission_id.as_ref()).await?;
 
         let mut pending = PendingRequest::new(
@@ -324,10 +324,7 @@ where
             .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::MissionNotFound(id.clone()))?;
         if !mission.is_active() {
-            return Err(PersonServerError::MissionNotActive(
-                id.0.clone(),
-                mission.status.clone(),
-            ));
+            return Err(PersonServerError::MissionNotActive(id.clone(), mission.status.clone()));
         }
         Ok(Some(MissionContext::from(&mission)))
     }
@@ -427,7 +424,7 @@ where
     /// byte-exact blob for later `s256` verification.
     pub async fn approve_mission(&self, blob: MissionBlob) -> Result<Vec<u8>, PersonServerError> {
         let blob_bytes = serde_json::to_vec(&blob).map_err(PersonServerError::MissionSerialization)?;
-        let mission = Mission::approve(blob_bytes.clone(), blob);
+        let mission = Mission::approve(blob_bytes.clone(), blob).map_err(PersonServerError::MissionValidation)?;
         self.store
             .insert_mission(mission)
             .await
@@ -471,7 +468,7 @@ where
             .ok_or_else(|| PersonServerError::MissionNotFound(mission_id.clone()))?;
         if !mission.is_active() {
             return Err(PersonServerError::MissionNotActive(
-                mission_id.0.clone(),
+                mission_id.clone(),
                 mission.status.clone(),
             ));
         }

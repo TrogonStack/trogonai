@@ -403,7 +403,7 @@ async fn mission_context_flows_into_policy_and_log() {
     let mission_id = MissionId::from_blob_bytes(&blob_bytes);
     let mission_ref = MissionRef {
         approver: mission_blob.approver.clone(),
-        s256: mission_id.0.clone(),
+        s256: mission_id.as_str().to_owned(),
     };
 
     let mission = server.get_mission(&mission_id).await.unwrap().unwrap();

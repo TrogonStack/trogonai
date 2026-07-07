@@ -36,7 +36,7 @@ fn mission_id_differs_for_different_bytes() {
 #[test]
 fn approve_creates_active_mission_with_empty_log() {
     let bytes = serde_json::to_vec(&blob()).unwrap();
-    let mission = Mission::approve(bytes, blob());
+    let mission = Mission::approve(bytes, blob()).unwrap();
     assert!(mission.is_active());
     assert!(mission.log.is_empty());
 }
@@ -44,16 +44,16 @@ fn approve_creates_active_mission_with_empty_log() {
 #[test]
 fn mission_ref_uses_blob_approver_and_id_as_s256() {
     let bytes = serde_json::to_vec(&blob()).unwrap();
-    let mission = Mission::approve(bytes, blob());
+    let mission = Mission::approve(bytes, blob()).unwrap();
     let mission_ref = mission.mission_ref();
     assert_eq!(mission_ref.approver, "https://ps.example");
-    assert_eq!(mission_ref.s256, mission.id.0);
+    assert_eq!(mission_ref.s256, mission.id.as_str());
 }
 
 #[test]
 fn append_log_accumulates_entries_in_order() {
     let bytes = serde_json::to_vec(&blob()).unwrap();
-    let mut mission = Mission::approve(bytes, blob());
+    let mut mission = Mission::approve(bytes, blob()).unwrap();
     mission.append_log(MissionLogEntry::TokenRequest { justification: None });
     mission.append_log(MissionLogEntry::AuditRecord {
         action: "WebSearch".to_string(),
@@ -65,7 +65,7 @@ fn append_log_accumulates_entries_in_order() {
 #[test]
 fn complete_transitions_to_terminated_and_is_one_way() {
     let bytes = serde_json::to_vec(&blob()).unwrap();
-    let mut mission = Mission::approve(bytes, blob());
+    let mut mission = Mission::approve(bytes, blob()).unwrap();
     mission.complete();
     assert!(!mission.is_active());
     assert_eq!(mission.status, MissionStatus::Terminated);
@@ -74,9 +74,9 @@ fn complete_transitions_to_terminated_and_is_one_way() {
 #[test]
 fn mission_context_from_mission_carries_status() {
     let bytes = serde_json::to_vec(&blob()).unwrap();
-    let mut mission = Mission::approve(bytes, blob());
+    let mut mission = Mission::approve(bytes, blob()).unwrap();
     mission.complete();
     let ctx = MissionContext::from(&mission);
     assert_eq!(ctx.status, MissionStatus::Terminated);
-    assert_eq!(ctx.mission_ref.s256, mission.id.0);
+    assert_eq!(ctx.mission_ref.s256, mission.id.as_str());
 }

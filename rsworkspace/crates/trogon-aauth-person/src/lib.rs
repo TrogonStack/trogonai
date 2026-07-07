@@ -88,7 +88,7 @@ pub mod time;
 pub use decision::{DecisionRequest, PolicyDecision, PolicyEngine};
 pub use error::PersonServerError;
 pub use interaction::{InteractionChannel, InteractionNotice, NoopInteractionChannel};
-pub use mission::{Mission, MissionContext, MissionId};
+pub use mission::{ApprovedMission, Mission, MissionContext, MissionId, MissionValidationError};
 pub use pending::{PendingId, PendingPhase, PendingRequest};
 pub use server::{PersonServer, TokenEndpointOutcome};
 pub use store::{InMemoryStore, PersonStateStore};

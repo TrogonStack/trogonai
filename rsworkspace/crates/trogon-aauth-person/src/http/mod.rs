@@ -74,7 +74,10 @@ where
 
 fn error_response(err: &PersonServerError) -> Response {
     let status = StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let body = ErrorResponse::new(err.wire_code()).with_detail(err.to_string());
+    let mut body = ErrorResponse::new(err.wire_code());
+    if let Some(detail) = err.client_detail() {
+        body = body.with_detail(detail);
+    }
     (status, Json(body)).into_response()
 }
 
@@ -179,11 +182,11 @@ where
     S: PersonStateStore,
 {
     let Some(mission_ref) = req.mission.clone() else {
-        return error_response(&PersonServerError::MissionNotFound(crate::mission::MissionId(
-            "(none provided)".to_string(),
-        )));
+        return error_response(&PersonServerError::MissionNotFound(
+            crate::mission::MissionId::from_s256("(none provided)"),
+        ));
     };
-    let mission_id = MissionId(mission_ref.s256.clone());
+    let mission_id = MissionId::from_s256(mission_ref.s256.clone());
     let entry = trogon_identity_types::aauth::mission::MissionLogEntry::PermissionRequest {
         action: req.action.clone(),
         description: req.description.clone(),
@@ -212,7 +215,7 @@ where
     I: InteractionChannel,
     S: PersonStateStore,
 {
-    let mission_id = MissionId(req.mission.s256.clone());
+    let mission_id = MissionId::from_s256(req.mission.s256.clone());
     let entry = trogon_identity_types::aauth::mission::MissionLogEntry::AuditRecord {
         action: req.action.clone(),
         description: req.description.clone(),
@@ -235,11 +238,11 @@ where
     S: PersonStateStore,
 {
     let Some(mission_ref) = req.mission.clone() else {
-        return error_response(&PersonServerError::MissionNotFound(crate::mission::MissionId(
-            "(none provided)".to_string(),
-        )));
+        return error_response(&PersonServerError::MissionNotFound(
+            crate::mission::MissionId::from_s256("(none provided)"),
+        ));
     };
-    let mission_id = MissionId(mission_ref.s256.clone());
+    let mission_id = MissionId::from_s256(mission_ref.s256.clone());
     let type_str = format!("{:?}", req.type_).to_lowercase();
     let entry = trogon_identity_types::aauth::mission::MissionLogEntry::InteractionRequest { type_: type_str };
     match server.append_mission_log(&mission_id, entry).await {

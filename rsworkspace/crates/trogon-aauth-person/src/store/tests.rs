@@ -95,7 +95,7 @@ async fn mission_insert_get_update_round_trips() {
         capabilities: None,
     };
     let bytes = serde_json::to_vec(&blob).unwrap();
-    let mission = Mission::approve(bytes, blob);
+    let mission = Mission::approve(bytes, blob).expect("valid mission blob");
     let id = mission.id.clone();
 
     store.insert_mission(mission).await.unwrap();

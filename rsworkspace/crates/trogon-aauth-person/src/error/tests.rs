@@ -40,7 +40,7 @@ fn denied_maps_to_denied_wire_code_and_403() {
 
 #[test]
 fn server_error_fallback_maps_to_500() {
-    let err = PersonServerError::MissionNotFound(crate::mission::MissionId("abc".to_string()));
+    let err = PersonServerError::MissionNotFound(crate::mission::MissionId::from_s256("abc"));
     assert_eq!(err.token_endpoint_code(), TokenEndpointError::ServerError);
     assert_eq!(err.http_status(), 500);
     assert_eq!(err.wire_code(), "server_error");
@@ -68,4 +68,31 @@ fn interaction_endpoint_error_status_matches_draft_table() {
 fn wire_code_matches_token_endpoint_error_serde_rename() {
     let err = PersonServerError::Verification(RequestVerificationError::AgentToken(TokenError::BadHeader));
     assert_eq!(err.wire_code(), "invalid_agent_token");
+}
+
+#[test]
+fn client_detail_does_not_leak_verification_comparison_values() {
+    let err = PersonServerError::Verification(RequestVerificationError::ResourceTokenWrongAudience {
+        expected: "https://ps.internal.example".to_string(),
+        actual: "https://evil.example".to_string(),
+    });
+    let detail = err.client_detail().expect("generic detail");
+    assert!(!detail.contains("ps.internal.example"));
+    assert!(!detail.contains("evil.example"));
+    assert_eq!(detail, "request verification failed");
+}
+
+#[test]
+fn client_detail_is_omitted_for_internal_failures() {
+    let err = PersonServerError::Store(crate::store::StoreError("dsn=postgres://user:pw@db".to_string()));
+    assert!(err.client_detail().is_none());
+
+    let policy = PersonServerError::Policy(Box::new(crate::store::StoreError("internal".to_string())));
+    assert!(policy.client_detail().is_none());
+}
+
+#[test]
+fn client_detail_preserves_denied_reason() {
+    let err = PersonServerError::Denied("not within mission scope".to_string());
+    assert_eq!(err.client_detail().as_deref(), Some("denied: not within mission scope"));
 }

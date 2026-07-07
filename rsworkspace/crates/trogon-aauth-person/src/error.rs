@@ -118,7 +118,7 @@ pub enum PersonServerError {
     UserUnreachable,
     /// "Mission Status Errors": the referenced mission is no longer active.
     #[error("mission {0} is not active (status: {1:?})")]
-    MissionNotActive(String, MissionStatus),
+    MissionNotActive(crate::mission::MissionId, MissionStatus),
     #[error("mission {0} not found")]
     MissionNotFound(crate::mission::MissionId),
     #[error("interaction relay error: {0}")]
@@ -138,6 +138,9 @@ pub enum PersonServerError {
     /// The mission blob could not be serialized for byte-exact persistence.
     #[error("mission blob serialization failed: {0}")]
     MissionSerialization(#[source] serde_json::Error),
+    /// The mission blob failed domain validation at the approval boundary.
+    #[error("mission blob failed validation: {0}")]
+    MissionValidation(#[from] crate::mission::MissionValidationError),
 }
 
 /// Failures relaying an interaction to the user, per "Interaction Endpoint"
@@ -214,6 +217,36 @@ impl PersonServerError {
             | TokenEndpointError::ExpiredResourceToken => 400,
             TokenEndpointError::UserUnreachable => 403,
             TokenEndpointError::ServerError => 500,
+        }
+    }
+
+    /// Client-safe `detail` for the HTTP error body. The wire code already
+    /// classifies the failure; forwarding the full `Display` chain for
+    /// verification or internal failures would leak expected/actual
+    /// comparison values and backend state to the caller.
+    #[must_use]
+    pub fn client_detail(&self) -> Option<String> {
+        match self {
+            PersonServerError::Verification(_) | PersonServerError::Pending(PendingRequestError::Verification(_)) => {
+                Some("request verification failed".to_string())
+            }
+            PersonServerError::Pending(
+                e @ (PendingRequestError::NotFound(_)
+                | PendingRequestError::Gone(_)
+                | PendingRequestError::ClarificationLimitExceeded(_, _)
+                | PendingRequestError::UpdatedRequestIdentityMismatch),
+            ) => Some(e.to_string()),
+            PersonServerError::Mint(_)
+            | PersonServerError::Pending(PendingRequestError::Mint(_))
+            | PersonServerError::Store(_)
+            | PersonServerError::Policy(_)
+            | PersonServerError::MissionSerialization(_) => None,
+            PersonServerError::MissionValidation(e) => Some(e.to_string()),
+            PersonServerError::UserUnreachable
+            | PersonServerError::MissionNotActive(_, _)
+            | PersonServerError::MissionNotFound(_)
+            | PersonServerError::Interaction(_)
+            | PersonServerError::Denied(_) => Some(self.to_string()),
         }
     }
 
