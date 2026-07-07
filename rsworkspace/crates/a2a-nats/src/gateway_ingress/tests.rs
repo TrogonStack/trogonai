@@ -213,6 +213,13 @@ fn declarative_denied_emits_code_minus_32803() {
 }
 
 #[test]
+fn aauth_denied_emits_code_minus_32118() {
+    let headers = HeaderMap::new();
+    let encoded = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth", None).unwrap();
+    assert_eq!(parse_error_code(&encoded), -32_118);
+}
+
+#[test]
 fn tier3_refused_emits_code_minus_32802_with_rule() {
     let headers = HeaderMap::new();
     let encoded = ingress_error_response_wire(

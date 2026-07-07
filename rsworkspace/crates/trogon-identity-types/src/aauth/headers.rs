@@ -17,3 +17,4 @@ pub const NATS_SIG_INPUT: &str = "AAuth-Sig-Input";
 pub const NATS_SIG: &str = "AAuth-Sig";
 pub const NATS_SIG_CREATED: &str = "AAuth-Sig-Created";
 pub const NATS_SIG_NONCE: &str = "AAuth-Sig-Nonce";
+pub const NATS_AUTH_TOKEN: &str = "AAuth-Auth-Token";

@@ -23,17 +23,20 @@ use a2a_auth_callout::SpiceDbSubject;
 use a2a_nats::A2aMethod;
 use a2a_nats::audit::envelope::{AuditEnvelope, AuditEnvelopeFields, AuditOutcome, Tier1Decision, Tier3Decision};
 use a2a_nats::{
-    gateway_ingress_agent_and_method_dots, ingress_gateway_deadline_exceeded_response_bytes,
-    ingress_gateway_declarative_denied_response_bytes, ingress_gateway_policy_denied_response_bytes,
-    ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
+    gateway_ingress_agent_and_method_dots, ingress_gateway_aauth_denied_response_bytes,
+    ingress_gateway_deadline_exceeded_response_bytes, ingress_gateway_declarative_denied_response_bytes,
+    ingress_gateway_policy_denied_response_bytes, ingress_gateway_tier3_refused_response_bytes,
+    ingress_invalid_request_response_bytes,
 };
 use async_nats::HeaderMap;
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, warn};
+use trogon_identity_types::aauth::headers as aauth_headers;
 use trogon_std::env::ReadEnv;
 use uuid::Uuid;
 
+use crate::aauth::{AAuthMode, DefaultAAuthIngress, StaticJwks};
 use crate::config::Config;
 use crate::gw_ingress_stream::{CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate};
 use crate::jwt_caller_identity::{
@@ -55,6 +58,7 @@ use crate::policy::tier3_redaction::{
     Tier3EvaluationContext, Tier3RedactionDecision, gateway_tier3_redaction_enabled, merge_forward_audit_rewrites,
     tier3_redaction_audit_rewrites,
 };
+use crate::runtime::aauth_env::aauth_deny_rule_fired;
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::{
     gateway_audit_publish_enabled, json_rpc_audit_req_id, json_rpc_params, unary_deadline_for_method, unix_epoch_ms,
@@ -75,6 +79,7 @@ const ATTR_AGENT_SUBJECT: &str = "agent_subject";
 const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
 
 const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
+const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
 const ROUTING_TIER1_DENIED: &str = "tier1_denied";
 const ROUTING_POLICY_DENIED: &str = "policy_denied";
 const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
@@ -100,6 +105,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
+    aauth: Option<&DefaultAAuthIngress<StaticJwks>>,
     policy: &GatewayPolicyStack,
     message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: GatewayCallerIdentityPolicy,
@@ -128,6 +134,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
         caller_id = tracing::field::Empty,
         agent_subject = tracing::field::Empty,
         routing_outcome = tracing::field::Empty,
+        aauth_agent_id = tracing::field::Empty,
     );
 
     async {
@@ -157,6 +164,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
                     tier1,
                     tier1_owner,
                     tier1_declarative,
+                    aauth,
                     policy,
                     streaming_ingress_enabled,
                     streaming_ingress_config,
@@ -189,6 +197,7 @@ async fn dispatch_routed<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
+    aauth: Option<&DefaultAAuthIngress<StaticJwks>>,
     policy: &GatewayPolicyStack,
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
@@ -225,6 +234,88 @@ async fn dispatch_routed<E: ReadEnv>(
 
     let caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
     let mut tier1_zed_token: Option<String> = None;
+
+    // AAuth verifies caller identity before any authorization tier runs --
+    // authentication must precede authorization.
+    if let Some(aauth) = aauth
+        && aauth.mode != AAuthMode::Off
+    {
+        let header_pairs: Vec<(String, String)> = headers_owned
+            .iter()
+            .flat_map(|(name, values)| values.iter().map(move |value| (name.to_string(), value.to_string())))
+            .collect();
+        let auth_token = headers_owned
+            .get(aauth_headers::NATS_AUTH_TOKEN)
+            .map(std::string::ToString::to_string);
+        match aauth
+            .resolve_nats(
+                ingress_subject,
+                Some(reply.as_str()),
+                payload.as_ref(),
+                &header_pairs,
+                auth_token.as_deref(),
+            )
+            .await
+        {
+            Ok(resolution) => {
+                // The verified resolution is observability-only until the
+                // policy layers map AAuth principals to caller identity.
+                if let Some(agent_id) = resolution.agent_id.as_deref() {
+                    tracing::Span::current().record("aauth_agent_id", agent_id);
+                }
+            }
+            Err(deny) => {
+                tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_AAUTH_DENIED);
+                warn!(
+                    ingress.subject = %ingress_subject,
+                    agent_subject = %agent_subject,
+                    routing_outcome = ROUTING_AAUTH_DENIED,
+                    reason = %deny.reason,
+                    "gateway aauth verification rejected ingress envelope",
+                );
+                let Ok(body) = ingress_gateway_aauth_denied_response_bytes(
+                    &headers_owned,
+                    payload.as_ref(),
+                    "aauth verification rejected envelope",
+                ) else {
+                    return;
+                };
+                let mut reply_headers = HeaderMap::new();
+                if let Some((name, value)) = deny.to_requirement_header() {
+                    reply_headers.insert(name.as_str(), value.as_str());
+                }
+                reply_error(client, reply, reply_headers, body).await;
+                spawn_gateway_audit_publish(
+                    audit_enabled,
+                    client.clone(),
+                    config.a2a_prefix.clone(),
+                    agent_id.clone(),
+                    AuditEnvelope::new(
+                        &agent_id,
+                        method_slashes.clone(),
+                        json_rpc_audit_req_id(payload.as_ref()),
+                        started_wall_ms,
+                        elapsed_ms(started_mono),
+                        AuditOutcome::Err {
+                            code: -32_118,
+                            message: "aauth verification rejected envelope".into(),
+                        },
+                        Some(payload.as_ref()),
+                        enrich_audit_caller(
+                            AuditEnvelopeFields {
+                                trace_id: Some(trace_id.clone()),
+                                rules_fired: Some(vec![aauth_deny_rule_fired(&deny.reason).to_string()]),
+                                ..Default::default()
+                            },
+                            audit_caller_id.as_str(),
+                            &audit_caller_source,
+                        ),
+                    ),
+                );
+                return;
+            }
+        }
+    }
 
     if tier1.is_enabled() {
         match run_tier1_spicedb(
@@ -551,7 +642,7 @@ async fn dispatch_routed<E: ReadEnv>(
     )
     .await;
 
-    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env);
+    let rules_fired = build_rules_fired(tier1, policy, &tier3_rewrites, env, aauth.map(|a| a.mode));
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
         ingress_subject,
@@ -963,8 +1054,9 @@ fn build_rules_fired<E: ReadEnv>(
     policy: &GatewayPolicyStack,
     tier3_rewrites: &[crate::policy::tier3_redaction::RedactionRewrite],
     env: &E,
+    aauth_mode: Option<crate::aauth::AAuthMode>,
 ) -> Vec<String> {
-    let mut rules_fired = Vec::with_capacity(3);
+    let mut rules_fired = Vec::with_capacity(4);
     rules_fired.push(if tier1.is_enabled() {
         "gateway.tier1.spicedb_allowed".into()
     } else {
@@ -983,6 +1075,11 @@ fn build_rules_fired<E: ReadEnv>(
         }
     } else {
         "gateway.tier3.layer_disabled".into()
+    });
+    rules_fired.push(match aauth_mode {
+        Some(AAuthMode::Enforce) => "gateway.aauth.enforced_allow".into(),
+        Some(AAuthMode::Shadow) => "gateway.aauth.shadow".into(),
+        Some(AAuthMode::Off) | None => "gateway.aauth.layer_disabled".into(),
     });
     rules_fired
 }
