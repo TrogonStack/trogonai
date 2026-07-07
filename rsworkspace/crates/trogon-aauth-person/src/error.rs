@@ -121,6 +121,18 @@ pub enum PersonServerError {
     /// Person policy denied the request outright, per "PS Response".
     #[error("denied: {0}")]
     Denied(String),
+    /// A `PersonStateStore` operation failed. Distinct from a missing
+    /// pending entry so persistence outages surface as `server_error`
+    /// rather than a not-found.
+    #[error("state store failure: {0}")]
+    Store(#[from] crate::store::StoreError),
+    /// The person policy engine itself failed (not a deny) -- surfaced as
+    /// `server_error` so policy outages don't read as missing requests.
+    #[error("policy engine failure: {0}")]
+    Policy(#[source] Box<dyn std::error::Error + Send + Sync>),
+    /// The mission blob could not be serialized for byte-exact persistence.
+    #[error("mission blob serialization failed: {0}")]
+    MissionSerialization(#[source] serde_json::Error),
 }
 
 /// Failures relaying an interaction to the user, per "Interaction Endpoint"

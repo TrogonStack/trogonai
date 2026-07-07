@@ -493,3 +493,158 @@ async fn updated_request_action_replaces_resource_token_and_rechecks_policy() {
         .unwrap();
     assert!(matches!(outcome, TokenEndpointOutcome::Grant { .. }));
 }
+
+#[tokio::test]
+async fn policy_engine_failure_surfaces_as_policy_error() {
+    let (_agent_fixture, _resource_fixture, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    // No scripted decisions queued: the engine errors on the first call.
+    let server = build_server(vec![], jwks);
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server
+        .evaluate_token_request(&agent_jwt, &req)
+        .await
+        .expect_err("policy failure must not grant");
+    assert!(matches!(err, PersonServerError::Policy(_)));
+    assert_eq!(err.http_status(), 500);
+    assert_eq!(err.wire_code(), "server_error");
+}
+
+/// Store double whose every operation fails, standing in for a durable
+/// backend outage.
+struct FailingStore;
+
+#[async_trait]
+impl crate::store::PersonStateStore for FailingStore {
+    async fn insert_pending(&self, _pending: crate::pending::PendingRequest) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn get_pending(
+        &self,
+        _id: &crate::pending::PendingId,
+    ) -> Result<Option<crate::pending::PendingRequest>, crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn update_pending(&self, _pending: crate::pending::PendingRequest) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn remove_pending(&self, _id: &crate::pending::PendingId) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn find_pending_by_correlation(
+        &self,
+        _key: &str,
+    ) -> Result<Option<crate::pending::PendingId>, crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn insert_mission(&self, _mission: crate::mission::Mission) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn get_mission(
+        &self,
+        _id: &crate::mission::MissionId,
+    ) -> Result<Option<crate::mission::Mission>, crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+    async fn update_mission(&self, _mission: crate::mission::Mission) -> Result<(), crate::store::StoreError> {
+        Err(crate::store::StoreError("backend down".into()))
+    }
+}
+
+#[tokio::test]
+async fn store_failure_surfaces_as_store_error_not_not_found() {
+    let (_agent_fixture, _resource_fixture, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
+    let ps_signing = SigningKey::random(&mut OsRng);
+    let ps_pem = ps_signing.to_pkcs8_pem(pkcs8::LineEnding::LF).unwrap();
+    let ps_encoding_key = EncodingKey::from_ec_pem(ps_pem.as_bytes()).unwrap();
+    let server = PersonServer::new(
+        TokenVerifier::new(jwks, SystemTimeSource),
+        SystemTimeSource,
+        ScriptedPolicy::new(vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }]),
+        NoopInteractionChannel,
+        FailingStore,
+        ps_encoding_key,
+        Algorithm::ES256,
+        "ps-kid",
+        "https://ps.example",
+    );
+
+    let req = TokenRequest::new(resource_jwt);
+    let err = server
+        .evaluate_token_request(&agent_jwt, &req)
+        .await
+        .expect_err("store outage must not read as not-found");
+    assert!(matches!(err, PersonServerError::Store(_)));
+    assert_eq!(err.http_status(), 500);
+    assert_eq!(err.wire_code(), "server_error");
+}
+
+#[tokio::test]
+async fn subagent_grant_binds_subagent_confirmation_key() {
+    let parent_fixture = key_fixture("agent-kid");
+    let subagent_fixture = key_fixture("subagent-kid");
+    let resource_fixture = key_fixture("resource-kid");
+    let jwks = StaticJwks::new()
+        .with("https://ap.example", parent_fixture.jwk_set.clone())
+        .with("https://subap.example", subagent_fixture.jwk_set.clone())
+        .with("https://calendar.example", resource_fixture.jwk_set.clone());
+
+    let parent_sub = "aauth:assistant@agent.example";
+    let subagent_sub = "aauth:worker@agent.example";
+    let parent_jwt = mint_agent_jwt(&parent_fixture, "https://ap.example", parent_sub, "agent-kid");
+
+    // AgentClaims has no typed parent_agent field yet, so the sub-agent
+    // token is minted from raw JSON the same way real issuers produce it.
+    let now = now_unix();
+    let subagent_claims = serde_json::json!({
+        "iss": "https://subap.example",
+        "sub": subagent_sub,
+        "jti": "subagent-jti",
+        "iat": now - 5,
+        "exp": now + 600,
+        "dwk": "aauth-agent.json",
+        "cnf": { "jwk": subagent_fixture.jwk.clone() },
+        "parent_agent": parent_sub,
+    });
+    let mut subagent_header = Header::new(Algorithm::ES256);
+    subagent_header.typ = Some(TYP_AGENT.into());
+    subagent_header.kid = Some("subagent-kid".to_string());
+    let subagent_jwt = encode(&subagent_header, &subagent_claims, &subagent_fixture.encoding_key).unwrap();
+
+    let subagent_jkt = jkt_of(&subagent_fixture.jwk);
+    let resource_jwt = mint_resource_jwt(
+        &resource_fixture,
+        "https://calendar.example",
+        "https://ps.example",
+        subagent_sub,
+        &subagent_jkt,
+        "resource-kid",
+        None,
+    );
+
+    let server = build_server(
+        vec![PolicyDecision::Grant {
+            scope: "calendar.readwrite".to_string(),
+        }],
+        jwks,
+    );
+
+    let mut req = TokenRequest::new(resource_jwt);
+    req.subagent_token = Some(subagent_jwt);
+    let outcome = server.evaluate_token_request(&parent_jwt, &req).await.unwrap();
+    let auth_token = match outcome {
+        TokenEndpointOutcome::Grant { response } => response.auth_token,
+        other => panic!("expected Grant, got {other:?}"),
+    };
+
+    let payload_b64 = auth_token.split('.').nth(1).unwrap();
+    let payload = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload_b64).unwrap();
+    let claims: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+    assert_eq!(claims["agent"], subagent_sub);
+    assert_eq!(claims["agent_jkt"], subagent_jkt.as_str());
+    // The confirmation key must be the sub-agent's PoP key, not the signing
+    // parent's.
+    assert_eq!(claims["cnf"]["jwk"], subagent_fixture.jwk);
+}

@@ -115,12 +115,12 @@ where
             .store
             .find_pending_by_correlation(&correlation_key)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             && let Some(existing) = self
                 .store
                 .get_pending(&existing_id)
                 .await
-                .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+                .map_err(PersonServerError::Store)?
             && !existing.is_terminal()
         {
             return Ok(TokenEndpointOutcome::Pending {
@@ -153,7 +153,7 @@ where
                 clarification_round: 0,
             })
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.to_string())))?;
+            .map_err(|e| PersonServerError::Policy(Box::new(e)))?;
 
         self.apply_decision(&mut pending, decision, &verified, mission_id.as_ref())
             .await
@@ -184,7 +184,14 @@ where
                     sub: &verified.binding.agent,
                     jti: &jti,
                     binding: &verified.binding,
-                    cnf_jwk: verified.agent_claims.cnf.jwk.clone(),
+                    // The confirmation key must belong to the agent the token
+                    // binds to: on a sub-agent request that is the sub-agent's
+                    // key, not the signing parent's ("Sub-Agent Identity").
+                    cnf_jwk: verified
+                        .subagent_claims
+                        .as_ref()
+                        .map_or(&verified.agent_claims.cnf.jwk, |s| &s.cnf.jwk)
+                        .clone(),
                     scope: &scope,
                     act,
                     principal: None,
@@ -237,7 +244,7 @@ where
                 self.store
                     .insert_pending(pending.clone())
                     .await
-                    .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+                    .map_err(PersonServerError::Store)?;
                 Ok(TokenEndpointOutcome::Pending {
                     pending_id: pending.id.clone(),
                     response: PendingResponse {
@@ -257,7 +264,7 @@ where
                 self.store
                     .insert_pending(pending.clone())
                     .await
-                    .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+                    .map_err(PersonServerError::Store)?;
                 Ok(TokenEndpointOutcome::Pending {
                     pending_id: pending.id.clone(),
                     response: PendingResponse {
@@ -274,7 +281,7 @@ where
                 self.store
                     .insert_pending(pending.clone())
                     .await
-                    .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+                    .map_err(PersonServerError::Store)?;
                 Ok(TokenEndpointOutcome::Pending {
                     pending_id: pending.id.clone(),
                     response: PendingResponse::pending(),
@@ -292,19 +299,15 @@ where
         self.store
             .insert_pending(pending.clone())
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+            .map_err(PersonServerError::Store)?;
         if let Some(id) = mission_id
-            && let Some(mut mission) = self
-                .store
-                .get_mission(id)
-                .await
-                .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            && let Some(mut mission) = self.store.get_mission(id).await.map_err(PersonServerError::Store)?
         {
             mission.append_log(log_entry);
             self.store
                 .update_mission(mission)
                 .await
-                .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+                .map_err(PersonServerError::Store)?;
         }
         Ok(())
     }
@@ -318,7 +321,7 @@ where
             .store
             .get_mission(id)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::MissionNotFound(id.0.clone()))?;
         if !mission.is_active() {
             return Err(PersonServerError::MissionNotActive(
@@ -335,7 +338,7 @@ where
         self.store
             .get_pending(id)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.0.clone())))
     }
 
@@ -354,7 +357,7 @@ where
             .store
             .get_pending(id)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.0.clone())))?;
 
         if pending.is_terminal() {
@@ -401,7 +404,7 @@ where
                 clarification_round: pending.clarification_round,
             })
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.to_string())))?;
+            .map_err(|e| PersonServerError::Policy(Box::new(e)))?;
 
         let binding = crate::mint::BindingAgent {
             agent: pending.resource.agent.clone(),
@@ -423,13 +426,12 @@ where
     /// "Mission Approval": approves a mission proposal and persists the
     /// byte-exact blob for later `s256` verification.
     pub async fn approve_mission(&self, blob: MissionBlob) -> Result<Vec<u8>, PersonServerError> {
-        let blob_bytes = serde_json::to_vec(&blob)
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.to_string())))?;
+        let blob_bytes = serde_json::to_vec(&blob).map_err(PersonServerError::MissionSerialization)?;
         let mission = Mission::approve(blob_bytes.clone(), blob);
         self.store
             .insert_mission(mission)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+            .map_err(PersonServerError::Store)?;
         Ok(blob_bytes)
     }
 
@@ -440,21 +442,18 @@ where
             .store
             .get_mission(id)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::MissionNotFound(id.0.clone()))?;
         mission.complete();
         self.store
             .update_mission(mission)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+            .map_err(PersonServerError::Store)?;
         Ok(())
     }
 
     pub async fn get_mission(&self, id: &MissionId) -> Result<Option<Mission>, PersonServerError> {
-        self.store
-            .get_mission(id)
-            .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))
+        self.store.get_mission(id).await.map_err(PersonServerError::Store)
     }
 
     /// "Permission Endpoint" / "Audit Endpoint": appends one governed event
@@ -468,7 +467,7 @@ where
             .store
             .get_mission(mission_id)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?
+            .map_err(PersonServerError::Store)?
             .ok_or_else(|| PersonServerError::MissionNotFound(mission_id.0.clone()))?;
         if !mission.is_active() {
             return Err(PersonServerError::MissionNotActive(
@@ -480,7 +479,7 @@ where
         self.store
             .update_mission(mission)
             .await
-            .map_err(|e| PersonServerError::Pending(PendingRequestError::NotFound(e.0)))?;
+            .map_err(PersonServerError::Store)?;
         Ok(())
     }
 }
