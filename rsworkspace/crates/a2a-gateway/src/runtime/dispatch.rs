@@ -77,6 +77,7 @@ const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
 const ATTR_CALLER_ID: &str = "caller_id";
 const ATTR_AGENT_SUBJECT: &str = "agent_subject";
 const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
+const ATTR_AAUTH_AGENT_ID: &str = "aauth_agent_id";
 
 const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
 const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
@@ -261,7 +262,7 @@ async fn dispatch_routed<E: ReadEnv>(
         {
             Ok(resolution) => {
                 if let Some(agent_id) = resolution.agent_id.as_deref() {
-                    tracing::Span::current().record("aauth_agent_id", agent_id);
+                    tracing::Span::current().record(ATTR_AAUTH_AGENT_ID, agent_id);
                 }
                 // A verified `aa-auth+jwt` principal supersedes the
                 // JWT-header caller identity for everything downstream

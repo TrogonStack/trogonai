@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use base64::Engine;
 use jsonwebtoken::jwk::JwkSet;
 use trogon_aauth_verify::challenge::ResourceChallenge;
 use trogon_aauth_verify::jwks::JwksError;
@@ -604,7 +605,6 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
 /// `trogon_aauth_verify::mission` module docs), so the `mission` claim must
 /// be read off the raw payload via `extract_mission_claim`.
 fn raw_claims_value(jwt: &str) -> Option<serde_json::Value> {
-    use base64::Engine;
     let payload_b64 = jwt.split('.').nth(1)?;
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload_b64.as_bytes())
