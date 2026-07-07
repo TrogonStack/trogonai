@@ -122,6 +122,7 @@ const SECURITY_HEADERS: &[&str] = &[
     // downstream consumers could read another -- the same smuggling shape
     // the six envelope headers are guarded against.
     headers::NATS_AUTH_TOKEN,
+    headers::MISSION,
 ];
 
 /// Header view: pick the first value for a given case-insensitive name.

@@ -227,6 +227,29 @@ fn aauth_denied_emits_code_minus_32118() {
 }
 
 #[test]
+fn aauth_denied_response_bytes_emits_code_minus_32118() {
+    // `ingress_gateway_aauth_denied_response_bytes` returns only the body
+    // (the -32118 code lives in the NATS header `ingress_error_wire` sets,
+    // which this body-only helper intentionally discards for callers that
+    // reply through a channel carrying its own headers), so this asserts the
+    // message round-trips and cross-checks the code against the
+    // header-carrying twin built from the same underlying encoder.
+    let headers = HeaderMap::new();
+    let bytes = ingress_gateway_aauth_denied_response_bytes(&headers, b"{}", "aauth required").unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["message"], "aauth required");
+
+    let wire = ingress_error_response_wire(&headers, b"{}", -32_118, "aauth required", None).unwrap();
+    assert_eq!(wire.body.as_ref(), bytes.as_ref());
+    assert_eq!(
+        wire.headers
+            .get(jsonrpc_nats::HEADER_ERROR_CODE)
+            .map(|v| v.as_str().to_owned()),
+        Some("-32118".to_owned())
+    );
+}
+
+#[test]
 fn tier3_refused_emits_code_minus_32802_with_rule() {
     let headers = HeaderMap::new();
     let encoded = ingress_error_response_wire(

@@ -47,16 +47,13 @@ where
         .map_err(RequestVerificationError::UntrustedPs)?
         .clone();
 
+    // `aud` binding against `as_own_iss` is enforced by
+    // `TokenVerifier::verify_resource` (via `decode_with_jwks`) before this
+    // point; a mismatch surfaces as `RequestVerificationError::ResourceToken`.
     let resource = verifier
         .verify_resource(&req.resource_token, as_own_iss)
         .await
         .map_err(RequestVerificationError::ResourceToken)?;
-    if resource.claims.aud != as_own_iss {
-        return Err(RequestVerificationError::ResourceTokenWrongAudience {
-            expected: as_own_iss.to_string(),
-            actual: resource.claims.aud.clone(),
-        });
-    }
 
     let agent = verifier
         .verify_agent(&req.agent_token)
@@ -91,6 +88,9 @@ where
 
     let binding = match &subagent {
         Some(sub) => {
+            if resource.claims.agent != sub.claims.sub {
+                return Err(RequestVerificationError::ResourceTokenSubagentIdentifierMismatch);
+            }
             if resource.claims.agent_jkt != sub.jkt {
                 return Err(RequestVerificationError::ResourceTokenSubagentKeyMismatch);
             }
@@ -149,20 +149,13 @@ where
     // the `iss` of the intermediary's own agent token (the agent token
     // presented via Signature-Key). `verify_auth` needs the expected `aud`
     // up front, so bind against `intermediary_agent.iss` directly, rather
-    // than verifying first and comparing after -- this also means a
-    // mismatched `aud` surfaces as the same audience-mismatch failure mode
-    // `TokenVerifier` already produces for other token types.
+    // than verifying first and comparing after. `aud` binding is enforced by
+    // `TokenVerifier::verify_auth` before this point; a mismatch surfaces as
+    // `RequestVerificationError::UpstreamToken`.
     let upstream = verifier
         .verify_auth(upstream_token, &intermediary_agent.iss)
         .await
         .map_err(RequestVerificationError::UpstreamToken)?;
-
-    if upstream.claims.aud != intermediary_agent.iss {
-        return Err(RequestVerificationError::UpstreamAudienceBindingMismatch {
-            upstream_aud: upstream.claims.aud.clone(),
-            agent_token_iss: intermediary_agent.iss.clone(),
-        });
-    }
 
     trust
         .require(&upstream.claims.iss)

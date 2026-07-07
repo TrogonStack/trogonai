@@ -613,6 +613,159 @@ async fn resolve_nats_denies_malformed_mission_claim() {
     assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_nats_denies_expired_auth_token_with_valid_pop() {
+    // The PoP envelope verifies (the agent is who it says it is) but the
+    // presented `aa-auth+jwt` is expired — verify_auth must fail and the
+    // deny must still bind a challenge to the PoP-verified agent.
+    let ap_signing = SigningKey::random(&mut OsRng);
+    let agent = agent_fixture("agent-1", "agent-key-1");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(1_700_000_000);
+
+    let ap_iss = "https://ap.test";
+    let resource_iss = "https://resource.test";
+
+    let agent_jwt = mint_agent_jwt(&ap_signing, "ap-key-1", ap_iss, &agent, now);
+    let agent_jkt = trogon_aauth_verify::jwk_thumbprint(&agent.jwk_val).expect("jkt");
+
+    // Expired well outside the ingress's configured leeway (30s in
+    // build_ingress) so verify_auth's freshness check fails.
+    let enc = EncodingKey::from_ec_pem(pkcs8_pem(&ap_signing).as_bytes()).expect("enc");
+    let mut header = Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_AUTH.into());
+    header.kid = Some("ap-key-1".into());
+    let claims = serde_json::json!({
+        "iss": ap_iss,
+        "sub": agent.sub,
+        "aud": resource_iss,
+        "jti": "auth-jti-expired",
+        "iat": now - 4000,
+        "exp": now - 3600,
+        "agent": agent.sub,
+        "agent_jkt": agent_jkt,
+        "scope": "*",
+        "principal": "spicedb-principal",
+    });
+    let expired_auth_jwt = encode(&header, &claims, &enc).expect("encode expired auth jwt");
+
+    let ap_public_jwk = {
+        let point = ap_signing.verifying_key().to_encoded_point(false);
+        let x = URL_SAFE_NO_PAD.encode(point.x().expect("x"));
+        let y = URL_SAFE_NO_PAD.encode(point.y().expect("y"));
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_id: Some("ap-key-1".into()),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x,
+                y,
+            }),
+        }
+    };
+    let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
+
+    let subject = "a2a.gateway.bot.message.send";
+    let reply = "_INBOX.x.1";
+    let payload = b"{}".to_vec();
+    let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
+
+    let err = ingress
+        .resolve_nats(
+            subject,
+            Some(reply),
+            &payload,
+            &pop,
+            Some(&expired_auth_jwt),
+            "message.send",
+        )
+        .await
+        .expect_err("expired auth token denies");
+    assert_eq!(err.code, AAUTH_REQUIRED_CODE);
+    assert!(matches!(err.reason, AAuthDenyReason::Auth(_)));
+    // Challenge IS issued because PoP already verified the presenting agent.
+    assert!(err.challenge.is_some(), "expected challenge bound to verified agent");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_nats_denies_mission_header_mismatching_claim() {
+    // Both the header and the claim are present, but they disagree — a
+    // mission-scoped grant must not be usable under a header naming a
+    // different approver/content hash than the token was minted for.
+    let ap_signing = SigningKey::random(&mut OsRng);
+    let agent = agent_fixture("agent-1", "agent-key-1");
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(1_700_000_000);
+
+    let ap_iss = "https://ap.test";
+    let resource_iss = "https://resource.test";
+
+    let agent_jwt = mint_agent_jwt(&ap_signing, "ap-key-1", ap_iss, &agent, now);
+    let agent_jkt = trogon_aauth_verify::jwk_thumbprint(&agent.jwk_val).expect("jkt");
+    let claim_s256 = "a".repeat(64);
+    let auth_jwt = mint_auth_jwt_with(
+        &ap_signing,
+        "ap-key-1",
+        ap_iss,
+        resource_iss,
+        &agent.sub,
+        &agent_jkt,
+        "spicedb-principal",
+        "*",
+        Some(("approver-1", claim_s256.as_str())),
+        now,
+    );
+
+    let ap_public_jwk = {
+        let point = ap_signing.verifying_key().to_encoded_point(false);
+        let x = URL_SAFE_NO_PAD.encode(point.x().expect("x"));
+        let y = URL_SAFE_NO_PAD.encode(point.y().expect("y"));
+        Jwk {
+            common: CommonParameters {
+                public_key_use: Some(PublicKeyUse::Signature),
+                key_id: Some("ap-key-1".into()),
+                ..Default::default()
+            },
+            algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+                key_type: EllipticCurveKeyType::EC,
+                curve: EllipticCurve::P256,
+                x,
+                y,
+            }),
+        }
+    };
+    let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
+
+    let subject = "a2a.gateway.bot.message.send";
+    let reply = "_INBOX.x.1";
+    let payload = b"{}".to_vec();
+    let mut pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
+    // Header names a different approver than the claim, so the s256 match
+    // alone can't paper over the mismatch.
+    let mission_header = trogon_identity_types::aauth::mission::MissionHeader {
+        approver: "approver-2".to_string(),
+        s256: claim_s256,
+    };
+    pop.push((headers::MISSION.to_string(), mission_header.to_header_value()));
+
+    let err = ingress
+        .resolve_nats(subject, Some(reply), &payload, &pop, Some(&auth_jwt), "message.send")
+        .await
+        .expect_err("mismatched mission header denies");
+    assert_eq!(err.code, AAUTH_REQUIRED_CODE);
+    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+}
+
 const _: () = {
     // Just reference DWK_RESOURCE so the import stays referenced even when
     // we don't decode the gateway-minted challenge below; keeps the test

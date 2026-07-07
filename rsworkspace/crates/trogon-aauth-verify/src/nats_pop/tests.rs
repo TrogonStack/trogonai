@@ -215,3 +215,26 @@ async fn verify_rejects_duplicate_auth_token_headers() {
         NatsPopError::DuplicateHeader(name) if name == headers::NATS_AUTH_TOKEN
     ));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_duplicate_mission_headers() {
+    // AAuth-Mission binds a request to its mission context; two values would
+    // let the binding check read one while a downstream consumer reads the
+    // other.
+    let items = vec![
+        (headers::MISSION.to_string(), "approver=\"a\"; s256=\"x\"".into()),
+        (headers::MISSION.to_string(), "approver=\"b\"; s256=\"y\"".into()),
+    ];
+    let req = NatsRequest {
+        subject: "s",
+        reply: None,
+        payload: b"",
+        headers: NatsHeaders::new(&items),
+    };
+    let verifier = NatsPopVerifier::new(StaticJwks::new(), SystemTimeSource, InMemoryReplayStore::new());
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::DuplicateHeader(name) if name == headers::MISSION
+    ));
+}

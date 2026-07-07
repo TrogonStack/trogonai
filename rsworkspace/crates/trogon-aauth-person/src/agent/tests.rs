@@ -532,9 +532,8 @@ async fn verify_request_accepts_upstream_token_bound_to_intermediary() {
 async fn verify_request_rejects_upstream_token_wrong_audience_as_upstream_token_error() {
     // `TokenVerifier::verify_auth` enforces `aud == expected_aud` itself
     // (see `trogon_aauth_verify::token::TokenVerifier::decode_with_jwks`),
-    // so a mismatched upstream `aud` never reaches this module's own
-    // `UpstreamAudienceBindingMismatch` check -- it surfaces as the
-    // upstream token failing verification outright.
+    // so a mismatched upstream `aud` surfaces as the upstream token failing
+    // verification outright, not as a distinct binding-mismatch variant.
     let agent_fixture = key_fixture("agent-kid-upx");
     let resource_fixture = key_fixture("resource-kid-upx");
     let upstream_fixture = key_fixture("upstream-kid-upx");

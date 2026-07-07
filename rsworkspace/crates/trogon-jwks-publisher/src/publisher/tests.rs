@@ -74,6 +74,23 @@ fn builder_with_ec_pkcs8_pem_registers_single_key_set() {
     assert_eq!(set.keys.len(), 1);
 }
 
+struct UnserializableValue;
+
+impl serde::Serialize for UnserializableValue {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("deliberate encode failure for coverage"))
+    }
+}
+
+#[test]
+fn jwks_response_maps_serialize_failure_to_internal_server_error() {
+    let response = jwks_response(&UnserializableValue, &CacheMaxAge::new(60));
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
 #[test]
 fn cache_max_age_renders_header_value() {
     let max_age = CacheMaxAge::new(300);

@@ -264,6 +264,35 @@ fn discovery_with_negative_ttl_errors() {
 }
 
 #[test]
+fn discovery_with_allowed_issuers_builds_some() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    env.set(
+        ENV_AAUTH_JWKS_ALLOWED_ISSUERS,
+        " https://ap-a.test, ,https://ap-b.test ,",
+    );
+    let result = gateway_aauth_from_env(&env).expect("discovery with allowed issuers builds");
+    assert!(result.is_some());
+}
+
+#[test]
+fn discovery_with_blank_allowed_issuers_builds_some() {
+    // A value that is present but trims/splits to nothing must not panic or
+    // configure an empty allow-list that then rejects every issuer.
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    env.set(ENV_AAUTH_JWKS_ALLOWED_ISSUERS, " , ,");
+    let result = gateway_aauth_from_env(&env).expect("blank allowed issuers still builds");
+    assert!(result.is_some());
+}
+
+#[test]
 fn invalid_jwks_json_errors() {
     let jwks_file = write_temp_file("not json");
     let key_file = write_temp_file(&ec_pem());
@@ -293,6 +322,25 @@ fn missing_jwks_file_errors() {
     assert!(matches!(
         gateway_aauth_from_env(&env),
         Err(AAuthEnvError::ReadFile { .. })
+    ));
+}
+
+#[test]
+fn missing_challenge_key_file_errors() {
+    let jwks_file = write_temp_file(r#"{"https://ap.test": {"keys": []}}"#);
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "enforce");
+    set_all_required(
+        &env,
+        jwks_file.path().to_str().expect("utf8 path"),
+        "/nonexistent/path/challenge-key.pem",
+    );
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::ReadFile {
+            var: ENV_AAUTH_CHALLENGE_KEY_PATH,
+            ..
+        })
     ));
 }
 

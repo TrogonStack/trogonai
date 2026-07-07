@@ -265,6 +265,31 @@ fn capabilities_parse_pass_through() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn gateway_jwks_resolver_static_variant_delegates() {
+    let jwks = StaticJwks::new().with("https://ap.test".to_string(), JwkSet { keys: vec![] });
+    let resolver = GatewayJwksResolver::Static(jwks);
+    let resolved = resolver
+        .resolve("https://ap.test")
+        .await
+        .expect("known issuer resolves");
+    assert!(resolved.keys.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn gateway_jwks_resolver_well_known_variant_delegates() {
+    // A non-https issuer is rejected by `HttpJwksResolver` before any network
+    // call, so this exercises the `WellKnown` delegation arm without
+    // requiring a live discovery endpoint.
+    let cached = CachedJwksResolver::new(HttpJwksResolver::new(), SystemTimeSource);
+    let resolver = GatewayJwksResolver::WellKnown(Arc::new(cached));
+    let err = resolver
+        .resolve("http://insecure.test")
+        .await
+        .expect_err("non-https issuer rejected");
+    assert!(matches!(err, JwksError::Transport(_)), "got {err}");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn resolve_nats_records_capabilities_header_on_resolution() {
     // Off mode short-circuits before capabilities parsing, so this exercises
     // shadow mode's PoP-failure path -- capabilities parsing happens after

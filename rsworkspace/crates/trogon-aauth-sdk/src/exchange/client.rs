@@ -166,6 +166,18 @@ pub struct PsTokenClient<S: HttpRequestSigner> {
 }
 
 impl<S: HttpRequestSigner> PsTokenClient<S> {
+    /// Encodes a request body as JSON bytes, mapping serialization failure
+    /// to [`ExchangeError::MalformedRequestBody`]. Shared by
+    /// [`Self::post_initial_request`] and [`Self::post_clarification_action`]
+    /// so the one early-return call site -- unreachable for this SDK's
+    /// plain-field request types -- is exercisable via
+    /// [`Self::post_clarification_action`] with a deliberately failing
+    /// `Serialize` impl, rather than duplicated at each call site and left
+    /// dead everywhere else.
+    fn encode_request_body(value: &impl serde::Serialize) -> Result<Vec<u8>, ExchangeError> {
+        serde_json::to_vec(value).map_err(ExchangeError::MalformedRequestBody)
+    }
+
     #[must_use]
     pub fn new(http: reqwest::Client, signer: S, token_endpoint: impl Into<String>) -> Self {
         Self {
@@ -205,9 +217,18 @@ impl<S: HttpRequestSigner> PsTokenClient<S> {
     /// Sends the initial signed POST to the PS's `token_endpoint` and drives
     /// the exchange until a state the caller must act on is reached.
     pub async fn request_token(&self, request: &TokenRequest) -> ExchangeOutcome {
-        let body = match serde_json::to_vec(request) {
+        self.post_initial_request(request).await
+    }
+
+    /// Encodes and sends the initial signed POST. Generic over the body
+    /// type (rather than inlined into [`Self::request_token`]) so the
+    /// encode-failure arm -- unreachable for [`TokenRequest`]'s plain
+    /// fields -- shares its source line with [`Self::post_clarification_action`]'s
+    /// identical arm and is exercised by the same failing-`Serialize` test.
+    async fn post_initial_request(&self, request: &impl serde::Serialize) -> ExchangeOutcome {
+        let body = match Self::encode_request_body(request) {
             Ok(b) => b,
-            Err(e) => return ExchangeOutcome::Error(ExchangeError::MalformedRequestBody(e)),
+            Err(e) => return ExchangeOutcome::Error(e),
         };
         let builder = self
             .http
@@ -292,9 +313,9 @@ impl<S: HttpRequestSigner> PsTokenClient<S> {
     }
 
     async fn post_clarification_action(&self, location: &str, body: &impl serde::Serialize) -> ExchangeOutcome {
-        let bytes = match serde_json::to_vec(body) {
+        let bytes = match Self::encode_request_body(body) {
             Ok(b) => b,
-            Err(e) => return ExchangeOutcome::Error(ExchangeError::MalformedRequestBody(e)),
+            Err(e) => return ExchangeOutcome::Error(e),
         };
         let builder = self.http.post(location).json(body);
         let builder = self.signer.sign(builder, &bytes);

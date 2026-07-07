@@ -18,6 +18,10 @@ pub enum RequestVerificationError {
     ResourceToken(#[source] TokenError),
     #[error("invalid subagent token: {0}")]
     SubagentToken(#[source] TokenError),
+    /// "Upstream Token Verification" step 3's `aud` binding against the
+    /// intermediary agent token's `iss` is enforced by
+    /// `TokenVerifier::verify_auth`, so a mismatch surfaces here rather than
+    /// as a distinct variant.
     #[error("invalid upstream token: {0}")]
     UpstreamToken(#[source] TokenError),
     /// "PS Response": three-party mode requires the resource token's `aud`
@@ -55,13 +59,6 @@ pub enum RequestVerificationError {
     SubagentParentMismatch {
         parent_agent: String,
         signing_agent: String,
-    },
-    /// "Upstream Token Verification" step 3: the upstream token's `aud` must
-    /// equal the `iss` of the intermediary's own agent token.
-    #[error("upstream_token aud ({upstream_aud}) does not match intermediary agent_token iss ({agent_token_iss})")]
-    UpstreamAudienceBindingMismatch {
-        upstream_aud: String,
-        agent_token_iss: String,
     },
     /// The HTTP request did not carry a `Signature-Key` presenting an agent
     /// token, per "Agent Token Request".
@@ -185,8 +182,7 @@ impl PersonServerError {
             | PersonServerError::Verification(RequestVerificationError::ResourceTokenSubagentIdentifierMismatch) => {
                 TokenEndpointError::InvalidResourceToken
             }
-            PersonServerError::Verification(RequestVerificationError::UpstreamToken(_))
-            | PersonServerError::Verification(RequestVerificationError::UpstreamAudienceBindingMismatch { .. }) => {
+            PersonServerError::Verification(RequestVerificationError::UpstreamToken(_)) => {
                 TokenEndpointError::InvalidRequest
             }
             PersonServerError::UserUnreachable

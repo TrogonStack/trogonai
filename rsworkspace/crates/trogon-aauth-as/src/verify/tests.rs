@@ -86,9 +86,8 @@ async fn verify_request_accepts_trusted_ps_and_binds_agent() {
 async fn verify_request_rejects_resource_token_wrong_audience_as_resource_token_error() {
     // `TokenVerifier::verify_resource` itself enforces `aud == expected_aud`
     // (same `decode_with_jwks` path as `verify_auth`), so a mismatched
-    // resource `aud` never reaches this module's own
-    // `ResourceTokenWrongAudience` check -- it surfaces as the resource
-    // token failing verification outright.
+    // resource `aud` surfaces as the resource token failing verification
+    // outright, not as a distinct wrong-audience variant.
     let now = now_unix();
     let as_key = key_fixture("as-kid");
     let ap_key = key_fixture("ap-kid");
@@ -556,9 +555,8 @@ async fn verify_request_rejects_subagent_key_binding_mismatch() {
 async fn verify_request_rejects_upstream_token_wrong_audience_as_upstream_token_error() {
     // `TokenVerifier::verify_auth` itself enforces `aud == expected_aud`
     // (see `trogon_aauth_verify::token::TokenVerifier::decode_with_jwks`),
-    // so a mismatched upstream `aud` never reaches `verify.rs`'s own
-    // `UpstreamAudienceBindingMismatch` check -- it surfaces as the
-    // upstream token failing verification outright.
+    // so a mismatched upstream `aud` surfaces as the upstream token failing
+    // verification outright, not as a distinct binding-mismatch variant.
     let now = now_unix();
     let as_key = key_fixture("as-kid-ub");
     let ap_key = key_fixture("ap-kid-ub");
@@ -678,5 +676,68 @@ async fn verify_request_rejects_agent_identifier_binding_mismatch() {
     assert!(matches!(
         err,
         RequestVerificationError::ResourceTokenAgentIdentifierMismatch
+    ));
+}
+
+#[tokio::test]
+async fn verify_request_rejects_subagent_identifier_binding_mismatch() {
+    let now = now_unix();
+    let as_key = key_fixture("as-kid-si");
+    let ap_key = key_fixture("ap-kid-si");
+    let resource_key = key_fixture("resource-kid-si");
+    let parent_key = key_fixture("parent-key-si");
+    let sub_key = key_fixture("sub-key-si");
+
+    let agent_token = mint_agent_jwt(
+        &ap_key,
+        "ap-kid-si",
+        AP_ISS,
+        "aauth:parent@agent.example",
+        &parent_key.jwk_json,
+        None,
+        now,
+    );
+    let subagent_token = mint_agent_jwt(
+        &ap_key,
+        "ap-kid-si",
+        AP_ISS,
+        "aauth:sub@agent.example",
+        &sub_key.jwk_json,
+        Some("aauth:parent@agent.example"),
+        now,
+    );
+    // resource_token carries the sub-agent's key thumbprint but names a
+    // different agent identifier: key match alone must not bind.
+    let sub_jkt = trogon_aauth_verify::jwk_thumbprint(&sub_key.jwk_json).unwrap();
+    let resource_token = mint_resource_jwt(
+        &resource_key,
+        "resource-kid-si",
+        RESOURCE_ISS,
+        AS_ISS,
+        "aauth:someone-else@agent.example",
+        &sub_jkt,
+        "documents:read",
+        now,
+    );
+
+    let jwks = StaticJwks::new()
+        .with(AP_ISS, jwk_set(&[&ap_key]))
+        .with(RESOURCE_ISS, jwk_set(&[&resource_key]))
+        .with(AS_ISS, jwk_set(&[&as_key]));
+    let verifier = TokenVerifier::new(jwks, SystemTimeSource);
+    let trust = TrustRegistry::from_entries([(PS_ISS.to_string(), TrustBasisRecord::PreEstablished)]).unwrap();
+    let req = AsTokenRequest {
+        resource_token,
+        agent_token,
+        subagent_token: Some(subagent_token),
+        upstream_token: None,
+    };
+
+    let err = verify_request(&verifier, &trust, AS_ISS, PS_ISS, &req)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        RequestVerificationError::ResourceTokenSubagentIdentifierMismatch
     ));
 }

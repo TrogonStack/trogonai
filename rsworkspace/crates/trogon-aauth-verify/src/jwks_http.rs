@@ -256,6 +256,12 @@ fn require_https_issuer(iss: &str) -> Result<&str, JwksError> {
             "issuer must be an https:// URL, got {iss:?}"
         )));
     }
+    // `https` is a "special" scheme, so the `url` crate refuses to parse one
+    // with an empty/missing host -- there is no `https://` value that
+    // reaches this point with `host() == None`. Fold that case into the
+    // IP-literal rejection (both mean "not a DNS name") so the match stays
+    // exhaustive without an arm that's reachable in theory but not in
+    // practice for this parser.
     match parsed.host() {
         Some(url::Host::Domain(domain)) => {
             let lower = domain.to_ascii_lowercase();
@@ -265,13 +271,10 @@ fn require_https_issuer(iss: &str) -> Result<&str, JwksError> {
                 )));
             }
         }
-        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) => {
+        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) | None => {
             return Err(JwksError::Transport(format!(
-                "issuer host in {iss:?} is an IP literal; AAuth issuers must be DNS names"
+                "issuer host in {iss:?} is an IP literal or missing; AAuth issuers must be DNS names"
             )));
-        }
-        None => {
-            return Err(JwksError::Transport(format!("issuer {iss:?} has no host")));
         }
     }
     Ok(iss.trim_end_matches('/'))

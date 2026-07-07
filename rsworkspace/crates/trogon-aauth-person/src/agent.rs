@@ -40,16 +40,13 @@ where
     R: JwksResolver,
     C: TimeSource,
 {
+    // `aud` binding against `ps_iss` is enforced by
+    // `TokenVerifier::verify_resource` (via `decode_with_jwks`) before this
+    // point; a mismatch surfaces as `RequestVerificationError::ResourceToken`.
     let resource = verifier
         .verify_resource(&req.resource_token, ps_iss)
         .await
         .map_err(RequestVerificationError::ResourceToken)?;
-    if resource.claims.aud != ps_iss {
-        return Err(RequestVerificationError::ResourceTokenWrongAudience {
-            expected: ps_iss.to_string(),
-            actual: resource.claims.aud.clone(),
-        });
-    }
 
     let agent = verifier
         .verify_agent(agent_token)
@@ -134,17 +131,13 @@ where
     R: JwksResolver,
     C: TimeSource,
 {
+    // `aud` binding against `intermediary_agent.iss` is enforced by
+    // `TokenVerifier::verify_auth` before this point; a mismatch surfaces as
+    // `RequestVerificationError::UpstreamToken`.
     let upstream = verifier
         .verify_auth(upstream_token, &intermediary_agent.iss)
         .await
         .map_err(RequestVerificationError::UpstreamToken)?;
-
-    if upstream.claims.aud != intermediary_agent.iss {
-        return Err(RequestVerificationError::UpstreamAudienceBindingMismatch {
-            upstream_aud: upstream.claims.aud.clone(),
-            agent_token_iss: intermediary_agent.iss.clone(),
-        });
-    }
 
     Ok(upstream)
 }

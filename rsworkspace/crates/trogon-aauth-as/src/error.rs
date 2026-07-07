@@ -18,12 +18,12 @@ pub enum RequestVerificationError {
     /// must be rejected.
     #[error("untrusted PS: {0}")]
     UntrustedPs(#[source] TrustRegistryError),
+    /// "PS-to-AS Token Request": the resource token's `aud` MUST identify
+    /// this AS. Enforced by `TokenVerifier::verify_resource`'s `aud`
+    /// binding, so a mismatch surfaces here rather than as a distinct
+    /// variant.
     #[error("invalid resource_token: {0}")]
     ResourceToken(#[source] TokenError),
-    /// "PS-to-AS Token Request": the resource token's `aud` MUST identify
-    /// this AS.
-    #[error("resource_token aud does not identify this AS (expected {expected}, got {actual})")]
-    ResourceTokenWrongAudience { expected: String, actual: String },
     #[error("invalid agent_token: {0}")]
     AgentToken(#[source] TokenError),
     #[error("invalid subagent_token: {0}")]
@@ -45,6 +45,11 @@ pub enum RequestVerificationError {
     /// `subagent_token` is present.
     #[error("resource_token agent_jkt does not match subagent_token cnf.jwk")]
     ResourceTokenSubagentKeyMismatch,
+    /// "Parent-Mediated Authorization": for a sub-agent request the resource
+    /// token's `agent` must name the sub-agent; a key match alone must not
+    /// bind a challenge issued to a different agent.
+    #[error("resource_token agent does not name the sub-agent")]
+    ResourceTokenSubagentIdentifierMismatch,
     /// "Parent-Mediated Authorization": when no `subagent_token` is present,
     /// `resource_token.agent_jkt` MUST match the requesting agent's `cnf.jwk`.
     #[error("resource_token agent_jkt does not match agent_token cnf.jwk")]
@@ -68,13 +73,6 @@ pub enum RequestVerificationError {
     /// "Upstream Token Verification" step 2: `iss` must be a trusted issuer.
     #[error("upstream_token issuer is not trusted: {0}")]
     UpstreamUntrustedIssuer(#[source] TrustRegistryError),
-    /// "Upstream Token Verification" step 3: the upstream token's `aud` must
-    /// equal the `iss` of the intermediary's own agent token.
-    #[error("upstream_token aud ({upstream_aud}) does not match intermediary agent_token iss ({agent_token_iss})")]
-    UpstreamAudienceBindingMismatch {
-        upstream_aud: String,
-        agent_token_iss: String,
-    },
 }
 
 /// Failures while minting an auth token, per "Auth Token Structure".

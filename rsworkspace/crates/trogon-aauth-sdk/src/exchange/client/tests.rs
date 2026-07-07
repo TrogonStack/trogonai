@@ -902,3 +902,57 @@ async fn service_unavailable_on_initial_post_with_no_location_yet_is_surfaced_as
         other => panic!("expected UnexpectedStatus(503), got {other:?}"),
     }
 }
+
+struct UnserializableBody;
+
+impl serde::Serialize for UnserializableBody {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom("deliberate encode failure for coverage"))
+    }
+}
+
+#[tokio::test]
+async fn post_clarification_action_surfaces_encode_failure_as_malformed_request_body() {
+    let server = MockServer::start().await;
+    let client = client_for(&server);
+
+    let outcome = client
+        .post_clarification_action("https://ps.example/pending/abc", &UnserializableBody)
+        .await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::MalformedRequestBody(_)) => {}
+        other => panic!("expected MalformedRequestBody, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn post_initial_request_surfaces_encode_failure_as_malformed_request_body() {
+    let server = MockServer::start().await;
+    let client = client_for(&server);
+
+    let outcome = client.post_initial_request(&UnserializableBody).await;
+
+    match outcome {
+        ExchangeOutcome::Error(ExchangeError::MalformedRequestBody(_)) => {}
+        other => panic!("expected MalformedRequestBody, got {other:?}"),
+    }
+}
+
+#[test]
+fn outcome_from_state_maps_polling_to_pending() {
+    let state = ExchangeState::Polling {
+        location: "https://ps.example/pending/abc".to_string(),
+        interval_secs: 5,
+    };
+
+    match outcome_from_state(state) {
+        ExchangeOutcome::Pending { poll_location } => {
+            assert_eq!(poll_location, "https://ps.example/pending/abc");
+        }
+        other => panic!("expected Pending, got {other:?}"),
+    }
+}

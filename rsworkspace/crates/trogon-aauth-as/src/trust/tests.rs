@@ -27,6 +27,17 @@ fn registry_from_entries_fails_loudly_on_invalid_issuer() {
 }
 
 #[test]
+fn registry_from_entries_accepts_two_distinct_issuers() {
+    let registry = TrustRegistry::from_entries([
+        ("https://ps-one.example".to_string(), TrustBasisRecord::PreEstablished),
+        ("https://ps-two.example".to_string(), TrustBasisRecord::ClaimsOnly),
+    ])
+    .unwrap();
+    assert!(registry.contains("https://ps-one.example"));
+    assert!(registry.contains("https://ps-two.example"));
+}
+
+#[test]
 fn registry_from_entries_fails_loudly_on_duplicate_issuer() {
     let err = TrustRegistry::from_entries([
         ("https://ps.example".to_string(), TrustBasisRecord::PreEstablished),
@@ -68,4 +79,10 @@ fn registry_trust_inserts_dynamically() {
         registry.require("https://ps.example").unwrap().basis().kind(),
         TrustBasis::Payment
     );
+}
+
+#[test]
+fn trust_basis_record_kind_maps_pre_established_and_claims_only() {
+    assert_eq!(TrustBasisRecord::PreEstablished.kind(), TrustBasis::PreEstablished);
+    assert_eq!(TrustBasisRecord::ClaimsOnly.kind(), TrustBasis::ClaimsOnly);
 }

@@ -175,12 +175,13 @@ pub fn router(config: JwksPublisherConfig) -> Router {
         .with_state(config)
 }
 
-async fn serve_dwk(State(config): State<JwksPublisherConfig>, Path(dwk): Path<String>) -> Response {
-    let Some(set) = config.entries.get(&dwk) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-
-    let body = match serde_json::to_vec(set) {
+/// Encodes `value` as a JWKS response body, or a `500` if serialization
+/// fails. Generic (rather than inlined into `serve_dwk`, which is pinned to
+/// the fixed `JwkSet` value type by axum's handler signature) so the
+/// error arm -- unreachable for this module's plain-field `JwkSet` values --
+/// is exercisable in isolation with a deliberately failing `Serialize` impl.
+fn jwks_response(value: &impl serde::Serialize, cache_max_age: &CacheMaxAge) -> Response {
+    let body = match serde_json::to_vec(value) {
         Ok(body) => body,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
@@ -190,10 +191,17 @@ async fn serve_dwk(State(config): State<JwksPublisherConfig>, Path(dwk): Path<St
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static(JWK_SET_CONTENT_TYPE));
-    if let Ok(value) = HeaderValue::from_str(&config.max_age.header_value()) {
+    if let Ok(value) = HeaderValue::from_str(&cache_max_age.header_value()) {
         response.headers_mut().insert(header::CACHE_CONTROL, value);
     }
     response
+}
+
+async fn serve_dwk(State(config): State<JwksPublisherConfig>, Path(dwk): Path<String>) -> Response {
+    let Some(set) = config.entries.get(&dwk) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    jwks_response(set, &config.max_age)
 }
 
 #[cfg(test)]

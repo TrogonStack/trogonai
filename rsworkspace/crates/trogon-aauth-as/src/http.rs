@@ -137,21 +137,18 @@ fn error_response(err: &AccessServerError) -> Response {
 fn verification_status(err: &RequestVerificationError) -> (StatusCode, &'static str) {
     match err {
         RequestVerificationError::UntrustedPs(_) => (StatusCode::FORBIDDEN, "invalid_request"),
-        RequestVerificationError::ResourceToken(_) | RequestVerificationError::ResourceTokenWrongAudience { .. } => {
-            (StatusCode::BAD_REQUEST, "invalid_resource_token")
-        }
+        RequestVerificationError::ResourceToken(_) => (StatusCode::BAD_REQUEST, "invalid_resource_token"),
         RequestVerificationError::AgentToken(_)
         | RequestVerificationError::AgentTokenIsSubagent
         | RequestVerificationError::SubagentToken(_)
         | RequestVerificationError::SubagentParentMismatch { .. }
         | RequestVerificationError::SubagentTokenIsItselfSubagent
         | RequestVerificationError::ResourceTokenSubagentKeyMismatch
+        | RequestVerificationError::ResourceTokenSubagentIdentifierMismatch
         | RequestVerificationError::ResourceTokenAgentKeyMismatch
         | RequestVerificationError::ResourceTokenAgentIdentifierMismatch
         | RequestVerificationError::MalformedParentAgentClaim(_) => (StatusCode::BAD_REQUEST, "invalid_agent_token"),
-        RequestVerificationError::UpstreamToken(_)
-        | RequestVerificationError::UpstreamUntrustedIssuer(_)
-        | RequestVerificationError::UpstreamAudienceBindingMismatch { .. } => {
+        RequestVerificationError::UpstreamToken(_) | RequestVerificationError::UpstreamUntrustedIssuer(_) => {
             (StatusCode::BAD_REQUEST, "invalid_request")
         }
     }
