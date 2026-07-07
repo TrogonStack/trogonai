@@ -322,7 +322,7 @@ where
             .get_mission(id)
             .await
             .map_err(PersonServerError::Store)?
-            .ok_or_else(|| PersonServerError::MissionNotFound(id.0.clone()))?;
+            .ok_or_else(|| PersonServerError::MissionNotFound(id.clone()))?;
         if !mission.is_active() {
             return Err(PersonServerError::MissionNotActive(
                 id.0.clone(),
@@ -339,7 +339,7 @@ where
             .get_pending(id)
             .await
             .map_err(PersonServerError::Store)?
-            .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.0.clone())))
+            .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.clone())))
     }
 
     /// "Agent Response to Clarification": the agent replies with either a
@@ -358,10 +358,10 @@ where
             .get_pending(id)
             .await
             .map_err(PersonServerError::Store)?
-            .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.0.clone())))?;
+            .ok_or_else(|| PersonServerError::Pending(PendingRequestError::NotFound(id.clone())))?;
 
         if pending.is_terminal() {
-            return Err(PersonServerError::Pending(PendingRequestError::Gone(id.0.clone())));
+            return Err(PersonServerError::Pending(PendingRequestError::Gone(id.clone())));
         }
 
         match action {
@@ -443,7 +443,7 @@ where
             .get_mission(id)
             .await
             .map_err(PersonServerError::Store)?
-            .ok_or_else(|| PersonServerError::MissionNotFound(id.0.clone()))?;
+            .ok_or_else(|| PersonServerError::MissionNotFound(id.clone()))?;
         mission.complete();
         self.store
             .update_mission(mission)
@@ -468,7 +468,7 @@ where
             .get_mission(mission_id)
             .await
             .map_err(PersonServerError::Store)?
-            .ok_or_else(|| PersonServerError::MissionNotFound(mission_id.0.clone()))?;
+            .ok_or_else(|| PersonServerError::MissionNotFound(mission_id.clone()))?;
         if !mission.is_active() {
             return Err(PersonServerError::MissionNotActive(
                 mission_id.0.clone(),

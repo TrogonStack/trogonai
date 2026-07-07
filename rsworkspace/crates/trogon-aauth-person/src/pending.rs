@@ -25,6 +25,12 @@ impl PendingId {
     }
 }
 
+impl std::fmt::Display for PendingId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Cheap, dependency-free unique id: not a spec-mandated format (the draft
 /// leaves pending-id shape to the PS), just needs to be unpredictable and
 /// unique per process. Uses a counter + time to avoid pulling in a UUID
@@ -111,7 +117,7 @@ impl PendingRequest {
     pub fn begin_clarification(&mut self, clarification: ClarificationRequired) -> Result<(), PendingRequestError> {
         if self.clarification_round >= MAX_CLARIFICATION_ROUNDS {
             return Err(PendingRequestError::ClarificationLimitExceeded(
-                self.id.0.clone(),
+                self.id.clone(),
                 MAX_CLARIFICATION_ROUNDS,
             ));
         }

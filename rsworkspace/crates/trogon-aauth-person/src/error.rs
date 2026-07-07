@@ -83,14 +83,14 @@ pub enum MintError {
 #[derive(Debug, thiserror::Error)]
 pub enum PendingRequestError {
     #[error("no pending request for id {0}")]
-    NotFound(String),
+    NotFound(crate::pending::PendingId),
     /// "Cancel Request": subsequent requests to a canceled pending URL return
     /// `410 Gone`.
     #[error("pending request {0} is gone (canceled or already resolved)")]
-    Gone(String),
+    Gone(crate::pending::PendingId),
     /// "Clarification Limits": PSes SHOULD enforce a maximum round count.
     #[error("clarification round limit ({limit}) exceeded for pending request {0}", limit = .1)]
-    ClarificationLimitExceeded(String, u32),
+    ClarificationLimitExceeded(crate::pending::PendingId, u32),
     /// "Updated Request": the new resource token MUST have the same `iss`,
     /// `agent`, and `agent_jkt` as the original.
     #[error("updated_request resource_token does not match original iss/agent/agent_jkt")]
@@ -120,7 +120,7 @@ pub enum PersonServerError {
     #[error("mission {0} is not active (status: {1:?})")]
     MissionNotActive(String, MissionStatus),
     #[error("mission {0} not found")]
-    MissionNotFound(String),
+    MissionNotFound(crate::mission::MissionId),
     #[error("interaction relay error: {0}")]
     Interaction(#[from] InteractionRelayError),
     /// Person policy denied the request outright, per "PS Response".
@@ -186,7 +186,10 @@ impl PersonServerError {
             | PersonServerError::Verification(RequestVerificationError::UpstreamAudienceBindingMismatch { .. }) => {
                 TokenEndpointError::InvalidRequest
             }
-            PersonServerError::UserUnreachable => TokenEndpointError::UserUnreachable,
+            PersonServerError::UserUnreachable
+            | PersonServerError::Interaction(InteractionRelayError::UserUnreachable) => {
+                TokenEndpointError::UserUnreachable
+            }
             _ => TokenEndpointError::ServerError,
         }
     }

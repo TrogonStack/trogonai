@@ -25,6 +25,13 @@ fn user_unreachable_maps_to_403() {
 }
 
 #[test]
+fn interaction_relay_user_unreachable_maps_like_top_level_user_unreachable() {
+    let err = PersonServerError::Interaction(InteractionRelayError::UserUnreachable);
+    assert_eq!(err.token_endpoint_code(), TokenEndpointError::UserUnreachable);
+    assert_eq!(err.http_status(), 403);
+}
+
+#[test]
 fn denied_maps_to_denied_wire_code_and_403() {
     let err = PersonServerError::Denied("not within mission scope".to_string());
     assert_eq!(err.wire_code(), "denied");
@@ -33,7 +40,7 @@ fn denied_maps_to_denied_wire_code_and_403() {
 
 #[test]
 fn server_error_fallback_maps_to_500() {
-    let err = PersonServerError::MissionNotFound("abc".to_string());
+    let err = PersonServerError::MissionNotFound(crate::mission::MissionId("abc".to_string()));
     assert_eq!(err.token_endpoint_code(), TokenEndpointError::ServerError);
     assert_eq!(err.http_status(), 500);
     assert_eq!(err.wire_code(), "server_error");

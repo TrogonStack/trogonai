@@ -15,6 +15,12 @@ use trogon_identity_types::aauth::mission::{MissionBlob, MissionLogEntry, Missio
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MissionId(pub String);
 
+impl std::fmt::Display for MissionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl MissionId {
     #[must_use]
     pub fn from_blob_bytes(blob_bytes: &[u8]) -> Self {

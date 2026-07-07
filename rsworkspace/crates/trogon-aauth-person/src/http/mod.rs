@@ -179,7 +179,9 @@ where
     S: PersonStateStore,
 {
     let Some(mission_ref) = req.mission.clone() else {
-        return error_response(&PersonServerError::MissionNotFound("(none provided)".to_string()));
+        return error_response(&PersonServerError::MissionNotFound(crate::mission::MissionId(
+            "(none provided)".to_string(),
+        )));
     };
     let mission_id = MissionId(mission_ref.s256.clone());
     let entry = trogon_identity_types::aauth::mission::MissionLogEntry::PermissionRequest {
@@ -233,7 +235,9 @@ where
     S: PersonStateStore,
 {
     let Some(mission_ref) = req.mission.clone() else {
-        return error_response(&PersonServerError::MissionNotFound("(none provided)".to_string()));
+        return error_response(&PersonServerError::MissionNotFound(crate::mission::MissionId(
+            "(none provided)".to_string(),
+        )));
     };
     let mission_id = MissionId(mission_ref.s256.clone());
     let type_str = format!("{:?}", req.type_).to_lowercase();
