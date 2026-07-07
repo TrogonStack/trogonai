@@ -1,46 +1,47 @@
 use super::*;
 use acp_nats::nats::{ParsedAgentSubject, parse_agent_subject};
-use agent_client_protocol::{
-    AuthenticateResponse, Error as AcpError, ErrorCode, InitializeResponse, LogoutResponse, NewSessionResponse,
-    PromptResponse, StopReason,
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{
+    AuthenticateResponse, InitializeResponse, LogoutResponse, NewSessionResponse, PromptResponse, StopReason,
 };
-use std::cell::RefCell;
+use agent_client_protocol::{Error as AcpError, ErrorCode};
+use std::sync::Mutex;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::MockNatsClient;
 use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
 
 struct MockAgent {
-    initialized: RefCell<bool>,
-    cancelled: RefCell<Vec<String>>,
+    initialized: Mutex<bool>,
+    cancelled: Mutex<Vec<String>>,
     fail_cancel: bool,
-    received_new_session: RefCell<Option<NewSessionRequest>>,
+    received_new_session: Mutex<Option<NewSessionRequest>>,
 }
 
 impl MockAgent {
     fn new() -> Self {
         Self {
-            initialized: RefCell::new(false),
-            cancelled: RefCell::new(Vec::new()),
+            initialized: Mutex::new(false),
+            cancelled: Mutex::new(Vec::new()),
             fail_cancel: false,
-            received_new_session: RefCell::new(None),
+            received_new_session: Mutex::new(None),
         }
     }
 
     fn failing_cancel() -> Self {
         Self {
-            initialized: RefCell::new(false),
-            cancelled: RefCell::new(Vec::new()),
+            initialized: Mutex::new(false),
+            cancelled: Mutex::new(Vec::new()),
             fail_cancel: true,
-            received_new_session: RefCell::new(None),
+            received_new_session: Mutex::new(None),
         }
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl Agent for MockAgent {
+#[async_trait::async_trait]
+impl AgentHandler for MockAgent {
     async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
-        *self.initialized.borrow_mut() = true;
-        Ok(InitializeResponse::new(agent_client_protocol::ProtocolVersion::V0))
+        *self.initialized.lock().unwrap() = true;
+        Ok(InitializeResponse::new(ProtocolVersion::V0))
     }
 
     async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
@@ -51,12 +52,9 @@ impl Agent for MockAgent {
         Ok(LogoutResponse::new())
     }
 
-    async fn new_session(
-        &self,
-        args: NewSessionRequest,
-    ) -> agent_client_protocol::Result<agent_client_protocol::NewSessionResponse> {
-        *self.received_new_session.borrow_mut() = Some(args);
-        Ok(agent_client_protocol::NewSessionResponse::new("sess-1"))
+    async fn new_session(&self, args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        *self.received_new_session.lock().unwrap() = Some(args);
+        Ok(NewSessionResponse::new("sess-1"))
     }
 
     async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
@@ -67,7 +65,7 @@ impl Agent for MockAgent {
         if self.fail_cancel {
             return Err(AcpError::internal_error());
         }
-        self.cancelled.borrow_mut().push(args.session_id.to_string());
+        self.cancelled.lock().unwrap().push(args.session_id.to_string());
         Ok(())
     }
 }
@@ -144,7 +142,7 @@ fn published_response<T: serde::de::DeserializeOwned>(nats: &MockNatsClient) -> 
 }
 
 fn init_request() -> InitializeRequest {
-    InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0)
+    InitializeRequest::new(ProtocolVersion::V0)
 }
 
 fn test_prefix() -> AcpPrefix {
@@ -163,9 +161,9 @@ fn test_session_id(s: &str) -> AcpSessionId {
 async fn dispatch_initialize_calls_agent_and_publishes_response() {
     let (nats, agent) = dispatch("acp.agent.initialize", &init_request(), Some("_INBOX.1")).await;
 
-    assert!(*agent.initialized.borrow());
+    assert!(*agent.initialized.lock().unwrap());
     let response: InitializeResponse = published_response(&nats);
-    assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
+    assert_eq!(response.protocol_version, ProtocolVersion::V0);
 }
 
 async fn dispatch_authenticate<T: serde::Serialize>(
@@ -216,7 +214,7 @@ async fn dispatch_logout_publishes_response() {
 async fn dispatch_cancel_is_notification_no_reply_published() {
     let (nats, agent) = dispatch("acp.session.s1.agent.cancel", &CancelNotification::new("s1"), None).await;
 
-    assert_eq!(agent.cancelled.borrow().as_slice(), ["s1"]);
+    assert_eq!(agent.cancelled.lock().unwrap().as_slice(), ["s1"]);
     assert!(nats.published_messages().is_empty());
 }
 
@@ -224,7 +222,7 @@ async fn dispatch_cancel_is_notification_no_reply_published() {
 async fn dispatch_invalid_payload_publishes_error_reply() {
     let (nats, agent) = dispatch_raw("acp.agent.initialize", b"not json", Some("_INBOX.err")).await;
 
-    assert!(!*agent.initialized.borrow());
+    assert!(!*agent.initialized.lock().unwrap());
     let error = published_wire_error(&nats);
     assert_eq!(error.code, ErrorCode::InvalidParams);
 }
@@ -259,7 +257,7 @@ async fn dispatch_publishes_to_correct_reply_subject() {
     let (nats, _) = dispatch("acp.agent.initialize", &init_request(), Some("_INBOX.specific")).await;
     assert_eq!(nats.published_messages(), vec!["_INBOX.specific"]);
     let response: InitializeResponse = published_response(&nats);
-    assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
+    assert_eq!(response.protocol_version, ProtocolVersion::V0);
 }
 
 #[test]
@@ -306,20 +304,20 @@ fn raw_value(json: &str) -> std::sync::Arc<serde_json::value::RawValue> {
 async fn dispatch_ext_with_reply_calls_ext_method() {
     let (nats, _) = dispatch(
         "acp.agent.ext.my_tool",
-        &agent_client_protocol::ExtRequest::new("my_tool", raw_value("{}")),
+        &agent_client_protocol::schema::v1::ExtRequest::new("my_tool", raw_value("{}")),
         Some("_INBOX.ext"),
     )
     .await;
     assert_eq!(nats.published_messages(), vec!["_INBOX.ext"]);
-    let value: serde_json::Value = published_response(&nats);
-    assert!(value.is_null());
+    let error = published_wire_error(&nats);
+    assert_eq!(error.code, ErrorCode::MethodNotFound);
 }
 
 #[tokio::test]
 async fn dispatch_ext_without_reply_calls_ext_notification() {
     let (nats, _) = dispatch(
         "acp.agent.ext.my_tool",
-        &agent_client_protocol::ExtNotification::new("my_tool", raw_value("{}")),
+        &agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw_value("{}")),
         None,
     )
     .await;
@@ -353,7 +351,7 @@ async fn dispatch_new_session_additional_directories_survive_bridge() {
     let (nats, agent) = dispatch("acp.agent.session.new", &request, Some("_INBOX.r")).await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
-    let received = agent.received_new_session.borrow();
+    let received = agent.received_new_session.lock().unwrap();
     assert_eq!(
         received.as_ref().unwrap().additional_directories,
         request.additional_directories
@@ -396,15 +394,6 @@ async fn dispatch_set_session_config_option_publishes_response() {
     assert_dispatch_method_not_found(
         "acp.session.s1.agent.set_config_option",
         &SetSessionConfigOptionRequest::new("s1", "key", "val"),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn dispatch_set_session_model_publishes_response() {
-    assert_dispatch_method_not_found(
-        "acp.session.s1.agent.set_model",
-        &SetSessionModelRequest::new("s1", "gpt-4"),
     )
     .await;
 }
@@ -584,10 +573,7 @@ async fn serve_global_dispatches_message() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let encoded = wire_encode_request(
-                "initialize",
-                &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
-            );
+            let encoded = wire_encode_request("initialize", &InitializeRequest::new(ProtocolVersion::V0));
             let msg = Message {
                 subject: "acp.agent.initialize".into(),
                 reply: Some("_INBOX.serve".into()),
@@ -611,7 +597,7 @@ async fn serve_global_dispatches_message() {
 
             assert_eq!(nats.published_messages(), vec!["_INBOX.serve"]);
             let response: InitializeResponse = published_response(&nats);
-            assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
+            assert_eq!(response.protocol_version, ProtocolVersion::V0);
         })
         .await;
 }
@@ -752,7 +738,7 @@ async fn dispatch_js_message_global_method_returns_early() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg(
         "acp.agent.initialize",
-        &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
+        &InitializeRequest::new(ProtocolVersion::V0),
         Some("_INBOX.1"),
     );
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
@@ -764,10 +750,7 @@ async fn dispatch_js_message_global_method_returns_early() {
 async fn dispatch_js_message_global_method_ack_failure() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let js_msg = make_failing_js_msg(
-        "acp.agent.initialize",
-        &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
-    );
+    let js_msg = make_failing_js_msg("acp.agent.initialize", &InitializeRequest::new(ProtocolVersion::V0));
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 }
 
@@ -790,7 +773,7 @@ async fn dispatch_js_message_ext_notification_handler_error() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
     // No X-Req-Id → ext notification path (reply_subject is None → msg.reply is None)
     let js_msg = make_js_msg_no_headers("acp.session.s1.agent.ext.my_tool", &payload);
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
@@ -803,7 +786,7 @@ async fn dispatch_js_message_ext_notification_handler_error_ack_failure() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
     let js_msg = MockJsMessage::with_failing_signals(async_nats::Message {
         subject: "acp.session.s1.agent.ext.my_tool".into(),
         reply: None,
@@ -821,7 +804,7 @@ async fn dispatch_js_message_global_ext_no_session_id() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
-    let payload = serialize(&agent_client_protocol::ExtNotification::new("my_tool", raw));
+    let payload = serialize(&agent_client_protocol::schema::v1::ExtNotification::new("my_tool", raw));
     let js_msg = make_js_msg_no_headers("acp.agent.ext.my_tool", &payload);
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 }
@@ -863,7 +846,7 @@ async fn dispatch_error_logs_warning_with_subscriber() {
 
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
-    let payload = serialize(&InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0));
+    let payload = serialize(&InitializeRequest::new(ProtocolVersion::V0));
     let msg = make_nats_message("acp.agent.initialize", &payload, None);
 
     dispatch_message(msg, &agent, &nats).await;
@@ -880,10 +863,7 @@ async fn serve_subscribes_and_dispatches_messages() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let encoded = wire_encode_request(
-                "initialize",
-                &InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0),
-            );
+            let encoded = wire_encode_request("initialize", &InitializeRequest::new(ProtocolVersion::V0));
             let msg = Message {
                 subject: "acp.agent.initialize".into(),
                 reply: Some("_INBOX.serve".into()),
@@ -910,7 +890,7 @@ async fn serve_subscribes_and_dispatches_messages() {
 
             assert_eq!(nats.published_messages(), vec!["_INBOX.serve"]);
             let response: InitializeResponse = published_response(&nats);
-            assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
+            assert_eq!(response.protocol_version, ProtocolVersion::V0);
         })
         .await;
 }
@@ -981,7 +961,7 @@ async fn dispatch_js_message_cancel_notification() {
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 
-    assert_eq!(agent.cancelled.borrow().as_slice(), ["s1"]);
+    assert_eq!(agent.cancelled.lock().unwrap().as_slice(), ["s1"]);
 }
 
 fn assert_js_response_method_not_found(nats: &MockNatsClient, expected_subject: &str) {
@@ -1038,21 +1018,6 @@ async fn dispatch_js_message_set_config_option() {
     let js_msg = make_js_msg(
         "acp.session.s1.agent.set_config_option",
         &SetSessionConfigOptionRequest::new("s1", "key", "val"),
-        None,
-    );
-
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
-
-    assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
-}
-
-#[tokio::test]
-async fn dispatch_js_message_set_model() {
-    let nats = MockNatsClient::new();
-    let agent = MockAgent::new();
-    let js_msg = make_js_msg(
-        "acp.session.s1.agent.set_model",
-        &SetSessionModelRequest::new("s1", "gpt-4"),
         None,
     );
 
@@ -1209,7 +1174,7 @@ fn init_handler_error(_: InitializeRequest) -> std::future::Ready<agent_client_p
 #[tokio::test]
 async fn handle_request_with_keepalive_completes_fast() {
     let nats = MockNatsClient::new();
-    let init = InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0);
+    let init = InitializeRequest::new(ProtocolVersion::V0);
     let encoded = wire_encode_request("initialize", &init);
     let msg = make_nats_message("acp.agent.initialize", &encoded.body, Some("_INBOX.1"));
     let mut msg = msg;
@@ -1224,13 +1189,13 @@ async fn handle_request_with_keepalive_completes_fast() {
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let response: InitializeResponse = published_response(&nats);
-    assert_eq!(response.protocol_version, agent_client_protocol::ProtocolVersion::V0);
+    assert_eq!(response.protocol_version, ProtocolVersion::V0);
 }
 
 #[tokio::test]
 async fn handle_request_with_keepalive_no_reply_subject() {
     let nats = MockNatsClient::new();
-    let init = InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0);
+    let init = InitializeRequest::new(ProtocolVersion::V0);
     let encoded = wire_encode_request("initialize", &init);
     let msg = make_nats_message("acp.agent.initialize", &encoded.body, None);
     let mut msg = msg;
@@ -1252,7 +1217,7 @@ async fn handle_request_with_keepalive_bad_payload() {
 #[tokio::test]
 async fn handle_request_with_keepalive_handler_returns_error() {
     let nats = MockNatsClient::new();
-    let init = InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0);
+    let init = InitializeRequest::new(ProtocolVersion::V0);
     let encoded = wire_encode_request("initialize", &init);
     let msg = make_nats_message("acp.agent.initialize", &encoded.body, Some("_INBOX.1"));
     let mut msg = msg;
@@ -1270,7 +1235,7 @@ async fn handle_request_with_keepalive_progress_ack_failure() {
     let _guard = tracing_subscriber::fmt().with_test_writer().set_default();
 
     let nats = MockNatsClient::new();
-    let init = InitializeRequest::new(agent_client_protocol::ProtocolVersion::V0);
+    let init = InitializeRequest::new(ProtocolVersion::V0);
     let encoded = wire_encode_request("initialize", &init);
     let msg = make_nats_message("acp.agent.initialize", &encoded.body, Some("_INBOX.1"));
     let mut msg = msg;

@@ -3,11 +3,11 @@ use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
 use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
-use acp_nats::{AcpPrefix, AcpSessionId, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
-use agent_client_protocol::{
-    Agent, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification, ExtRequest,
-    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest,
-    PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
+use agent_client_protocol::schema::v1::{
+    AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification, ExtRequest, ForkSessionRequest,
+    InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
+    ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -58,7 +58,7 @@ where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient + Clone + 'static,
 {
     pub fn new(
-        agent: impl Agent + 'static,
+        agent: impl AgentHandler + Sync + 'static,
         nats: N,
         acp_prefix: AcpPrefix,
         spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
@@ -77,7 +77,7 @@ where
     }
 
     pub fn with_jetstream<J>(
-        agent: impl Agent + 'static,
+        agent: impl AgentHandler + Sync + 'static,
         nats: N,
         js: J,
         acp_prefix: AcpPrefix,
@@ -130,7 +130,7 @@ async fn serve<N, A>(
 ) -> Result<(), ConnectionError>
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
-    A: Agent + 'static,
+    A: AgentHandler + Sync + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let session_wildcard = AllAgentSubject::new(prefix);
@@ -176,7 +176,7 @@ async fn serve_global<N, A>(
 ) -> Result<(), ConnectionError>
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
-    A: Agent + 'static,
+    A: AgentHandler + Sync + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let ext_wildcard = AllAgentExtSubject::new(prefix);
@@ -213,7 +213,7 @@ where
     Ok(())
 }
 
-async fn dispatch_message<N: PublishClient + FlushClient, A: Agent>(msg: Message, agent: &A, nats: &N) {
+async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
     let subject = msg.subject.as_str();
 
     let parsed = match parse_agent_subject(subject) {
@@ -238,7 +238,7 @@ async fn dispatch_message<N: PublishClient + FlushClient, A: Agent>(msg: Message
     }
 }
 
-async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
+async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>(
     method: GlobalAgentMethod,
     msg: &Message,
     agent: &A,
@@ -288,7 +288,7 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: Agent>(
     }
 }
 
-async fn dispatch_session<N: PublishClient + FlushClient, A: Agent>(
+async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync>(
     method: SessionAgentMethod,
     msg: &Message,
     agent: &A,
@@ -316,12 +316,6 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: Agent>(
         SessionAgentMethod::SetConfigOption => {
             handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionConfigOptionRequest| {
                 agent.set_session_config_option(req)
-            })
-            .await
-        }
-        SessionAgentMethod::SetModel => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionModelRequest| {
-                agent.set_session_model(req)
             })
             .await
         }
@@ -510,7 +504,7 @@ where
     N: PublishClient + FlushClient + Clone + 'static,
     J: JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
-    A: Agent + 'static,
+    A: AgentHandler + Sync + 'static,
 {
     let stream_name = commands_stream_name(prefix);
     let config = commands_observer();
@@ -556,7 +550,7 @@ where
     Ok(())
 }
 
-async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDispatchMessage>(
+async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(
     js_msg: M,
     agent: &A,
     nats: &N,
@@ -641,12 +635,6 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: Agent, M: JsDisp
                 nats,
                 |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
             )
-            .await
-        }
-        SessionAgentMethod::SetModel => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: SetSessionModelRequest| {
-                agent.set_session_model(req)
-            })
             .await
         }
         SessionAgentMethod::Fork => {
