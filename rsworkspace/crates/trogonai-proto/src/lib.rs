@@ -1,6 +1,6 @@
 #[allow(clippy::all)]
 #[path = "gen/mod.rs"]
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "gateway", feature = "schedules"))]
 mod r#gen;
 
 #[cfg(feature = "schedules")]
@@ -8,6 +8,9 @@ mod codec;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
+
+#[cfg(feature = "gateway")]
+pub mod gateway;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;

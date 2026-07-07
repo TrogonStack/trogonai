@@ -14,6 +14,21 @@ pub enum CredentialKind {
 }
 
 impl CredentialKind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "app_token" => Some(Self::AppToken),
+            "bot_token" => Some(Self::BotToken),
+            "client_secret" => Some(Self::ClientSecret),
+            "client_state" => Some(Self::ClientState),
+            "consumer_secret" => Some(Self::ConsumerSecret),
+            "signing_secret" => Some(Self::SigningSecret),
+            "signing_token" => Some(Self::SigningToken),
+            "verification_token" => Some(Self::VerificationToken),
+            "webhook_secret" => Some(Self::WebhookSecret),
+            _ => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AppToken => "app_token",

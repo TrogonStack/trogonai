@@ -5,14 +5,104 @@ use std::sync::Arc;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use trogon_std::{EmptySecret, SecretString};
 use url::Url;
 
 use super::{
-    CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, StorageBackend,
+    CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialRef,
+    CredentialScope, CredentialStatus, CredentialVersion, SecretMaterial, SecretStoreError, SecretStoreGet,
+    SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate, SourceKind, StorageBackend,
 };
+use crate::source_integration_id::SourceIntegrationId;
+
+pub(crate) fn openbao_credential_id(
+    scope: &CredentialScope,
+    kind: CredentialKind,
+) -> Result<CredentialId, CredentialIdError> {
+    CredentialId::new(format!(
+        "openbao:{}:{}:{}",
+        scope.owner_id(),
+        scope.scope_key(),
+        kind.as_str()
+    ))
+}
+
+pub(crate) fn openbao_credential_ref_from_id(
+    id: CredentialId,
+    version: CredentialVersion,
+) -> Result<CredentialRef, OpenBaoCredentialIdParseError> {
+    let value = id.as_str();
+    let Some(rest) = value.strip_prefix("openbao:") else {
+        return Err(OpenBaoCredentialIdParseError::MissingPrefix { id });
+    };
+    let Some((owner_id, scope_key, kind)) = split_openbao_credential_id(rest) else {
+        return Err(OpenBaoCredentialIdParseError::InvalidShape { id });
+    };
+    let owner_id = super::CredentialOwnerId::new(owner_id)
+        .map_err(|source| OpenBaoCredentialIdParseError::InvalidOwner { id: id.clone(), source })?;
+    let kind =
+        CredentialKind::parse(kind).ok_or_else(|| OpenBaoCredentialIdParseError::InvalidKind { id: id.clone() })?;
+    let scope = openbao_scope_from_scope_key(owner_id, scope_key)
+        .map_err(|source| OpenBaoCredentialIdParseError::InvalidScope { id: id.clone(), source })?;
+
+    Ok(CredentialRef::new(id, version, &scope, kind))
+}
+
+fn split_openbao_credential_id(value: &str) -> Option<(&str, &str, &str)> {
+    let (owner_and_scope, kind) = value.rsplit_once(':')?;
+    let (owner_id, scope_key) = owner_and_scope.rsplit_once(':')?;
+    Some((owner_id, scope_key, kind))
+}
+
+fn openbao_scope_from_scope_key(
+    owner_id: super::CredentialOwnerId,
+    scope_key: &str,
+) -> Result<CredentialScope, OpenBaoScopeKeyParseError> {
+    if let Some(source) = SourceKind::parse(scope_key) {
+        return Ok(CredentialScope::source(owner_id, source));
+    }
+
+    let Some((source, integration_id)) = scope_key.split_once('/') else {
+        return Err(OpenBaoScopeKeyParseError::MissingSource);
+    };
+    let source = SourceKind::parse(source).ok_or(OpenBaoScopeKeyParseError::UnknownSource)?;
+    let integration_id =
+        SourceIntegrationId::new(integration_id).map_err(OpenBaoScopeKeyParseError::InvalidIntegration)?;
+    Ok(CredentialScope::integration(owner_id, source, integration_id))
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OpenBaoCredentialIdParseError {
+    #[error("OpenBao credential id is missing expected prefix: {id}")]
+    MissingPrefix { id: CredentialId },
+    #[error("OpenBao credential id has invalid shape: {id}")]
+    InvalidShape { id: CredentialId },
+    #[error("OpenBao credential id has invalid owner: {id}")]
+    InvalidOwner {
+        id: CredentialId,
+        #[source]
+        source: super::CredentialOwnerIdError,
+    },
+    #[error("OpenBao credential id has invalid scope: {id}")]
+    InvalidScope {
+        id: CredentialId,
+        #[source]
+        source: OpenBaoScopeKeyParseError,
+    },
+    #[error("OpenBao credential id has invalid kind: {id}")]
+    InvalidKind { id: CredentialId },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OpenBaoScopeKeyParseError {
+    #[error("scope key is missing source")]
+    MissingSource,
+    #[error("scope key source is unknown")]
+    UnknownSource,
+    #[error("scope key integration id is invalid")]
+    InvalidIntegration(#[source] crate::source_integration_id::SourceIntegrationIdError),
+}
 
 #[derive(Clone)]
 pub struct OpenBaoSecretStore {
@@ -57,8 +147,7 @@ impl OpenBaoSecretStore {
         kind: CredentialKind,
         version: CredentialVersion,
     ) -> Result<CredentialRef, SecretStoreError> {
-        let id = CredentialId::new(format!("openbao:{}:{}", scope.scope_key(), kind.as_str()))
-            .map_err(|error| self.backend_error(error.to_string()))?;
+        let id = openbao_credential_id(scope, kind).map_err(|error| self.backend_error(error.to_string()))?;
         Ok(CredentialRef::new(id, version, scope, kind))
     }
 
@@ -269,12 +358,7 @@ impl SecretStoreRotate for OpenBaoSecretStore {
             )
             .await?;
 
-        Ok(CredentialRef::new(
-            credential.id().clone(),
-            response.data.version()?,
-            &CredentialScope::source(credential.owner_id().clone(), credential.source()),
-            credential.kind(),
-        ))
+        Ok(credential.with_version(response.data.version()?))
     }
 }
 
@@ -321,10 +405,9 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
             CredentialStatus::Previous
         };
 
-        let fingerprint = CredentialFingerprint::new(format!(
-            "openbao:{}#{}",
-            self.metadata_path(credential),
-            credential.version().get()
+        let fingerprint = CredentialFingerprint::new(openbao_fingerprint(
+            &self.metadata_path(credential),
+            credential.version().get(),
         ))
         .map_err(|error| self.backend_error(error.to_string()))?;
 
@@ -335,6 +418,14 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
             fingerprint,
         ))
     }
+}
+
+fn openbao_fingerprint(metadata_path: &str, version: u64) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(metadata_path.as_bytes());
+    hasher.update(b"#");
+    hasher.update(version.to_string().as_bytes());
+    format!("openbao:{}", hex::encode(hasher.finalize()))
 }
 
 impl OpenBaoSecretStore {
@@ -460,14 +551,102 @@ mod tests {
     #[test]
     fn encodes_openbao_path_segments() {
         assert_eq!(
-            encode_path_segment("openbao:github/primary:webhook_secret"),
-            "openbao%3Agithub%2Fprimary%3Awebhook_secret"
+            encode_path_segment("openbao:tenant-1:github/primary:webhook_secret"),
+            "openbao%3Atenant-1%3Agithub%2Fprimary%3Awebhook_secret"
         );
     }
 
     #[test]
     fn default_mount_is_secret() {
         assert_eq!(OpenBaoMount::default().as_str(), "secret");
+    }
+
+    #[test]
+    fn openbao_fingerprint_stays_within_value_object_limit() {
+        let fingerprint = openbao_fingerprint(
+            "secret/metadata/trogonai/tenant-compose-smoke/credentials/openbao%3Atenant-compose-smoke%3Agithub%2Fcompose-smoke%3Awebhook_secret",
+            2,
+        );
+
+        assert!(CredentialFingerprint::new(&fingerprint).is_ok());
+        assert_eq!(fingerprint.len(), "openbao:".len() + 64);
+    }
+
+    #[test]
+    fn parses_integration_scoped_openbao_credential_id() {
+        let id = CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap();
+
+        let credential = openbao_credential_ref_from_id(id, CredentialVersion::new(2).unwrap()).unwrap();
+
+        assert_eq!(
+            credential.id().as_str(),
+            "openbao:tenant-1:github/primary:webhook_secret"
+        );
+        assert_eq!(credential.version().get(), 2);
+        assert_eq!(credential.owner_id().as_str(), "tenant-1");
+        assert_eq!(credential.source(), SourceKind::GitHub);
+        assert_eq!(credential.scope_key(), "github/primary");
+        assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
+    }
+
+    #[test]
+    fn parses_source_scoped_openbao_credential_id() {
+        let id = CredentialId::new("openbao:tenant-1:discord:bot_token").unwrap();
+
+        let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
+
+        assert_eq!(credential.owner_id().as_str(), "tenant-1");
+        assert_eq!(credential.source(), SourceKind::Discord);
+        assert_eq!(credential.scope_key(), "discord");
+        assert_eq!(credential.kind(), CredentialKind::BotToken);
+    }
+
+    #[test]
+    fn parses_owner_id_with_colons_from_the_right() {
+        let id = CredentialId::new("openbao:tenant:region:github/primary:webhook_secret").unwrap();
+
+        let credential = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap();
+
+        assert_eq!(credential.owner_id().as_str(), "tenant:region");
+        assert_eq!(credential.scope_key(), "github/primary");
+        assert_eq!(credential.kind(), CredentialKind::WebhookSecret);
+    }
+
+    #[test]
+    fn rejects_unknown_openbao_scope_source() {
+        let id = CredentialId::new("openbao:tenant-1:unknown/primary:webhook_secret").unwrap();
+
+        let error = openbao_credential_ref_from_id(id, CredentialVersion::initial()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            OpenBaoCredentialIdParseError::InvalidScope {
+                source: OpenBaoScopeKeyParseError::UnknownSource,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rotated_credential_ref_preserves_integration_scope() {
+        let scope = CredentialScope::integration(
+            CredentialOwnerId::new("tenant-1").unwrap(),
+            SourceKind::GitHub,
+            SourceIntegrationId::new("primary").unwrap(),
+        );
+        let credential = CredentialRef::new(
+            CredentialId::new("openbao:tenant-1:github/primary:webhook_secret").unwrap(),
+            CredentialVersion::initial(),
+            &scope,
+            CredentialKind::WebhookSecret,
+        );
+
+        let rotated = credential.with_version(CredentialVersion::new(2).unwrap());
+
+        assert_eq!(rotated.scope_key(), "github/primary");
+        assert_eq!(rotated.id(), credential.id());
+        assert_eq!(rotated.kind(), CredentialKind::WebhookSecret);
+        assert_eq!(rotated.version().get(), 2);
     }
 
     struct OpenBaoServer {
@@ -540,11 +719,11 @@ mod tests {
 
         assert_eq!(
             store.data_path(&credential),
-            "secret/data/trogonai/tenant-e2e/credentials/openbao%3Agithub%2Fcopy-in-out%3Awebhook_secret"
+            "secret/data/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
         );
         assert_eq!(
             store.metadata_path(&credential),
-            "secret/metadata/trogonai/tenant-e2e/credentials/openbao%3Agithub%2Fcopy-in-out%3Awebhook_secret"
+            "secret/metadata/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
         );
     }
 

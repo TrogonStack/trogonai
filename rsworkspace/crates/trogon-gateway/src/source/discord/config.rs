@@ -26,7 +26,7 @@ use twilight_model::gateway::Intents;
 
 #[derive(Clone)]
 pub struct DiscordConfig {
-    pub bot_token: DiscordBotToken,
+    pub bot_token: Option<DiscordBotToken>,
     pub intents: Intents,
     pub subject_prefix: NatsToken,
     pub stream_name: NatsToken,

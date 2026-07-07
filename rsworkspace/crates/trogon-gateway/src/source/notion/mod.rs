@@ -14,4 +14,4 @@ pub mod verification_token;
 pub use config::NotionConfig;
 pub use notion_event_type::NotionEventType;
 pub use notion_verification_token::NotionVerificationToken;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

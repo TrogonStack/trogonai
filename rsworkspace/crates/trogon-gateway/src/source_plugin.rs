@@ -7,7 +7,7 @@
 //!
 //! Discord is intentionally NOT a `SourcePlugin`: its primary path is a
 //! WebSocket gateway runner spawned in `main.rs`, not a webhook receiver.
-//! Slack's socket-mode runners are spawned the same way — `SlackPlugin`
+//! Slack's socket-mode runners are spawned the same way - `SlackPlugin`
 //! only mounts integrations that expose a webhook config.
 
 use axum::Router;
@@ -15,6 +15,8 @@ use tracing::info;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use crate::config::{ResolvedConfig, SourceIntegration};
+use crate::runtime_projection::RuntimeCredentialResolver;
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 pub type SourceId = &'static str;
 
@@ -43,6 +45,36 @@ pub struct LinearPlugin;
 pub struct MicrosoftGraphPlugin;
 pub struct NotionPlugin;
 pub struct SentryPlugin;
+
+pub(crate) struct RuntimeCredentialMounts<G> {
+    pub(crate) github: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) gitlab: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) incidentio: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) linear: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) microsoft_graph: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) sentry: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) slack: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) telegram: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) twitter: Option<RuntimeCredentialResolver<G>>,
+    pub(crate) notion: Option<RuntimeCredentialResolver<G>>,
+}
+
+impl<G> Default for RuntimeCredentialMounts<G> {
+    fn default() -> Self {
+        Self {
+            github: None,
+            gitlab: None,
+            incidentio: None,
+            linear: None,
+            microsoft_graph: None,
+            sentry: None,
+            slack: None,
+            telegram: None,
+            twitter: None,
+            notion: None,
+        }
+    }
+}
 
 async fn provision_integrations<C, T, F>(
     integrations: &[SourceIntegration<T>],
@@ -112,6 +144,41 @@ impl SourcePlugin for GithubPlugin {
     }
 }
 
+impl GithubPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.github {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::github::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for SlackPlugin {
     fn id(&self) -> SourceId {
         "slack"
@@ -136,6 +203,44 @@ impl SourcePlugin for SlackPlugin {
             app = app.nest(
                 &path,
                 crate::source::slack::router(publisher.clone(), &integration.config),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
+impl SlackPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.slack {
+            if integration.config.webhook().is_none() {
+                continue;
+            }
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::slack::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
             );
             info!(
                 source = self.id(),
@@ -173,6 +278,41 @@ impl SourcePlugin for TelegramPlugin {
     }
 }
 
+impl TelegramPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.telegram {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::telegram::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for TwitterPlugin {
     fn id(&self) -> SourceId {
         "twitter"
@@ -198,6 +338,41 @@ impl SourcePlugin for TwitterPlugin {
     }
 }
 
+impl TwitterPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.twitter {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::twitter::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for GitlabPlugin {
     fn id(&self) -> SourceId {
         "gitlab"
@@ -220,6 +395,41 @@ impl SourcePlugin for GitlabPlugin {
             &self.path_prefix(),
             |p, cfg| crate::source::gitlab::router(p, cfg),
         )
+    }
+}
+
+impl GitlabPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.gitlab {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::gitlab::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
     }
 }
 
@@ -254,6 +464,41 @@ impl SourcePlugin for IncidentioPlugin {
     }
 }
 
+impl IncidentioPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.incidentio {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::incidentio::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for LinearPlugin {
     fn id(&self) -> SourceId {
         "linear"
@@ -276,6 +521,41 @@ impl SourcePlugin for LinearPlugin {
             &self.path_prefix(),
             |p, cfg| crate::source::linear::router(p, cfg),
         )
+    }
+}
+
+impl LinearPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.linear {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::linear::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
     }
 }
 
@@ -310,6 +590,41 @@ impl SourcePlugin for MicrosoftGraphPlugin {
     }
 }
 
+impl MicrosoftGraphPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.microsoft_graph {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::microsoft_graph::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for NotionPlugin {
     fn id(&self) -> SourceId {
         "notion"
@@ -335,6 +650,41 @@ impl SourcePlugin for NotionPlugin {
     }
 }
 
+impl NotionPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.notion {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::notion::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
+    }
+}
+
 impl SourcePlugin for SentryPlugin {
     fn id(&self) -> SourceId {
         "sentry"
@@ -357,6 +707,41 @@ impl SourcePlugin for SentryPlugin {
             &self.path_prefix(),
             |p, cfg| crate::source::sentry::router(p, cfg),
         )
+    }
+}
+
+impl SentryPlugin {
+    fn mount_runtime<P, S, G>(
+        &self,
+        mut app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        config: &ResolvedConfig,
+        credential_resolver: RuntimeCredentialResolver<G>,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        G: SecretStoreGet<Error = SecretStoreError>,
+    {
+        for integration in &config.sentry {
+            let path = format!("{}/{}", self.path_prefix(), integration.id);
+            app = app.nest(
+                &path,
+                crate::source::sentry::runtime_router(
+                    publisher.clone(),
+                    &integration.config,
+                    integration.id.clone(),
+                    credential_resolver.clone(),
+                ),
+            );
+            info!(
+                source = self.id(),
+                integration = integration.id.as_str(),
+                path,
+                "mounted source integration"
+            );
+        }
+        app
     }
 }
 
@@ -398,4 +783,63 @@ where
     app = MicrosoftGraphPlugin.mount(app, publisher.clone(), config);
     app = NotionPlugin.mount(app, publisher.clone(), config);
     SentryPlugin.mount(app, publisher, config)
+}
+
+pub(crate) fn mount_webhook_sources_with_runtime_credentials<P, S, G>(
+    mut app: Router,
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &ResolvedConfig,
+    runtime_credentials: RuntimeCredentialMounts<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    app = match runtime_credentials.github {
+        Some(github_credentials) => GithubPlugin.mount_runtime(app, publisher.clone(), config, github_credentials),
+        None => GithubPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.slack {
+        Some(slack_credentials) => SlackPlugin.mount_runtime(app, publisher.clone(), config, slack_credentials),
+        None => SlackPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.telegram {
+        Some(telegram_credentials) => {
+            TelegramPlugin.mount_runtime(app, publisher.clone(), config, telegram_credentials)
+        }
+        None => TelegramPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.twitter {
+        Some(twitter_credentials) => TwitterPlugin.mount_runtime(app, publisher.clone(), config, twitter_credentials),
+        None => TwitterPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.gitlab {
+        Some(gitlab_credentials) => GitlabPlugin.mount_runtime(app, publisher.clone(), config, gitlab_credentials),
+        None => GitlabPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.incidentio {
+        Some(incidentio_credentials) => {
+            IncidentioPlugin.mount_runtime(app, publisher.clone(), config, incidentio_credentials)
+        }
+        None => IncidentioPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.linear {
+        Some(linear_credentials) => LinearPlugin.mount_runtime(app, publisher.clone(), config, linear_credentials),
+        None => LinearPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.microsoft_graph {
+        Some(microsoft_graph_credentials) => {
+            MicrosoftGraphPlugin.mount_runtime(app, publisher.clone(), config, microsoft_graph_credentials)
+        }
+        None => MicrosoftGraphPlugin.mount(app, publisher.clone(), config),
+    };
+    app = match runtime_credentials.notion {
+        Some(notion_credentials) => NotionPlugin.mount_runtime(app, publisher.clone(), config, notion_credentials),
+        None => NotionPlugin.mount(app, publisher.clone(), config),
+    };
+    match runtime_credentials.sentry {
+        Some(sentry_credentials) => SentryPlugin.mount_runtime(app, publisher, config, sentry_credentials),
+        None => SentryPlugin.mount(app, publisher, config),
+    }
 }

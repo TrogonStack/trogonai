@@ -16,6 +16,24 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
+    const ALL: [Self; 11] = [
+        Self::Discord,
+        Self::GitHub,
+        Self::Gitlab,
+        Self::Incidentio,
+        Self::Linear,
+        Self::MicrosoftGraph,
+        Self::Notion,
+        Self::Sentry,
+        Self::Slack,
+        Self::Telegram,
+        Self::Twitter,
+    ];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|source| source.as_str() == value)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discord => "discord",

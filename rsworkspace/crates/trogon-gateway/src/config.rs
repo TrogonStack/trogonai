@@ -737,25 +737,35 @@ fn resolve_discord(
         return None;
     }
 
-    let token_str = match bot_token {
+    let configured = status.is_some()
+        || bot_token.is_some()
+        || gateway_intents.is_some()
+        || subject_prefix != "discord"
+        || stream_name != "DISCORD"
+        || stream_max_age_secs != 604_800
+        || nats_ack_timeout_secs != 10;
+    if !configured {
+        return None;
+    }
+
+    let bot_token = match bot_token {
         Some(input) => match input.resolve(
             static_config_source_scope(SourceKind::Discord),
             CredentialKind::BotToken,
         ) {
-            Ok(value) => value,
+            Ok(value) => match DiscordBotToken::new(value) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
+                    return None;
+                }
+            },
             Err(error) => {
                 errors.push(ConfigValidationError::invalid("discord", "bot_token", error));
                 return None;
             }
         },
-        None => return None,
-    };
-    let bot_token = match DiscordBotToken::new(token_str) {
-        Ok(s) => s,
-        Err(e) => {
-            errors.push(ConfigValidationError::invalid("discord", "bot_token", e));
-            return None;
-        }
+        None => None,
     };
 
     let intents = if let Some(s) = gateway_intents.as_deref().filter(|s| !s.is_empty()) {
@@ -2274,7 +2284,10 @@ subject_prefix = "github-primary"
         let f = write_toml(&discord_gateway_toml("Bot my-bot-token"));
         let cfg = load(Some(f.path())).expect("load failed");
         let discord = cfg.discord.as_ref().expect("discord should be Some");
-        assert_eq!(discord.bot_token.as_str(), "Bot my-bot-token");
+        assert_eq!(
+            discord.bot_token.as_ref().expect("bot token should be Some").as_str(),
+            "Bot my-bot-token"
+        );
     }
 
     #[test]
@@ -2302,14 +2315,15 @@ gateway_intents = "bogus_intent"
     }
 
     #[test]
-    fn discord_missing_bot_token_returns_none() {
+    fn discord_gateway_can_resolve_without_static_bot_token() {
         let toml = r#"
 [sources.discord]
 gateway_intents = "guilds,guild_messages"
 "#;
         let f = write_toml(toml);
         let cfg = load(Some(f.path())).expect("load failed");
-        assert!(cfg.discord.is_none());
+        let discord = cfg.discord.as_ref().expect("discord should be Some");
+        assert!(discord.bot_token.is_none());
     }
 
     #[test]

@@ -3,6 +3,11 @@
 mod credential_fingerprint;
 mod credential_id;
 mod credential_kind;
+pub(crate) mod credential_lifecycle;
+pub(crate) mod credential_lifecycle_handler;
+pub(crate) mod credential_lifecycle_store;
+pub(crate) mod credential_lifecycle_stream;
+pub(crate) mod credential_lifecycle_worker;
 mod credential_metadata;
 mod credential_owner_id;
 mod credential_ref;
@@ -24,7 +29,7 @@ pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintErr
 pub use credential_id::{CredentialId, CredentialIdError};
 pub use credential_kind::CredentialKind;
 pub use credential_metadata::CredentialMetadata;
-pub use credential_owner_id::CredentialOwnerId;
+pub use credential_owner_id::{CredentialOwnerId, CredentialOwnerIdError};
 pub use credential_ref::CredentialRef;
 pub use credential_scope::CredentialScope;
 pub use credential_status::CredentialStatus;

@@ -6,4 +6,4 @@ pub mod signature;
 
 pub use config::SentryConfig;
 pub use sentry_client_secret::SentryClientSecret;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

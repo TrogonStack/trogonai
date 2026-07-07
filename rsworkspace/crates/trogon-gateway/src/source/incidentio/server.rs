@@ -20,6 +20,10 @@ use super::constants::{
 };
 use super::signature;
 
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {
     InvalidJson,
@@ -82,6 +86,16 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     nats_ack_timeout: NonZeroDuration,
 }
 
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
+    subject_prefix: NatsToken,
+    timestamp_tolerance: NonZeroDuration,
+    nats_ack_timeout: NonZeroDuration,
+}
+
 pub async fn provision<C: JetStreamContext>(js: &C, config: &IncidentioConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.to_string(),
@@ -116,6 +130,32 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &IncidentioConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Incidentio, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        timestamp_tolerance: config.timestamp_tolerance,
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 #[instrument(
     name = "incidentio.webhook",
     skip_all,
@@ -138,17 +178,90 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         }
     };
 
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        verified,
+        body,
+    )
+    .await
+}
+
+#[instrument(
+    name = "incidentio.webhook",
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        webhook_id = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let signing_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::SigningSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "incident.io runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+    let signing_secret = match IncidentioSigningSecret::new(signing_secret.as_str()) {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "incident.io runtime signing secret is invalid");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    let verified = match signature::verify(&headers, &body, &signing_secret, state.timestamp_tolerance) {
+        Ok(verified) => verified,
+        Err(err) => {
+            warn!(error = %err, "incident.io webhook signature validation failed");
+            return StatusCode::UNAUTHORIZED;
+        }
+    };
+
+    publish_verified_webhook(
+        state.publisher,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        verified,
+        body,
+    )
+    .await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    verified: signature::VerifiedWebhook,
+    body: Bytes,
+) -> StatusCode {
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(value) => value,
         Err(err) => {
             warn!(error = %err, "Failed to parse incident.io webhook body as JSON");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 &verified,
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -157,12 +270,12 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     let Some(raw_event_type) = parsed.get("event_type").and_then(|value| value.as_str()) else {
         warn!("Missing event_type in incident.io webhook payload");
         return publish_unroutable(
-            &state.publisher,
-            &state.subject_prefix,
+            &publisher,
+            &subject_prefix,
             &verified,
             RejectReason::MissingEventType,
             body,
-            state.nats_ack_timeout,
+            nats_ack_timeout,
         )
         .await;
     };
@@ -172,18 +285,18 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         Err(err) => {
             warn!(error = %err, "Invalid event_type in incident.io webhook payload");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 &verified,
                 RejectReason::InvalidEventType,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
     };
 
-    let subject = format!("{}.{}", state.subject_prefix, event_type);
+    let subject = format!("{}.{}", subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record("event_type", event_type.as_str());
     span.record("webhook_id", tracing::field::display(verified.webhook_id.as_str()));
@@ -195,12 +308,24 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     nats_headers.insert(NATS_HEADER_WEBHOOK_ID, verified.webhook_id.as_str());
     nats_headers.insert(NATS_HEADER_WEBHOOK_TIMESTAMP, verified.webhook_timestamp.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+    }
 }
 
 #[cfg(test)]
@@ -219,10 +344,17 @@ mod tests {
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut};
+
     type HmacSha256 = Hmac<Sha256>;
 
     fn test_secret() -> String {
         ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
+    }
+
+    fn runtime_secret() -> String {
+        ["whsec_", "cnVudGltZS1zZWNyZXQ="].concat()
     }
 
     fn wrap_publisher(
@@ -255,8 +387,42 @@ mod tests {
         router(wrap_publisher(publisher), &test_config())
     }
 
+    async fn runtime_app(publisher: MockJetStreamPublisher, secret: String) -> Router {
+        let config = test_config();
+        let store = MockOpenBaoSecretStore::default();
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Incidentio,
+                    integration_id.clone(),
+                ),
+                CredentialKind::SigningSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &config,
+            integration_id,
+            registry.resolver(store),
+        )
+    }
+
     fn sign(body: &[u8], webhook_id: &str, timestamp: &str) -> String {
-        let secret = test_config().signing_secret;
+        sign_with_secret(&test_secret(), body, webhook_id, timestamp)
+    }
+
+    fn sign_with_secret(secret: &str, body: &[u8], webhook_id: &str, timestamp: &str) -> String {
+        let secret = IncidentioSigningSecret::new(secret).unwrap();
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
         let signed = format!("{webhook_id}.{timestamp}.").into_bytes();
         mac.update(&signed);
@@ -361,6 +527,44 @@ mod tests {
                 .map(|v| v.as_str()),
             Some("msg-1"),
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_signing_secret_publishes_and_rejects_static_secret() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), runtime_secret()).await;
+        let body = br#"{"event_type":"public_incident.incident_created_v2","data":{"id":"01ABC"}}"#;
+        let timestamp = valid_timestamp();
+
+        let static_response = app
+            .clone()
+            .oneshot(webhook_request(
+                body,
+                "msg-runtime",
+                &timestamp,
+                &sign_with_secret(&test_secret(), body, "msg-runtime", &timestamp),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+
+        let runtime_response = app
+            .oneshot(webhook_request(
+                body,
+                "msg-runtime",
+                &timestamp,
+                &sign_with_secret(&runtime_secret(), body, "msg-runtime", &timestamp),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(runtime_response.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "incidentio.public_incident.incident_created_v2");
     }
 
     #[tokio::test]

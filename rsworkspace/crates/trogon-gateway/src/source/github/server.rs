@@ -19,6 +19,10 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
+
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
         info!("Published GitHub event to NATS");
@@ -33,6 +37,15 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: GitHubWebhookSecret,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -69,12 +82,50 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &GithubConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::GitHub, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Pin<Box<dyn Future<Output = StatusCode> + Send>> {
     Box::pin(handle_webhook_inner(state, headers, body))
+}
+
+fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Pin<Box<dyn Future<Output = StatusCode> + Send>>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    Box::pin(handle_runtime_webhook_inner(state, headers, body))
 }
 
 #[instrument(
@@ -145,6 +196,101 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     outcome_to_status(outcome)
 }
 
+#[instrument(
+    name = "github.webhook",
+    skip_all,
+    fields(
+        event = tracing::field::Empty,
+        delivery = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook_inner<P, S, G>(
+    state: RuntimeAppState<P, S, G>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let sig = if let Some(v) = headers.get(HEADER_SIGNATURE) {
+        v.to_str().ok()
+    } else {
+        None
+    };
+
+    let Some(sig) = sig else {
+        warn!("Missing X-Hub-Signature-256 header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    let webhook_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::WebhookSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "GitHub runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+
+    if let Err(e) = signature::verify(webhook_secret.as_str(), &body, sig) {
+        warn!(reason = %e, "GitHub webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    let Some(event) = headers
+        .get(HEADER_EVENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        warn!("Missing X-GitHub-Event header");
+        return StatusCode::BAD_REQUEST;
+    };
+
+    let delivery = headers
+        .get(HEADER_DELIVERY)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned();
+
+    let subject = format!("{}.{}", state.subject_prefix, event);
+
+    let span = tracing::Span::current();
+    span.record("event", &event);
+    span.record("delivery", &delivery);
+    span.record("subject", &subject);
+
+    let mut nats_headers = async_nats::HeaderMap::new();
+    nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, delivery.as_str());
+    nats_headers.insert(NATS_HEADER_EVENT, event.as_str());
+    nats_headers.insert(NATS_HEADER_DELIVERY, delivery.as_str());
+
+    let outcome = state
+        .publisher
+        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+        .await;
+
+    outcome_to_status(outcome)
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +306,9 @@ mod tests {
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
     use trogon_std::NonZeroDuration;
+
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut};
 
     type HmacSha256 = Hmac<Sha256>;
 
@@ -198,6 +347,35 @@ mod tests {
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
         router(wrap_publisher(publisher), &test_config())
+    }
+
+    async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+        let store = MockOpenBaoSecretStore::default();
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::GitHub,
+                    integration_id.clone(),
+                ),
+                CredentialKind::WebhookSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        let runtime_credentials = RuntimeCredentialRegistry::default();
+        runtime_credentials
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &test_config(),
+            integration_id,
+            runtime_credentials.resolver(store),
+        )
     }
 
     fn webhook_request(body: &[u8], event: &str, delivery: &str, sig: Option<&str>) -> Request<Body> {
@@ -267,6 +445,42 @@ mod tests {
             messages[0].headers.get(NATS_HEADER_DELIVERY).map(|v| v.as_str()),
             Some("del-1"),
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_webhook_secret_publishes_to_nats_and_returns_200() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), "runtime-secret").await;
+        let body = br#"{"ref":"refs/heads/main"}"#;
+        let sig = compute_sig("runtime-secret", body);
+
+        let resp = app
+            .oneshot(webhook_request(body, "push", "runtime-del-1", Some(&sig)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "github.push");
+    }
+
+    #[tokio::test]
+    async fn runtime_webhook_secret_does_not_use_static_config_secret() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), "runtime-secret").await;
+        let body = br#"{"ref":"refs/heads/main"}"#;
+        let sig = compute_sig(TEST_SECRET, body);
+
+        let resp = app
+            .oneshot(webhook_request(body, "push", "runtime-del-1", Some(&sig)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
     }
 
     #[tokio::test]

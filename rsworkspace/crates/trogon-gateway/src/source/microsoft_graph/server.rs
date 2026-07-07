@@ -16,8 +16,12 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 use trogon_std::NonZeroDuration;
 
+use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Deserialize)]
 struct ChangeNotificationCollection {
@@ -27,7 +31,16 @@ struct ChangeNotificationCollection {
 #[derive(Clone)]
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
-    client_state: super::client_state::MicrosoftGraphClientState,
+    client_state: MicrosoftGraphClientState,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -64,6 +77,31 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &MicrosoftGraphConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::MicrosoftGraph, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route("/webhook", post(handle_runtime_webhook::<P, S, G>))
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
     RawQuery(query): RawQuery,
@@ -74,7 +112,60 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], validation_token).into_response();
     }
 
-    handle_notification_collection(state, body).await.into_response()
+    publish_notification_collection(
+        state.publisher,
+        state.client_state,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+    .into_response()
+}
+
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    RawQuery(query): RawQuery,
+    body: Bytes,
+) -> Response
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    if let Some(validation_token) = validation_token_from_query(query.as_deref()) {
+        info!("Responding to Microsoft Graph notification URL validation");
+        return (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], validation_token).into_response();
+    }
+
+    let client_state = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ClientState)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Microsoft Graph runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error).into_response();
+        }
+    };
+    let client_state = match MicrosoftGraphClientState::new(client_state.as_str()) {
+        Ok(client_state) => client_state,
+        Err(error) => {
+            warn!(reason = %error, "Microsoft Graph runtime client state is invalid");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    publish_notification_collection(
+        state.publisher,
+        client_state,
+        state.subject_prefix,
+        state.nats_ack_timeout,
+        body,
+    )
+    .await
+    .into_response()
 }
 
 #[instrument(
@@ -85,8 +176,11 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         subject = tracing::field::Empty,
     )
 )]
-async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut>(
-    state: AppState<P, S>,
+async fn publish_notification_collection<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    client_state: MicrosoftGraphClientState,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {
     let collection = match serde_json::from_slice::<ChangeNotificationCollection>(&body) {
@@ -104,7 +198,7 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
 
     for notification in &collection.value {
         match client_state_from_notification(notification) {
-            Some(client_state) if state.client_state.matches(client_state) => {}
+            Some(provided) if client_state.matches(provided) => {}
             Some(_) => {
                 warn!("Microsoft Graph clientState validation failed");
                 return StatusCode::UNAUTHORIZED;
@@ -116,7 +210,7 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
         }
     }
 
-    let subject = format!("{}.change_notification_collection", state.subject_prefix);
+    let subject = format!("{}.change_notification_collection", subject_prefix);
     let span = tracing::Span::current();
     span.record("notification_count", collection.value.len());
     span.record("subject", &subject);
@@ -125,9 +219,8 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, headers, body, nats_ack_timeout.into())
         .await;
 
     if outcome.is_ok() {
@@ -136,6 +229,19 @@ async fn handle_notification_collection<P: JetStreamPublisher, S: ObjectStorePut
     } else {
         outcome.log_on_error("microsoft-graph");
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
     }
 }
 
@@ -178,8 +284,12 @@ fn validation_token_from_query(query: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::client_state::MicrosoftGraphClientState;
     use super::*;
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{
+        CredentialKind, CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut, SourceKind,
+    };
+    use crate::source_integration_id::SourceIntegrationId;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use tower::ServiceExt;
@@ -190,6 +300,7 @@ mod tests {
     };
 
     const TEST_CLIENT_STATE: &str = "secret-client-state";
+    const RUNTIME_CLIENT_STATE: &str = "runtime-client-state";
 
     fn wrap_publisher(
         publisher: MockJetStreamPublisher,
@@ -220,16 +331,50 @@ mod tests {
         router(wrap_publisher(publisher), &test_config())
     }
 
+    async fn runtime_app(publisher: MockJetStreamPublisher, client_state: &str) -> Router {
+        let config = test_config();
+        let store = MockOpenBaoSecretStore::default();
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::MicrosoftGraph,
+                    integration_id.clone(),
+                ),
+                CredentialKind::ClientState,
+                trogon_std::SecretString::new(client_state).unwrap(),
+            )
+            .await
+            .unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &config,
+            integration_id,
+            registry.resolver(store),
+        )
+    }
+
     fn webhook_request(uri: &str, body: impl Into<Body>) -> Request<Body> {
         Request::builder().method("POST").uri(uri).body(body.into()).unwrap()
     }
 
     fn notification_value() -> Value {
+        notification_value_with_client_state(TEST_CLIENT_STATE)
+    }
+
+    fn notification_value_with_client_state(client_state: &str) -> Value {
         serde_json::json!({
             "id": "notification-1",
             "subscriptionId": "subscription-1",
             "subscriptionExpirationDateTime": "2026-04-28T17:00:00Z",
-            "clientState": TEST_CLIENT_STATE,
+            "clientState": client_state,
             "changeType": "created",
             "tenantId": "tenant-1",
             "resource": "users('user-1')/messages('message-1')",
@@ -298,6 +443,37 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body.as_ref(), b"hello world");
         assert_no_publishes(&publisher);
+    }
+
+    #[tokio::test]
+    async fn runtime_client_state_publishes_and_rejects_static_client_state() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), RUNTIME_CLIENT_STATE).await;
+
+        let static_response = app
+            .clone()
+            .oneshot(webhook_request(
+                "/webhook",
+                collection_body(notification_value_with_client_state(TEST_CLIENT_STATE)),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+        assert_no_publishes(&publisher);
+
+        let runtime_response = app
+            .oneshot(webhook_request(
+                "/webhook",
+                collection_body(notification_value_with_client_state(RUNTIME_CLIENT_STATE)),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(runtime_response.status(), StatusCode::ACCEPTED);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "microsoft-graph.change_notification_collection");
     }
 
     #[tokio::test]

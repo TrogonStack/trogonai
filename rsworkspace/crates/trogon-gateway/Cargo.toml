@@ -17,6 +17,7 @@ trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["ring", "jetstream"] }
 axum = { workspace = true }
 base64 = "0.22"
+buffa = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true }
 confique = { workspace = true }
@@ -25,6 +26,7 @@ futures-core = "0.3"
 futures-util = { workspace = true }
 hex = "0.4"
 hmac = "0.13"
+opentelemetry = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -36,15 +38,21 @@ tracing = { workspace = true }
 twilight-gateway = { workspace = true }
 twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
+trogonai-proto = { path = "../trogonai-proto", features = ["gateway"] }
+trogon-decider-nats = { path = "../trogon-decider-nats" }
+trogon-decider-runtime = { workspace = true }
 trogon-service-config = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http"] }
 url = "2.5"
+uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
+chrono = "0.4"
 tempfile = { workspace = true }
 testcontainers-modules = "0.15"
 time = { workspace = true }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
+trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

@@ -5,10 +5,11 @@ use tokio::sync::Mutex;
 use trogon_std::SecretString;
 
 use super::{
-    CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
-    CredentialStatus, SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut,
-    SecretStoreRevoke, SecretStoreRotate, StorageBackend,
+    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
+    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate, StorageBackend,
 };
+use crate::secret_store::openbao_secret_store::openbao_credential_id;
 
 #[derive(Clone, Default)]
 pub struct MockOpenBaoSecretStore {
@@ -17,7 +18,6 @@ pub struct MockOpenBaoSecretStore {
 
 #[derive(Default)]
 struct MockOpenBaoSecretStoreState {
-    next_id: u64,
     versions: BTreeMap<CredentialRef, MockOpenBaoVersion>,
 }
 
@@ -47,16 +47,16 @@ impl MockOpenBaoSecretStore {
 
 impl MockOpenBaoSecretStoreState {
     fn next_credential_ref(&mut self, scope: CredentialScope, kind: CredentialKind) -> CredentialRef {
-        self.next_id += 1;
-        let id = CredentialId::new(format!(
-            "openbao:{}:{}:{}",
-            scope.scope_key(),
-            kind.as_str(),
-            self.next_id
-        ))
-        .expect("generated OpenBao credential id is valid");
+        let id = openbao_credential_id(&scope, kind).expect("generated OpenBao credential id is valid");
+        let current = self
+            .versions
+            .keys()
+            .filter(|credential| credential.id() == &id)
+            .map(|credential| credential.version())
+            .max();
+        let version = current.map_or_else(super::CredentialVersion::initial, super::CredentialVersion::next);
 
-        CredentialRef::new(id, super::CredentialVersion::initial(), &scope, kind)
+        CredentialRef::new(id, version, &scope, kind)
     }
 }
 
@@ -71,12 +71,17 @@ impl SecretStorePut for MockOpenBaoSecretStore {
     ) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
         let credential = state.next_credential_ref(scope, kind);
-        let metadata = metadata(&credential, CredentialStatus::Active);
+        let active_metadata = metadata(&credential, CredentialStatus::Active);
+        for (stored_ref, stored) in &mut state.versions {
+            if stored_ref.id() == credential.id() {
+                stored.metadata = metadata(stored_ref, CredentialStatus::Previous);
+            }
+        }
         state.versions.insert(
             credential.clone(),
             MockOpenBaoVersion {
                 material: SecretMaterial::plaintext(value),
-                metadata,
+                metadata: active_metadata,
             },
         );
         Ok(credential)

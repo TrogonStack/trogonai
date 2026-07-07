@@ -16,6 +16,10 @@ use trogon_nats::jetstream::{
 use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
+use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::source_integration_id::SourceIntegrationId;
+
 use super::config::{TwitterConfig, TwitterConsumerSecret};
 use super::constants::{
     HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
@@ -76,6 +80,15 @@ impl PayloadKind {
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     consumer_secret: TwitterConsumerSecret,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+}
+
+#[derive(Clone)]
+struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
+    publisher: ClaimCheckPublisher<P, S>,
+    credential_resolver: RuntimeCredentialResolver<G>,
+    runtime_key: RuntimeIntegrationKey,
     subject_prefix: NatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
@@ -156,6 +169,34 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
         .with_state(state)
 }
 
+pub fn runtime_router<P, S, G>(
+    publisher: ClaimCheckPublisher<P, S>,
+    config: &TwitterConfig,
+    integration_id: SourceIntegrationId,
+    credential_resolver: RuntimeCredentialResolver<G>,
+) -> Router
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let state = RuntimeAppState {
+        publisher,
+        credential_resolver,
+        runtime_key: RuntimeIntegrationKey::new(SourceKind::Twitter, &integration_id),
+        subject_prefix: config.subject_prefix.clone(),
+        nats_ack_timeout: config.nats_ack_timeout,
+    };
+
+    Router::new()
+        .route(
+            "/webhook",
+            get(handle_runtime_crc::<P, S, G>).post(handle_runtime_webhook::<P, S, G>),
+        )
+        .layer(DefaultBodyLimit::max(HTTP_BODY_SIZE_MAX.as_usize()))
+        .with_state(state)
+}
+
 #[instrument(name = "twitter.crc", skip_all)]
 async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
     State(state): State<AppState<P, S>>,
@@ -168,6 +209,38 @@ async fn handle_crc<P: JetStreamPublisher, S: ObjectStorePut>(
 
     Ok(Json(CrcResponse {
         response_token: signature::crc_response_token(state.consumer_secret.as_str(), &query.crc_token),
+    }))
+}
+
+#[instrument(name = "twitter.crc", skip_all)]
+async fn handle_runtime_crc<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    Query(query): Query<CrcQuery>,
+) -> Result<Json<CrcResponse>, StatusCode>
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    if query.crc_token.is_empty() {
+        warn!("Empty crc_token query parameter");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let consumer_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ConsumerSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Twitter/X runtime credential resolution failed");
+            return Err(runtime_credential_error_to_status(&error));
+        }
+    };
+
+    Ok(Json(CrcResponse {
+        response_token: signature::crc_response_token(consumer_secret.as_str(), &query.crc_token),
     }))
 }
 
@@ -195,16 +268,69 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         return StatusCode::UNAUTHORIZED;
     }
 
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+#[instrument(
+    name = "twitter.webhook",
+    skip_all,
+    fields(
+        event_type = tracing::field::Empty,
+        payload_kind = tracing::field::Empty,
+        subject = tracing::field::Empty,
+    )
+)]
+async fn handle_runtime_webhook<P, S, G>(
+    State(state): State<RuntimeAppState<P, S, G>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> StatusCode
+where
+    P: JetStreamPublisher,
+    S: ObjectStorePut,
+    G: SecretStoreGet<Error = SecretStoreError>,
+{
+    let Some(signature_header) = headers.get(HEADER_SIGNATURE).and_then(|value| value.to_str().ok()) else {
+        warn!("Missing x-twitter-webhooks-signature header");
+        return StatusCode::UNAUTHORIZED;
+    };
+
+    let consumer_secret = match state
+        .credential_resolver
+        .resolve_plaintext(&state.runtime_key, CredentialKind::ConsumerSecret)
+        .await
+    {
+        Ok(secret) => secret,
+        Err(error) => {
+            warn!(reason = %error, "Twitter/X runtime credential resolution failed");
+            return runtime_credential_error_to_status(&error);
+        }
+    };
+
+    if let Err(error) = signature::verify(consumer_secret.as_str(), &body, signature_header) {
+        warn!(reason = %error, "Twitter/X webhook signature validation failed");
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    publish_verified_webhook(state.publisher, state.subject_prefix, state.nats_ack_timeout, body).await
+}
+
+async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
+    publisher: ClaimCheckPublisher<P, S>,
+    subject_prefix: NatsToken,
+    nats_ack_timeout: NonZeroDuration,
+    body: Bytes,
+) -> StatusCode {
     let payload = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(payload) => payload,
         Err(error) => {
             warn!(error = %error, "Failed to parse Twitter/X webhook payload");
             return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
+                &publisher,
+                &subject_prefix,
                 RejectReason::InvalidJson,
                 body,
-                state.nats_ack_timeout,
+                nats_ack_timeout,
             )
             .await;
         }
@@ -214,18 +340,11 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         Ok(event_type) => event_type,
         Err(reason) => {
             warn!(reason = reason.as_str(), "Unable to classify Twitter/X webhook payload");
-            return publish_unroutable(
-                &state.publisher,
-                &state.subject_prefix,
-                reason,
-                body,
-                state.nats_ack_timeout,
-            )
-            .await;
+            return publish_unroutable(&publisher, &subject_prefix, reason, body, nats_ack_timeout).await;
         }
     };
 
-    let subject = format!("{}.{}", state.subject_prefix, event_type);
+    let subject = format!("{}.{}", subject_prefix, event_type);
     let span = tracing::Span::current();
     span.record("event_type", event_type.as_str());
     span.record("payload_kind", payload_kind.as_str());
@@ -239,12 +358,24 @@ async fn handle_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
         nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, message_id.as_str());
     }
 
-    let outcome = state
-        .publisher
-        .publish_event(subject, nats_headers, body, state.nats_ack_timeout.into())
+    let outcome = publisher
+        .publish_event(subject, nats_headers, body, nats_ack_timeout.into())
         .await;
 
     outcome_to_status(outcome)
+}
+
+fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusCode {
+    match error {
+        RuntimeCredentialError::SecretStore(SecretStoreError::BackendUnavailable { .. }) => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+        RuntimeCredentialError::SecretStore(_)
+        | RuntimeCredentialError::IntegrationNotFound { .. }
+        | RuntimeCredentialError::IntegrationNotResolvable { .. }
+        | RuntimeCredentialError::CredentialMissing { .. }
+        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+    }
 }
 
 fn resolve_event_type(payload: &serde_json::Value) -> Result<(DottedNatsToken, PayloadKind), RejectReason> {
@@ -349,6 +480,12 @@ mod tests {
     };
     use trogon_nats::mocks::MockError;
 
+    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{
+        CredentialKind, CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut, SourceKind,
+    };
+    use crate::source_integration_id::SourceIntegrationId;
+
     type HmacSha256 = Hmac<Sha256>;
 
     const TEST_SECRET: &str = "test-secret";
@@ -380,6 +517,35 @@ mod tests {
 
     fn mock_app(publisher: MockJetStreamPublisher) -> Router {
         router(wrap_publisher(publisher), &test_config())
+    }
+
+    async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router {
+        let integration_id = SourceIntegrationId::new("primary").unwrap();
+        let store = MockOpenBaoSecretStore::default();
+        let credential = store
+            .put(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Twitter,
+                    integration_id.clone(),
+                ),
+                CredentialKind::ConsumerSecret,
+                trogon_std::SecretString::new(secret).unwrap(),
+            )
+            .await
+            .unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        registry
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .await;
+
+        runtime_router(
+            wrap_publisher(publisher),
+            &test_config(),
+            integration_id,
+            registry.resolver(store),
+        )
     }
 
     fn compute_sig(secret: &str, body: &[u8]) -> String {
@@ -513,6 +679,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_consumer_secret_handles_crc() {
+        let _guard = tracing_guard();
+        let app = runtime_app(MockJetStreamPublisher::new(), "runtime-secret").await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/webhook?crc_token=challenge")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            payload["response_token"],
+            signature::crc_response_token("runtime-secret", "challenge"),
+        );
+    }
+
+    #[tokio::test]
     async fn crc_request_without_token_returns_bad_request() {
         let _guard = tracing_guard();
         let app = mock_app(MockJetStreamPublisher::new());
@@ -567,6 +758,43 @@ mod tests {
                 .map(|value| value.as_str()),
             Some("x_activity"),
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_consumer_secret_publishes_to_nats_and_rejects_static_secret() {
+        let _guard = tracing_guard();
+        let publisher = MockJetStreamPublisher::new();
+        let app = runtime_app(publisher.clone(), "runtime-secret").await;
+        let body = br#"{
+            "data": {
+                "event_type": "profile.update.bio",
+                "payload": {
+                    "before": "Mars & Cars",
+                    "after": "Mars, Cars & AI"
+                }
+            }
+        }"#;
+        let static_signature = compute_sig(TEST_SECRET, body);
+
+        let static_response = app
+            .clone()
+            .oneshot(webhook_request(body, Some(&static_signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+        assert!(publisher.published_messages().is_empty());
+
+        let runtime_signature = compute_sig("runtime-secret", body);
+        let runtime_response = app
+            .oneshot(webhook_request(body, Some(&runtime_signature)))
+            .await
+            .unwrap();
+
+        assert_eq!(runtime_response.status(), StatusCode::OK);
+        let messages = publisher.published_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].subject, "twitter.profile.update.bio");
     }
 
     #[tokio::test]

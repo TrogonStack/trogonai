@@ -25,7 +25,7 @@
 //!
 //! | Variable | Default | Description |
 //! |---|---|---|
-//! | `LINEAR_WEBHOOK_SECRET` | — | Signing secret from Linear's webhook settings (required) |
+//! | `LINEAR_WEBHOOK_SECRET` | required | Signing secret from Linear's webhook settings |
 //! | `LINEAR_WEBHOOK_PORT` | `8080` | HTTP listening port |
 //! | `LINEAR_SUBJECT_PREFIX` | `linear` | NATS subject prefix |
 //! | `LINEAR_STREAM_NAME` | `LINEAR` | JetStream stream name |
@@ -42,4 +42,4 @@ pub mod signature;
 mod webhook_fixtures_tests;
 
 pub use config::LinearConfig;
-pub use server::{provision, router};
+pub use server::{provision, router, runtime_router};

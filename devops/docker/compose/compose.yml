@@ -47,7 +47,7 @@ services:
         required: false
     environment:
       TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET: "${TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET:-local-dev-secret}"
-      NATS_URL: "nats:4222"
+      NATS_URL: "nats://nats:4222"
       OPENBAO_ADDR: "http://openbao:8200"
       OPENBAO_TOKEN: "${OPENBAO_DEV_ROOT_TOKEN:-dev-only-token}"
       RUST_LOG: "${RUST_LOG:-info}"

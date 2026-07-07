@@ -5,6 +5,12 @@ use crate::config::ResolvedConfig;
 use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
+    crate::secret_store::credential_lifecycle_stream::provision(client).await?;
+    info!(
+        stream = crate::secret_store::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
+        "credential lifecycle stream provisioned"
+    );
+
     // Discord is gateway-WebSocket, not a webhook source; it doesn't fit `SourcePlugin`.
     if let Some(ref cfg) = config.discord {
         crate::source::discord::provision(client, cfg).await?;
@@ -17,6 +23,9 @@ pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &Resolved
 mod tests {
     use super::*;
     use crate::config::load;
+    use crate::secret_store::credential_lifecycle_stream::{
+        CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX, CREDENTIAL_LIFECYCLE_STREAM,
+    };
     use std::io::Write;
     use trogon_nats::jetstream::MockJetStreamContext;
 
@@ -69,13 +78,20 @@ client_secret = "sentry-client-secret"
     }
 
     #[tokio::test]
-    async fn provision_no_sources_is_noop() {
+    async fn provision_no_sources_creates_credential_lifecycle_stream() {
         let cfg = load(None).expect("load failed");
         let js = MockJetStreamContext::new();
 
         provision(&js, &cfg).await.expect("provision should succeed");
 
-        assert!(js.created_streams().is_empty());
+        let streams = js.created_streams();
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].name, CREDENTIAL_LIFECYCLE_STREAM);
+        assert_eq!(
+            streams[0].subjects,
+            vec![format!("{CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX}.>")]
+        );
+        assert!(streams[0].allow_atomic_publish);
     }
 
     #[tokio::test]
@@ -86,7 +102,7 @@ client_secret = "sentry-client-secret"
 
         provision(&js, &cfg).await.expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 11);
+        assert_eq!(js.created_streams().len(), 12);
     }
 
     #[tokio::test]
@@ -105,11 +121,12 @@ webhook_secret = "underscore-secret"
         provision(&js, &cfg).await.expect("provision should succeed");
 
         let streams = js.created_streams();
-        assert_eq!(streams.len(), 2);
-        assert_eq!(streams[0].name, "GITHUB_ACME-MAIN");
-        assert_eq!(streams[0].subjects, vec!["github-acme-main.>"]);
-        assert_eq!(streams[1].name, "GITHUB_ACME_MAIN");
-        assert_eq!(streams[1].subjects, vec!["github-acme_main.>"]);
+        assert_eq!(streams.len(), 3);
+        assert_eq!(streams[0].name, CREDENTIAL_LIFECYCLE_STREAM);
+        assert_eq!(streams[1].name, "GITHUB_ACME-MAIN");
+        assert_eq!(streams[1].subjects, vec!["github-acme-main.>"]);
+        assert_eq!(streams[2].name, "GITHUB_ACME_MAIN");
+        assert_eq!(streams[2].subjects, vec!["github-acme_main.>"]);
     }
 
     #[tokio::test]
@@ -157,6 +174,6 @@ client_secret = "sentry-client-secret"
 
         provision(&js, &cfg).await.expect("provision should succeed");
 
-        assert_eq!(js.created_streams().len(), 10);
+        assert_eq!(js.created_streams().len(), 11);
     }
 }
