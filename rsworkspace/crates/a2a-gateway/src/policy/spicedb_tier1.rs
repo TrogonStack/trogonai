@@ -403,8 +403,11 @@ pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_accou
 }
 
 /// Build a principal payload from a caller slug + session account.
-/// Used by the gateway runtime to materialise a principal from
-/// the verified caller identity once an AAuth token is mapped.
+/// Used by the gateway runtime to materialise a principal from the caller
+/// identity dispatch resolved for this request -- the JWT-header identity by
+/// default, or the verified `aa-auth+jwt` principal when
+/// `gateway_caller_identity_after_aauth` (in `runtime::aauth_env`) determined
+/// one supersedes it.
 pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
     SpiceDbPrincipal(serde_json::json!({
         "spicedb_subject": format!("user/{caller_slug}"),

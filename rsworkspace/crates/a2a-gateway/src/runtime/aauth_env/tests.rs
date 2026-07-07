@@ -56,7 +56,7 @@ fn invalid_mode_string_errors() {
 }
 
 #[test]
-fn missing_jwks_path_errors() {
+fn missing_jwks_source_errors_when_neither_path_nor_discovery_set() {
     let env = InMemoryEnv::new();
     env.set(ENV_AAUTH_MODE, "shadow");
     env.set(ENV_AAUTH_RESOURCE_ISS, "https://resource.test");
@@ -65,7 +65,7 @@ fn missing_jwks_path_errors() {
     env.set(ENV_AAUTH_CHALLENGE_KEY_PATH, "/tmp/does-not-matter");
     assert!(matches!(
         gateway_aauth_from_env(&env),
-        Err(AAuthEnvError::MissingRequired(ENV_AAUTH_JWKS_PATH))
+        Err(AAuthEnvError::MissingJwksSource)
     ));
 }
 
@@ -153,6 +153,97 @@ fn happy_path_enforce_builds_some() {
     );
     let result = gateway_aauth_from_env(&env).expect("enforce builds");
     assert!(result.is_some());
+}
+
+fn set_all_required_without_jwks_path(env: &InMemoryEnv, challenge_key_path: &str) {
+    env.set(ENV_AAUTH_RESOURCE_ISS, "https://resource.test");
+    env.set(ENV_AAUTH_PERSON_SERVER_AUD, "https://ps.test");
+    env.set(ENV_AAUTH_CHALLENGE_KID, "gw-kid");
+    env.set(ENV_AAUTH_CHALLENGE_KEY_PATH, challenge_key_path);
+}
+
+#[test]
+fn discovery_happy_path_builds_some() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    let result = gateway_aauth_from_env(&env).expect("discovery builds");
+    assert!(result.is_some());
+}
+
+#[test]
+fn discovery_false_with_no_path_errors_missing_source() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "false");
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::MissingJwksSource)
+    ));
+}
+
+#[test]
+fn both_path_and_discovery_set_errors_conflicting_source() {
+    let jwks_file = write_temp_file(r#"{"https://ap.test": {"keys": []}}"#);
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required(
+        &env,
+        jwks_file.path().to_str().expect("utf8 path"),
+        key_file.path().to_str().expect("utf8 path"),
+    );
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::ConflictingJwksSource)
+    ));
+}
+
+#[test]
+fn invalid_discovery_flag_errors() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "shadow");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "bogus");
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::InvalidJwksDiscovery(_))
+    ));
+}
+
+#[test]
+fn discovery_with_custom_ttl_builds_some() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "enforce");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    env.set(ENV_AAUTH_JWKS_TTL_SECS, "120");
+    let result = gateway_aauth_from_env(&env).expect("discovery with custom ttl builds");
+    assert!(result.is_some());
+}
+
+#[test]
+fn discovery_with_non_numeric_ttl_errors() {
+    let key_file = write_temp_file(&ec_pem());
+    let env = InMemoryEnv::new();
+    env.set(ENV_AAUTH_MODE, "enforce");
+    set_all_required_without_jwks_path(&env, key_file.path().to_str().expect("utf8 path"));
+    env.set(ENV_AAUTH_JWKS_DISCOVERY, "true");
+    env.set(ENV_AAUTH_JWKS_TTL_SECS, "not-a-number");
+    assert!(matches!(
+        gateway_aauth_from_env(&env),
+        Err(AAuthEnvError::InvalidNonNegativeSecs {
+            var: ENV_AAUTH_JWKS_TTL_SECS,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -292,4 +383,65 @@ fn aauth_deny_rule_fired_maps_all_variants() {
         aauth_deny_rule_fired(&mismatch),
         "gateway.aauth.denied.auth_agent_mismatch"
     );
+
+    let scope = AAuthDenyReason::ScopeNotCovered {
+        scope: "tasks.*".into(),
+        method: "message.send".into(),
+    };
+    assert_eq!(aauth_deny_rule_fired(&scope), "gateway.aauth.denied.scope");
+
+    let header = trogon_identity_types::aauth::MissionRef {
+        approver: "approver-1".into(),
+        s256: "hash-a".into(),
+    };
+    let claim = trogon_identity_types::aauth::MissionRef {
+        approver: "approver-2".into(),
+        s256: "hash-a".into(),
+    };
+    let mission_err =
+        trogon_aauth_verify::mission::verify_mission_header_matches_claim(&header, &claim).expect_err("mismatch");
+    let mission = AAuthDenyReason::MissionMismatch(mission_err);
+    assert_eq!(aauth_deny_rule_fired(&mission), "gateway.aauth.denied.mission");
+}
+
+fn jwt_header_identity() -> GatewayCallerIdentity {
+    GatewayCallerIdentity {
+        audit_caller_id: "user/jwt-header-caller".to_owned(),
+        audit_caller_source: Some("jwt_header".to_owned()),
+        caller_slug: Some("jwt-header-caller".to_owned()),
+    }
+}
+
+#[test]
+fn principal_present_overrides_existing_caller_identity() {
+    let result = gateway_caller_identity_after_aauth(jwt_header_identity(), Some("alice"));
+    assert_eq!(result.audit_caller_id, "user/alice");
+    assert_eq!(result.caller_slug.as_deref(), Some("alice"));
+}
+
+#[test]
+fn principal_present_sets_audit_caller_source_to_aauth() {
+    let result = gateway_caller_identity_after_aauth(jwt_header_identity(), Some("alice"));
+    assert_eq!(result.audit_caller_source.as_deref(), Some(AAUTH_CALLER_SOURCE));
+    assert_eq!(AAUTH_CALLER_SOURCE, "aauth");
+}
+
+#[test]
+fn principal_absent_preserves_existing_caller_identity() {
+    let existing = jwt_header_identity();
+    let result = gateway_caller_identity_after_aauth(existing.clone(), None);
+    assert_eq!(result, existing);
+}
+
+#[test]
+fn principal_present_overrides_even_anonymous_existing_identity() {
+    let anonymous = GatewayCallerIdentity {
+        audit_caller_id: "_".to_owned(),
+        audit_caller_source: None,
+        caller_slug: None,
+    };
+    let result = gateway_caller_identity_after_aauth(anonymous, Some("bob"));
+    assert_eq!(result.audit_caller_id, "user/bob");
+    assert_eq!(result.audit_caller_source.as_deref(), Some("aauth"));
+    assert_eq!(result.caller_slug.as_deref(), Some("bob"));
 }

@@ -36,7 +36,7 @@ use trogon_identity_types::aauth::headers as aauth_headers;
 use trogon_std::env::ReadEnv;
 use uuid::Uuid;
 
-use crate::aauth::{AAuthMode, DefaultAAuthIngress, StaticJwks};
+use crate::aauth::{AAuthMode, GatewayAAuthIngress};
 use crate::config::Config;
 use crate::gw_ingress_stream::{CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate};
 use crate::jwt_caller_identity::{
@@ -58,7 +58,7 @@ use crate::policy::tier3_redaction::{
     Tier3EvaluationContext, Tier3RedactionDecision, gateway_tier3_redaction_enabled, merge_forward_audit_rewrites,
     tier3_redaction_audit_rewrites,
 };
-use crate::runtime::aauth_env::aauth_deny_rule_fired;
+use crate::runtime::aauth_env::{GatewayCallerIdentity, aauth_deny_rule_fired, gateway_caller_identity_after_aauth};
 use crate::runtime::audit_publish::spawn_gateway_audit_publish;
 use crate::runtime::env::{
     gateway_audit_publish_enabled, json_rpc_audit_req_id, json_rpc_params, unary_deadline_for_method, unix_epoch_ms,
@@ -105,7 +105,7 @@ pub async fn dispatch_gateway_ingress<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&DefaultAAuthIngress<StaticJwks>>,
+    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
     message_caller_identity: &JwtHeaderCallerIdentitySource,
     caller_identity_policy: GatewayCallerIdentityPolicy,
@@ -197,7 +197,7 @@ async fn dispatch_routed<E: ReadEnv>(
     tier1: &dyn SpiceDbTier1Gate,
     tier1_owner: Option<&Arc<dyn OwnerTupleEmitter>>,
     tier1_declarative: &dyn Tier1DeclarativeGate,
-    aauth: Option<&DefaultAAuthIngress<StaticJwks>>,
+    aauth: Option<&GatewayAAuthIngress>,
     policy: &GatewayPolicyStack,
     streaming_ingress_enabled: bool,
     streaming_ingress_config: GatewayStreamingIngressConfig,
@@ -209,8 +209,8 @@ async fn dispatch_routed<E: ReadEnv>(
     ingress_subject: &str,
     agent_id: a2a_nats::A2aAgentId,
     method_dots: String,
-    audit_caller_id: String,
-    audit_caller_source: Option<String>,
+    mut audit_caller_id: String,
+    mut audit_caller_source: Option<String>,
 ) {
     let agent_subject = format!(
         "{}.agents.{}.{}",
@@ -218,10 +218,7 @@ async fn dispatch_routed<E: ReadEnv>(
         agent_id.as_str(),
         method_dots
     );
-    let headers_owned = msg.headers.clone().unwrap_or_default();
-    if audit_caller_id != ANONYMOUS_CALLER {
-        tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
-    }
+    let mut headers_owned = msg.headers.clone().unwrap_or_default();
     tracing::Span::current().record(ATTR_AGENT_SUBJECT, tracing::field::display(&agent_subject));
 
     let mut payload: Bytes = msg.payload.clone();
@@ -232,8 +229,12 @@ async fn dispatch_routed<E: ReadEnv>(
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
 
-    let caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
+    let mut caller_slug = caller_slug_from_audit_id(audit_caller_id.as_str());
     let mut tier1_zed_token: Option<String> = None;
+    // Carries the verified `aa-auth+jwt`'s `jti` past the AAuth block below so
+    // it can be attached as the forwarded message's `AAuth-Access` header
+    // (draft "AAuth-Access Response Header") once the allow path is reached.
+    let mut aauth_access_jti: Option<String> = None;
 
     // AAuth verifies caller identity before any authorization tier runs --
     // authentication must precede authorization.
@@ -254,15 +255,31 @@ async fn dispatch_routed<E: ReadEnv>(
                 payload.as_ref(),
                 &header_pairs,
                 auth_token.as_deref(),
+                method_dots.as_str(),
             )
             .await
         {
             Ok(resolution) => {
-                // The verified resolution is observability-only until the
-                // policy layers map AAuth principals to caller identity.
                 if let Some(agent_id) = resolution.agent_id.as_deref() {
                     tracing::Span::current().record("aauth_agent_id", agent_id);
                 }
+                // A verified `aa-auth+jwt` principal supersedes the
+                // JWT-header caller identity for everything downstream
+                // (Tier-1 authorization + audit attribution). Absent a
+                // principal, the agent authenticated on its own behalf and
+                // the existing caller identity is left untouched.
+                let identity = gateway_caller_identity_after_aauth(
+                    GatewayCallerIdentity {
+                        audit_caller_id,
+                        audit_caller_source,
+                        caller_slug,
+                    },
+                    resolution.principal.as_deref(),
+                );
+                audit_caller_id = identity.audit_caller_id;
+                audit_caller_source = identity.audit_caller_source;
+                caller_slug = identity.caller_slug;
+                aauth_access_jti = resolution.auth_jti;
             }
             Err(deny) => {
                 tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_AAUTH_DENIED);
@@ -315,6 +332,19 @@ async fn dispatch_routed<E: ReadEnv>(
                 return;
             }
         }
+    }
+
+    // AAuth-Access (draft "AAuth-Access Response Header"): once an
+    // `aa-auth+jwt` has been verified, the resource echoes back an opaque
+    // access identifier -- here, the auth token's `jti` -- so the forwarded
+    // agent can correlate this delivery with the access grant that produced
+    // it. Absent a verified auth token, no header is attached.
+    if let Some(jti) = aauth_access_jti.as_deref() {
+        headers_owned.insert(aauth_headers::ACCESS, jti);
+    }
+
+    if audit_caller_id != ANONYMOUS_CALLER {
+        tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
     }
 
     if tier1.is_enabled() {
