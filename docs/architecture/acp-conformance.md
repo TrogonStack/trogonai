@@ -56,26 +56,26 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `fs/read_text_file` | stable | implemented | |
 | `fs/write_text_file` | stable | implemented | |
 | `session/request_permission` | stable | implemented | |
-| `session/update` | stable | implemented | unknown variants fail decode and are dropped; observability guard planned in Phase 1 |
+| `session/update` | stable | implemented | unknown variants fail decode and are dropped with a `session_update`/`decode_failure` error metric |
 | `terminal/create` | stable | implemented | |
 | `terminal/output` | stable | implemented | |
 | `terminal/release` | stable | implemented | |
 | `terminal/wait_for_exit` | stable | implemented | |
 | `terminal/kill` | stable | implemented | |
-| Elicitation requests | unstable | unrepresentable at trait level | schema types exist behind `unstable_elicitation` at our pin, but the 0.10.4 SDK trait surface has no elicitation methods (SDK support landed in 0.14.0); Phase 4 of PLAN.md |
+| Elicitation requests | unstable | capabilities implemented | flag enabled, capability fields round-trip; the 0.10.4 SDK trait surface has no elicitation methods (SDK support landed in 0.14.0), full wiring lands with SDK 1.x in Phase 4 of PLAN.md |
 | `ext/*` | stable | implemented | passthrough, plus bullard-specific `ext/session/prompt_response` |
 
 ### Payload-level capabilities
 
 | Spec surface | Spec stage | Our status | Notes |
 | --- | --- | --- | --- |
-| `additionalDirectories` (session/new, session/load) | stable (0.13.5) | dropped | flag exists at our pin; Phase 1 of PLAN.md enables it |
+| `additionalDirectories` (session/new, session/load) | stable (0.13.5) | implemented | round-trip tested through the bridge |
 | Message IDs on chunks | stable (0.13.6) | implemented | 0.10.4-era `unstable_message_id` shape |
 | Session usage updates | stable (0.13.6) | implemented | 0.10.4-era `unstable_session_usage` shape |
 | Session config options | stable | implemented | 0.10.4-era shape |
 | Boolean config options | stable (1.3.0) | implemented (draft shape) | stabilized shape requires SDK 1.x |
 | `model_config` option category | stable (1.1.0) | unrepresentable | requires SDK 1.x; Phase 3 |
-| NES (next edit suggestions) | unstable | dropped | flag exists at our pin; Phase 1 enables it |
+| NES (next edit suggestions) | unstable | capabilities implemented | capability payloads round-trip; NES document methods have no trait surface at this pin, full wiring lands with SDK 1.x |
 | Plan operations | unstable (0.13.4) | unrepresentable | requires SDK 1.x; Phase 4 |
 | Providers | unstable (0.11.7) | unrepresentable | requires SDK 1.x; Phase 4 |
 | MCP-over-ACP message types | unstable (0.13.0) | unrepresentable | requires SDK 1.x; Phase 4 |

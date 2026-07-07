@@ -56,6 +56,10 @@ fn empty_headers() -> HeaderMap {
     HeaderMap::new()
 }
 
+fn test_metrics() -> crate::telemetry::metrics::Metrics {
+    crate::telemetry::metrics::Metrics::new(&opentelemetry::global::meter("session-update-test"))
+}
+
 #[tokio::test]
 async fn forwards_notification_to_client() {
     let client = MockClient::new();
@@ -65,7 +69,7 @@ async fn forwards_notification_to_client() {
     );
     let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&headers, &payload, &client, false).await;
+    handle(&headers, &payload, &client, false, &test_metrics()).await;
 
     assert_eq!(client.notification_count(), 1);
 }
@@ -73,7 +77,7 @@ async fn forwards_notification_to_client() {
 #[tokio::test]
 async fn invalid_payload_does_not_panic() {
     let client = MockClient::new();
-    handle(&empty_headers(), b"not json", &client, false).await;
+    handle(&empty_headers(), b"not json", &client, false, &test_metrics()).await;
     assert_eq!(client.notification_count(), 0);
 }
 
@@ -86,7 +90,7 @@ async fn client_error_does_not_panic() {
     );
     let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&headers, &payload, &client, false).await;
+    handle(&headers, &payload, &client, false, &test_metrics()).await;
 }
 
 #[tokio::test]
@@ -98,7 +102,7 @@ async fn has_reply_logs_warning_but_still_forwards() {
     );
     let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
 
-    handle(&headers, &payload, &client, true).await;
+    handle(&headers, &payload, &client, true, &test_metrics()).await;
 
     assert_eq!(client.notification_count(), 1);
 }

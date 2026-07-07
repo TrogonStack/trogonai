@@ -13,6 +13,7 @@ struct MockAgent {
     initialized: RefCell<bool>,
     cancelled: RefCell<Vec<String>>,
     fail_cancel: bool,
+    received_new_session: RefCell<Option<NewSessionRequest>>,
 }
 
 impl MockAgent {
@@ -21,6 +22,7 @@ impl MockAgent {
             initialized: RefCell::new(false),
             cancelled: RefCell::new(Vec::new()),
             fail_cancel: false,
+            received_new_session: RefCell::new(None),
         }
     }
 
@@ -29,6 +31,7 @@ impl MockAgent {
             initialized: RefCell::new(false),
             cancelled: RefCell::new(Vec::new()),
             fail_cancel: true,
+            received_new_session: RefCell::new(None),
         }
     }
 }
@@ -50,8 +53,9 @@ impl Agent for MockAgent {
 
     async fn new_session(
         &self,
-        _args: NewSessionRequest,
+        args: NewSessionRequest,
     ) -> agent_client_protocol::Result<agent_client_protocol::NewSessionResponse> {
+        *self.received_new_session.borrow_mut() = Some(args);
         Ok(agent_client_protocol::NewSessionResponse::new("sess-1"))
     }
 
@@ -344,8 +348,33 @@ async fn dispatch_new_session_publishes_response() {
 }
 
 #[tokio::test]
+async fn dispatch_new_session_additional_directories_survive_bridge() {
+    let request = NewSessionRequest::new("/tmp").additional_directories(vec![std::path::PathBuf::from("/tmp/extra")]);
+    let (nats, agent) = dispatch("acp.agent.session.new", &request, Some("_INBOX.r")).await;
+
+    assert_eq!(nats.published_messages(), vec!["_INBOX.r"]);
+    let received = agent.received_new_session.borrow();
+    assert_eq!(
+        received.as_ref().unwrap().additional_directories,
+        request.additional_directories
+    );
+}
+
+#[tokio::test]
 async fn dispatch_session_load_publishes_response() {
     assert_dispatch_method_not_found("acp.session.s1.agent.load", &LoadSessionRequest::new("s1", "/tmp")).await;
+}
+
+#[tokio::test]
+async fn dispatch_session_load_additional_directories_survive_wire_decode() {
+    let request =
+        LoadSessionRequest::new("s1", "/tmp").additional_directories(vec![std::path::PathBuf::from("/tmp/extra")]);
+    let method = wire_method_for_subject("acp.session.s1.agent.load");
+    let encoded = wire_encode_request(&method, &request);
+    let decoded: LoadSessionRequest =
+        acp_nats::wire::decode_request_params(&method, &encoded.headers, &encoded.body).unwrap();
+
+    assert_eq!(decoded.additional_directories, request.additional_directories);
 }
 
 #[tokio::test]

@@ -212,7 +212,7 @@ async fn dispatch_client_method<
             .await;
         }
         ClientMethod::SessionUpdate => {
-            session_update::handle(headers, &payload, ctx.client, reply.is_some()).await;
+            session_update::handle(headers, &payload, ctx.client, reply.is_some(), &ctx.bridge.metrics).await;
         }
         ClientMethod::ExtSessionPromptResponse => {
             ext_session_prompt_response::handle(

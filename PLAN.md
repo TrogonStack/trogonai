@@ -63,11 +63,11 @@ Key architectural fact driving this plan: the bridge decodes every message into 
 
 Do these before the big migration; they are independent, low-risk, and immediately fix silent data loss.
 
-- [ ] Enable `unstable_session_additional_directories` in `acp-nats` and `acp-nats-agent`; add round-trip tests proving `additionalDirectories` survives the bridge on `session/new` and `session/load`.
+- [x] Enable `unstable_session_additional_directories` in `acp-nats` and `acp-nats-agent`; round-trip tests cover wire encode/decode and full dispatch for `session/new` and `session/load`.
 - [x] Request cancellation interim decision: cannot be wired at 0.10.4 because the SDK's `AgentSideConnection` dispatch drops `$/cancel_request` before the bridge sees it (verified in `acp-nats-server/src/connection.rs` ingress). Any NATS-leg routing would be unreachable dead code rewritten in Phase 2. Recorded in the conformance matrix; end-to-end wiring lands with the 1.x SDK in Phase 3.
-- [ ] Enable `unstable_elicitation`: add the new client-side methods to `ClientMethod` in `parsing.rs`, subjects, handlers, and tests.
-- [ ] Enable `unstable_nes`: confirm the payloads round-trip through the bridge with tests.
-- [ ] Add a bridge-level guard for unknown `session/update` variants: on decode failure, log with a distinct metric/counter instead of silently dropping, so field-level drift becomes observable in Datadog.
+- [x] Enable `unstable_elicitation`: flag enabled with capability round-trip tests. Method routing is impossible at this pin (no SDK trait surface until 0.14.0); full wiring moves to Phase 4 with the 1.x SDK.
+- [x] Enable `unstable_nes`: capability payloads round-trip with tests; NES document methods follow the same SDK-trait limitation as elicitation.
+- [x] Add a bridge-level guard for unknown `session/update` variants: decode failures now record `acp` error metric with `session_update`/`decode_failure` attributes and log the drop.
 
 **Acceptance**: every feature the pinned SDK can express, stable or unstable, traverses the bridge with tests; unknown-variant drops are observable.
 
