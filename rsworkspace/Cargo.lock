@@ -6207,6 +6207,7 @@ dependencies = [
  "tower",
  "trogon-aauth-verify",
  "trogon-identity-types",
+ "uuid",
 ]
 
 [[package]]

@@ -75,6 +75,20 @@ impl PendingRequestStore {
         let mut guard = self.entries.lock().unwrap();
         guard.remove(id)
     }
+
+    /// Remove and return the pending request only when `ps_iss` is the PS
+    /// that parked it. A mismatch behaves exactly like an unknown id and
+    /// leaves the entry in place, so a caller probing ids can neither take
+    /// over nor burn another PS's claims-resume flow.
+    #[must_use]
+    pub fn take_for(&self, id: &PendingRequestId, ps_iss: &str) -> Option<PendingRequest> {
+        #[allow(clippy::unwrap_used)]
+        let mut guard = self.entries.lock().unwrap();
+        if guard.get(id)?.trust.issuer().as_str() != ps_iss {
+            return None;
+        }
+        guard.remove(id)
+    }
 }
 
 /// Body accepted at the claims-resume endpoint, re-exported here so callers

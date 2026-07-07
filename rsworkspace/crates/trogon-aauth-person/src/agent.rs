@@ -55,7 +55,10 @@ where
         .verify_agent(agent_token)
         .await
         .map_err(RequestVerificationError::AgentToken)?;
-    if parent_agent_of(agent_token).unwrap_or(None).is_some() {
+    if parent_agent_of(agent_token)
+        .map_err(RequestVerificationError::ParentAgentDecode)?
+        .is_some()
+    {
         return Err(RequestVerificationError::AgentTokenIsSubagent);
     }
 
@@ -66,7 +69,7 @@ where
                 .await
                 .map_err(RequestVerificationError::SubagentToken)?;
             let parent_agent = parent_agent_of(sat)
-                .unwrap_or(None)
+                .map_err(RequestVerificationError::ParentAgentDecode)?
                 .ok_or(RequestVerificationError::SubagentTokenIsItselfSubagent)?;
             if parent_agent != agent.claims.sub {
                 return Err(RequestVerificationError::SubagentParentMismatch {

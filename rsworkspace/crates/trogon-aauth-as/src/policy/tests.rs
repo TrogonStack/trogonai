@@ -125,7 +125,7 @@ impl OrganizationPolicy for ScopeSwitchedPolicy {
     fn decide(&self, ctx: &AsTokenContext<'_>, _trust: &TrustedIssuer) -> Decision {
         match ctx.resource_claims.scope.as_str() {
             "deny-me" => Decision::Deny {
-                reason: "org policy denies this scope".into(),
+                reason: DenialReason::new("org policy denies this scope"),
             },
             "claims-please" => Decision::RequireClaims {
                 required: RequiredClaims::new(["email", "tenant"]).unwrap(),
@@ -144,7 +144,7 @@ impl OrganizationPolicy for ScopeSwitchedPolicy {
     ) -> Decision {
         if claims.sub.is_empty() {
             return Decision::Deny {
-                reason: "missing directed sub".into(),
+                reason: DenialReason::new("missing directed sub"),
             };
         }
         Decision::Issue {

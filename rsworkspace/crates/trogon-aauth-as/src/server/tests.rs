@@ -21,7 +21,7 @@ impl OrganizationPolicy for ScopeSwitchedPolicy {
     fn decide(&self, ctx: &AsTokenContext<'_>, _trust: &TrustedIssuer) -> Decision {
         match ctx.resource_claims.scope.as_str() {
             "deny-me" => Decision::Deny {
-                reason: "org policy denies this scope".into(),
+                reason: crate::policy::DenialReason::new("org policy denies this scope"),
             },
             "claims-please" => Decision::RequireClaims {
                 required: RequiredClaims::new(["email"]).unwrap(),
@@ -121,7 +121,7 @@ async fn evaluate_denies_per_policy() {
 
     let outcome = server.evaluate(PS_ISS, &req).await.unwrap();
     match outcome {
-        AsOutcome::Denied { reason } => assert_eq!(reason, "org policy denies this scope"),
+        AsOutcome::Denied { reason } => assert_eq!(reason.as_str(), "org policy denies this scope"),
         _ => panic!("expected Denied"),
     }
 }
@@ -147,7 +147,10 @@ async fn evaluate_requires_claims_then_resume_issues() {
         sub: "user:alice".into(),
         claims: serde_json::Map::new(),
     };
-    let resumed = server.resume_with_claims(&pending_id, &submission).await.unwrap();
+    let resumed = server
+        .resume_with_claims(&pending_id, PS_ISS, &submission)
+        .await
+        .unwrap();
     match resumed {
         AsOutcome::Issued(resp) => assert!(!resp.auth_token.is_empty()),
         _ => panic!("expected Issued after resume"),
@@ -163,10 +166,41 @@ async fn resume_with_claims_rejects_unknown_pending_id() {
         claims: serde_json::Map::new(),
     };
     let err = server
-        .resume_with_claims(&PendingRequestId::new("does-not-exist"), &submission)
+        .resume_with_claims(&PendingRequestId::new("does-not-exist"), PS_ISS, &submission)
         .await
         .unwrap_err();
     assert!(matches!(err, AccessServerError::UnknownPendingRequest(_)));
+}
+
+#[tokio::test]
+async fn resume_with_claims_rejects_a_different_ps_and_preserves_the_pending_request() {
+    let now = now_unix();
+    let (server, req) = build_server("claims-please", now);
+
+    let outcome = server.evaluate(PS_ISS, &req).await.unwrap();
+    let pending_id = match outcome {
+        AsOutcome::ClaimsRequired { pending_id, .. } => pending_id,
+        _ => panic!("expected ClaimsRequired"),
+    };
+
+    let submission = ClaimsSubmission {
+        sub: "user:alice".into(),
+        claims: serde_json::Map::new(),
+    };
+    // A different PS gets the same answer as an unknown id: no probe oracle,
+    // no takeover, no burning of the parked request.
+    let err = server
+        .resume_with_claims(&pending_id, "https://ps-imposter.example", &submission)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AccessServerError::UnknownPendingRequest(_)));
+
+    // The rightful PS can still resume afterwards.
+    let resumed = server
+        .resume_with_claims(&pending_id, PS_ISS, &submission)
+        .await
+        .unwrap();
+    assert!(matches!(resumed, AsOutcome::Issued(_)));
 }
 
 #[tokio::test]

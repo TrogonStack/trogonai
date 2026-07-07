@@ -55,6 +55,31 @@ pub enum RequiredClaimsError {
     Empty,
 }
 
+/// Why organization policy refused, per "AS Decision Logic" item 8. A
+/// newtype rather than a bare `String`, matching [`GrantedScope`], so a
+/// denial cause cannot be confused with other policy strings on its way
+/// into the `denied` error body.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DenialReason(String);
+
+impl DenialReason {
+    #[must_use]
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self(reason.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DenialReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Outcome of an organization policy evaluation for one PS-to-AS token
 /// request, per "AS Response" and "AS Decision Logic (Non-Normative)".
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,7 +91,7 @@ pub enum Decision {
     RequireClaims { required: RequiredClaims },
     /// Deny per "AS Decision Logic" item 8 ("Insufficient trust for
     /// requested scope") -- surfaced as a token endpoint error.
-    Deny { reason: String },
+    Deny { reason: DenialReason },
 }
 
 /// Organization resource policy, evaluated per "Access Server" in "Policy

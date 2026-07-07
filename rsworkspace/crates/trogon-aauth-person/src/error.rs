@@ -44,6 +44,11 @@ pub enum RequestVerificationError {
     /// request directly.
     #[error("agent_token is a sub-agent token; sub-agents must not request authorization directly")]
     AgentTokenIsSubagent,
+    /// The `parent_agent` claim could not be decoded from a
+    /// signature-verified token. Failing closed: an undecodable payload
+    /// must not pass as a primary agent token.
+    #[error("parent_agent claim could not be decoded: {0}")]
+    ParentAgentDecode(#[source] crate::subagent::ParentAgentError),
     /// "Parent-Mediated Authorization" step 3: `subagent_token.parent_agent`
     /// must name the signing (parent) agent.
     #[error("subagent_token parent_agent ({parent_agent}) does not match signing agent ({signing_agent})")]
@@ -159,6 +164,7 @@ impl PersonServerError {
     pub fn token_endpoint_code(&self) -> TokenEndpointError {
         match self {
             PersonServerError::Verification(RequestVerificationError::AgentToken(_))
+            | PersonServerError::Verification(RequestVerificationError::ParentAgentDecode(_))
             | PersonServerError::Verification(RequestVerificationError::SubagentToken(_))
             | PersonServerError::Verification(RequestVerificationError::AgentTokenIsSubagent)
             | PersonServerError::Verification(RequestVerificationError::SubagentTokenIsItselfSubagent)

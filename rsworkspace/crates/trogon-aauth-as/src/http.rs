@@ -69,6 +69,7 @@ where
 
 async fn resume_endpoint<R, C, P>(
     State(server): State<Arc<AccessServer<R, C, P>>>,
+    Extension(ps): Extension<PsIdentity>,
     Path(id): Path<String>,
     Json(body): Json<ClaimsSubmission>,
 ) -> Response
@@ -78,7 +79,7 @@ where
     P: OrganizationPolicy,
 {
     let pending_id = PendingRequestId::new(id);
-    match server.resume_with_claims(&pending_id, &body).await {
+    match server.resume_with_claims(&pending_id, &ps.iss, &body).await {
         Ok(outcome) => outcome_response(outcome),
         Err(err) => error_response(&err),
     }
@@ -117,7 +118,7 @@ fn outcome_response(outcome: AsOutcome) -> Response {
         }
         AsOutcome::Denied { reason } => (
             StatusCode::FORBIDDEN,
-            Json(ErrorResponse::new("denied").with_detail(reason)),
+            Json(ErrorResponse::new("denied").with_detail(reason.as_str())),
         )
             .into_response(),
     }

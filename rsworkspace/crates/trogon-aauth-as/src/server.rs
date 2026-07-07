@@ -27,7 +27,7 @@ pub enum AsOutcome {
         required_claims: Vec<String>,
     },
     Denied {
-        reason: String,
+        reason: crate::policy::DenialReason,
     },
 }
 
@@ -139,11 +139,14 @@ where
     pub async fn resume_with_claims(
         &self,
         pending_id: &PendingRequestId,
+        ps_iss: &str,
         claims: &ClaimsSubmission,
     ) -> Result<AsOutcome, AccessServerError> {
+        // Bound to the PS that parked the request: any other caller gets the
+        // same unknown-id answer, so ids cannot be probed or taken over.
         let PendingRequest { verified, trust } = self
             .pending
-            .take(pending_id)
+            .take_for(pending_id, ps_iss)
             .ok_or_else(|| AccessServerError::UnknownPendingRequest(pending_id.as_str().to_string()))?;
 
         let ctx = self.context_of(&verified);
@@ -274,13 +277,11 @@ fn cnf_jwk_for(verified: &VerifiedRequest) -> serde_json::Value {
         .clone()
 }
 
+/// CSPRNG-backed: this value keys the pending store and rides in the
+/// `Location` URL, so it must be neither guessable nor collision-prone
+/// under bursty issuance.
 fn fresh_pending_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("as-{nanos:x}")
+    format!("as-{}", uuid::Uuid::new_v4().simple())
 }
 
 #[cfg(test)]
