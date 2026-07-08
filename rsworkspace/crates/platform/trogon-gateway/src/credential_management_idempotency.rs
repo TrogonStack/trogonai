@@ -15,7 +15,7 @@ use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus,
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, is_create_key_value_already_exists,
 };
-use trogonai_proto::gateway::credentials::v1 as proto;
+use trogonai_proto::gateway::credentials::idempotency_v1 as proto;
 
 use crate::credential_management::{CredentialCommandResponse, CredentialRefResponse};
 

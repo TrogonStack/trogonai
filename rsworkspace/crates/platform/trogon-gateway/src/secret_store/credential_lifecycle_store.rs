@@ -247,7 +247,9 @@ mod tests {
         let snapshot_id = credential_lifecycle_snapshot_id(raw_stream_id);
         let key = snapshot_key::<CredentialLifecycleState>(&snapshot_id).unwrap();
 
-        assert!(key.starts_with("snapshots.data.trogonai.gateway.credentials.v1.CredentialLifecycleStateSnapshot."));
+        assert!(
+            key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot.")
+        );
         assert!(!key.contains(raw_stream_id));
         assert!(!key.contains(':'));
         assert!(!key.contains('/'));
