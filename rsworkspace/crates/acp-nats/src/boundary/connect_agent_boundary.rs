@@ -187,6 +187,30 @@ async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
     cx.spawn(async move { agent.ext_notification(notification).await })
 }
 
+macro_rules! route_request {
+    ($builder:expr, $agent:expr, $handler:path) => {
+        $builder.on_receive_request(
+            {
+                let agent = $agent.clone();
+                async move |req, responder, cx| $handler(agent.clone(), req, responder, cx).await
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+    };
+}
+
+macro_rules! route_notification {
+    ($builder:expr, $agent:expr, $handler:path) => {
+        $builder.on_receive_notification(
+            {
+                let agent = $agent.clone();
+                async move |notif, cx| $handler(agent.clone(), notif, cx).await
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+    };
+}
+
 /// Connects an [`AgentHandler`] implementation to a byte-stream boundary.
 ///
 /// Registers one named handler per [`AgentHandler`] method, then falls
@@ -212,50 +236,27 @@ where
 {
     let (incoming, eof_rx) = EofSignalReader::new(incoming);
 
-    macro_rules! route_request {
-        ($builder:expr, $handler:path) => {
-            $builder.on_receive_request(
-                {
-                    let agent = agent.clone();
-                    async move |req, responder, cx| $handler(agent.clone(), req, responder, cx).await
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-        };
-    }
-    macro_rules! route_notification {
-        ($builder:expr, $handler:path) => {
-            $builder.on_receive_notification(
-                {
-                    let agent = agent.clone();
-                    async move |notif, cx| $handler(agent.clone(), notif, cx).await
-                },
-                agent_client_protocol::on_receive_notification!(),
-            )
-        };
-    }
-
     let builder = Agent.builder();
-    let builder = route_request!(builder, initialize);
-    let builder = route_request!(builder, authenticate);
-    let builder = route_request!(builder, logout);
-    let builder = route_request!(builder, new_session);
-    let builder = route_request!(builder, load_session);
-    let builder = route_request!(builder, prompt);
-    let builder = route_request!(builder, set_session_mode);
-    let builder = route_request!(builder, set_session_config_option);
-    let builder = route_request!(builder, fork_session);
-    let builder = route_request!(builder, resume_session);
-    let builder = route_request!(builder, close_session);
-    let builder = route_request!(builder, delete_session);
-    let builder = route_request!(builder, list_sessions);
+    let builder = route_request!(builder, agent, initialize);
+    let builder = route_request!(builder, agent, authenticate);
+    let builder = route_request!(builder, agent, logout);
+    let builder = route_request!(builder, agent, new_session);
+    let builder = route_request!(builder, agent, load_session);
+    let builder = route_request!(builder, agent, prompt);
+    let builder = route_request!(builder, agent, set_session_mode);
+    let builder = route_request!(builder, agent, set_session_config_option);
+    let builder = route_request!(builder, agent, fork_session);
+    let builder = route_request!(builder, agent, resume_session);
+    let builder = route_request!(builder, agent, close_session);
+    let builder = route_request!(builder, agent, delete_session);
+    let builder = route_request!(builder, agent, list_sessions);
     let builder = builder.on_receive_notification(
         async move |_notif: CancelRequestNotification, _cx| Ok(()),
         agent_client_protocol::on_receive_notification!(),
     );
-    let builder = route_notification!(builder, cancel);
-    let builder = route_request!(builder, ext_method);
-    let builder = route_notification!(builder, ext_notification);
+    let builder = route_notification!(builder, agent, cancel);
+    let builder = route_request!(builder, agent, ext_method);
+    let builder = route_notification!(builder, agent, ext_notification);
 
     builder
         .connect_with(ByteStreams::new(outgoing, incoming), async move |cx| {

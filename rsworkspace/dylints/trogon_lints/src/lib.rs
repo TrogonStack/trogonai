@@ -8,6 +8,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod error_string_comparison;
+mod function_local_macro_rules;
 mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
@@ -31,6 +32,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     dylint_linting::init_config(sess);
     lint_store.register_lints(&[
         ERROR_STRING_COMPARISON,
+        FUNCTION_LOCAL_MACRO_RULES,
         FUNCTION_LOCAL_USE,
         INLINE_MODULE_BLOCK,
         MANUAL_ERROR_IMPL,
@@ -235,6 +237,48 @@ rustc_session::declare_lint! {
     pub STD_ENV_ACCESS,
     Deny,
     "read environment variables through an injected `trogon_std::env::ReadEnv`, not `std::env` directly",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects `macro_rules!` definitions declared inside a function body.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Function-local macros lean on definition-site hygiene to silently
+    /// capture surrounding local variables, which hides the macro's real
+    /// inputs and pins the definition inside an unrelated function. At module
+    /// scope every input must be passed explicitly, the macro is visible in
+    /// the file structure, and it can be reused and reviewed on its own.
+    ///
+    /// ### Example
+    ///
+    /// ```rust
+    /// fn build() {
+    ///     let base = 1;
+    ///     macro_rules! add {
+    ///         ($x:expr) => { base + $x };
+    ///     }
+    ///     let _ = add!(2);
+    /// }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust
+    /// macro_rules! add {
+    ///     ($base:expr, $x:expr) => { $base + $x };
+    /// }
+    ///
+    /// fn build() {
+    ///     let base = 1;
+    ///     let _ = add!(base, 2);
+    /// }
+    /// ```
+    pub FUNCTION_LOCAL_MACRO_RULES,
+    Deny,
+    "macro_rules! definitions must live at module scope",
 }
 
 rustc_session::declare_lint! {
@@ -518,6 +562,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'tcx>) {
+        function_local_macro_rules::check_stmt(cx, stmt);
         self.function_local_use.check_stmt(cx, stmt);
     }
 
@@ -530,6 +575,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
 rustc_session::impl_lint_pass!(TrogonLints => [
     ERROR_STRING_COMPARISON,
+    FUNCTION_LOCAL_MACRO_RULES,
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,

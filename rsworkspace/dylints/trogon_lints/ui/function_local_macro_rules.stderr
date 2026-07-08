@@ -1,0 +1,27 @@
+error: `macro_rules! local_add` declared inside a function body
+  --> $DIR/function_local_macro_rules.rs:13:5
+   |
+LL | /     macro_rules! local_add {
+LL | |         ($x:expr) => {
+LL | |             $x + 1
+LL | |         };
+LL | |     }
+   | |_____^
+   |
+   = help: move the macro to module scope; pass what it captured from the enclosing scope as macro arguments
+   = note: `#[deny(function_local_macro_rules)]` on by default
+
+error: `macro_rules! inner` declared inside a function body
+  --> $DIR/function_local_macro_rules.rs:24:9
+   |
+LL | /         macro_rules! inner {
+LL | |             () => {
+LL | |                 7
+LL | |             };
+LL | |         }
+   | |_________^
+   |
+   = help: move the macro to module scope; pass what it captured from the enclosing scope as macro arguments
+
+error: aborting due to 2 previous errors
+
