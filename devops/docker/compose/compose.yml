@@ -45,6 +45,31 @@ services:
       start_period: 10s
       retries: 3
 
+  # Telegram chat bridge: consumes the gateway's raw TELEGRAM stream and
+  # drives the shared agent over acp-nats. Needs the gateway's Telegram
+  # source enabled (provisions the stream) and an agent behind acp-nats.
+  chat-bridge-telegram:
+    build:
+      context: ../../../rsworkspace
+      dockerfile: ../devops/docker/compose/services/chat-bridge-telegram/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      CHAT_SEED_TELEGRAM_USERS: "${CHAT_SEED_TELEGRAM_USERS:-}"
+      CHAT_PREFIX: "${CHAT_PREFIX:-prod}"
+      TELEGRAM_INBOUND_STREAM: "${TELEGRAM_INBOUND_STREAM:-TELEGRAM}"
+      ACP_PREFIX: "${ACP_PREFIX:-acp}"
+      NATS_URL: "nats:4222"
+      RUST_LOG: "${RUST_LOG:-info}"
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - telegram
+
   # Backing store for the optional Postgres schedules read-model projection
   # (SCHEDULER_PROJECTION_BACKEND=postgres). The default NATS KV projection does
   # not need this service.

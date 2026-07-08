@@ -25,14 +25,6 @@ docs/.vitepress/cache
 !.env.example
 mise.local.toml
 
-# Config
-config/telegram-bot.toml
-config/*.toml
-!config/*.example.toml
-
-# Docker
-docker-compose.override.yml
-
 # IDE
 .idea/
 .vscode/
