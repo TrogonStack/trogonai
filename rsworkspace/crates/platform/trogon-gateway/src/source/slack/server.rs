@@ -26,7 +26,7 @@ use trogon_nats::jetstream::{
 };
 use trogon_semconv::span::SLACK_WEBHOOK;
 
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -605,7 +605,7 @@ mod tests {
     };
     use trogon_std::NonZeroDuration;
 
-    use crate::credential::domain::{CredentialOwnerId, CredentialScope};
+    use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 

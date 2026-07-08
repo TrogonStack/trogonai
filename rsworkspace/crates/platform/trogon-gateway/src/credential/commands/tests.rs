@@ -11,14 +11,14 @@ use trogon_decider_runtime::{
 };
 use trogonai_proto::gateway::credentials::v1 as proto;
 
-use super::super::domain::credential_event::proto_event_type;
-use super::super::domain::{
+use super::domain::credential_event::proto_event_type;
+use super::domain::{
     CredentialEvent, CredentialEventPayloadError, CredentialFailureReason, CredentialFingerprint, CredentialId,
     CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
     CredentialVersion, SourceKind, StorageBackend,
 };
-use super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
-use super::super::state::{CredentialDecideError, CredentialState, evolve, initial_state};
+use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
+use super::state::{CredentialDecideError, CredentialState, evolve, initial_state};
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
     RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,

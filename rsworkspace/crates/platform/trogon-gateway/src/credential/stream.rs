@@ -7,7 +7,7 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::JetStreamContext;
 use uuid::Uuid;
 
-use super::domain::CredentialId;
+use super::commands::domain::CredentialId;
 
 pub(crate) const CREDENTIAL_STREAM: &str = "GATEWAY_CREDENTIAL_EVENTS";
 pub(crate) const CREDENTIAL_EVENT_SUBJECT_PREFIX: &str = "gateway.credentials.events.v1";
