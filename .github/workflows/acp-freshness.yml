@@ -18,70 +18,23 @@ jobs:
 
       - name: Compare pinned agent-client-protocol against crates.io
         id: compare
-        run: |
-          set -euo pipefail
-
-          pinned=$(grep -oE 'agent-client-protocol = \{ version = "=?[0-9]+\.[0-9]+\.[0-9]+"' rsworkspace/Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-          if [ -z "$pinned" ]; then
-            echo "Could not find pinned agent-client-protocol version" >&2
-            exit 1
-          fi
-
-          latest_sdk=$(curl -sf -A "trogonai-acp-freshness" https://crates.io/api/v1/crates/agent-client-protocol | jq -r '.crate.max_stable_version // .crate.max_version')
-          latest_schema=$(curl -sf -A "trogonai-acp-freshness" https://crates.io/api/v1/crates/agent-client-protocol-schema | jq -r '.crate.max_stable_version // .crate.max_version')
-
-          bundled_schema=$(grep -A2 'name = "agent-client-protocol-schema"' rsworkspace/Cargo.lock | grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-
-          {
-            echo "pinned=$pinned"
-            echo "latest_sdk=$latest_sdk"
-            echo "bundled_schema=${bundled_schema:-unknown}"
-            echo "latest_schema=$latest_schema"
-          } >> "$GITHUB_OUTPUT"
-
-          if [ "$pinned" != "$latest_sdk" ]; then
-            echo "drift=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "drift=false" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          ISSUE_BODY_FILE: ${{ runner.temp }}/acp-drift-issue.md
+        run: ./.config/mise/tasks/acp-freshness
 
       - name: Open or update drift issue
         if: steps.compare.outputs.drift == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PINNED: ${{ steps.compare.outputs.pinned }}
-          LATEST_SDK: ${{ steps.compare.outputs.latest_sdk }}
-          BUNDLED_SCHEMA: ${{ steps.compare.outputs.bundled_schema }}
-          LATEST_SCHEMA: ${{ steps.compare.outputs.latest_schema }}
+          TITLE: "ACP drift: agent-client-protocol ${{ steps.compare.outputs.pinned }} is behind ${{ steps.compare.outputs.latest_sdk }}"
+          ISSUE_BODY_FILE: ${{ runner.temp }}/acp-drift-issue.md
         run: |
           set -euo pipefail
-
-          title="ACP drift: agent-client-protocol $PINNED is behind $LATEST_SDK"
-          body=$(cat <<EOF
-          The pinned \`agent-client-protocol\` version has fallen behind crates.io.
-
-          | | pinned | latest |
-          | --- | --- | --- |
-          | SDK (\`agent-client-protocol\`) | $PINNED | $LATEST_SDK |
-          | Schema (\`agent-client-protocol-schema\`) | $BUNDLED_SCHEMA | $LATEST_SCHEMA |
-
-          A version bump is never just a version change. Per the upgrade ritual in \`docs/architecture/acp-conformance.md\`, the bump PR must:
-
-          - [ ] Diff the schema changelog between the pinned and latest versions: https://github.com/agentclientprotocol/agent-client-protocol/blob/main/CHANGELOG.md
-          - [ ] For each added or stabilized method: add subject mapping in \`acp-nats/src/nats/parsing.rs\`, a handler, and tests, or a conformance matrix row with opt-out rationale
-          - [ ] For each added field or \`session/update\` variant: add a round-trip test through the bridge (typed re-encode silently drops unmapped fields)
-          - [ ] For each new unstable flag: enable it per the opt-in policy and wire it
-          - [ ] Update \`docs/architecture/acp-conformance.md\` (matrix and spec position) in the same PR
-
-          This issue is filed automatically by \`.github/workflows/acp-freshness.yml\` and updated on re-runs.
-          EOF
-          )
-
           existing=$(gh issue list --state open --search "in:title \"ACP drift:\"" --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue edit "$existing" --title "$title" --body "$body"
+            gh issue edit "$existing" --title "$TITLE" --body-file "$ISSUE_BODY_FILE"
             echo "Updated issue #$existing"
           else
-            gh issue create --title "$title" --body "$body" --label dependencies
+            gh issue create --title "$TITLE" --body-file "$ISSUE_BODY_FILE" --label dependencies
             echo "Created new drift issue"
           fi

@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#MISE description="Compare the pinned agent-client-protocol SDK and bundled schema against crates.io latest"
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+
+crates_io() {
+  curl -sf --retry 3 -A "trogonai-acp-freshness" "https://crates.io/api/v1/crates/$1" |
+    jq -r '.crate.max_stable_version // .crate.max_version'
+}
+
+pinned="$(grep -oE 'agent-client-protocol = \{ version = "=?[0-9]+\.[0-9]+\.[0-9]+"' "$root/rsworkspace/Cargo.toml" |
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+if [[ -z "$pinned" ]]; then
+  echo "Could not find pinned agent-client-protocol version in rsworkspace/Cargo.toml" >&2
+  exit 1
+fi
+
+bundled_schema="$(grep -A2 'name = "agent-client-protocol-schema"' "$root/rsworkspace/Cargo.lock" |
+  grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+
+latest_sdk="$(crates_io agent-client-protocol)"
+latest_schema="$(crates_io agent-client-protocol-schema)"
+
+drift=false
+if [[ "$pinned" != "$latest_sdk" || "${bundled_schema:-unknown}" != "$latest_schema" ]]; then
+  drift=true
+fi
+
+echo "ACP freshness:"
+echo "  SDK    pinned=$pinned latest=$latest_sdk"
+echo "  schema bundled=${bundled_schema:-unknown} latest=$latest_schema"
+echo "  drift=$drift"
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "pinned=$pinned"
+    echo "latest_sdk=$latest_sdk"
+    echo "bundled_schema=${bundled_schema:-unknown}"
+    echo "latest_schema=$latest_schema"
+    echo "drift=$drift"
+  } >>"$GITHUB_OUTPUT"
+fi
+
+if [[ "$drift" == "true" && -n "${ISSUE_BODY_FILE:-}" ]]; then
+  cat >"$ISSUE_BODY_FILE" <<EOF
+The pinned \`agent-client-protocol\` version has fallen behind crates.io.
+
+| | pinned | latest |
+| --- | --- | --- |
+| SDK (\`agent-client-protocol\`) | $pinned | $latest_sdk |
+| Schema (\`agent-client-protocol-schema\`) | ${bundled_schema:-unknown} | $latest_schema |
+
+A version bump is never just a version change. Per the upgrade ritual in \`docs/architecture/acp-conformance.md\`, the bump PR must:
+
+- [ ] Diff the schema changelog between the pinned and latest versions: https://github.com/agentclientprotocol/agent-client-protocol/blob/main/CHANGELOG.md
+- [ ] For each added or stabilized method: add subject mapping in \`acp-nats/src/nats/parsing.rs\`, a handler, and tests, or a conformance matrix row with opt-out rationale
+- [ ] For each added field or \`session/update\` variant: add a round-trip test through the bridge (typed re-encode silently drops unmapped fields)
+- [ ] For each new unstable flag: enable it per the opt-in policy and wire it
+- [ ] Update \`docs/architecture/acp-conformance.md\` (matrix and spec position) in the same PR
+
+This issue is filed automatically by \`.github/workflows/acp-freshness.yml\` and updated on re-runs.
+EOF
+  echo "  issue body written to $ISSUE_BODY_FILE"
+fi
