@@ -217,8 +217,7 @@ mod tests {
     use async_nats::jetstream::context::{CreateKeyValueErrorKind, KeyValueErrorKind};
     use trogon_decider_nats::snapshot_key;
     use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
-
-    use super::super::CredentialState;
+    use trogonai_proto::gateway::credentials::state_v1;
 
     #[test]
     fn snapshot_id_uses_nats_safe_deterministic_key() {
@@ -239,7 +238,7 @@ mod tests {
     fn snapshot_key_keeps_raw_credential_id_out_of_nats_kv_key() {
         let raw_stream_id = "openbao:tenant-1:github/primary:webhook_secret";
         let snapshot_id = credential_snapshot_id(raw_stream_id);
-        let key = snapshot_key::<CredentialState>(&snapshot_id).unwrap();
+        let key = snapshot_key::<state_v1::CredentialStateSnapshot>(&snapshot_id).unwrap();
 
         assert!(key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialStateSnapshot."));
         assert!(!key.contains(raw_stream_id));

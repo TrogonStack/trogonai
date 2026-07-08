@@ -4,7 +4,7 @@
 #[cfg(any(feature = "gateway", feature = "schedules", feature = "agents", feature = "sessions"))]
 mod r#gen;
 
-#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "agents", feature = "sessions"))]
 mod codec;
 
 pub mod constants;

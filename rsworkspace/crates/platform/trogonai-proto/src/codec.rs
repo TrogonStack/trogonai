@@ -1,6 +1,6 @@
 use trogon_decider::EventData;
 
-#[cfg(feature = "runtime-snapshot")]
+#[cfg(any(feature = "runtime-snapshot", feature = "gateway"))]
 use trogon_decider_runtime::{InvalidSnapshotTypeNameError, SnapshotTypeName};
 
 pub(crate) fn decode_event_case<Payload, Case>(event: &EventData<'_>) -> Option<Result<Case, buffa::DecodeError>>
@@ -18,7 +18,7 @@ where
     Payload::FULL_NAME
 }
 
-#[cfg(feature = "runtime-snapshot")]
+#[cfg(any(feature = "runtime-snapshot", feature = "gateway"))]
 pub(crate) fn snapshot_type<Payload>() -> Result<SnapshotTypeName, InvalidSnapshotTypeNameError>
 where
     Payload: buffa::MessageName,

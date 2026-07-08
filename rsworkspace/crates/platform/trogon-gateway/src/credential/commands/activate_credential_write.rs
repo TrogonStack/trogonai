@@ -1,9 +1,10 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialEvent, CredentialMetadata};
+use super::super::proto::{activated_to_proto, decode_pending_write_state};
+use super::domain::CredentialMetadata;
 use super::state::{
-    CredentialDecideError, CredentialEvolveError, CredentialState, validate_activation_metadata,
-    validate_ref_matches_pending,
+    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_ref_matches_pending,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,8 +20,8 @@ impl ActivateCredentialWrite {
 
 impl Decider for ActivateCredentialWrite {
     type StreamId = str;
-    type State = CredentialState;
-    type Event = CredentialEvent;
+    type State = state_v1::CredentialStateSnapshot;
+    type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
@@ -37,19 +38,28 @@ impl Decider for ActivateCredentialWrite {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let pending = match state {
-            CredentialState::PendingWrite(pending) => pending,
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+        let pending = match current {
+            CredentialStateSnapshotCase::PendingWrite(pending) => pending,
             _ => {
                 return Err(CredentialDecideError::CredentialWriteNotPending {
                     credential_id: command.metadata.reference().id().clone(),
                 });
             }
         };
-        validate_activation_metadata(&command.metadata)?;
-        validate_ref_matches_pending(command.metadata.reference(), pending)?;
+        let (pending_id, pending_owner, pending_source, pending_kind) = decode_pending_write_state(pending)?;
 
-        Ok(Decision::event(CredentialEvent::Activated {
-            metadata: command.metadata.clone(),
+        validate_activation_metadata(&command.metadata)?;
+        validate_ref_matches_pending(
+            command.metadata.reference(),
+            &pending_id,
+            &pending_owner,
+            pending_source,
+            pending_kind,
+        )?;
+
+        Ok(Decision::event(v1::CredentialEvent {
+            event: Some(activated_to_proto(&command.metadata).into()),
         }))
     }
 }
