@@ -1,8 +1,20 @@
+use super::super::connection_client::ConnectionClient;
 use super::*;
+use crate::client_handler::ClientHandler;
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, AuthenticateResponse, CancelNotification, InitializeRequest, InitializeResponse,
-    NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, StopReason,
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest,
+    CompleteElicitationNotification, ContentBlock, ContentChunk, CreateElicitationRequest, CreateElicitationResponse,
+    CreateTerminalRequest, CreateTerminalResponse, DeleteSessionRequest, ElicitationAcceptAction, ElicitationFormMode,
+    ElicitationSchema, ElicitationSessionScope, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
+    InitializeResponse, KillTerminalRequest, KillTerminalResponse, ListSessionsRequest, LoadSessionRequest,
+    LogoutRequest, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest, SessionConfigOptionValue,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason,
+    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCallUpdate, ToolCallUpdateFields,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 struct StubAgent;
 
@@ -81,7 +93,6 @@ async fn initialize_round_trips_through_boundary() {
     );
 
     let client = async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let mut writer = client_write;
         writer
             .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1}}\n")
@@ -138,7 +149,6 @@ async fn cancel_request_answers_pending_prompt_with_request_cancelled_error() {
     );
 
     let client = async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let mut writer = client_write;
         writer
             .write_all(
@@ -168,12 +178,6 @@ async fn cancel_request_answers_pending_prompt_with_request_cancelled_error() {
 
 #[tokio::test]
 async fn every_agent_method_is_routed_through_the_boundary() {
-    use agent_client_protocol::schema::v1::{
-        CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest, ListSessionsRequest, LoadSessionRequest,
-        LogoutRequest, ResumeSessionRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
-        SetSessionModeRequest,
-    };
-
     let (client_io, server_io) = tokio::io::duplex(16384);
     let (client_read, client_write) = tokio::io::split(client_io);
     let (server_read, server_write) = tokio::io::split(server_io);
@@ -253,7 +257,6 @@ async fn every_agent_method_is_routed_through_the_boundary() {
         .collect();
 
     let client = async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let mut writer = client_write;
         writer
             .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{\"sessionId\":\"s1\"}}\n")
@@ -301,19 +304,6 @@ async fn every_agent_method_is_routed_through_the_boundary() {
 
 #[tokio::test]
 async fn connection_client_forwards_every_client_method() {
-    use super::super::connection_client::ConnectionClient;
-    use crate::client_handler::ClientHandler;
-    use agent_client_protocol::schema::v1::{
-        CompleteElicitationNotification, ContentBlock, ContentChunk, CreateElicitationRequest,
-        CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse, ElicitationAcceptAction,
-        ElicitationFormMode, ElicitationSchema, ElicitationSessionScope, ExtNotification, ExtRequest,
-        KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-        ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-        SessionNotification, SessionUpdate, TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse,
-        ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-        WriteTextFileRequest, WriteTextFileResponse,
-    };
-
     let (client_io, server_io) = tokio::io::duplex(16384);
     let (client_read, client_write) = tokio::io::split(client_io);
     let (server_read, server_write) = tokio::io::split(server_io);
@@ -384,7 +374,6 @@ async fn connection_client_forwards_every_client_method() {
     );
 
     let peer = async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let mut writer = client_write;
         let mut lines = BufReader::new(client_read).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -469,7 +458,6 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
     );
 
     let client = async move {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let mut writer = client_write;
 
         writer
