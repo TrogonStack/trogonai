@@ -107,8 +107,10 @@ mod tests {
     use super::*;
     use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
     use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
-    use crate::credential::{CredentialEvent, evolve, initial_state};
+    use crate::credential::proto::{activated_to_proto, write_requested_to_proto};
+    use crate::credential::{evolve, initial_state};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
+    use trogonai_proto::gateway::credentials::v1;
 
     fn owner_id() -> CredentialOwnerId {
         CredentialOwnerId::new("tenant-1").unwrap()
@@ -131,13 +133,20 @@ mod tests {
             .unwrap();
         let metadata = store.metadata(&credential).await.unwrap();
         let state = [
-            CredentialEvent::WriteRequested {
-                credential_id: credential.id().clone(),
-                owner_id: owner_id(),
-                source: SourceKind::Discord,
-                kind: CredentialKind::BotToken,
+            v1::CredentialEvent {
+                event: Some(
+                    write_requested_to_proto(
+                        credential.id(),
+                        &owner_id(),
+                        SourceKind::Discord,
+                        CredentialKind::BotToken,
+                    )
+                    .into(),
+                ),
             },
-            CredentialEvent::Activated { metadata },
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))

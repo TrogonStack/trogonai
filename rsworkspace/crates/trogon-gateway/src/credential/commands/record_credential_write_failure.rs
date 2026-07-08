@@ -1,7 +1,9 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialEvent, CredentialFailureReason, CredentialId};
-use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
+use super::super::proto::write_failed_to_proto;
+use super::domain::{CredentialFailureReason, CredentialId};
+use super::state::{CredentialDecideError, CredentialEvolveError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialWriteFailure {
@@ -17,8 +19,8 @@ impl RecordCredentialWriteFailure {
 
 impl Decider for RecordCredentialWriteFailure {
     type StreamId = str;
-    type State = CredentialState;
-    type Event = CredentialEvent;
+    type State = state_v1::CredentialStateSnapshot;
+    type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
@@ -35,10 +37,11 @@ impl Decider for RecordCredentialWriteFailure {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        match state {
-            CredentialState::PendingWrite(_) => Ok(Decision::event(CredentialEvent::WriteFailed {
-                credential_id: command.credential_id.clone(),
-                reason: command.reason.clone(),
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+
+        match current {
+            CredentialStateSnapshotCase::PendingWrite(_) => Ok(Decision::event(v1::CredentialEvent {
+                event: Some(write_failed_to_proto(&command.credential_id, &command.reason).into()),
             })),
             _ => Err(CredentialDecideError::CredentialWriteNotPending {
                 credential_id: command.credential_id.clone(),

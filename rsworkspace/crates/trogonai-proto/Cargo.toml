@@ -10,7 +10,7 @@ workspace = true
 [features]
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
-gateway = ["dep:buffa", "dep:buffa-types", "dep:serde"]
+gateway = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider-runtime"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider-runtime", "chrono"]
 
 [dependencies]

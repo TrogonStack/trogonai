@@ -14,6 +14,7 @@ use subtle::ConstantTimeEq;
 use tracing::warn;
 use trogon_decider_runtime::{SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::SecretString;
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
 use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
@@ -23,7 +24,7 @@ use crate::credential::handler::{
 };
 use crate::credential::processor::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
 use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
-use crate::credential::{ActiveCredential, CredentialState};
+use crate::credential::proto::{decode_active_state, decode_message_field, decode_revoked_state};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{
@@ -125,8 +126,8 @@ pub(crate) fn router<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -274,8 +275,8 @@ fn test_router<EventStore, Secrets>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -334,8 +335,8 @@ async fn put_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -357,8 +358,8 @@ async fn put_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -380,8 +381,8 @@ async fn put_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -403,8 +404,8 @@ async fn put_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -426,8 +427,8 @@ async fn put_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -449,8 +450,8 @@ async fn put_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -472,8 +473,8 @@ async fn put_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -495,8 +496,8 @@ async fn put_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -518,8 +519,8 @@ async fn put_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -541,8 +542,8 @@ async fn put_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -564,8 +565,8 @@ async fn put_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -588,8 +589,8 @@ async fn put_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -612,8 +613,8 @@ async fn put_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -637,8 +638,8 @@ async fn put_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -715,8 +716,8 @@ async fn rotate_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -738,8 +739,8 @@ async fn rotate_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -761,8 +762,8 @@ async fn rotate_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -784,8 +785,8 @@ async fn rotate_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -807,8 +808,8 @@ async fn rotate_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -830,8 +831,8 @@ async fn rotate_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -853,8 +854,8 @@ async fn rotate_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -876,8 +877,8 @@ async fn rotate_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -899,8 +900,8 @@ async fn rotate_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -922,8 +923,8 @@ async fn rotate_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -945,8 +946,8 @@ async fn rotate_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -969,8 +970,8 @@ async fn rotate_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -993,8 +994,8 @@ async fn rotate_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1019,8 +1020,8 @@ async fn rotate_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1098,8 +1099,8 @@ async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1121,8 +1122,8 @@ async fn revoke_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1144,8 +1145,8 @@ async fn revoke_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1167,8 +1168,8 @@ async fn revoke_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1190,8 +1191,8 @@ async fn revoke_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1213,8 +1214,8 @@ async fn revoke_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1236,8 +1237,8 @@ async fn revoke_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1259,8 +1260,8 @@ async fn revoke_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1282,8 +1283,8 @@ async fn revoke_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1305,8 +1306,8 @@ async fn revoke_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1328,8 +1329,8 @@ async fn revoke_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1352,8 +1353,8 @@ async fn revoke_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1376,8 +1377,8 @@ async fn revoke_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1401,8 +1402,8 @@ async fn revoke_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + Send
         + Sync
@@ -1567,11 +1568,17 @@ enum CredentialManagementHttpError {
     InvalidInput(String),
     CommandFailed(String),
     UnexpectedCredentialState(&'static str),
+    InvalidState(String),
 }
 
 impl CredentialManagementHttpError {
     fn invalid_input(error: impl fmt::Display) -> Self {
         Self::InvalidInput(error.to_string())
+    }
+
+    fn invalid_state(error: impl fmt::Display) -> Self {
+        warn!(error = %error, "credential management persisted state is invalid");
+        Self::InvalidState(error.to_string())
     }
 
     fn command_failed<SnapshotReadError, ReadError, AppendError>(
@@ -1634,6 +1641,13 @@ impl IntoResponse for CredentialManagementHttpError {
             }
             Self::UnexpectedCredentialState(state) => {
                 warn!(state, "credential management command returned an unexpected state");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "credential management request failed",
+                )
+            }
+            Self::InvalidState(error) => {
+                warn!(error = %error, "credential management persisted state is invalid");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management request failed",
@@ -1709,25 +1723,30 @@ fn credential_ref_from_request(
 
 fn command_response(
     stream_position: StreamPosition,
-    state: CredentialState,
+    state: state_v1::CredentialStateSnapshot,
 ) -> Result<CredentialCommandResponse, CredentialManagementHttpError> {
-    match state {
-        CredentialState::Active(active) => Ok(response_for_active("active", stream_position, active)),
-        CredentialState::RotationPending(rotation) => Ok(response_for_active(
-            "rotation_pending",
-            stream_position,
-            rotation.active().clone(),
-        )),
-        CredentialState::Revoked(revoked) => Ok(CredentialCommandResponse {
-            state: "revoked".to_string(),
-            stream_position: stream_position.as_u64(),
-            credential_ref: credential_ref_response(revoked.credential_ref(), CredentialStatus::Revoked),
-        }),
-        CredentialState::Missing => Err(CredentialManagementHttpError::UnexpectedCredentialState("missing")),
-        CredentialState::PendingWrite(_) => Err(CredentialManagementHttpError::UnexpectedCredentialState(
-            "pending_write",
-        )),
-        CredentialState::WriteFailed(_) => {
+    match state.state.as_ref() {
+        Some(CredentialStateSnapshotCase::Active(active)) => response_for_active("active", stream_position, active),
+        Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
+            let active = decode_message_field("rotation_pending.active", &rotation.active)
+                .map_err(CredentialManagementHttpError::invalid_state)?;
+            response_for_active("rotation_pending", stream_position, active)
+        }
+        Some(CredentialStateSnapshotCase::Revoked(revoked)) => {
+            let credential_ref = decode_revoked_state(revoked).map_err(CredentialManagementHttpError::invalid_state)?;
+            Ok(CredentialCommandResponse {
+                state: "revoked".to_string(),
+                stream_position: stream_position.as_u64(),
+                credential_ref: credential_ref_response(&credential_ref, CredentialStatus::Revoked),
+            })
+        }
+        None | Some(CredentialStateSnapshotCase::Missing(_)) => {
+            Err(CredentialManagementHttpError::UnexpectedCredentialState("missing"))
+        }
+        Some(CredentialStateSnapshotCase::PendingWrite(_)) => Err(
+            CredentialManagementHttpError::UnexpectedCredentialState("pending_write"),
+        ),
+        Some(CredentialStateSnapshotCase::WriteFailed(_)) => {
             Err(CredentialManagementHttpError::UnexpectedCredentialState("write_failed"))
         }
     }
@@ -1736,13 +1755,15 @@ fn command_response(
 fn response_for_active(
     state: &'static str,
     stream_position: StreamPosition,
-    active: ActiveCredential,
-) -> CredentialCommandResponse {
-    CredentialCommandResponse {
+    active: &state_v1::ActiveCredentialState,
+) -> Result<CredentialCommandResponse, CredentialManagementHttpError> {
+    let (metadata, _previous_versions) =
+        decode_active_state("active", active).map_err(CredentialManagementHttpError::invalid_state)?;
+    Ok(CredentialCommandResponse {
         state: state.to_string(),
         stream_position: stream_position.as_u64(),
-        credential_ref: credential_ref_response(active.credential_ref(), active.metadata().status()),
-    }
+        credential_ref: credential_ref_response(metadata.reference(), metadata.status()),
+    })
 }
 
 fn credential_ref_response(credential: &CredentialRef, status: CredentialStatus) -> CredentialRefResponse {
@@ -1775,17 +1796,17 @@ mod tests {
     };
 
     use super::*;
-    use crate::credential::CredentialEvent;
     use crate::credential::processor::recovery_worker::{
         CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
     };
     use crate::credential::processor::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
     use crate::secret_store::MockOpenBaoSecretStore;
+    use trogonai_proto::gateway::credentials::v1;
 
     #[derive(Clone, Default)]
     struct ManagementTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -1793,11 +1814,11 @@ mod tests {
     struct ManagementTestStreamError;
 
     impl ManagementTestStreamStore {
-        async fn decoded_events(&self) -> Vec<CredentialEvent> {
+        async fn decoded_events(&self) -> Vec<v1::CredentialEvent> {
             let events = self.events.lock().await.clone();
             events
                 .into_iter()
-                .filter_map(|event| event.decode::<CredentialEvent>().unwrap().into_decoded())
+                .filter_map(|event| event.decode::<v1::CredentialEvent>().unwrap().into_decoded())
                 .collect()
         }
     }
@@ -1858,13 +1879,13 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialState, str> for ManagementTestStreamStore {
+    impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
         type Error = ManagementTestStreamError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
             let snapshots = self.snapshots.lock().await;
             Ok(ReadSnapshotResponse {
                 snapshot: snapshots.get(request.snapshot_id).cloned(),
@@ -1872,12 +1893,12 @@ mod tests {
         }
     }
 
-    impl SnapshotWrite<CredentialState, str> for ManagementTestStreamStore {
+    impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for ManagementTestStreamStore {
         type Error = ManagementTestStreamError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialState, str>,
+            request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             let mut snapshots = self.snapshots.lock().await;
             snapshots.insert(request.snapshot_id.to_string(), request.snapshot);

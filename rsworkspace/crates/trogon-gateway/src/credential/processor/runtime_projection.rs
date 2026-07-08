@@ -21,11 +21,17 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
+use trogonai_proto::gateway::credentials::{
+    CredentialEventCase, CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1,
+};
 
 use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
-use crate::credential::{
-    CredentialEvent, CredentialEventPayloadError, CredentialEvolveError, CredentialState, evolve, initial_state,
+use crate::credential::proto::{
+    CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_message_field,
+    decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested,
+    decode_write_failed, decode_write_requested,
 };
+use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
@@ -174,18 +180,29 @@ impl RuntimeIntegrationProjection {
     }
 
     pub fn from_credential_state(
-        state: &CredentialState,
+        state: &state_v1::CredentialStateSnapshot,
         version: u64,
     ) -> Result<Option<Self>, RuntimeProjectionBuildError> {
-        match state {
-            CredentialState::Active(active) => active_runtime_projection(active.credential_ref().clone(), version),
-            CredentialState::RotationPending(rotation) => {
-                active_runtime_projection(rotation.active().credential_ref().clone(), version)
+        match state.state.as_ref() {
+            Some(CredentialStateSnapshotCase::Active(active)) => {
+                let credential_ref =
+                    active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
+                active_runtime_projection(credential_ref, version)
             }
-            CredentialState::Missing
-            | CredentialState::PendingWrite(_)
-            | CredentialState::WriteFailed(_)
-            | CredentialState::Revoked(_) => Ok(None),
+            Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
+                let active = decode_message_field("rotation_pending.active", &rotation.active)
+                    .map_err(RuntimeProjectionBuildError::InvalidState)?;
+                let credential_ref =
+                    active_credential_ref(active).map_err(RuntimeProjectionBuildError::InvalidState)?;
+                active_runtime_projection(credential_ref, version)
+            }
+            None
+            | Some(
+                CredentialStateSnapshotCase::Missing(_)
+                | CredentialStateSnapshotCase::PendingWrite(_)
+                | CredentialStateSnapshotCase::WriteFailed(_)
+                | CredentialStateSnapshotCase::Revoked(_),
+            ) => Ok(None),
         }
     }
 
@@ -238,6 +255,8 @@ pub enum RuntimeProjectionBuildError {
         #[source]
         source: SourceIntegrationIdError,
     },
+    #[error("persisted credential state is invalid: {0}")]
+    InvalidState(#[source] CredentialProtoDecodeError),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -302,6 +321,13 @@ pub enum RuntimeProjectionRefreshError {
     DecodeEvent {
         #[source]
         source: CredentialEventPayloadError,
+    },
+    #[error("credential event is missing its event case")]
+    MissingEvent,
+    #[error("credential event is invalid: {source}")]
+    InvalidEvent {
+        #[source]
+        source: CredentialProtoDecodeError,
     },
     #[error("credential stream replay failed: {source}")]
     ReplayStream {
@@ -775,7 +801,7 @@ impl RuntimeCredentialRegistry {
 
     pub async fn apply_state(
         &self,
-        state: &CredentialState,
+        state: &state_v1::CredentialStateSnapshot,
         stream_position: StreamPosition,
     ) -> Result<(), RuntimeProjectionRefreshError> {
         if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
@@ -786,8 +812,10 @@ impl RuntimeCredentialRegistry {
             return Ok(());
         }
 
-        if let CredentialState::Revoked(revoked) = state {
-            self.remove_credential_ref(revoked.credential_ref()).await?;
+        if let Some(CredentialStateSnapshotCase::Revoked(revoked)) = state.state.as_ref() {
+            let credential_ref = decode_revoked_state(revoked)
+                .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+            self.remove_credential_ref(&credential_ref).await?;
         }
         Ok(())
     }
@@ -882,14 +910,14 @@ pub async fn refresh_runtime_projections_from_credential_events(
     events: impl IntoIterator<Item = StreamEvent>,
 ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionRefreshError> {
     let mut report = RuntimeProjectionRefreshReport::default();
-    let mut streams: BTreeMap<String, Vec<(u64, CredentialEvent)>> = BTreeMap::new();
+    let mut streams: BTreeMap<String, Vec<(u64, v1::CredentialEvent)>> = BTreeMap::new();
 
     for event in events {
         report.scanned_events += 1;
         let stream_id = event.stream_id().to_string();
         let stream_position = event.stream_position.as_u64();
         match event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
@@ -946,12 +974,17 @@ where
         let stream_position = event.stream_position.as_u64();
         report.checkpoint_advanced_to = Some(report.checkpoint_advanced_to.unwrap_or(0).max(stream_position));
         match event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
                 report.decoded_events += 1;
-                let credential_id = event_credential_id(&event).clone();
+                let case = event
+                    .event
+                    .as_ref()
+                    .ok_or(RuntimeProjectionRefreshError::MissingEvent)?;
+                let credential_id = event_credential_id(case)
+                    .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
                 changed_credentials
                     .entry(credential_id)
                     .and_modify(|position| *position = (*position).max(stream_position))
@@ -978,7 +1011,7 @@ where
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<CredentialState, RuntimeProjectionRefreshError>
+) -> Result<state_v1::CredentialStateSnapshot, RuntimeProjectionRefreshError>
 where
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
@@ -996,7 +1029,7 @@ where
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         else {
             continue;
@@ -1009,7 +1042,7 @@ where
 async fn apply_state_to_projection(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
-    state: &CredentialState,
+    state: &state_v1::CredentialStateSnapshot,
     stream_position: StreamPosition,
 ) -> Result<(), RuntimeProjectionRefreshError> {
     if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
@@ -1020,30 +1053,32 @@ async fn apply_state_to_projection(
         return Ok(());
     }
 
-    if let CredentialState::Revoked(revoked) = state {
-        cache.invalidate(revoked.credential_ref()).await;
-        let key = RuntimeIntegrationKey::from_credential_ref(revoked.credential_ref())
+    if let Some(CredentialStateSnapshotCase::Revoked(revoked)) = state.state.as_ref() {
+        let credential_ref =
+            decode_revoked_state(revoked).map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+        cache.invalidate(&credential_ref).await;
+        let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
-        projections
-            .remove_credential(&key, revoked.credential_ref().kind())
-            .await;
+        projections.remove_credential(&key, credential_ref.kind()).await;
     }
     Ok(())
 }
 
-fn event_credential_id(event: &CredentialEvent) -> &CredentialId {
+fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
     match event {
-        CredentialEvent::WriteRequested { credential_id, .. } | CredentialEvent::WriteFailed { credential_id, .. } => {
-            credential_id
+        CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.0),
+        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
+        CredentialEventCase::Activated(inner) => {
+            let metadata = decode_message_field("event.metadata", &inner.metadata)?;
+            Ok(decode_credential_metadata("event.metadata", metadata)?
+                .reference()
+                .id()
+                .clone())
         }
-        CredentialEvent::Activated { metadata } => metadata.reference().id(),
-        CredentialEvent::RotationRequested { credential_ref }
-        | CredentialEvent::RotationFailed { credential_ref, .. }
-        | CredentialEvent::Revoked { credential_ref } => credential_ref.id(),
-        CredentialEvent::Rotated {
-            previous_credential_ref,
-            ..
-        } => previous_credential_ref.id(),
+        CredentialEventCase::RotationRequested(inner) => Ok(decode_rotation_requested(inner)?.id().clone()),
+        CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
+        CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
+        CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
     }
 }
 
@@ -1220,6 +1255,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::credential::commands::domain::{CredentialScope, CredentialVersion};
+    use crate::credential::proto::{activated_to_proto, revoked_to_proto, write_requested_to_proto};
     use crate::secret_store::{
         MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
     };
@@ -1244,7 +1280,7 @@ mod tests {
     struct ProjectionTestEventStoreError;
 
     impl ProjectionTestEventStore {
-        fn push(&self, stream_id: &str, stream_position: u64, event: CredentialEvent) {
+        fn push(&self, stream_id: &str, stream_position: u64, event: v1::CredentialEvent) {
             self.events
                 .lock()
                 .unwrap()
@@ -1320,7 +1356,7 @@ mod tests {
         StreamPosition::try_new(value).unwrap()
     }
 
-    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialEvent) -> StreamEvent {
+    fn stream_event(stream_id: &str, stream_position: u64, event: v1::CredentialEvent) -> StreamEvent {
         StreamEvent {
             stream_id: stream_id.to_string(),
             event: runtime_event(stream_position, event),
@@ -1329,11 +1365,11 @@ mod tests {
         }
     }
 
-    fn runtime_event(id: u64, event: CredentialEvent) -> Event {
+    fn runtime_event(id: u64, event: v1::CredentialEvent) -> Event {
         Event {
             id: EventId::new(Uuid::from_u128(id as u128)),
-            r#type: event.event_type().unwrap().to_string(),
-            content: event.encode().unwrap(),
+            r#type: EventType::event_type(&event).unwrap().to_string(),
+            content: EventEncode::encode(&event).unwrap(),
             headers: Headers::empty(),
         }
     }
@@ -1355,16 +1391,15 @@ mod tests {
         stream
     }
 
-    fn write_requested(credential: &CredentialRef) -> CredentialEvent {
-        CredentialEvent::WriteRequested {
-            credential_id: credential.id().clone(),
-            owner_id: owner_id(),
-            source: credential.source(),
-            kind: credential.kind(),
+    fn write_requested(credential: &CredentialRef) -> v1::CredentialEvent {
+        v1::CredentialEvent {
+            event: Some(
+                write_requested_to_proto(credential.id(), &owner_id(), credential.source(), credential.kind()).into(),
+            ),
         }
     }
 
-    fn build_state(events: impl IntoIterator<Item = CredentialEvent>) -> CredentialState {
+    fn build_state(events: impl IntoIterator<Item = v1::CredentialEvent>) -> state_v1::CredentialStateSnapshot {
         events
             .into_iter()
             .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -1400,13 +1435,10 @@ mod tests {
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
         let state = [
-            CredentialEvent::WriteRequested {
-                credential_id: credential.id().clone(),
-                owner_id: owner_id(),
-                source: credential.source(),
-                kind: credential.kind(),
+            write_requested(&credential),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
             },
-            CredentialEvent::Activated { metadata },
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -1439,7 +1471,13 @@ mod tests {
         let report = registry
             .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
+                stream_event(
+                    "credential-a",
+                    2,
+                    v1::CredentialEvent {
+                        event: Some(activated_to_proto(&metadata).into()),
+                    },
+                ),
             ])
             .await
             .unwrap();
@@ -1470,7 +1508,12 @@ mod tests {
             None,
             &[
                 runtime_event(1, write_requested(&credential)),
-                runtime_event(2, CredentialEvent::Activated { metadata }),
+                runtime_event(
+                    2,
+                    v1::CredentialEvent {
+                        event: Some(activated_to_proto(&metadata).into()),
+                    },
+                ),
             ],
         )
         .await
@@ -1536,13 +1579,18 @@ mod tests {
         event_store.push(
             credential.id().as_str(),
             2,
-            CredentialEvent::Activated {
-                metadata: metadata.clone(),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
             },
         );
         let stream = raw_stream([
             runtime_event(1, write_requested(&credential)),
-            runtime_event(2, CredentialEvent::Activated { metadata }),
+            runtime_event(
+                2,
+                v1::CredentialEvent {
+                    event: Some(activated_to_proto(&metadata).into()),
+                },
+            ),
         ])
         .await;
         let kv = MockJetStreamKvStore::new();
@@ -1592,13 +1640,18 @@ mod tests {
         event_store.push(
             credential.id().as_str(),
             2,
-            CredentialEvent::Activated {
-                metadata: metadata.clone(),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
             },
         );
         let stream = raw_stream([
             runtime_event(1, write_requested(&credential)),
-            runtime_event(2, CredentialEvent::Activated { metadata }),
+            runtime_event(
+                2,
+                v1::CredentialEvent {
+                    event: Some(activated_to_proto(&metadata).into()),
+                },
+            ),
         ])
         .await;
         let checkpoint = RuntimeProjectionCheckpoint::new(1);
@@ -1678,8 +1731,8 @@ mod tests {
                 stream_event(
                     "credential-a",
                     2,
-                    CredentialEvent::Activated {
-                        metadata: metadata.clone(),
+                    v1::CredentialEvent {
+                        event: Some(activated_to_proto(&metadata).into()),
                     },
                 ),
             ])
@@ -1698,12 +1751,18 @@ mod tests {
         let report = registry
             .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
+                stream_event(
+                    "credential-a",
+                    2,
+                    v1::CredentialEvent {
+                        event: Some(activated_to_proto(&metadata).into()),
+                    },
+                ),
                 stream_event(
                     "credential-a",
                     3,
-                    CredentialEvent::Revoked {
-                        credential_ref: credential.clone(),
+                    v1::CredentialEvent {
+                        event: Some(revoked_to_proto(&credential).into()),
                     },
                 ),
             ])
@@ -1737,7 +1796,13 @@ mod tests {
         let report = registry
             .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
+                stream_event(
+                    "credential-a",
+                    2,
+                    v1::CredentialEvent {
+                        event: Some(activated_to_proto(&metadata).into()),
+                    },
+                ),
             ])
             .await
             .unwrap();
@@ -1762,7 +1827,12 @@ mod tests {
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store);
-        let state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
+        let state = build_state([
+            write_requested(&credential),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
+        ]);
 
         registry.apply_state(&state, position(2)).await.unwrap();
 
@@ -1783,7 +1853,12 @@ mod tests {
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store);
-        let state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
+        let state = build_state([
+            write_requested(&credential),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
+        ]);
 
         registry.apply_state(&state, position(2)).await.unwrap();
 
@@ -1804,7 +1879,12 @@ mod tests {
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store.clone());
-        let active_state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
+        let active_state = build_state([
+            write_requested(&credential),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
+        ]);
         registry.apply_state(&active_state, position(2)).await.unwrap();
         assert_eq!(
             resolver
@@ -1818,8 +1898,8 @@ mod tests {
         store.revoke(&credential).await.unwrap();
         let revoked_state = evolve(
             active_state,
-            &CredentialEvent::Revoked {
-                credential_ref: credential.clone(),
+            &v1::CredentialEvent {
+                event: Some(revoked_to_proto(&credential).into()),
             },
         )
         .unwrap();

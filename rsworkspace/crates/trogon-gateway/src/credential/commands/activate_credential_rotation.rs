@@ -1,9 +1,11 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialEvent, CredentialMetadata};
+use super::super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
+use super::domain::CredentialMetadata;
 use super::state::{
-    CredentialDecideError, CredentialEvolveError, CredentialState, validate_activation_metadata,
-    validate_newer_version, validate_same_logical_ref,
+    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_newer_version,
+    validate_same_logical_ref,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,8 +21,8 @@ impl ActivateCredentialRotation {
 
 impl Decider for ActivateCredentialRotation {
     type StreamId = str;
-    type State = CredentialState;
-    type Event = CredentialEvent;
+    type State = state_v1::CredentialStateSnapshot;
+    type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
@@ -37,18 +39,21 @@ impl Decider for ActivateCredentialRotation {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let CredentialState::RotationPending(rotation) = state else {
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+        let CredentialStateSnapshotCase::RotationPending(rotation) = current else {
             return Err(CredentialDecideError::CredentialRotationNotPending {
                 credential_id: command.metadata.reference().id().clone(),
             });
         };
-        validate_activation_metadata(&command.metadata)?;
-        validate_same_logical_ref(rotation.active.credential_ref(), command.metadata.reference())?;
-        validate_newer_version(rotation.active.credential_ref(), command.metadata.reference())?;
+        let active = decode_message_field("rotation_pending.active", &rotation.active)?;
+        let previous_credential_ref = active_credential_ref(active)?;
 
-        Ok(Decision::event(CredentialEvent::Rotated {
-            previous_credential_ref: rotation.active.credential_ref().clone(),
-            metadata: command.metadata.clone(),
+        validate_activation_metadata(&command.metadata)?;
+        validate_same_logical_ref(&previous_credential_ref, command.metadata.reference())?;
+        validate_newer_version(&previous_credential_ref, command.metadata.reference())?;
+
+        Ok(Decision::event(v1::CredentialEvent {
+            event: Some(rotated_to_proto(&previous_credential_ref, &command.metadata).into()),
         }))
     }
 }

@@ -3,7 +3,7 @@
 #[cfg(any(feature = "gateway", feature = "schedules"))]
 mod r#gen;
 
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "gateway", feature = "schedules"))]
 mod codec;
 
 #[cfg(feature = "chrono")]

@@ -1,7 +1,9 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialEvent, CredentialRef};
-use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState, validate_same_ref};
+use super::super::proto::{active_credential_ref, rotation_requested_to_proto};
+use super::domain::CredentialRef;
+use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialRotation {
@@ -20,8 +22,8 @@ impl RequestCredentialRotation {
 
 impl Decider for RequestCredentialRotation {
     type StreamId = str;
-    type State = CredentialState;
-    type Event = CredentialEvent;
+    type State = state_v1::CredentialStateSnapshot;
+    type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
@@ -38,9 +40,10 @@ impl Decider for RequestCredentialRotation {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let active = match state {
-            CredentialState::Active(active) => active,
-            CredentialState::RotationPending(_) => {
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+        let active = match current {
+            CredentialStateSnapshotCase::Active(active) => active,
+            CredentialStateSnapshotCase::RotationPending(_) => {
                 return Err(CredentialDecideError::CredentialRotationAlreadyPending {
                     credential_id: command.credential_ref.id().clone(),
                 });
@@ -51,9 +54,10 @@ impl Decider for RequestCredentialRotation {
                 });
             }
         };
-        validate_same_ref(active.credential_ref(), &command.credential_ref)?;
-        Ok(Decision::event(CredentialEvent::RotationRequested {
-            credential_ref: command.credential_ref.clone(),
+        let current_ref = active_credential_ref(active)?;
+        validate_same_ref(&current_ref, &command.credential_ref)?;
+        Ok(Decision::event(v1::CredentialEvent {
+            event: Some(rotation_requested_to_proto(&command.credential_ref).into()),
         }))
     }
 }

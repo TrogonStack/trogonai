@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::error::Error;
 use std::fmt;
 
@@ -7,16 +6,19 @@ use trogon_decider_runtime::{
     StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
 };
 use trogon_std::SecretString;
+use trogonai_proto::gateway::credentials::{CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1};
 
 use super::commands::domain::{
-    CredentialEvent, CredentialEventPayloadError, CredentialId, CredentialIdError, CredentialKind, CredentialOwnerId,
-    CredentialRef, CredentialScope, CredentialVersion, SourceKind,
+    CredentialId, CredentialIdError, CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope,
+    CredentialVersion, SourceKind,
+};
+use super::proto::{
+    CredentialProtoDecodeError, active_credential_ref, decode_message_field, decode_pending_write_state,
 };
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, CredentialDecideError, CredentialEvolveError,
-    CredentialFailureReason, CredentialState, PendingCredentialWrite, RecordCredentialRotationFailure,
-    RecordCredentialWriteFailure, RequestCredentialRotation, RequestCredentialWrite, RevokeCredential, evolve,
-    initial_state,
+    CredentialFailureReason, RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialRotation,
+    RequestCredentialWrite, RevokeCredential, evolve, initial_state,
 };
 use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
@@ -28,11 +30,11 @@ type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     SnapshotReadError,
     ReadError,
     AppendError,
-    Infallible,
-    Infallible,
+    CredentialEventPayloadError,
+    CredentialEventPayloadError,
     CredentialEventPayloadError,
 >;
-type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<CredentialState, str>>::Error;
+type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<state_v1::CredentialStateSnapshot, str>>::Error;
 type ReadError<EventStore> = <EventStore as StreamRead<str>>::Error;
 type AppendError<EventStore> = <EventStore as StreamAppend<str>>::Error;
 type HandlerResult<EventStore, SecretError> = Result<
@@ -132,16 +134,16 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct CredentialHandlerOutcome {
-    state: CredentialState,
+    state: state_v1::CredentialStateSnapshot,
     stream_position: StreamPosition,
 }
 
 impl CredentialHandlerOutcome {
-    fn new(state: CredentialState, stream_position: StreamPosition) -> Self {
+    fn new(state: state_v1::CredentialStateSnapshot, stream_position: StreamPosition) -> Self {
         Self { state, stream_position }
     }
 
-    pub(crate) fn state(&self) -> &CredentialState {
+    pub(crate) fn state(&self) -> &state_v1::CredentialStateSnapshot {
         &self.state
     }
 
@@ -149,7 +151,7 @@ impl CredentialHandlerOutcome {
         self.stream_position
     }
 
-    pub(crate) fn into_state(self) -> CredentialState {
+    pub(crate) fn into_state(self) -> state_v1::CredentialStateSnapshot {
         self.state
     }
 }
@@ -162,45 +164,56 @@ pub(crate) enum CredentialActivationRecoveryCommand {
 
 pub(crate) fn activation_recovery_command(
     stream_id: &str,
-    state: &CredentialState,
+    state: &state_v1::CredentialStateSnapshot,
 ) -> Result<Option<CredentialActivationRecoveryCommand>, CredentialActivationRecoveryPlanError> {
-    match state {
-        CredentialState::PendingWrite(pending) => {
+    match state.state.as_ref() {
+        Some(CredentialStateSnapshotCase::PendingWrite(pending)) => {
             let credential = pending_write_credential_ref(stream_id, pending)?;
             Ok(Some(CredentialActivationRecoveryCommand::Write(
                 RecoverCredentialWriteActivation::new(credential),
             )))
         }
-        CredentialState::RotationPending(rotation) => Ok(Some(CredentialActivationRecoveryCommand::Rotation(
-            RecoverCredentialRotationActivation::new(rotation.active().credential_ref().next_version()),
-        ))),
-        CredentialState::Missing
-        | CredentialState::Active(_)
-        | CredentialState::WriteFailed(_)
-        | CredentialState::Revoked(_) => Ok(None),
+        Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
+            let active = decode_message_field("rotation_pending.active", &rotation.active)
+                .map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
+            let current_ref =
+                active_credential_ref(active).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
+            Ok(Some(CredentialActivationRecoveryCommand::Rotation(
+                RecoverCredentialRotationActivation::new(current_ref.next_version()),
+            )))
+        }
+        None
+        | Some(
+            CredentialStateSnapshotCase::Missing(_)
+            | CredentialStateSnapshotCase::Active(_)
+            | CredentialStateSnapshotCase::WriteFailed(_)
+            | CredentialStateSnapshotCase::Revoked(_),
+        ) => Ok(None),
     }
 }
 
 fn pending_write_credential_ref(
     stream_id: &str,
-    pending: &PendingCredentialWrite,
+    pending: &state_v1::PendingCredentialWriteState,
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
+    let (pending_id, pending_owner_id, pending_source, pending_kind) =
+        decode_pending_write_state(pending).map_err(CredentialActivationRecoveryPlanError::InvalidState)?;
     let credential_id =
         CredentialId::new(stream_id).map_err(CredentialActivationRecoveryPlanError::InvalidCredentialId)?;
     let credential = openbao_credential_ref_from_id(credential_id, CredentialVersion::initial())
         .map_err(CredentialActivationRecoveryPlanError::InvalidOpenBaoCredentialId)?;
 
-    if credential.id() != pending.credential_id()
-        || credential.owner_id() != pending.owner_id()
-        || credential.source() != pending.source()
-        || credential.kind() != pending.kind()
+    if credential.id() != &pending_id
+        || credential.owner_id() != &pending_owner_id
+        || credential.source() != pending_source
+        || credential.kind() != pending_kind
     {
         return Err(CredentialActivationRecoveryPlanError::PendingWriteMismatch {
             credential,
-            expected_id: pending.credential_id().clone(),
-            expected_owner_id: pending.owner_id().clone(),
-            expected_source: pending.source(),
-            expected_kind: pending.kind(),
+            expected_id: pending_id,
+            expected_owner_id: pending_owner_id,
+            expected_source: pending_source,
+            expected_kind: pending_kind,
         });
     }
 
@@ -213,6 +226,8 @@ pub(crate) enum CredentialActivationRecoveryPlanError {
     InvalidCredentialId(#[source] CredentialIdError),
     #[error("credential recovery stream id is not an OpenBao credential id: {0}")]
     InvalidOpenBaoCredentialId(#[source] OpenBaoCredentialIdParseError),
+    #[error("credential recovery persisted state is invalid: {0}")]
+    InvalidState(#[source] CredentialProtoDecodeError),
     #[error(
         "credential recovery pending write does not match parsed credential ref: expected {expected_id} {expected_owner_id} {expected_source} {expected_kind}, got {credential}"
     )]
@@ -248,8 +263,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -272,8 +287,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
@@ -296,8 +311,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -333,8 +348,8 @@ impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -395,8 +410,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -444,8 +459,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -506,9 +521,15 @@ where
             Ok(_) => Ok(()),
             Err(source) => {
                 let state = load_state(&self.event_store, command.credential_id().as_str()).await?;
-                match state {
-                    CredentialState::PendingWrite(pending) if pending_matches(&pending, command) => Ok(()),
-                    _ => Err(CredentialHandlerError::RequestWrite { source }),
+                let matches = match state.state.as_ref() {
+                    Some(CredentialStateSnapshotCase::PendingWrite(pending)) => pending_matches(pending, command)
+                        .map_err(|source| CredentialHandlerError::InvalidState { source })?,
+                    _ => false,
+                };
+                if matches {
+                    Ok(())
+                } else {
+                    Err(CredentialHandlerError::RequestWrite { source })
                 }
             }
         }
@@ -544,8 +565,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
@@ -601,13 +622,20 @@ where
             Ok(_) => Ok(()),
             Err(source) => {
                 let state = load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
-                match state {
-                    CredentialState::RotationPending(rotation)
-                        if rotation.active().credential_ref() == command.credential_ref() =>
-                    {
-                        Ok(())
+                let matches = match state.state.as_ref() {
+                    Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
+                        let active = decode_message_field("rotation_pending.active", &rotation.active)
+                            .map_err(|source| CredentialHandlerError::InvalidState { source })?;
+                        let current_ref = active_credential_ref(active)
+                            .map_err(|source| CredentialHandlerError::InvalidState { source })?;
+                        current_ref == *command.credential_ref()
                     }
-                    _ => Err(CredentialHandlerError::RequestRotation { source }),
+                    _ => false,
+                };
+                if matches {
+                    Ok(())
+                } else {
+                    Err(CredentialHandlerError::RequestRotation { source })
                 }
             }
         }
@@ -643,8 +671,8 @@ impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -691,6 +719,11 @@ where
     DecodeState {
         #[source]
         source: CredentialEventPayloadError,
+    },
+    #[error("persisted credential state is invalid: {source}")]
+    InvalidState {
+        #[source]
+        source: CredentialProtoDecodeError,
     },
     #[error("credential state replay failed: {source}")]
     ReplayState {
@@ -759,25 +792,29 @@ where
     },
 }
 
-fn pending_matches(pending: &PendingCredentialWrite, command: &RequestCredentialWrite) -> bool {
-    pending.credential_id() == command.credential_id()
-        && pending.owner_id() == command.owner_id()
-        && pending.source() == command.source()
-        && pending.kind() == command.kind()
+fn pending_matches(
+    pending: &state_v1::PendingCredentialWriteState,
+    command: &RequestCredentialWrite,
+) -> Result<bool, CredentialProtoDecodeError> {
+    let (credential_id, owner_id, source, kind) = decode_pending_write_state(pending)?;
+    Ok(credential_id == *command.credential_id()
+        && owner_id == *command.owner_id()
+        && source == command.source()
+        && kind == command.kind())
 }
 
 async fn load_state<EventStore, SecretError>(
     event_store: &EventStore,
     stream_id: &str,
 ) -> Result<
-    CredentialState,
+    state_v1::CredentialStateSnapshot,
     CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
 >
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     SecretError: Error + Send + Sync + 'static,
@@ -792,7 +829,7 @@ where
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| CredentialHandlerError::DecodeState { source })?
         else {
             continue;
@@ -836,9 +873,13 @@ mod tests {
     use crate::credential::processor::runtime_projection::{
         RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
     };
+    use crate::credential::proto::{
+        activated_to_proto, decode_active_state, rotation_requested_to_proto, write_requested_to_proto,
+    };
     use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};
     use crate::source_integration_id::SourceIntegrationId;
+    use trogonai_proto::gateway::credentials::CredentialEventCase;
 
     const OPENBAO_IMAGE: &str = "openbao/openbao";
     const OPENBAO_IMAGE_TAG: &str = "2.5.5";
@@ -852,7 +893,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct HandlerTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
         write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         fail_append_at: Arc<Mutex<Option<usize>>>,
     }
@@ -866,10 +907,10 @@ mod tests {
             self.events.lock().unwrap().clone()
         }
 
-        fn decoded_events(&self) -> Vec<CredentialEvent> {
+        fn decoded_events(&self) -> Vec<v1::CredentialEvent> {
             self.events()
                 .into_iter()
-                .map(|event| event.decode::<CredentialEvent>().unwrap().into_decoded().unwrap())
+                .map(|event| event.decode::<v1::CredentialEvent>().unwrap().into_decoded().unwrap())
                 .collect()
         }
 
@@ -946,25 +987,25 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialState, str> for HandlerTestStreamStore {
+    impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
         type Error = HandlerTestStreamStoreError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
             Ok(ReadSnapshotResponse {
                 snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
             })
         }
     }
 
-    impl SnapshotWrite<CredentialState, str> for HandlerTestStreamStore {
+    impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for HandlerTestStreamStore {
         type Error = HandlerTestStreamStoreError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialState, str>,
+            request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             self.snapshots
                 .lock()
@@ -1099,6 +1140,32 @@ mod tests {
         payload.windows(needle.len()).any(|window| window == needle.as_bytes())
     }
 
+    fn write_requested_event() -> v1::CredentialEvent {
+        v1::CredentialEvent {
+            event: Some(
+                write_requested_to_proto(
+                    &credential_id(),
+                    &owner_id(),
+                    SourceKind::GitHub,
+                    CredentialKind::WebhookSecret,
+                )
+                .into(),
+            ),
+        }
+    }
+
+    fn activated_event(metadata: CredentialMetadata) -> v1::CredentialEvent {
+        v1::CredentialEvent {
+            event: Some(activated_to_proto(&metadata).into()),
+        }
+    }
+
+    fn rotation_requested_event(version: u64) -> v1::CredentialEvent {
+        v1::CredentialEvent {
+            event: Some(rotation_requested_to_proto(&credential_ref(version)).into()),
+        }
+    }
+
     struct OpenBaoServer {
         _container: ContainerAsync<GenericImage>,
         address: String,
@@ -1138,16 +1205,7 @@ mod tests {
 
     #[test]
     fn recovery_plan_builds_write_activation_command_for_pending_write() {
-        let state = evolve(
-            initial_state(),
-            &CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        )
-        .unwrap();
+        let state = evolve(initial_state(), &write_requested_event()).unwrap();
 
         let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
 
@@ -1168,16 +1226,9 @@ mod tests {
             CredentialFingerprint::new("fingerprint").unwrap(),
         );
         let state = [
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-            CredentialEvent::Activated { metadata: active },
-            CredentialEvent::RotationRequested {
-                credential_ref: credential_ref(1),
-            },
+            write_requested_event(),
+            activated_event(active),
+            rotation_requested_event(1),
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -1201,18 +1252,10 @@ mod tests {
             StorageBackend::OpenBao,
             CredentialFingerprint::new("fingerprint").unwrap(),
         );
-        let state = [
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-            CredentialEvent::Activated { metadata: active },
-        ]
-        .into_iter()
-        .try_fold(initial_state(), |state, event| evolve(state, &event))
-        .unwrap();
+        let state = [write_requested_event(), activated_event(active)]
+            .into_iter()
+            .try_fold(initial_state(), |state, event| evolve(state, &event))
+            .unwrap();
 
         let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
 
@@ -1228,16 +1271,20 @@ mod tests {
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialState::Active(_)));
+        assert!(matches!(
+            outcome.state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Active(_))
+        ));
         let state = outcome.into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        assert_eq!(active.credential_ref().id(), &credential_id());
-        assert_eq!(active.metadata().storage_backend(), StorageBackend::OpenBao);
+        let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+        assert_eq!(metadata.reference().id(), &credential_id());
+        assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
         assert_eq!(
             secrets
-                .get(active.credential_ref())
+                .get(metadata.reference())
                 .await
                 .unwrap()
                 .as_plaintext()
@@ -1268,8 +1315,8 @@ mod tests {
         assert!(matches!(error, CredentialHandlerError::SecretWrite { .. }));
         let decoded = events.decoded_events();
         assert_eq!(decoded.len(), 2);
-        assert!(matches!(decoded[0], CredentialEvent::WriteRequested { .. }));
-        assert!(matches!(decoded[1], CredentialEvent::WriteFailed { .. }));
+        assert!(matches!(decoded[0].event, Some(CredentialEventCase::WriteRequested(_))));
+        assert!(matches!(decoded[1].event, Some(CredentialEventCase::WriteFailed(_))));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1295,13 +1342,14 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(2));
         let state = outcome.into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        assert_eq!(active.credential_ref().version().get(), 2);
+        let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+        assert_eq!(metadata.reference().version().get(), 2);
         assert_eq!(
             secrets
-                .get(active.credential_ref())
+                .get(metadata.reference())
                 .await
                 .unwrap()
                 .as_plaintext()
@@ -1350,10 +1398,11 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(2));
         let state = outcome.into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        assert_eq!(active.credential_ref(), &credential_ref(1));
+        let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+        assert_eq!(metadata.reference(), &credential_ref(1));
         assert_eq!(events.decoded_events().len(), 2);
         assert_eq!(
             events.write_preconditions(),
@@ -1374,13 +1423,14 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
 
         let outcome = handler
             .rotate(RotateCredential::new(
-                active.credential_ref().clone(),
+                active_metadata.reference().clone(),
                 SecretString::new("rotated-secret").unwrap(),
             ))
             .await
@@ -1388,14 +1438,15 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(4));
         let state = outcome.into_state();
-        let CredentialState::Active(rotated) = state else {
+        let Some(CredentialStateSnapshotCase::Active(rotated)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        assert_eq!(rotated.credential_ref().version().get(), 2);
-        assert_eq!(rotated.previous_versions(), &[active.credential_ref().clone()]);
+        let (rotated_metadata, rotated_previous_versions) = decode_active_state("active", rotated).unwrap();
+        assert_eq!(rotated_metadata.reference().version().get(), 2);
+        assert_eq!(rotated_previous_versions, vec![active_metadata.reference().clone()]);
         assert_eq!(
             secrets
-                .get(rotated.credential_ref())
+                .get(rotated_metadata.reference())
                 .await
                 .unwrap()
                 .as_plaintext()
@@ -1413,8 +1464,11 @@ mod tests {
             ]
         );
         let decoded = events.decoded_events();
-        assert!(matches!(decoded[2], CredentialEvent::RotationRequested { .. }));
-        assert!(matches!(decoded[3], CredentialEvent::Rotated { .. }));
+        assert!(matches!(
+            decoded[2].event,
+            Some(CredentialEventCase::RotationRequested(_))
+        ));
+        assert!(matches!(decoded[3].event, Some(CredentialEventCase::Rotated(_))));
         for event in events.events() {
             assert!(!payload_contains(&event.event.content, "rotated-secret"));
         }
@@ -1430,14 +1484,15 @@ mod tests {
             .await
             .unwrap()
             .into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
         let rotate_handler = CredentialHandler::new(events.clone(), FailingRotateSecretStore);
 
         let error = rotate_handler
             .rotate(RotateCredential::new(
-                active.credential_ref().clone(),
+                active_metadata.reference().clone(),
                 SecretString::new("ignored-secret").unwrap(),
             ))
             .await
@@ -1446,8 +1501,11 @@ mod tests {
         assert!(matches!(error, CredentialHandlerError::SecretRotate { .. }));
         let decoded = events.decoded_events();
         assert_eq!(decoded.len(), 4);
-        assert!(matches!(decoded[2], CredentialEvent::RotationRequested { .. }));
-        assert!(matches!(decoded[3], CredentialEvent::RotationFailed { .. }));
+        assert!(matches!(
+            decoded[2].event,
+            Some(CredentialEventCase::RotationRequested(_))
+        ));
+        assert!(matches!(decoded[3].event, Some(CredentialEventCase::RotationFailed(_))));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1465,15 +1523,16 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let rotated_ref = active.credential_ref().next_version();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let rotated_ref = active_metadata.reference().next_version();
         events.fail_append_at(4);
 
         let error = handler
             .rotate(RotateCredential::new(
-                active.credential_ref().clone(),
+                active_metadata.reference().clone(),
                 SecretString::new("rotated-secret").unwrap(),
             ))
             .await
@@ -1499,11 +1558,12 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(4));
         let state = outcome.into_state();
-        let CredentialState::Active(rotated) = state else {
+        let Some(CredentialStateSnapshotCase::Active(rotated)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        assert_eq!(rotated.credential_ref(), &rotated_ref);
-        assert_eq!(rotated.previous_versions(), &[active.credential_ref().clone()]);
+        let (rotated_metadata, rotated_previous_versions) = decode_active_state("active", rotated).unwrap();
+        assert_eq!(rotated_metadata.reference(), &rotated_ref);
+        assert_eq!(rotated_previous_versions, vec![active_metadata.reference().clone()]);
         assert_eq!(events.decoded_events().len(), 4);
         assert_eq!(
             events.write_preconditions(),
@@ -1526,10 +1586,11 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let credential_ref = active.credential_ref().clone();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
 
         let outcome = handler
             .revoke(RevokeStoredCredential::new(credential_ref.clone()))
@@ -1538,13 +1599,16 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(3));
         let state = outcome.into_state();
-        assert!(matches!(state, CredentialState::Revoked(_)));
+        assert!(matches!(
+            state.state.as_ref(),
+            Some(CredentialStateSnapshotCase::Revoked(_))
+        ));
         assert!(matches!(
             secrets.get(&credential_ref).await,
             Err(SecretStoreError::Unreadable { .. })
         ));
         let decoded = events.decoded_events();
-        assert!(matches!(decoded[2], CredentialEvent::Revoked { .. }));
+        assert!(matches!(decoded[2].event, Some(CredentialEventCase::Revoked(_))));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1561,10 +1625,11 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialState::Active(active) = state else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let credential_ref = active.credential_ref().clone();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
         events.fail_append_at(3);
 
         let error = handler
@@ -1586,7 +1651,10 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(3));
         let state = outcome.into_state();
-        assert!(matches!(state, CredentialState::Revoked(_)));
+        assert!(matches!(
+            state.state.as_ref(),
+            Some(CredentialStateSnapshotCase::Revoked(_))
+        ));
         assert_eq!(events.decoded_events().len(), 3);
         assert_eq!(
             events.write_preconditions(),
@@ -1610,7 +1678,10 @@ mod tests {
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialState::Active(_)));
+        assert!(matches!(
+            outcome.state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Active(_))
+        ));
         assert_eq!(
             resolver
                 .resolve_plaintext(&runtime_key(), CredentialKind::WebhookSecret)
@@ -1632,7 +1703,10 @@ mod tests {
         let outcome = handler.put(source_scoped_put_command("source-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialState::Active(_)));
+        assert!(matches!(
+            outcome.state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Active(_))
+        ));
         assert_eq!(
             resolver
                 .resolve_plaintext(&source_runtime_key(), CredentialKind::WebhookSecret)
@@ -1685,10 +1759,12 @@ mod tests {
         let resolver = runtime_credentials.resolver(secrets.clone());
         let handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
-        let CredentialState::Active(active) = outcome.into_state() else {
+        let state = outcome.into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let credential_ref = active.credential_ref().clone();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
         assert_eq!(
             resolver
                 .resolve_plaintext(&runtime_key(), CredentialKind::WebhookSecret)
@@ -1731,10 +1807,12 @@ mod tests {
         let put = handler.put(put_command("copy-this-value-in-and-out")).await.unwrap();
 
         assert_eq!(put.stream_position(), position(2));
-        let CredentialState::Active(active) = put.into_state() else {
+        let put_state = put.into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = put_state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let initial_ref = active.credential_ref().clone();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let initial_ref = active_metadata.reference().clone();
         assert_eq!(
             resolver
                 .resolve_plaintext(&runtime_key(), CredentialKind::WebhookSecret)
@@ -1753,10 +1831,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(rotated.stream_position(), position(4));
-        let CredentialState::Active(active) = rotated.into_state() else {
+        let rotated_state = rotated.into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = rotated_state.state.as_ref() else {
             panic!("expected active credential");
         };
-        let rotated_ref = active.credential_ref().clone();
+        let (rotated_metadata, _) = decode_active_state("active", active).unwrap();
+        let rotated_ref = rotated_metadata.reference().clone();
         assert_eq!(rotated_ref.version().get(), 2);
         assert_eq!(
             resolver
@@ -1773,7 +1853,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(revoked.stream_position(), position(5));
-        assert!(matches!(revoked.state(), CredentialState::Revoked(_)));
+        assert!(matches!(
+            revoked.state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Revoked(_))
+        ));
         assert!(matches!(
             resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
             Err(RuntimeCredentialError::IntegrationNotFound { .. })

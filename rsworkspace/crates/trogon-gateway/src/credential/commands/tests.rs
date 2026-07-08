@@ -9,16 +9,19 @@ use trogon_decider_runtime::{
     SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, StreamAppend, StreamEvent, StreamPosition,
     StreamRead, StreamWritePrecondition,
 };
-use trogonai_proto::gateway::credentials::v1 as proto;
+use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1 as proto};
 
-use super::domain::credential_event::proto_event_type;
+use super::super::proto::{
+    CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
+    decode_message_field, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
+    write_failed_to_proto, write_requested_to_proto,
+};
 use super::domain::{
-    CredentialEvent, CredentialEventPayloadError, CredentialFailureReason, CredentialFingerprint, CredentialId,
-    CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, SourceKind, StorageBackend,
+    CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
+    CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
 };
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
-use super::state::{CredentialDecideError, CredentialState, evolve, initial_state};
+use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
     RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,
@@ -145,44 +148,59 @@ fn metadata(version: u64) -> CredentialMetadata {
     )
 }
 
-fn write_requested() -> CredentialEvent {
-    CredentialEvent::WriteRequested {
-        credential_id: credential_id(),
-        owner_id: owner_id(),
-        source: SourceKind::GitHub,
-        kind: CredentialKind::WebhookSecret,
+fn write_requested() -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(
+            write_requested_to_proto(
+                &credential_id(),
+                &owner_id(),
+                SourceKind::GitHub,
+                CredentialKind::WebhookSecret,
+            )
+            .into(),
+        ),
     }
 }
 
-fn activated(version: u64) -> CredentialEvent {
-    CredentialEvent::Activated {
-        metadata: metadata(version),
+fn write_failed(reason: CredentialFailureReason) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(write_failed_to_proto(&credential_id(), &reason).into()),
     }
 }
 
-fn rotation_requested(version: u64) -> CredentialEvent {
-    CredentialEvent::RotationRequested {
-        credential_ref: credential_ref(version),
+fn activated(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(activated_to_proto(&metadata(version)).into()),
     }
 }
 
-fn rotation_failed(version: u64) -> CredentialEvent {
-    CredentialEvent::RotationFailed {
-        credential_ref: credential_ref(version),
-        reason: CredentialFailureReason::new("openbao rotate failed").unwrap(),
+fn rotation_requested(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(rotation_requested_to_proto(&credential_ref(version)).into()),
     }
 }
 
-fn rotated(previous_version: u64, next_version: u64) -> CredentialEvent {
-    CredentialEvent::Rotated {
-        previous_credential_ref: credential_ref(previous_version),
-        metadata: metadata(next_version),
+fn rotation_failed(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(
+            rotation_failed_to_proto(
+                &credential_ref(version),
+                &CredentialFailureReason::new("openbao rotate failed").unwrap(),
+            )
+            .into(),
+        ),
     }
 }
 
-fn revoked(version: u64) -> CredentialEvent {
-    CredentialEvent::Revoked {
-        credential_ref: credential_ref(version),
+fn rotated(previous_version: u64, next_version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(rotated_to_proto(&credential_ref(previous_version), &metadata(next_version)).into()),
+    }
+}
+
+fn revoked(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(revoked_to_proto(&credential_ref(version)).into()),
     }
 }
 
@@ -195,7 +213,9 @@ fn request_write() -> RequestCredentialWrite {
     )
 }
 
-fn rebuild_state_from_events(events: impl IntoIterator<Item = CredentialEvent>) -> CredentialState {
+fn rebuild_state_from_events(
+    events: impl IntoIterator<Item = proto::CredentialEvent>,
+) -> state_v1::CredentialStateSnapshot {
     events
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -240,7 +260,9 @@ fn state_snapshot_round_trips_active_state() {
     let state = rebuild_state_from_events([write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]);
 
     let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
-    let decoded = <CredentialState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
+    let decoded =
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded))
+            .unwrap();
 
     assert_eq!(decoded, state);
 }
@@ -250,7 +272,9 @@ fn state_snapshot_round_trips_pending_write_state() {
     let state = rebuild_state_from_events([write_requested()]);
 
     let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
-    let decoded = <CredentialState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
+    let decoded =
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded))
+            .unwrap();
 
     assert_eq!(decoded, state);
 }
@@ -288,10 +312,7 @@ fn given_when_then_records_pending_write_failure() {
     TestCase::<RecordCredentialWriteFailure>::new()
         .given([write_requested()])
         .when(RecordCredentialWriteFailure::new(credential_id(), reason.clone()))
-        .then([CredentialEvent::WriteFailed {
-            credential_id: credential_id(),
-            reason,
-        }]);
+        .then([write_failed(reason)]);
 }
 
 #[test]
@@ -321,11 +342,8 @@ fn given_when_then_records_pending_rotation_failure() {
         .given([write_requested()])
         .given([activated(1)])
         .given([rotation_requested(1)])
-        .when(RecordCredentialRotationFailure::new(credential_ref(1), reason.clone()))
-        .then([CredentialEvent::RotationFailed {
-            credential_ref: credential_ref(1),
-            reason,
-        }]);
+        .when(RecordCredentialRotationFailure::new(credential_ref(1), reason))
+        .then([rotation_failed(1)]);
 }
 
 #[test]
@@ -377,21 +395,19 @@ fn rebuild_state_from_events_active_rotated_state() {
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
-    let CredentialState::Active(active) = state else {
+    let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
         panic!("expected active credential");
     };
-    assert_eq!(active.credential_ref(), &credential_ref(2));
-    assert_eq!(active.previous_versions(), &[credential_ref(1)]);
+    let (metadata, previous_versions) = decode_active_state("active", active).unwrap();
+    assert_eq!(metadata.reference(), &credential_ref(2));
+    assert_eq!(previous_versions, vec![credential_ref(1)]);
 }
 
 #[test]
 fn event_codec_round_trips_all_events() {
     for event in [
         write_requested(),
-        CredentialEvent::WriteFailed {
-            credential_id: credential_id(),
-            reason: CredentialFailureReason::new("openbao unavailable").unwrap(),
-        },
+        write_failed(CredentialFailureReason::new("openbao unavailable").unwrap()),
         activated(1),
         rotation_requested(1),
         rotation_failed(1),
@@ -399,8 +415,8 @@ fn event_codec_round_trips_all_events() {
         revoked(2),
     ] {
         let event_type = event.event_type().unwrap();
-        let payload = event.encode().unwrap();
-        let decoded = CredentialEvent::decode(EventData::new(event_type, &payload))
+        let payload = EventEncode::encode(&event).unwrap();
+        let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(event_type, &payload))
             .unwrap()
             .into_decoded();
 
@@ -411,26 +427,32 @@ fn event_codec_round_trips_all_events() {
 #[test]
 fn event_codec_preserves_integration_scope_key() {
     let event = activated(1);
-    let payload = event.encode().unwrap();
+    let payload = EventEncode::encode(&event).unwrap();
     let proto_event = proto::CredentialActivated::decode_from_slice(&payload).unwrap();
     let metadata = proto_event.metadata.as_option().unwrap();
     let reference = metadata.reference.as_option().unwrap();
 
     assert_eq!(reference.scope_key, "github/primary");
 
-    let decoded = CredentialEvent::decode(EventData::new(event.event_type().unwrap(), &payload))
-        .unwrap()
-        .into_decoded()
-        .unwrap();
-    let CredentialEvent::Activated { metadata } = decoded else {
+    let decoded =
+        <proto::CredentialEvent as EventDecode>::decode(EventData::new(event.event_type().unwrap(), &payload))
+            .unwrap()
+            .into_decoded()
+            .unwrap();
+    let Some(CredentialEventCase::Activated(activated)) = decoded.event else {
         panic!("expected activated event");
     };
+    let metadata = decode_credential_metadata(
+        "metadata",
+        decode_message_field("metadata", &activated.metadata).unwrap(),
+    )
+    .unwrap();
     assert_eq!(metadata.reference().scope_key(), "github/primary");
 }
 
 #[test]
 fn event_codec_skips_foreign_event_types() {
-    let decoded = CredentialEvent::decode(EventData::new("foreign.event.v1", b"{}")).unwrap();
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new("foreign.event.v1", b"{}")).unwrap();
 
     assert_eq!(decoded, EventDecodeOutcome::Skipped);
 }
@@ -445,18 +467,22 @@ fn event_codec_rejects_invalid_persisted_fields() {
     }
     .encode_to_vec();
 
-    let error = CredentialEvent::decode(EventData::new(
-        proto_event_type::<proto::CredentialWriteRequested>(),
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
+        <proto::CredentialWriteRequested as buffa::MessageName>::FULL_NAME,
         &payload,
     ))
-    .unwrap_err();
+    .unwrap()
+    .into_decoded()
+    .unwrap();
+
+    let error = evolve(initial_state(), &decoded).unwrap_err();
 
     assert!(matches!(
         error,
-        CredentialEventPayloadError::InvalidField {
+        CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
             field: "credential_id",
             ..
-        }
+        })
     ));
 }
 
@@ -474,18 +500,23 @@ fn event_codec_rejects_scope_key_that_does_not_match_source() {
     }
     .encode_to_vec();
 
-    let error = CredentialEvent::decode(EventData::new(
-        proto_event_type::<proto::CredentialRotationRequested>(),
+    let decoded = <proto::CredentialEvent as EventDecode>::decode(EventData::new(
+        <proto::CredentialRotationRequested as buffa::MessageName>::FULL_NAME,
         &payload,
     ))
-    .unwrap_err();
+    .unwrap()
+    .into_decoded()
+    .unwrap();
+
+    let state = rebuild_state_from_events([write_requested(), activated(1)]);
+    let error = evolve(state, &decoded).unwrap_err();
 
     assert!(matches!(
         error,
-        CredentialEventPayloadError::InvalidField {
+        CredentialEvolveError::InvalidProto(CredentialProtoDecodeError::InvalidField {
             field: "credential_ref.scope_key",
             ..
-        }
+        })
     ));
 }
 
@@ -496,7 +527,10 @@ async fn command_execution_persists_and_replays_events() {
     let request_result = CommandExecution::new(&store, &request_write()).execute().await.unwrap();
     assert_eq!(request_result.stream_position, position(1));
     assert_eq!(request_result.events.as_slice(), &[write_requested()]);
-    assert!(matches!(request_result.state, CredentialState::PendingWrite(_)));
+    assert!(matches!(
+        request_result.state.state,
+        Some(CredentialStateSnapshotCase::PendingWrite(_))
+    ));
     assert_eq!(store.write_preconditions(), [StreamWritePrecondition::NoStream]);
 
     let activation = ActivateCredentialWrite::new(metadata(1));
@@ -511,10 +545,11 @@ async fn command_execution_persists_and_replays_events() {
         ]
     );
 
-    let CredentialState::Active(active) = activation_result.state else {
+    let Some(CredentialStateSnapshotCase::Active(active)) = activation_result.state.state.as_ref() else {
         panic!("expected active credential");
     };
-    assert_eq!(active.credential_ref(), &credential_ref(1));
+    let (metadata, _previous_versions) = decode_active_state("active", active).unwrap();
+    assert_eq!(metadata.reference(), &credential_ref(1));
 }
 
 #[tokio::test]

@@ -18,15 +18,18 @@ use trogon_nats::jetstream::{
     is_create_key_value_already_exists,
 };
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
+use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialEventPayloadError, state_v1, v1};
 
 use crate::credential::commands::domain::CredentialId;
 use crate::credential::handler::{
     CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialRuntimeHandler,
     activation_recovery_command,
 };
-use crate::credential::{
-    CredentialEvent, CredentialEventPayloadError, CredentialEvolveError, CredentialState, evolve, initial_state,
+use crate::credential::proto::{
+    CredentialProtoDecodeError, decode_credential_metadata, decode_message_field, decode_revoked, decode_rotated,
+    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
+use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::SecretStoreMetadata;
 
 const CHECKPOINT_KEY: &str = "v1.recovery-worker";
@@ -191,8 +194,8 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -319,8 +322,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -349,8 +352,8 @@ where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -444,8 +447,8 @@ async fn recover_pending_credential_activations_from_events<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialState, str>
-        + SnapshotWrite<CredentialState, str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -500,12 +503,18 @@ where
     for event in events {
         report.scanned_events += 1;
         match event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
                 report.decoded_events += 1;
-                changed_credentials.insert(event_credential_id(&event).clone());
+                let case = event
+                    .event
+                    .as_ref()
+                    .ok_or(CredentialRecoveryPlanBuildError::MissingEvent)?;
+                let credential_id = event_credential_id(case)
+                    .map_err(|source| CredentialRecoveryPlanBuildError::InvalidEvent { source })?;
+                changed_credentials.insert(credential_id);
             }
             EventDecodeOutcome::Skipped => {
                 report.skipped_events += 1;
@@ -540,7 +549,7 @@ where
 async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<CredentialState, CredentialRecoveryPlanBuildError>
+) -> Result<state_v1::CredentialStateSnapshot, CredentialRecoveryPlanBuildError>
 where
     EventStore: StreamRead<str>,
 {
@@ -557,7 +566,7 @@ where
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialEvent>()
+            .decode::<v1::CredentialEvent>()
             .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
         else {
             continue;
@@ -570,19 +579,21 @@ where
     Ok(state)
 }
 
-fn event_credential_id(event: &CredentialEvent) -> &CredentialId {
+fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, CredentialProtoDecodeError> {
     match event {
-        CredentialEvent::WriteRequested { credential_id, .. } | CredentialEvent::WriteFailed { credential_id, .. } => {
-            credential_id
+        CredentialEventCase::WriteRequested(inner) => Ok(decode_write_requested(inner)?.0),
+        CredentialEventCase::WriteFailed(inner) => Ok(decode_write_failed(inner)?.0),
+        CredentialEventCase::Activated(inner) => {
+            let metadata = decode_message_field("event.metadata", &inner.metadata)?;
+            Ok(decode_credential_metadata("event.metadata", metadata)?
+                .reference()
+                .id()
+                .clone())
         }
-        CredentialEvent::Activated { metadata } => metadata.reference().id(),
-        CredentialEvent::RotationRequested { credential_ref }
-        | CredentialEvent::RotationFailed { credential_ref, .. }
-        | CredentialEvent::Revoked { credential_ref } => credential_ref.id(),
-        CredentialEvent::Rotated {
-            previous_credential_ref,
-            ..
-        } => previous_credential_ref.id(),
+        CredentialEventCase::RotationRequested(inner) => Ok(decode_rotation_requested(inner)?.id().clone()),
+        CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
+        CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
+        CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
     }
 }
 
@@ -611,6 +622,13 @@ pub(crate) enum CredentialRecoveryPlanBuildError {
     DecodeEvent {
         #[source]
         source: CredentialEventPayloadError,
+    },
+    #[error("credential event is missing its event case")]
+    MissingEvent,
+    #[error("credential event is invalid: {source}")]
+    InvalidEvent {
+        #[source]
+        source: CredentialProtoDecodeError,
     },
     #[error("credential stream read failed for {credential_id}: {source}")]
     ReadCredential {
@@ -960,8 +978,10 @@ mod tests {
     };
     use crate::credential::handler::{CredentialHandler, PutCredential, RotateCredential};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
+    use crate::credential::proto::{decode_active_state, write_requested_to_proto};
     use crate::secret_store::MockOpenBaoSecretStore;
     use crate::source_integration_id::SourceIntegrationId;
+    use trogonai_proto::gateway::credentials::CredentialStateSnapshotCase;
 
     #[derive(Debug, thiserror::Error)]
     #[error("worker test stream store rejected the append")]
@@ -970,7 +990,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct WorkerTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<state_v1::CredentialStateSnapshot>>>>,
         write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         fail_append_at: Arc<Mutex<Option<usize>>>,
     }
@@ -993,7 +1013,7 @@ mod tests {
                 .collect()
         }
 
-        fn push_credential_event(&self, stream_id: &str, event: CredentialEvent) {
+        fn push_credential_event(&self, stream_id: &str, event: v1::CredentialEvent) {
             let mut events = self.events.lock().unwrap();
             let stream_position = position(events.len() as u64 + 1);
             events.push(StreamEvent {
@@ -1073,25 +1093,25 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialState, str> for WorkerTestStreamStore {
+    impl SnapshotRead<state_v1::CredentialStateSnapshot, str> for WorkerTestStreamStore {
         type Error = WorkerTestStreamStoreError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<state_v1::CredentialStateSnapshot>, Self::Error> {
             Ok(ReadSnapshotResponse {
                 snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
             })
         }
     }
 
-    impl SnapshotWrite<CredentialState, str> for WorkerTestStreamStore {
+    impl SnapshotWrite<state_v1::CredentialStateSnapshot, str> for WorkerTestStreamStore {
         type Error = WorkerTestStreamStoreError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialState, str>,
+            request: WriteSnapshotRequest<'_, state_v1::CredentialStateSnapshot, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             self.snapshots
                 .lock()
@@ -1104,15 +1124,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_plan_groups_by_payload_credential_id_instead_of_raw_subject() {
         let store = WorkerTestStreamStore::default();
-        store.push_credential_event(
-            credential_id().as_str(),
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        );
+        store.push_credential_event(credential_id().as_str(), write_requested_event());
         let events = store.events_as_raw_stream_scan();
 
         let plan = recovery_plan_from_credential_events(events, &store).await.unwrap();
@@ -1174,10 +1186,11 @@ mod tests {
         let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let active = handler.put(put_command("old-secret")).await.unwrap();
         let active = active.into_state();
-        let CredentialState::Active(active) = active else {
+        let Some(CredentialStateSnapshotCase::Active(active)) = active.state.as_ref() else {
             panic!("expected active credential");
         };
-        let active_ref = active.credential_ref().clone();
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let active_ref = active_metadata.reference().clone();
         events.fail_append_at(4);
         let error = handler
             .rotate(RotateCredential::new(
@@ -1218,15 +1231,7 @@ mod tests {
     #[tokio::test]
     async fn worker_continues_when_recovery_metadata_is_not_available() {
         let store = WorkerTestStreamStore::default();
-        store.push_credential_event(
-            credential_id().as_str(),
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        );
+        store.push_credential_event(credential_id().as_str(), write_requested_event());
         let events = store.events_as_raw_stream_scan();
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
@@ -1348,26 +1353,8 @@ mod tests {
         handler.put(put_command("super-secret")).await.unwrap_err();
 
         let raw_events = vec![
-            stream_event(
-                "gateway.credentials.events.v1.old",
-                1,
-                CredentialEvent::WriteRequested {
-                    credential_id: credential_id(),
-                    owner_id: owner_id(),
-                    source: SourceKind::GitHub,
-                    kind: CredentialKind::WebhookSecret,
-                },
-            ),
-            stream_event(
-                "gateway.credentials.events.v1.current",
-                2,
-                CredentialEvent::WriteRequested {
-                    credential_id: credential_id(),
-                    owner_id: owner_id(),
-                    source: SourceKind::GitHub,
-                    kind: CredentialKind::WebhookSecret,
-                },
-            ),
+            stream_event("gateway.credentials.events.v1.old", 1, write_requested_event()),
+            stream_event("gateway.credentials.events.v1.current", 2, write_requested_event()),
         ];
         let stream = raw_stream_with_events(raw_events).await;
         let kv = MockJetStreamKvStore::new();
@@ -1402,15 +1389,7 @@ mod tests {
     #[tokio::test]
     async fn worker_does_not_advance_checkpoint_when_recovery_fails() {
         let store = WorkerTestStreamStore::default();
-        store.push_credential_event(
-            credential_id().as_str(),
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        );
+        store.push_credential_event(credential_id().as_str(), write_requested_event());
         let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
@@ -1444,15 +1423,7 @@ mod tests {
     #[tokio::test]
     async fn worker_saves_retry_backoff_when_recovery_fails() {
         let store = WorkerTestStreamStore::default();
-        store.push_credential_event(
-            credential_id().as_str(),
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        );
+        store.push_credential_event(credential_id().as_str(), write_requested_event());
         let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
@@ -1490,15 +1461,7 @@ mod tests {
     #[tokio::test]
     async fn worker_skips_scan_until_retry_after_is_reached() {
         let store = WorkerTestStreamStore::default();
-        store.push_credential_event(
-            credential_id().as_str(),
-            CredentialEvent::WriteRequested {
-                credential_id: credential_id(),
-                owner_id: owner_id(),
-                source: SourceKind::GitHub,
-                kind: CredentialKind::WebhookSecret,
-            },
-        );
+        store.push_credential_event(credential_id().as_str(), write_requested_event());
         let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(
@@ -1719,12 +1682,26 @@ mod tests {
         StreamPosition::try_new(value).unwrap()
     }
 
-    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialEvent) -> StreamEvent {
+    fn stream_event(stream_id: &str, stream_position: u64, event: v1::CredentialEvent) -> StreamEvent {
         StreamEvent {
             stream_id: stream_id.to_string(),
             event: runtime_event(stream_position, event),
             stream_position: position(stream_position),
             recorded_at: Utc::now(),
+        }
+    }
+
+    fn write_requested_event() -> v1::CredentialEvent {
+        v1::CredentialEvent {
+            event: Some(
+                write_requested_to_proto(
+                    &credential_id(),
+                    &owner_id(),
+                    SourceKind::GitHub,
+                    CredentialKind::WebhookSecret,
+                )
+                .into(),
+            ),
         }
     }
 
@@ -1788,11 +1765,11 @@ mod tests {
         .expect("test stream info must be valid")
     }
 
-    fn runtime_event(id: u64, event: CredentialEvent) -> Event {
+    fn runtime_event(id: u64, event: v1::CredentialEvent) -> Event {
         Event {
             id: EventId::new(Uuid::from_u128(id as u128)),
-            r#type: event.event_type().unwrap().to_string(),
-            content: event.encode().unwrap(),
+            r#type: EventType::event_type(&event).unwrap().to_string(),
+            content: EventEncode::encode(&event).unwrap(),
             headers: Headers::empty(),
         }
     }
