@@ -3,7 +3,8 @@ use std::future::Future;
 
 use trogon_std::SecretString;
 
-use super::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, SecretMaterial};
+use super::SecretMaterial;
+use crate::commands::domain::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope};
 
 pub trait SecretStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;

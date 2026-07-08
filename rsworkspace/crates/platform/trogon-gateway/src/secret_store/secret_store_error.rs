@@ -1,4 +1,4 @@
-use super::{CredentialRef, CredentialStatus, StorageBackend};
+use crate::commands::domain::{CredentialRef, CredentialStatus, StorageBackend};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum SecretStoreError {

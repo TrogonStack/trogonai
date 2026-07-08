@@ -22,14 +22,12 @@ use trogon_nats::jetstream::{
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use crate::secret_store::{
-    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SecretMaterial, SecretStoreError, SecretStoreGet,
-    SourceKind, credential_lifecycle,
-    credential_lifecycle::{
-        CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
-        CredentialLifecycleState,
-    },
+use crate::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
+use crate::commands::{
+    CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
+    CredentialLifecycleState, evolve, initial_state,
 };
+use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
 const RUNTIME_PROJECTION_CHECKPOINT_KEY: &str = "v1.runtime-projection";
@@ -916,9 +914,7 @@ pub async fn refresh_runtime_projections_from_lifecycle_events(
         let state = stream_events
             .into_iter()
             .map(|(_, event)| event)
-            .try_fold(credential_lifecycle::initial_state(), |state, event| {
-                credential_lifecycle::evolve(state, &event)
-            })
+            .try_fold(initial_state(), |state, event| evolve(state, &event))
             .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
 
         let Some(projection) = RuntimeIntegrationProjection::from_lifecycle_state(&state, version)
@@ -1000,7 +996,7 @@ where
             credential_id: credential_id.clone(),
             source: Box::new(source),
         })?;
-    let mut state = credential_lifecycle::initial_state();
+    let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<CredentialLifecycleEvent>()
@@ -1008,8 +1004,7 @@ where
         else {
             continue;
         };
-        state = credential_lifecycle::evolve(state, &event)
-            .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
+        state = evolve(state, &event).map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
     }
     Ok(state)
 }
@@ -1226,9 +1221,9 @@ impl std::fmt::Display for RuntimeIntegrationKey {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use crate::commands::domain::{CredentialScope, CredentialVersion};
     use crate::secret_store::{
-        CredentialId, CredentialScope, CredentialVersion, MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut,
-        SecretStoreRevoke, SecretStoreRotate, credential_lifecycle, credential_lifecycle::CredentialLifecycleEvent,
+        MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
     };
     use chrono::Utc;
     use trogon_decider_nats::{StreamSubject, append_stream};
@@ -1374,9 +1369,7 @@ mod tests {
     fn lifecycle_state(events: impl IntoIterator<Item = CredentialLifecycleEvent>) -> CredentialLifecycleState {
         events
             .into_iter()
-            .try_fold(credential_lifecycle::initial_state(), |state, event| {
-                credential_lifecycle::evolve(state, &event)
-            })
+            .try_fold(initial_state(), |state, event| evolve(state, &event))
             .unwrap()
     }
 
@@ -1418,9 +1411,7 @@ mod tests {
             CredentialLifecycleEvent::Activated { metadata },
         ]
         .into_iter()
-        .try_fold(credential_lifecycle::initial_state(), |state, event| {
-            credential_lifecycle::evolve(state, &event)
-        })
+        .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
         let projection = RuntimeIntegrationProjection::from_lifecycle_state(&state, 2)
             .unwrap()
@@ -1839,7 +1830,7 @@ mod tests {
         );
 
         store.revoke(&credential).await.unwrap();
-        let revoked_state = credential_lifecycle::evolve(
+        let revoked_state = evolve(
             active_state,
             &CredentialLifecycleEvent::Revoked {
                 credential_ref: credential.clone(),

@@ -10,9 +10,13 @@ use trogon_std::{EmptySecret, SecretString};
 use url::Url;
 
 use super::{
-    CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialRef,
-    CredentialScope, CredentialStatus, CredentialVersion, SecretMaterial, SecretStoreError, SecretStoreGet,
-    SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate, SourceKind, StorageBackend,
+    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
+use crate::commands::domain::{
+    CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId,
+    CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
+    StorageBackend,
 };
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -39,7 +43,7 @@ pub(crate) fn openbao_credential_ref_from_id(
     let Some((owner_id, scope_key, kind)) = split_openbao_credential_id(rest) else {
         return Err(OpenBaoCredentialIdParseError::InvalidShape { id });
     };
-    let owner_id = super::CredentialOwnerId::new(owner_id)
+    let owner_id = CredentialOwnerId::new(owner_id)
         .map_err(|source| OpenBaoCredentialIdParseError::InvalidOwner { id: id.clone(), source })?;
     let kind =
         CredentialKind::parse(kind).ok_or_else(|| OpenBaoCredentialIdParseError::InvalidKind { id: id.clone() })?;
@@ -56,7 +60,7 @@ fn split_openbao_credential_id(value: &str) -> Option<(&str, &str, &str)> {
 }
 
 fn openbao_scope_from_scope_key(
-    owner_id: super::CredentialOwnerId,
+    owner_id: CredentialOwnerId,
     scope_key: &str,
 ) -> Result<CredentialScope, OpenBaoScopeKeyParseError> {
     if let Some(source) = SourceKind::parse(scope_key) {
@@ -82,7 +86,7 @@ pub(crate) enum OpenBaoCredentialIdParseError {
     InvalidOwner {
         id: CredentialId,
         #[source]
-        source: super::CredentialOwnerIdError,
+        source: CredentialOwnerIdError,
     },
     #[error("OpenBao credential id has invalid scope: {id}")]
     InvalidScope {
@@ -532,7 +536,7 @@ fn encode_path_segment(value: &str) -> String {
 mod tests {
     use std::env;
 
-    use crate::secret_store::{CredentialOwnerId, SourceKind};
+    use crate::commands::domain::{CredentialOwnerId, SourceKind};
     use crate::source_integration_id::SourceIntegrationId;
     use testcontainers_modules::testcontainers::{
         ContainerAsync, GenericImage, ImageExt,

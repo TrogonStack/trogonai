@@ -15,25 +15,27 @@ use tracing::warn;
 use trogon_decider_runtime::{SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::SecretString;
 
+use crate::commands::credential_lifecycle_handler::{
+    CredentialLifecycleRuntimeHandler, CredentialLifecycleRuntimeHandlerError, PutCredential, RevokeStoredCredential,
+    RotateCredential,
+};
+use crate::commands::domain::{
+    CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
+};
+use crate::commands::{ActiveCredential, CredentialLifecycleState};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
 };
-use crate::runtime_projection::RuntimeCredentialRegistry;
-use crate::secret_store::credential_lifecycle::{ActiveCredential, CredentialLifecycleState};
-use crate::secret_store::credential_lifecycle_handler::{
-    CredentialLifecycleRuntimeHandler, CredentialLifecycleRuntimeHandlerError, PutCredential, RevokeStoredCredential,
-    RotateCredential,
-};
-use crate::secret_store::credential_lifecycle_worker::{
+use crate::processor::credential_lifecycle_worker::{
     CredentialLifecycleRecoveryCheckpointStore, CredentialLifecycleRecoveryPolicy,
 };
+use crate::processor::runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
-    CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
-    SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate, SourceKind,
+    SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -1779,12 +1781,12 @@ mod tests {
     };
 
     use super::*;
-    use crate::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
-    use crate::secret_store::MockOpenBaoSecretStore;
-    use crate::secret_store::credential_lifecycle::CredentialLifecycleEvent;
-    use crate::secret_store::credential_lifecycle_worker::{
+    use crate::commands::CredentialLifecycleEvent;
+    use crate::processor::credential_lifecycle_worker::{
         CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError,
     };
+    use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
+    use crate::secret_store::MockOpenBaoSecretStore;
 
     #[derive(Clone, Default)]
     struct ManagementTestStreamStore {
