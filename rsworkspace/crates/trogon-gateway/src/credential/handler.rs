@@ -9,48 +9,43 @@ use trogon_decider_runtime::{
 use trogon_std::SecretString;
 
 use super::domain::{
-    CredentialId, CredentialIdError, CredentialKind, CredentialLifecycleEvent, CredentialLifecycleEventPayloadError,
-    CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
+    CredentialEvent, CredentialEventPayloadError, CredentialId, CredentialIdError, CredentialKind, CredentialOwnerId,
+    CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
 use super::{
-    ActivateCredentialRotation, ActivateCredentialWrite, CredentialFailureReason, CredentialLifecycleDecideError,
-    CredentialLifecycleEvolveError, CredentialLifecycleState, PendingCredentialWrite, RecordCredentialRotationFailure,
+    ActivateCredentialRotation, ActivateCredentialWrite, CredentialDecideError, CredentialEvolveError,
+    CredentialFailureReason, CredentialState, PendingCredentialWrite, RecordCredentialRotationFailure,
     RecordCredentialWriteFailure, RequestCredentialRotation, RequestCredentialWrite, RevokeCredential, evolve,
     initial_state,
 };
-use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
+use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
 use crate::secret_store::{SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate};
 
-type LifecycleExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
-    CredentialLifecycleDecideError,
-    CredentialLifecycleEvolveError,
+type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
+    CredentialDecideError,
+    CredentialEvolveError,
     SnapshotReadError,
     ReadError,
     AppendError,
     Infallible,
     Infallible,
-    CredentialLifecycleEventPayloadError,
+    CredentialEventPayloadError,
 >;
-type LifecycleSnapshotReadError<EventStore> = <EventStore as SnapshotRead<CredentialLifecycleState, str>>::Error;
-type LifecycleReadError<EventStore> = <EventStore as StreamRead<str>>::Error;
-type LifecycleAppendError<EventStore> = <EventStore as StreamAppend<str>>::Error;
-type LifecycleHandlerResult<EventStore, SecretError> = Result<
-    CredentialLifecycleHandlerOutcome,
-    CredentialLifecycleHandlerError<
-        SecretError,
-        LifecycleSnapshotReadError<EventStore>,
-        LifecycleReadError<EventStore>,
-        LifecycleAppendError<EventStore>,
-    >,
+type SnapshotReadError<EventStore> = <EventStore as SnapshotRead<CredentialState, str>>::Error;
+type ReadError<EventStore> = <EventStore as StreamRead<str>>::Error;
+type AppendError<EventStore> = <EventStore as StreamAppend<str>>::Error;
+type HandlerResult<EventStore, SecretError> = Result<
+    CredentialHandlerOutcome,
+    CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
 >;
-type LifecycleRuntimeHandlerResult<EventStore, SecretError> = Result<
-    CredentialLifecycleHandlerOutcome,
-    CredentialLifecycleRuntimeHandlerError<
+type RuntimeHandlerResult<EventStore, SecretError> = Result<
+    CredentialHandlerOutcome,
+    CredentialRuntimeHandlerError<
         SecretError,
-        LifecycleSnapshotReadError<EventStore>,
-        LifecycleReadError<EventStore>,
-        LifecycleAppendError<EventStore>,
+        SnapshotReadError<EventStore>,
+        ReadError<EventStore>,
+        AppendError<EventStore>,
     >,
 >;
 
@@ -124,29 +119,29 @@ impl PutCredential {
 }
 
 #[derive(Clone)]
-pub(crate) struct CredentialLifecycleHandler<EventStore, Secrets> {
+pub(crate) struct CredentialHandler<EventStore, Secrets> {
     event_store: EventStore,
     secrets: Secrets,
 }
 
-impl<EventStore, Secrets> CredentialLifecycleHandler<EventStore, Secrets> {
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets> {
     pub(crate) fn new(event_store: EventStore, secrets: Secrets) -> Self {
         Self { event_store, secrets }
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CredentialLifecycleHandlerOutcome {
-    state: CredentialLifecycleState,
+pub(crate) struct CredentialHandlerOutcome {
+    state: CredentialState,
     stream_position: StreamPosition,
 }
 
-impl CredentialLifecycleHandlerOutcome {
-    fn new(state: CredentialLifecycleState, stream_position: StreamPosition) -> Self {
+impl CredentialHandlerOutcome {
+    fn new(state: CredentialState, stream_position: StreamPosition) -> Self {
         Self { state, stream_position }
     }
 
-    pub(crate) fn state(&self) -> &CredentialLifecycleState {
+    pub(crate) fn state(&self) -> &CredentialState {
         &self.state
     }
 
@@ -154,7 +149,7 @@ impl CredentialLifecycleHandlerOutcome {
         self.stream_position
     }
 
-    pub(crate) fn into_state(self) -> CredentialLifecycleState {
+    pub(crate) fn into_state(self) -> CredentialState {
         self.state
     }
 }
@@ -167,22 +162,22 @@ pub(crate) enum CredentialActivationRecoveryCommand {
 
 pub(crate) fn activation_recovery_command(
     stream_id: &str,
-    state: &CredentialLifecycleState,
+    state: &CredentialState,
 ) -> Result<Option<CredentialActivationRecoveryCommand>, CredentialActivationRecoveryPlanError> {
     match state {
-        CredentialLifecycleState::PendingWrite(pending) => {
+        CredentialState::PendingWrite(pending) => {
             let credential = pending_write_credential_ref(stream_id, pending)?;
             Ok(Some(CredentialActivationRecoveryCommand::Write(
                 RecoverCredentialWriteActivation::new(credential),
             )))
         }
-        CredentialLifecycleState::RotationPending(rotation) => Ok(Some(CredentialActivationRecoveryCommand::Rotation(
+        CredentialState::RotationPending(rotation) => Ok(Some(CredentialActivationRecoveryCommand::Rotation(
             RecoverCredentialRotationActivation::new(rotation.active().credential_ref().next_version()),
         ))),
-        CredentialLifecycleState::Missing
-        | CredentialLifecycleState::Active(_)
-        | CredentialLifecycleState::WriteFailed(_)
-        | CredentialLifecycleState::Revoked(_) => Ok(None),
+        CredentialState::Missing
+        | CredentialState::Active(_)
+        | CredentialState::WriteFailed(_)
+        | CredentialState::Revoked(_) => Ok(None),
     }
 }
 
@@ -214,12 +209,12 @@ fn pending_write_credential_ref(
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CredentialActivationRecoveryPlanError {
-    #[error("credential lifecycle recovery stream id is invalid: {0}")]
+    #[error("credential recovery stream id is invalid: {0}")]
     InvalidCredentialId(#[source] CredentialIdError),
-    #[error("credential lifecycle recovery stream id is not an OpenBao credential id: {0}")]
+    #[error("credential recovery stream id is not an OpenBao credential id: {0}")]
     InvalidOpenBaoCredentialId(#[source] OpenBaoCredentialIdParseError),
     #[error(
-        "credential lifecycle recovery pending write does not match parsed credential ref: expected {expected_id} {expected_owner_id} {expected_source} {expected_kind}, got {credential}"
+        "credential recovery pending write does not match parsed credential ref: expected {expected_id} {expected_owner_id} {expected_source} {expected_kind}, got {credential}"
     )]
     PendingWriteMismatch {
         credential: CredentialRef,
@@ -231,30 +226,30 @@ pub(crate) enum CredentialActivationRecoveryPlanError {
 }
 
 #[derive(Clone)]
-pub(crate) struct CredentialLifecycleRuntimeHandler<EventStore, Secrets> {
-    lifecycle: CredentialLifecycleHandler<EventStore, Secrets>,
+pub(crate) struct CredentialRuntimeHandler<EventStore, Secrets> {
+    handler: CredentialHandler<EventStore, Secrets>,
     runtime_credentials: RuntimeCredentialRegistry,
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets> {
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets> {
     pub(crate) fn new(
         event_store: EventStore,
         secrets: Secrets,
         runtime_credentials: RuntimeCredentialRegistry,
     ) -> Self {
         Self {
-            lifecycle: CredentialLifecycleHandler::new(event_store, secrets),
+            handler: CredentialHandler::new(event_store, secrets),
             runtime_credentials,
         }
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -262,23 +257,23 @@ where
     pub(crate) async fn put(
         &self,
         command: PutCredential,
-    ) -> LifecycleRuntimeHandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
         let outcome = self
-            .lifecycle
+            .handler
             .put(command)
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Lifecycle { source })?;
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
         self.apply(&outcome).await?;
         Ok(outcome)
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
@@ -286,23 +281,23 @@ where
     pub(crate) async fn rotate(
         &self,
         command: RotateCredential,
-    ) -> LifecycleRuntimeHandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
         let outcome = self
-            .lifecycle
+            .handler
             .rotate(command)
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Lifecycle { source })?;
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
         self.apply(&outcome).await?;
         Ok(outcome)
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -310,12 +305,12 @@ where
     pub(crate) async fn recover_write_activation(
         &self,
         command: RecoverCredentialWriteActivation,
-    ) -> LifecycleRuntimeHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
         let outcome = self
-            .lifecycle
+            .handler
             .recover_write_activation(command)
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Lifecycle { source })?;
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
         self.apply(&outcome).await?;
         Ok(outcome)
     }
@@ -323,23 +318,23 @@ where
     pub(crate) async fn recover_rotation_activation(
         &self,
         command: RecoverCredentialRotationActivation,
-    ) -> LifecycleRuntimeHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
         let outcome = self
-            .lifecycle
+            .handler
             .recover_rotation_activation(command)
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Lifecycle { source })?;
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
         self.apply(&outcome).await?;
         Ok(outcome)
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -347,22 +342,22 @@ where
     pub(crate) async fn revoke(
         &self,
         command: RevokeStoredCredential,
-    ) -> LifecycleRuntimeHandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
         let outcome = self
-            .lifecycle
+            .handler
             .revoke(command)
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Lifecycle { source })?;
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
         self.apply(&outcome).await?;
         Ok(outcome)
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets> {
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets> {
     async fn apply<SecretError, SnapshotReadError, ReadError, AppendError>(
         &self,
-        outcome: &CredentialLifecycleHandlerOutcome,
-    ) -> Result<(), CredentialLifecycleRuntimeHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>>
+        outcome: &CredentialHandlerOutcome,
+    ) -> Result<(), CredentialRuntimeHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>>
     where
         SecretError: Error + Send + Sync + 'static,
         SnapshotReadError: Error + Send + Sync + 'static,
@@ -370,38 +365,38 @@ impl<EventStore, Secrets> CredentialLifecycleRuntimeHandler<EventStore, Secrets>
         AppendError: Error + Send + Sync + 'static,
     {
         self.runtime_credentials
-            .apply_lifecycle_state(outcome.state(), outcome.stream_position())
+            .apply_state(outcome.state(), outcome.stream_position())
             .await
-            .map_err(|source| CredentialLifecycleRuntimeHandlerError::Projection { source })
+            .map_err(|source| CredentialRuntimeHandlerError::Projection { source })
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleRuntimeHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>
+pub(crate) enum CredentialRuntimeHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>
 where
     SecretError: Error + Send + Sync + 'static,
     SnapshotReadError: Error + Send + Sync + 'static,
     ReadError: Error + Send + Sync + 'static,
     AppendError: Error + Send + Sync + 'static,
 {
-    #[error("credential lifecycle command failed: {source}")]
-    Lifecycle {
+    #[error("credential command failed: {source}")]
+    Command {
         #[source]
-        source: CredentialLifecycleHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>,
+        source: CredentialHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle runtime projection failed: {source}")]
+    #[error("credential runtime projection failed: {source}")]
     Projection {
         #[source]
         source: RuntimeProjectionRefreshError,
     },
 }
 
-impl<EventStore, Secrets> CredentialLifecycleHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
@@ -409,54 +404,48 @@ where
     pub(crate) async fn recover_write_activation(
         &self,
         command: RecoverCredentialWriteActivation,
-    ) -> LifecycleHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+    ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
         let metadata = self
             .secrets
             .metadata(&command.credential_ref)
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::SecretMetadata { source })?;
+            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialWrite::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
             .execute()
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::RecoverWriteActivation { source })?;
+            .map_err(|source| CredentialHandlerError::RecoverWriteActivation { source })?;
 
-        Ok(CredentialLifecycleHandlerOutcome::new(
-            result.state,
-            result.stream_position,
-        ))
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
     }
 
     pub(crate) async fn recover_rotation_activation(
         &self,
         command: RecoverCredentialRotationActivation,
-    ) -> LifecycleHandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
+    ) -> HandlerResult<EventStore, <Secrets as SecretStoreMetadata>::Error> {
         let metadata = self
             .secrets
             .metadata(&command.credential_ref)
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::SecretMetadata { source })?;
+            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialRotation::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
             .execute()
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::RecoverRotationActivation { source })?;
+            .map_err(|source| CredentialHandlerError::RecoverRotationActivation { source })?;
 
-        Ok(CredentialLifecycleHandlerOutcome::new(
-            result.state,
-            result.stream_position,
-        ))
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStorePut + SecretStoreMetadata<Error = <Secrets as SecretStorePut>::Error>,
@@ -464,7 +453,7 @@ where
     pub(crate) async fn put(
         &self,
         command: PutCredential,
-    ) -> LifecycleHandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
+    ) -> HandlerResult<EventStore, <Secrets as SecretStorePut>::Error> {
         let request = RequestCredentialWrite::new(
             command.credential_id.clone(),
             command.scope.owner_id().clone(),
@@ -478,25 +467,22 @@ where
             Err(source) => {
                 let reason = failure_reason(&source);
                 self.record_write_failure(command.credential_id, reason).await?;
-                return Err(CredentialLifecycleHandlerError::SecretWrite { source });
+                return Err(CredentialHandlerError::SecretWrite { source });
             }
         };
         let metadata = self
             .secrets
             .metadata(&credential_ref)
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::SecretMetadata { source })?;
+            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialWrite::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
             .execute()
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::ActivateWrite { source })?;
+            .map_err(|source| CredentialHandlerError::ActivateWrite { source })?;
 
-        Ok(CredentialLifecycleHandlerOutcome::new(
-            result.state,
-            result.stream_position,
-        ))
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
     }
 
     async fn ensure_write_requested(
@@ -504,11 +490,11 @@ where
         command: &RequestCredentialWrite,
     ) -> Result<
         (),
-        CredentialLifecycleHandlerError<
+        CredentialHandlerError<
             <Secrets as SecretStorePut>::Error,
-            LifecycleSnapshotReadError<EventStore>,
-            LifecycleReadError<EventStore>,
-            LifecycleAppendError<EventStore>,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
         >,
     > {
         match CommandExecution::new(&self.event_store, command)
@@ -521,8 +507,8 @@ where
             Err(source) => {
                 let state = load_state(&self.event_store, command.credential_id().as_str()).await?;
                 match state {
-                    CredentialLifecycleState::PendingWrite(pending) if pending_matches(&pending, command) => Ok(()),
-                    _ => Err(CredentialLifecycleHandlerError::RequestWrite { source }),
+                    CredentialState::PendingWrite(pending) if pending_matches(&pending, command) => Ok(()),
+                    _ => Err(CredentialHandlerError::RequestWrite { source }),
                 }
             }
         }
@@ -534,11 +520,11 @@ where
         reason: CredentialFailureReason,
     ) -> Result<
         (),
-        CredentialLifecycleHandlerError<
+        CredentialHandlerError<
             <Secrets as SecretStorePut>::Error,
-            LifecycleSnapshotReadError<EventStore>,
-            LifecycleReadError<EventStore>,
-            LifecycleAppendError<EventStore>,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
         >,
     > {
         CommandExecution::new(
@@ -550,16 +536,16 @@ where
         .execute()
         .await
         .map(|_| ())
-        .map_err(|source| CredentialLifecycleHandlerError::RecordWriteFailure { source })
+        .map_err(|source| CredentialHandlerError::RecordWriteFailure { source })
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRotate + SecretStoreMetadata<Error = <Secrets as SecretStoreRotate>::Error>,
@@ -567,7 +553,7 @@ where
     pub(crate) async fn rotate(
         &self,
         command: RotateCredential,
-    ) -> LifecycleHandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
+    ) -> HandlerResult<EventStore, <Secrets as SecretStoreRotate>::Error> {
         let request = RequestCredentialRotation::new(command.credential_ref.clone());
         self.ensure_rotation_requested(&request).await?;
 
@@ -576,25 +562,22 @@ where
             Err(source) => {
                 let reason = failure_reason(&source);
                 self.record_rotation_failure(command.credential_ref, reason).await?;
-                return Err(CredentialLifecycleHandlerError::SecretRotate { source });
+                return Err(CredentialHandlerError::SecretRotate { source });
             }
         };
         let metadata = self
             .secrets
             .metadata(&rotated_ref)
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::SecretMetadata { source })?;
+            .map_err(|source| CredentialHandlerError::SecretMetadata { source })?;
         let result = CommandExecution::new(&self.event_store, &ActivateCredentialRotation::new(metadata))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
             .execute()
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::ActivateRotation { source })?;
+            .map_err(|source| CredentialHandlerError::ActivateRotation { source })?;
 
-        Ok(CredentialLifecycleHandlerOutcome::new(
-            result.state,
-            result.stream_position,
-        ))
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
     }
 
     async fn ensure_rotation_requested(
@@ -602,11 +585,11 @@ where
         command: &RequestCredentialRotation,
     ) -> Result<
         (),
-        CredentialLifecycleHandlerError<
+        CredentialHandlerError<
             <Secrets as SecretStoreRotate>::Error,
-            LifecycleSnapshotReadError<EventStore>,
-            LifecycleReadError<EventStore>,
-            LifecycleAppendError<EventStore>,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
         >,
     > {
         match CommandExecution::new(&self.event_store, command)
@@ -619,12 +602,12 @@ where
             Err(source) => {
                 let state = load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
                 match state {
-                    CredentialLifecycleState::RotationPending(rotation)
+                    CredentialState::RotationPending(rotation)
                         if rotation.active().credential_ref() == command.credential_ref() =>
                     {
                         Ok(())
                     }
-                    _ => Err(CredentialLifecycleHandlerError::RequestRotation { source }),
+                    _ => Err(CredentialHandlerError::RequestRotation { source }),
                 }
             }
         }
@@ -636,11 +619,11 @@ where
         reason: CredentialFailureReason,
     ) -> Result<
         (),
-        CredentialLifecycleHandlerError<
+        CredentialHandlerError<
             <Secrets as SecretStoreRotate>::Error,
-            LifecycleSnapshotReadError<EventStore>,
-            LifecycleReadError<EventStore>,
-            LifecycleAppendError<EventStore>,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
         >,
     > {
         CommandExecution::new(
@@ -652,16 +635,16 @@ where
         .execute()
         .await
         .map(|_| ())
-        .map_err(|source| CredentialLifecycleHandlerError::RecordRotationFailure { source })
+        .map_err(|source| CredentialHandlerError::RecordRotationFailure { source })
     }
 }
 
-impl<EventStore, Secrets> CredentialLifecycleHandler<EventStore, Secrets>
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreRevoke,
@@ -669,53 +652,50 @@ where
     pub(crate) async fn revoke(
         &self,
         command: RevokeStoredCredential,
-    ) -> LifecycleHandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
+    ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
         self.secrets
             .revoke(&command.credential_ref)
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::SecretRevoke { source })?;
+            .map_err(|source| CredentialHandlerError::SecretRevoke { source })?;
 
         let result = CommandExecution::new(&self.event_store, &RevokeCredential::new(command.credential_ref))
             .with_snapshot(&self.event_store)
             .with_task_runtime(TokioSnapshotTaskScheduler)
             .execute()
             .await
-            .map_err(|source| CredentialLifecycleHandlerError::Revoke { source })?;
+            .map_err(|source| CredentialHandlerError::Revoke { source })?;
 
-        Ok(CredentialLifecycleHandlerOutcome::new(
-            result.state,
-            result.stream_position,
-        ))
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>
+pub(crate) enum CredentialHandlerError<SecretError, SnapshotReadError, ReadError, AppendError>
 where
     SecretError: Error + Send + Sync + 'static,
     SnapshotReadError: Error + Send + Sync + 'static,
     ReadError: Error + Send + Sync + 'static,
     AppendError: Error + Send + Sync + 'static,
 {
-    #[error("credential lifecycle write request failed: {source}")]
+    #[error("credential write request failed: {source}")]
     RequestWrite {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle state read failed: {source}")]
+    #[error("credential state read failed: {source}")]
     ReadState {
         #[source]
         source: ReadError,
     },
-    #[error("credential lifecycle state decode failed: {source}")]
+    #[error("credential state decode failed: {source}")]
     DecodeState {
         #[source]
-        source: CredentialLifecycleEventPayloadError,
+        source: CredentialEventPayloadError,
     },
-    #[error("credential lifecycle state replay failed: {source}")]
+    #[error("credential state replay failed: {source}")]
     ReplayState {
         #[source]
-        source: CredentialLifecycleEvolveError,
+        source: CredentialEvolveError,
     },
     #[error("secret store write failed: {source}")]
     SecretWrite {
@@ -727,55 +707,55 @@ where
         #[source]
         source: SecretError,
     },
-    #[error("credential lifecycle write failure recording failed: {source}")]
+    #[error("credential write failure recording failed: {source}")]
     RecordWriteFailure {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle rotation request failed: {source}")]
+    #[error("credential rotation request failed: {source}")]
     RequestRotation {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
     #[error("secret store rotate failed: {source}")]
     SecretRotate {
         #[source]
         source: SecretError,
     },
-    #[error("credential lifecycle rotation failure recording failed: {source}")]
+    #[error("credential rotation failure recording failed: {source}")]
     RecordRotationFailure {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle write activation failed: {source}")]
+    #[error("credential write activation failed: {source}")]
     ActivateWrite {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle rotation activation failed: {source}")]
+    #[error("credential rotation activation failed: {source}")]
     ActivateRotation {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle write activation recovery failed: {source}")]
+    #[error("credential write activation recovery failed: {source}")]
     RecoverWriteActivation {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
-    #[error("credential lifecycle rotation activation recovery failed: {source}")]
+    #[error("credential rotation activation recovery failed: {source}")]
     RecoverRotationActivation {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
     #[error("secret store revoke failed: {source}")]
     SecretRevoke {
         #[source]
         source: SecretError,
     },
-    #[error("credential lifecycle revoke failed: {source}")]
+    #[error("credential revoke failed: {source}")]
     Revoke {
         #[source]
-        source: LifecycleExecutionError<SnapshotReadError, ReadError, AppendError>,
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
 }
 
@@ -790,19 +770,14 @@ async fn load_state<EventStore, SecretError>(
     event_store: &EventStore,
     stream_id: &str,
 ) -> Result<
-    CredentialLifecycleState,
-    CredentialLifecycleHandlerError<
-        SecretError,
-        LifecycleSnapshotReadError<EventStore>,
-        LifecycleReadError<EventStore>,
-        LifecycleAppendError<EventStore>,
-    >,
+    CredentialState,
+    CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
 >
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     SecretError: Error + Send + Sync + 'static,
@@ -813,16 +788,16 @@ where
             from: ReadFrom::Beginning,
         })
         .await
-        .map_err(|source| CredentialLifecycleHandlerError::ReadState { source })?;
+        .map_err(|source| CredentialHandlerError::ReadState { source })?;
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialLifecycleEvent>()
-            .map_err(|source| CredentialLifecycleHandlerError::DecodeState { source })?
+            .decode::<CredentialEvent>()
+            .map_err(|source| CredentialHandlerError::DecodeState { source })?
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| CredentialLifecycleHandlerError::ReplayState { source })?;
+        state = evolve(state, &event).map_err(|source| CredentialHandlerError::ReplayState { source })?;
     }
     Ok(state)
 }
@@ -855,8 +830,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::commands::domain::{CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend};
-    use crate::processor::runtime_projection::{
+    use crate::credential::domain::{CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend};
+    use crate::credential::processor::runtime_projection::{
         RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
     };
     use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;
@@ -875,7 +850,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct HandlerTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialLifecycleState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
         write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         fail_append_at: Arc<Mutex<Option<usize>>>,
     }
@@ -889,16 +864,10 @@ mod tests {
             self.events.lock().unwrap().clone()
         }
 
-        fn decoded_events(&self) -> Vec<CredentialLifecycleEvent> {
+        fn decoded_events(&self) -> Vec<CredentialEvent> {
             self.events()
                 .into_iter()
-                .map(|event| {
-                    event
-                        .decode::<CredentialLifecycleEvent>()
-                        .unwrap()
-                        .into_decoded()
-                        .unwrap()
-                })
+                .map(|event| event.decode::<CredentialEvent>().unwrap().into_decoded().unwrap())
                 .collect()
         }
 
@@ -975,25 +944,25 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialLifecycleState, str> for HandlerTestStreamStore {
+    impl SnapshotRead<CredentialState, str> for HandlerTestStreamStore {
         type Error = HandlerTestStreamStoreError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialLifecycleState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
             Ok(ReadSnapshotResponse {
                 snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
             })
         }
     }
 
-    impl SnapshotWrite<CredentialLifecycleState, str> for HandlerTestStreamStore {
+    impl SnapshotWrite<CredentialState, str> for HandlerTestStreamStore {
         type Error = HandlerTestStreamStoreError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialLifecycleState, str>,
+            request: WriteSnapshotRequest<'_, CredentialState, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             self.snapshots
                 .lock()
@@ -1169,7 +1138,7 @@ mod tests {
     fn recovery_plan_builds_write_activation_command_for_pending_write() {
         let state = evolve(
             initial_state(),
-            &CredentialLifecycleEvent::WriteRequested {
+            &CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1197,14 +1166,14 @@ mod tests {
             CredentialFingerprint::new("fingerprint").unwrap(),
         );
         let state = [
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
                 kind: CredentialKind::WebhookSecret,
             },
-            CredentialLifecycleEvent::Activated { metadata: active },
-            CredentialLifecycleEvent::RotationRequested {
+            CredentialEvent::Activated { metadata: active },
+            CredentialEvent::RotationRequested {
                 credential_ref: credential_ref(1),
             },
         ]
@@ -1223,7 +1192,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_plan_skips_completed_lifecycle_state() {
+    fn recovery_plan_skips_completed_state() {
         let active = CredentialMetadata::new(
             credential_ref(1),
             CredentialStatus::Active,
@@ -1231,13 +1200,13 @@ mod tests {
             CredentialFingerprint::new("fingerprint").unwrap(),
         );
         let state = [
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
                 kind: CredentialKind::WebhookSecret,
             },
-            CredentialLifecycleEvent::Activated { metadata: active },
+            CredentialEvent::Activated { metadata: active },
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -1252,14 +1221,14 @@ mod tests {
     async fn put_records_request_writes_secret_and_activates_metadata() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
 
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialLifecycleState::Active(_)));
+        assert!(matches!(outcome.state(), CredentialState::Active(_)));
         let state = outcome.into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         assert_eq!(active.credential_ref().id(), &credential_id());
@@ -1290,15 +1259,15 @@ mod tests {
     #[tokio::test]
     async fn put_records_write_failure_when_secret_store_rejects_the_side_effect() {
         let events = HandlerTestStreamStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), FailingSecretStore);
+        let handler = CredentialHandler::new(events.clone(), FailingSecretStore);
 
         let error = handler.put(put_command("ignored-secret")).await.unwrap_err();
 
-        assert!(matches!(error, CredentialLifecycleHandlerError::SecretWrite { .. }));
+        assert!(matches!(error, CredentialHandlerError::SecretWrite { .. }));
         let decoded = events.decoded_events();
         assert_eq!(decoded.len(), 2);
-        assert!(matches!(decoded[0], CredentialLifecycleEvent::WriteRequested { .. }));
-        assert!(matches!(decoded[1], CredentialLifecycleEvent::WriteFailed { .. }));
+        assert!(matches!(decoded[0], CredentialEvent::WriteRequested { .. }));
+        assert!(matches!(decoded[1], CredentialEvent::WriteFailed { .. }));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1312,19 +1281,19 @@ mod tests {
     async fn put_retry_resumes_pending_write_after_activation_append_failure() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
 
         let error = handler.put(put_command("first-secret")).await.unwrap_err();
 
-        assert!(matches!(error, CredentialLifecycleHandlerError::ActivateWrite { .. }));
+        assert!(matches!(error, CredentialHandlerError::ActivateWrite { .. }));
         assert_eq!(events.decoded_events().len(), 1);
 
         let outcome = handler.put(put_command("retry-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
         let state = outcome.into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         assert_eq!(active.credential_ref().version().get(), 2);
@@ -1354,12 +1323,12 @@ mod tests {
     async fn recover_write_activation_records_missing_activation_without_plaintext() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
 
         let error = handler.put(put_command("first-secret")).await.unwrap_err();
 
-        assert!(matches!(error, CredentialLifecycleHandlerError::ActivateWrite { .. }));
+        assert!(matches!(error, CredentialHandlerError::ActivateWrite { .. }));
         assert_eq!(events.decoded_events().len(), 1);
         assert_eq!(
             secrets
@@ -1379,7 +1348,7 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(2));
         let state = outcome.into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         assert_eq!(active.credential_ref(), &credential_ref(1));
@@ -1401,9 +1370,9 @@ mod tests {
     async fn rotate_records_request_rotates_secret_and_activates_metadata() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
 
@@ -1417,7 +1386,7 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(4));
         let state = outcome.into_state();
-        let CredentialLifecycleState::Active(rotated) = state else {
+        let CredentialState::Active(rotated) = state else {
             panic!("expected active credential");
         };
         assert_eq!(rotated.credential_ref().version().get(), 2);
@@ -1442,8 +1411,8 @@ mod tests {
             ]
         );
         let decoded = events.decoded_events();
-        assert!(matches!(decoded[2], CredentialLifecycleEvent::RotationRequested { .. }));
-        assert!(matches!(decoded[3], CredentialLifecycleEvent::Rotated { .. }));
+        assert!(matches!(decoded[2], CredentialEvent::RotationRequested { .. }));
+        assert!(matches!(decoded[3], CredentialEvent::Rotated { .. }));
         for event in events.events() {
             assert!(!payload_contains(&event.event.content, "rotated-secret"));
         }
@@ -1453,16 +1422,16 @@ mod tests {
     async fn rotate_records_rotation_failure_when_secret_store_rejects_the_side_effect() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let put_handler = CredentialLifecycleHandler::new(events.clone(), secrets);
+        let put_handler = CredentialHandler::new(events.clone(), secrets);
         let state = put_handler
             .put(put_command("initial-secret"))
             .await
             .unwrap()
             .into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
-        let rotate_handler = CredentialLifecycleHandler::new(events.clone(), FailingRotateSecretStore);
+        let rotate_handler = CredentialHandler::new(events.clone(), FailingRotateSecretStore);
 
         let error = rotate_handler
             .rotate(RotateCredential::new(
@@ -1472,11 +1441,11 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, CredentialLifecycleHandlerError::SecretRotate { .. }));
+        assert!(matches!(error, CredentialHandlerError::SecretRotate { .. }));
         let decoded = events.decoded_events();
         assert_eq!(decoded.len(), 4);
-        assert!(matches!(decoded[2], CredentialLifecycleEvent::RotationRequested { .. }));
-        assert!(matches!(decoded[3], CredentialLifecycleEvent::RotationFailed { .. }));
+        assert!(matches!(decoded[2], CredentialEvent::RotationRequested { .. }));
+        assert!(matches!(decoded[3], CredentialEvent::RotationFailed { .. }));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1492,9 +1461,9 @@ mod tests {
     async fn recover_rotation_activation_records_missing_rotation_without_plaintext() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         let rotated_ref = active.credential_ref().next_version();
@@ -1508,10 +1477,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            CredentialLifecycleHandlerError::ActivateRotation { .. }
-        ));
+        assert!(matches!(error, CredentialHandlerError::ActivateRotation { .. }));
         assert_eq!(events.decoded_events().len(), 3);
         assert_eq!(
             secrets
@@ -1531,7 +1497,7 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(4));
         let state = outcome.into_state();
-        let CredentialLifecycleState::Active(rotated) = state else {
+        let CredentialState::Active(rotated) = state else {
             panic!("expected active credential");
         };
         assert_eq!(rotated.credential_ref(), &rotated_ref);
@@ -1553,12 +1519,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_revokes_secret_and_records_lifecycle_state() {
+    async fn revoke_revokes_secret_and_records_state() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         let credential_ref = active.credential_ref().clone();
@@ -1570,13 +1536,13 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(3));
         let state = outcome.into_state();
-        assert!(matches!(state, CredentialLifecycleState::Revoked(_)));
+        assert!(matches!(state, CredentialState::Revoked(_)));
         assert!(matches!(
             secrets.get(&credential_ref).await,
             Err(SecretStoreError::Unreadable { .. })
         ));
         let decoded = events.decoded_events();
-        assert!(matches!(decoded[2], CredentialLifecycleEvent::Revoked { .. }));
+        assert!(matches!(decoded[2], CredentialEvent::Revoked { .. }));
         assert_eq!(
             events.write_preconditions(),
             [
@@ -1588,12 +1554,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn revoke_retry_records_lifecycle_after_append_failure() {
+    async fn revoke_retry_records_state_after_append_failure() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
-        let CredentialLifecycleState::Active(active) = state else {
+        let CredentialState::Active(active) = state else {
             panic!("expected active credential");
         };
         let credential_ref = active.credential_ref().clone();
@@ -1604,7 +1570,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, CredentialLifecycleHandlerError::Revoke { .. }));
+        assert!(matches!(error, CredentialHandlerError::Revoke { .. }));
         assert_eq!(events.decoded_events().len(), 2);
         assert!(matches!(
             secrets.get(&credential_ref).await,
@@ -1618,7 +1584,7 @@ mod tests {
 
         assert_eq!(outcome.stream_position(), position(3));
         let state = outcome.into_state();
-        assert!(matches!(state, CredentialLifecycleState::Revoked(_)));
+        assert!(matches!(state, CredentialState::Revoked(_)));
         assert_eq!(events.decoded_events().len(), 3);
         assert_eq!(
             events.write_preconditions(),
@@ -1637,12 +1603,12 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let resolver = runtime_credentials.resolver(secrets.clone());
-        let handler = CredentialLifecycleRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
 
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialLifecycleState::Active(_)));
+        assert!(matches!(outcome.state(), CredentialState::Active(_)));
         assert_eq!(
             resolver
                 .resolve_plaintext(&runtime_key(), CredentialKind::WebhookSecret)
@@ -1659,12 +1625,12 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let resolver = runtime_credentials.resolver(secrets.clone());
-        let handler = CredentialLifecycleRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
 
         let outcome = handler.put(source_scoped_put_command("source-secret")).await.unwrap();
 
         assert_eq!(outcome.stream_position(), position(2));
-        assert!(matches!(outcome.state(), CredentialLifecycleState::Active(_)));
+        assert!(matches!(outcome.state(), CredentialState::Active(_)));
         assert_eq!(
             resolver
                 .resolve_plaintext(&source_runtime_key(), CredentialKind::WebhookSecret)
@@ -1681,15 +1647,15 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let resolver = runtime_credentials.resolver(secrets.clone());
-        let handler = CredentialLifecycleRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets, runtime_credentials);
         events.fail_append_at(2);
 
         let error = handler.put(put_command("super-secret")).await.unwrap_err();
 
         assert!(matches!(
             error,
-            CredentialLifecycleRuntimeHandlerError::Lifecycle {
-                source: CredentialLifecycleHandlerError::ActivateWrite { .. }
+            CredentialRuntimeHandlerError::Command {
+                source: CredentialHandlerError::ActivateWrite { .. }
             }
         ));
 
@@ -1715,10 +1681,9 @@ mod tests {
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let resolver = runtime_credentials.resolver(secrets.clone());
-        let handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
         let outcome = handler.put(put_command("super-secret")).await.unwrap();
-        let CredentialLifecycleState::Active(active) = outcome.into_state() else {
+        let CredentialState::Active(active) = outcome.into_state() else {
             panic!("expected active credential");
         };
         let credential_ref = active.credential_ref().clone();
@@ -1753,19 +1718,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_handler_with_openbao_testcontainer_applies_lifecycle_and_resolves_precise_value() {
+    async fn runtime_handler_with_openbao_testcontainer_applies_state_and_resolves_precise_value() {
         let server = OpenBaoServer::start().await;
         let secrets = server.store();
         let events = HandlerTestStreamStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let resolver = runtime_credentials.resolver(secrets.clone());
-        let handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
 
         let put = handler.put(put_command("copy-this-value-in-and-out")).await.unwrap();
 
         assert_eq!(put.stream_position(), position(2));
-        let CredentialLifecycleState::Active(active) = put.into_state() else {
+        let CredentialState::Active(active) = put.into_state() else {
             panic!("expected active credential");
         };
         let initial_ref = active.credential_ref().clone();
@@ -1787,7 +1751,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(rotated.stream_position(), position(4));
-        let CredentialLifecycleState::Active(active) = rotated.into_state() else {
+        let CredentialState::Active(active) = rotated.into_state() else {
             panic!("expected active credential");
         };
         let rotated_ref = active.credential_ref().clone();
@@ -1807,7 +1771,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(revoked.stream_position(), position(5));
-        assert!(matches!(revoked.state(), CredentialLifecycleState::Revoked(_)));
+        assert!(matches!(revoked.state(), CredentialState::Revoked(_)));
         assert!(matches!(
             resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
             Err(RuntimeCredentialError::IntegrationNotFound { .. })

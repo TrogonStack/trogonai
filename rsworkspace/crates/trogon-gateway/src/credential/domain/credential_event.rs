@@ -12,7 +12,7 @@ use super::{
 use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CredentialLifecycleEvent {
+pub enum CredentialEvent {
     WriteRequested {
         credential_id: CredentialId,
         owner_id: CredentialOwnerId,
@@ -43,18 +43,18 @@ pub enum CredentialLifecycleEvent {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CredentialLifecycleEventPayloadError {
-    #[error("credential lifecycle event payload protobuf failed: {0}")]
+pub enum CredentialEventPayloadError {
+    #[error("credential event payload protobuf failed: {0}")]
     Decode(#[source] buffa::DecodeError),
-    #[error("credential lifecycle event field '{field}' is missing")]
+    #[error("credential event field '{field}' is missing")]
     MissingField { field: &'static str },
-    #[error("credential lifecycle event field '{field}' is invalid: {reason}")]
+    #[error("credential event field '{field}' is invalid: {reason}")]
     InvalidField { field: &'static str, reason: String },
 }
 
-impl EventIdentity for CredentialLifecycleEvent {}
+impl EventIdentity for CredentialEvent {}
 
-impl EventType for CredentialLifecycleEvent {
+impl EventType for CredentialEvent {
     type Error = Infallible;
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
@@ -70,7 +70,7 @@ impl EventType for CredentialLifecycleEvent {
     }
 }
 
-impl EventEncode for CredentialLifecycleEvent {
+impl EventEncode for CredentialEvent {
     type Error = Infallible;
 
     fn encode(&self) -> Result<Vec<u8>, Self::Error> {
@@ -122,8 +122,8 @@ impl EventEncode for CredentialLifecycleEvent {
     }
 }
 
-impl EventDecode for CredentialLifecycleEvent {
-    type Error = CredentialLifecycleEventPayloadError;
+impl EventDecode for CredentialEvent {
+    type Error = CredentialEventPayloadError;
 
     fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
         let decoded = if event.event_type == proto_event_type::<proto::CredentialWriteRequested>() {
@@ -259,7 +259,7 @@ fn proto_storage_backend(value: StorageBackend) -> proto::StorageBackend {
 fn decode_credential_metadata(
     field: &'static str,
     value: &proto::CredentialMetadata,
-) -> Result<CredentialMetadata, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialMetadata, CredentialEventPayloadError> {
     Ok(CredentialMetadata::new(
         decode_credential_ref(
             nested_field(field, "reference"),
@@ -275,14 +275,14 @@ fn decode_credential_metadata(
 fn decode_credential_ref(
     field: &'static str,
     value: &proto::CredentialRef,
-) -> Result<CredentialRef, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialRef, CredentialEventPayloadError> {
     let id = decode_credential_id(nested_field(field, "id"), &value.id)?;
     let owner_id = decode_owner_id(nested_field(field, "owner_id"), &value.owner_id)?;
     let source = decode_source_kind(nested_field(field, "source"), value.source.as_ref())?;
     let kind = decode_credential_kind(nested_field(field, "kind"), value.kind.as_ref())?;
     let version = value
         .version
-        .ok_or(CredentialLifecycleEventPayloadError::MissingField {
+        .ok_or(CredentialEventPayloadError::MissingField {
             field: nested_field(field, "version"),
         })
         .and_then(|value| {
@@ -295,17 +295,17 @@ fn decode_credential_ref(
 pub(crate) fn decode_message_field<'a, T: Default>(
     field: &'static str,
     value: &'a MessageField<T>,
-) -> Result<&'a T, CredentialLifecycleEventPayloadError> {
+) -> Result<&'a T, CredentialEventPayloadError> {
     value
         .as_option()
-        .ok_or(CredentialLifecycleEventPayloadError::MissingField { field })
+        .ok_or(CredentialEventPayloadError::MissingField { field })
 }
 
-pub(crate) fn decode_payload<T>(payload: &[u8]) -> Result<T, CredentialLifecycleEventPayloadError>
+pub(crate) fn decode_payload<T>(payload: &[u8]) -> Result<T, CredentialEventPayloadError>
 where
     T: buffa::Message,
 {
-    T::decode_from_slice(payload).map_err(CredentialLifecycleEventPayloadError::Decode)
+    T::decode_from_slice(payload).map_err(CredentialEventPayloadError::Decode)
 }
 
 pub(crate) fn proto_event_type<T>() -> &'static str
@@ -318,21 +318,21 @@ where
 pub(crate) fn decode_credential_id(
     field: &'static str,
     value: &str,
-) -> Result<CredentialId, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialId, CredentialEventPayloadError> {
     CredentialId::new(value).map_err(|source| invalid_field(field, source))
 }
 
 pub(crate) fn decode_owner_id(
     field: &'static str,
     value: &str,
-) -> Result<CredentialOwnerId, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialOwnerId, CredentialEventPayloadError> {
     CredentialOwnerId::new(value).map_err(|source| invalid_field(field, source))
 }
 
 fn decode_source_kind(
     field: &'static str,
     value: Option<&EnumValue<proto::CredentialSource>>,
-) -> Result<SourceKind, CredentialLifecycleEventPayloadError> {
+) -> Result<SourceKind, CredentialEventPayloadError> {
     match decode_known_enum(field, value)? {
         proto::CredentialSource::CREDENTIAL_SOURCE_DISCORD => Ok(SourceKind::Discord),
         proto::CredentialSource::CREDENTIAL_SOURCE_GITHUB => Ok(SourceKind::GitHub),
@@ -352,7 +352,7 @@ fn decode_source_kind(
 fn decode_credential_kind(
     field: &'static str,
     value: Option<&EnumValue<proto::CredentialKind>>,
-) -> Result<CredentialKind, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialKind, CredentialEventPayloadError> {
     match decode_known_enum(field, value)? {
         proto::CredentialKind::CREDENTIAL_KIND_APP_TOKEN => Ok(CredentialKind::AppToken),
         proto::CredentialKind::CREDENTIAL_KIND_BOT_TOKEN => Ok(CredentialKind::BotToken),
@@ -370,7 +370,7 @@ fn decode_credential_kind(
 fn decode_credential_status(
     field: &'static str,
     value: Option<&EnumValue<proto::CredentialStatus>>,
-) -> Result<CredentialStatus, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialStatus, CredentialEventPayloadError> {
     match decode_known_enum(field, value)? {
         proto::CredentialStatus::CREDENTIAL_STATUS_PENDING => Ok(CredentialStatus::Pending),
         proto::CredentialStatus::CREDENTIAL_STATUS_ACTIVE => Ok(CredentialStatus::Active),
@@ -388,7 +388,7 @@ pub(crate) fn decode_scope_key(
     source: SourceKind,
     field: &'static str,
     scope_key: &str,
-) -> Result<CredentialScope, CredentialLifecycleEventPayloadError> {
+) -> Result<CredentialScope, CredentialEventPayloadError> {
     if scope_key == source.as_str() {
         return Ok(CredentialScope::source(owner_id, source));
     }
@@ -407,7 +407,7 @@ pub(crate) fn decode_scope_key(
 fn decode_storage_backend(
     field: &'static str,
     value: Option<&EnumValue<proto::StorageBackend>>,
-) -> Result<StorageBackend, CredentialLifecycleEventPayloadError> {
+) -> Result<StorageBackend, CredentialEventPayloadError> {
     match decode_known_enum(field, value)? {
         proto::StorageBackend::STORAGE_BACKEND_IN_MEMORY => Ok(StorageBackend::InMemory),
         proto::StorageBackend::STORAGE_BACKEND_OPENBAO => Ok(StorageBackend::OpenBao),
@@ -419,11 +419,11 @@ fn decode_storage_backend(
 pub(crate) fn decode_known_enum<T>(
     field: &'static str,
     value: Option<&EnumValue<T>>,
-) -> Result<T, CredentialLifecycleEventPayloadError>
+) -> Result<T, CredentialEventPayloadError>
 where
     T: buffa::Enumeration,
 {
-    let value = value.ok_or(CredentialLifecycleEventPayloadError::MissingField { field })?;
+    let value = value.ok_or(CredentialEventPayloadError::MissingField { field })?;
     value
         .as_known()
         .ok_or_else(|| invalid_field(field, format!("unknown enum value {}", value.to_i32())))
@@ -457,8 +457,8 @@ pub(crate) fn nested_field(parent: &'static str, child: &'static str) -> &'stati
     }
 }
 
-pub(crate) fn invalid_field(field: &'static str, source: impl fmt::Display) -> CredentialLifecycleEventPayloadError {
-    CredentialLifecycleEventPayloadError::InvalidField {
+pub(crate) fn invalid_field(field: &'static str, source: impl fmt::Display) -> CredentialEventPayloadError {
+    CredentialEventPayloadError::InvalidField {
         field,
         reason: source.to_string(),
     }

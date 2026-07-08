@@ -2,12 +2,12 @@
 // source: trogonai/gateway/credentials/v1/events.proto
 
 #[derive(Clone, Debug, Default)]
-pub struct CredentialLifecycleEventView<'a> {
+pub struct CredentialEventView<'a> {
     pub event: ::core::option::Option<
-        super::super::__buffa::view::oneof::credential_lifecycle_event::Event<'a>,
+        super::super::__buffa::view::oneof::credential_event::Event<'a>,
     >,
 }
-impl<'a> CredentialLifecycleEventView<'a> {
+impl<'a> CredentialEventView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
     ///
     /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
@@ -57,7 +57,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                        super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -65,7 +65,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                            super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialWriteRequestedView::_decode_depth(
                                         sub,
@@ -89,7 +89,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                        super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -97,7 +97,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                            super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialWriteFailedView::_decode_depth(
                                         sub,
@@ -121,7 +121,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                        super::super::__buffa::view::oneof::credential_event::Event::Activated(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -129,7 +129,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                            super::super::__buffa::view::oneof::credential_event::Event::Activated(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialActivatedView::_decode_depth(
                                         sub,
@@ -153,7 +153,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                        super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -161,7 +161,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                            super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialRotationRequestedView::_decode_depth(
                                         sub,
@@ -185,7 +185,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                        super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -193,7 +193,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                            super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialRotationFailedView::_decode_depth(
                                         sub,
@@ -217,7 +217,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                        super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -225,7 +225,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                            super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialRotatedView::_decode_depth(
                                         sub,
@@ -249,7 +249,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                     }
                     let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                     if let Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                        super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                             ref mut existing,
                         ),
                     ) = view.event
@@ -257,7 +257,7 @@ impl<'a> CredentialLifecycleEventView<'a> {
                         existing._merge_into_view(sub, depth - 1)?;
                     } else {
                         view.event = Some(
-                            super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                            super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                                 ::buffa::alloc::boxed::Box::new(
                                     super::super::__buffa::view::CredentialRevokedView::_decode_depth(
                                         sub,
@@ -276,8 +276,8 @@ impl<'a> CredentialLifecycleEventView<'a> {
         ::core::result::Result::Ok(())
     }
 }
-impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleEventView<'a> {
-    type Owned = super::super::CredentialLifecycleEvent;
+impl<'a> ::buffa::MessageView<'a> for CredentialEventView<'a> {
+    type Owned = super::super::CredentialEvent;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
     }
@@ -287,80 +287,80 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleEventView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    fn to_owned_message(&self) -> super::super::CredentialLifecycleEvent {
+    fn to_owned_message(&self) -> super::super::CredentialEvent {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
     fn to_owned_from_source(
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-    ) -> super::super::CredentialLifecycleEvent {
+    ) -> super::super::CredentialEvent {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        super::super::CredentialLifecycleEvent {
+        super::super::CredentialEvent {
             event: self
                 .event
                 .as_ref()
                 .map(|v| match v {
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                    super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::WriteRequested(
+                        super::super::__buffa::oneof::credential_event::Event::WriteRequested(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                    super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::WriteFailed(
+                        super::super::__buffa::oneof::credential_event::Event::WriteFailed(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                    super::super::__buffa::view::oneof::credential_event::Event::Activated(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::Activated(
+                        super::super::__buffa::oneof::credential_event::Event::Activated(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                    super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
+                        super::super::__buffa::oneof::credential_event::Event::RotationRequested(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                    super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::RotationFailed(
+                        super::super::__buffa::oneof::credential_event::Event::RotationFailed(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                    super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::Rotated(
+                        super::super::__buffa::oneof::credential_event::Event::Rotated(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
                         )
                     }
-                    super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                    super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                         v,
                     ) => {
-                        super::super::__buffa::oneof::credential_lifecycle_event::Event::Revoked(
+                        super::super::__buffa::oneof::credential_event::Event::Revoked(
                             ::buffa::alloc::boxed::Box::new(
                                 v.to_owned_from_source(__buffa_src),
                             ),
@@ -371,7 +371,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleEventView<'a> {
         }
     }
 }
-impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for CredentialEventView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -379,7 +379,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
         let mut size = 0u32;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -389,7 +389,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -399,7 +399,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                super::super::__buffa::view::oneof::credential_event::Event::Activated(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -409,7 +409,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -419,7 +419,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -429,7 +429,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -439,7 +439,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -463,7 +463,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
         use ::buffa::Enumeration as _;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -474,7 +474,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -485,7 +485,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                super::super::__buffa::view::oneof::credential_event::Event::Activated(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -496,7 +496,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -507,7 +507,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -518,7 +518,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -529,7 +529,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
                     ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                     x,
                 ) => {
                     ::buffa::encoding::Tag::new(
@@ -555,7 +555,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleEventView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for CredentialLifecycleEventView<'__a> {
+impl<'__a> ::serde::Serialize for CredentialEventView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -564,37 +564,37 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleEventView<'__a> {
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         if let ::core::option::Option::Some(ref __ov) = self.event {
             match __ov {
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteRequested(
                     v,
                 ) => {
                     __map.serialize_entry("writeRequested", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::WriteFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::WriteFailed(
                     v,
                 ) => {
                     __map.serialize_entry("writeFailed", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Activated(
+                super::super::__buffa::view::oneof::credential_event::Event::Activated(
                     v,
                 ) => {
                     __map.serialize_entry("activated", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationRequested(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationRequested(
                     v,
                 ) => {
                     __map.serialize_entry("rotationRequested", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::RotationFailed(
+                super::super::__buffa::view::oneof::credential_event::Event::RotationFailed(
                     v,
                 ) => {
                     __map.serialize_entry("rotationFailed", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Rotated(
+                super::super::__buffa::view::oneof::credential_event::Event::Rotated(
                     v,
                 ) => {
                     __map.serialize_entry("rotated", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_event::Event::Revoked(
+                super::super::__buffa::view::oneof::credential_event::Event::Revoked(
                     v,
                 ) => {
                     __map.serialize_entry("revoked", v)?;
@@ -604,42 +604,38 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleEventView<'__a> {
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for CredentialLifecycleEventView<'a> {
+impl<'a> ::buffa::MessageName for CredentialEventView<'a> {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.v1";
-    const NAME: &'static str = "CredentialLifecycleEvent";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.v1.CredentialLifecycleEvent";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialLifecycleEvent";
+    const NAME: &'static str = "CredentialEvent";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.v1.CredentialEvent";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialEvent";
 }
-impl<'v> ::buffa::DefaultViewInstance for CredentialLifecycleEventView<'v> {
+impl<'v> ::buffa::DefaultViewInstance for CredentialEventView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
         Self: 'a,
     {
-        static VALUE: ::buffa::__private::OnceBox<
-            CredentialLifecycleEventView<'static>,
-        > = ::buffa::__private::OnceBox::new();
+        static VALUE: ::buffa::__private::OnceBox<CredentialEventView<'static>> = ::buffa::__private::OnceBox::new();
         VALUE
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                <CredentialLifecycleEventView<'static>>::default(),
+                <CredentialEventView<'static>>::default(),
             ))
     }
 }
-impl ::buffa::ViewReborrow for CredentialLifecycleEventView<'static> {
-    type Reborrowed<'b> = CredentialLifecycleEventView<'b>;
+impl ::buffa::ViewReborrow for CredentialEventView<'static> {
+    type Reborrowed<'b> = CredentialEventView<'b>;
     fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
         this
     }
 }
-/** Self-contained, `'static` owned view of a `CredentialLifecycleEvent` message.
+/** Self-contained, `'static` owned view of a `CredentialEvent` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`CredentialLifecycleEventView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`CredentialEventView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialLifecycleEventView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialEventView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct CredentialLifecycleEventOwnedView(
-    ::buffa::OwnedView<CredentialLifecycleEventView<'static>>,
-);
-impl CredentialLifecycleEventOwnedView {
+pub struct CredentialEventOwnedView(::buffa::OwnedView<CredentialEventView<'static>>);
+impl CredentialEventOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -653,7 +649,7 @@ impl CredentialLifecycleEventOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleEventOwnedView(::buffa::OwnedView::decode(bytes)?),
+            CredentialEventOwnedView(::buffa::OwnedView::decode(bytes)?),
         )
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
@@ -668,7 +664,7 @@ impl CredentialLifecycleEventOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleEventOwnedView(
+            CredentialEventOwnedView(
                 ::buffa::OwnedView::decode_with_options(bytes, opts)?,
             ),
         )
@@ -680,20 +676,20 @@ impl CredentialLifecycleEventOwnedView {
     /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::CredentialLifecycleEvent,
+        msg: &super::super::CredentialEvent,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleEventOwnedView(::buffa::OwnedView::from_owned(msg)?),
+            CredentialEventOwnedView(::buffa::OwnedView::from_owned(msg)?),
         )
     }
-    /// Borrow the full [`CredentialLifecycleEventView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`CredentialEventView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &CredentialLifecycleEventView<'_> {
+    pub fn view(&self) -> &CredentialEventView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
     #[must_use]
-    pub fn to_owned_message(&self) -> super::super::CredentialLifecycleEvent {
+    pub fn to_owned_message(&self) -> super::super::CredentialEvent {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -711,34 +707,34 @@ impl CredentialLifecycleEventOwnedView {
     pub fn event(
         &self,
     ) -> ::core::option::Option<
-        &super::super::__buffa::view::oneof::credential_lifecycle_event::Event<'_>,
+        &super::super::__buffa::view::oneof::credential_event::Event<'_>,
     > {
         self.0.reborrow().event.as_ref()
     }
 }
-impl ::core::convert::From<::buffa::OwnedView<CredentialLifecycleEventView<'static>>>
-for CredentialLifecycleEventOwnedView {
-    fn from(inner: ::buffa::OwnedView<CredentialLifecycleEventView<'static>>) -> Self {
-        CredentialLifecycleEventOwnedView(inner)
+impl ::core::convert::From<::buffa::OwnedView<CredentialEventView<'static>>>
+for CredentialEventOwnedView {
+    fn from(inner: ::buffa::OwnedView<CredentialEventView<'static>>) -> Self {
+        CredentialEventOwnedView(inner)
     }
 }
-impl ::core::convert::From<CredentialLifecycleEventOwnedView>
-for ::buffa::OwnedView<CredentialLifecycleEventView<'static>> {
-    fn from(wrapper: CredentialLifecycleEventOwnedView) -> Self {
+impl ::core::convert::From<CredentialEventOwnedView>
+for ::buffa::OwnedView<CredentialEventView<'static>> {
+    fn from(wrapper: CredentialEventOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<::buffa::OwnedView<CredentialLifecycleEventView<'static>>>
-for CredentialLifecycleEventOwnedView {
-    fn as_ref(&self) -> &::buffa::OwnedView<CredentialLifecycleEventView<'static>> {
+impl ::core::convert::AsRef<::buffa::OwnedView<CredentialEventView<'static>>>
+for CredentialEventOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<CredentialEventView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView for super::super::CredentialLifecycleEvent {
-    type View<'a> = CredentialLifecycleEventView<'a>;
-    type ViewHandle = CredentialLifecycleEventOwnedView;
+impl ::buffa::HasMessageView for super::super::CredentialEvent {
+    type View<'a> = CredentialEventView<'a>;
+    type ViewHandle = CredentialEventOwnedView;
 }
-impl ::serde::Serialize for CredentialLifecycleEventOwnedView {
+impl ::serde::Serialize for CredentialEventOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
-use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;

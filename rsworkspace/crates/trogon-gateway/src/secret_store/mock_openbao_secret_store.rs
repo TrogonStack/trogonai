@@ -8,7 +8,7 @@ use super::{
     SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
     SecretStoreRotate,
 };
-use crate::commands::domain::{
+use crate::credential::domain::{
     CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
     CredentialVersion, StorageBackend,
 };
@@ -194,7 +194,7 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> CredentialM
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::domain::{CredentialOwnerId, SourceKind};
+    use crate::credential::domain::{CredentialOwnerId, SourceKind};
 
     use super::*;
 

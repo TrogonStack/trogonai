@@ -11,30 +11,30 @@ use trogon_decider_runtime::{
 };
 use trogonai_proto::gateway::credentials::v1 as proto;
 
-use super::domain::credential_lifecycle_event::proto_event_type;
-use super::domain::{
-    CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialLifecycleEvent,
-    CredentialLifecycleEventPayloadError, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
+use super::super::domain::credential_event::proto_event_type;
+use super::super::domain::{
+    CredentialEvent, CredentialEventPayloadError, CredentialFailureReason, CredentialFingerprint, CredentialId,
+    CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, SourceKind, StorageBackend,
 };
-use super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
-use super::state::{CredentialLifecycleDecideError, CredentialLifecycleState, evolve, initial_state};
+use super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
+use super::super::state::{CredentialDecideError, CredentialState, evolve, initial_state};
 use super::{
     ActivateCredentialRotation, ActivateCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
     RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,
 };
 
 #[derive(Debug, thiserror::Error)]
-#[error("lifecycle test stream store rejected the append")]
-struct LifecycleTestStoreError;
+#[error("credential test stream store rejected the append")]
+struct CredentialTestStoreError;
 
 #[derive(Default)]
-struct LifecycleTestStore {
+struct CredentialTestStore {
     events: Mutex<Vec<StreamEvent>>,
     write_preconditions: Mutex<Vec<StreamWritePrecondition>>,
 }
 
-impl LifecycleTestStore {
+impl CredentialTestStore {
     fn write_preconditions(&self) -> Vec<StreamWritePrecondition> {
         self.write_preconditions.lock().unwrap().clone()
     }
@@ -44,8 +44,8 @@ impl LifecycleTestStore {
     }
 }
 
-impl StreamRead<str> for LifecycleTestStore {
-    type Error = LifecycleTestStoreError;
+impl StreamRead<str> for CredentialTestStore {
+    type Error = CredentialTestStoreError;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
@@ -65,8 +65,8 @@ impl StreamRead<str> for LifecycleTestStore {
     }
 }
 
-impl StreamAppend<str> for LifecycleTestStore {
-    type Error = LifecycleTestStoreError;
+impl StreamAppend<str> for CredentialTestStore {
+    type Error = CredentialTestStoreError;
 
     async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
         let mut events = self.events.lock().unwrap();
@@ -80,7 +80,7 @@ impl StreamAppend<str> for LifecycleTestStore {
             StreamWritePrecondition::StreamExists if current_position.is_some() => {}
             StreamWritePrecondition::NoStream if current_position.is_none() => {}
             StreamWritePrecondition::At(position) if current_position == Some(position) => {}
-            _ => return Err(LifecycleTestStoreError),
+            _ => return Err(CredentialTestStoreError),
         }
 
         let mut last_position = current_position;
@@ -145,8 +145,8 @@ fn metadata(version: u64) -> CredentialMetadata {
     )
 }
 
-fn write_requested() -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::WriteRequested {
+fn write_requested() -> CredentialEvent {
+    CredentialEvent::WriteRequested {
         credential_id: credential_id(),
         owner_id: owner_id(),
         source: SourceKind::GitHub,
@@ -154,34 +154,34 @@ fn write_requested() -> CredentialLifecycleEvent {
     }
 }
 
-fn activated(version: u64) -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::Activated {
+fn activated(version: u64) -> CredentialEvent {
+    CredentialEvent::Activated {
         metadata: metadata(version),
     }
 }
 
-fn rotation_requested(version: u64) -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::RotationRequested {
+fn rotation_requested(version: u64) -> CredentialEvent {
+    CredentialEvent::RotationRequested {
         credential_ref: credential_ref(version),
     }
 }
 
-fn rotation_failed(version: u64) -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::RotationFailed {
+fn rotation_failed(version: u64) -> CredentialEvent {
+    CredentialEvent::RotationFailed {
         credential_ref: credential_ref(version),
         reason: CredentialFailureReason::new("openbao rotate failed").unwrap(),
     }
 }
 
-fn rotated(previous_version: u64, next_version: u64) -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::Rotated {
+fn rotated(previous_version: u64, next_version: u64) -> CredentialEvent {
+    CredentialEvent::Rotated {
         previous_credential_ref: credential_ref(previous_version),
         metadata: metadata(next_version),
     }
 }
 
-fn revoked(version: u64) -> CredentialLifecycleEvent {
-    CredentialLifecycleEvent::Revoked {
+fn revoked(version: u64) -> CredentialEvent {
+    CredentialEvent::Revoked {
         credential_ref: credential_ref(version),
     }
 }
@@ -195,7 +195,7 @@ fn request_write() -> RequestCredentialWrite {
     )
 }
 
-fn lifecycle_events_rebuild(events: impl IntoIterator<Item = CredentialLifecycleEvent>) -> CredentialLifecycleState {
+fn rebuild_state_from_events(events: impl IntoIterator<Item = CredentialEvent>) -> CredentialState {
     events
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -204,55 +204,53 @@ fn lifecycle_events_rebuild(events: impl IntoIterator<Item = CredentialLifecycle
 
 #[test]
 fn snapshot_policy_uses_scheduler_frequency_pattern() {
-    assert_eq!(CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY.frequency().get(), 32);
+    assert_eq!(CREDENTIAL_SNAPSHOT_POLICY.frequency().get(), 32);
     assert_eq!(
         <RequestCredentialWrite as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <ActivateCredentialWrite as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <RecordCredentialWriteFailure as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <RequestCredentialRotation as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <RecordCredentialRotationFailure as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <ActivateCredentialRotation as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
     assert_eq!(
         <RevokeCredential as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
-        CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY
+        CREDENTIAL_SNAPSHOT_POLICY
     );
 }
 
 #[test]
-fn lifecycle_state_snapshot_round_trips_active_state() {
-    let state = lifecycle_events_rebuild([write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]);
+fn state_snapshot_round_trips_active_state() {
+    let state = rebuild_state_from_events([write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]);
 
     let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
-    let decoded =
-        <CredentialLifecycleState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
+    let decoded = <CredentialState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
 
     assert_eq!(decoded, state);
 }
 
 #[test]
-fn lifecycle_state_snapshot_round_trips_pending_write_state() {
-    let state = lifecycle_events_rebuild([write_requested()]);
+fn state_snapshot_round_trips_pending_write_state() {
+    let state = rebuild_state_from_events([write_requested()]);
 
     let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
-    let decoded =
-        <CredentialLifecycleState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
+    let decoded = <CredentialState as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded)).unwrap();
 
     assert_eq!(decoded, state);
 }
@@ -270,7 +268,7 @@ fn given_when_then_rejects_duplicate_credential_write() {
     TestCase::<RequestCredentialWrite>::new()
         .given([write_requested()])
         .when(request_write())
-        .then_error(CredentialLifecycleDecideError::AlreadyExists {
+        .then_error(CredentialDecideError::AlreadyExists {
             credential_id: credential_id(),
         });
 }
@@ -290,7 +288,7 @@ fn given_when_then_records_pending_write_failure() {
     TestCase::<RecordCredentialWriteFailure>::new()
         .given([write_requested()])
         .when(RecordCredentialWriteFailure::new(credential_id(), reason.clone()))
-        .then([CredentialLifecycleEvent::WriteFailed {
+        .then([CredentialEvent::WriteFailed {
             credential_id: credential_id(),
             reason,
         }]);
@@ -324,7 +322,7 @@ fn given_when_then_records_pending_rotation_failure() {
         .given([activated(1)])
         .given([rotation_requested(1)])
         .when(RecordCredentialRotationFailure::new(credential_ref(1), reason.clone()))
-        .then([CredentialLifecycleEvent::RotationFailed {
+        .then([CredentialEvent::RotationFailed {
             credential_ref: credential_ref(1),
             reason,
         }]);
@@ -337,7 +335,7 @@ fn given_when_then_rejects_duplicate_rotation_request() {
         .given([activated(1)])
         .given([rotation_requested(1)])
         .when(RequestCredentialRotation::new(credential_ref(1)))
-        .then_error(CredentialLifecycleDecideError::CredentialRotationAlreadyPending {
+        .then_error(CredentialDecideError::CredentialRotationAlreadyPending {
             credential_id: credential_id(),
         });
 }
@@ -349,7 +347,7 @@ fn given_when_then_rejects_rotation_with_stale_version() {
         .given([activated(1)])
         .given([rotation_requested(1)])
         .when(ActivateCredentialRotation::new(metadata(1)))
-        .then_error(CredentialLifecycleDecideError::RotationVersionNotNewer);
+        .then_error(CredentialDecideError::RotationVersionNotNewer);
 }
 
 #[test]
@@ -373,13 +371,13 @@ fn given_when_then_revokes_active_credential() {
 }
 
 #[test]
-fn lifecycle_events_rebuild_active_rotated_state() {
+fn rebuild_state_from_events_active_rotated_state() {
     let state = [write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
-    let CredentialLifecycleState::Active(active) = state else {
+    let CredentialState::Active(active) = state else {
         panic!("expected active credential");
     };
     assert_eq!(active.credential_ref(), &credential_ref(2));
@@ -387,10 +385,10 @@ fn lifecycle_events_rebuild_active_rotated_state() {
 }
 
 #[test]
-fn lifecycle_event_codec_round_trips_all_events() {
+fn event_codec_round_trips_all_events() {
     for event in [
         write_requested(),
-        CredentialLifecycleEvent::WriteFailed {
+        CredentialEvent::WriteFailed {
             credential_id: credential_id(),
             reason: CredentialFailureReason::new("openbao unavailable").unwrap(),
         },
@@ -402,7 +400,7 @@ fn lifecycle_event_codec_round_trips_all_events() {
     ] {
         let event_type = event.event_type().unwrap();
         let payload = event.encode().unwrap();
-        let decoded = CredentialLifecycleEvent::decode(EventData::new(event_type, &payload))
+        let decoded = CredentialEvent::decode(EventData::new(event_type, &payload))
             .unwrap()
             .into_decoded();
 
@@ -411,7 +409,7 @@ fn lifecycle_event_codec_round_trips_all_events() {
 }
 
 #[test]
-fn lifecycle_event_codec_preserves_integration_scope_key() {
+fn event_codec_preserves_integration_scope_key() {
     let event = activated(1);
     let payload = event.encode().unwrap();
     let proto_event = proto::CredentialActivated::decode_from_slice(&payload).unwrap();
@@ -420,25 +418,25 @@ fn lifecycle_event_codec_preserves_integration_scope_key() {
 
     assert_eq!(reference.scope_key, "github/primary");
 
-    let decoded = CredentialLifecycleEvent::decode(EventData::new(event.event_type().unwrap(), &payload))
+    let decoded = CredentialEvent::decode(EventData::new(event.event_type().unwrap(), &payload))
         .unwrap()
         .into_decoded()
         .unwrap();
-    let CredentialLifecycleEvent::Activated { metadata } = decoded else {
+    let CredentialEvent::Activated { metadata } = decoded else {
         panic!("expected activated event");
     };
     assert_eq!(metadata.reference().scope_key(), "github/primary");
 }
 
 #[test]
-fn lifecycle_event_codec_skips_foreign_event_types() {
-    let decoded = CredentialLifecycleEvent::decode(EventData::new("foreign.event.v1", b"{}")).unwrap();
+fn event_codec_skips_foreign_event_types() {
+    let decoded = CredentialEvent::decode(EventData::new("foreign.event.v1", b"{}")).unwrap();
 
     assert_eq!(decoded, EventDecodeOutcome::Skipped);
 }
 
 #[test]
-fn lifecycle_event_codec_rejects_invalid_persisted_fields() {
+fn event_codec_rejects_invalid_persisted_fields() {
     let payload = proto::CredentialWriteRequested {
         credential_id: String::new(),
         owner_id: "tenant-1".to_string(),
@@ -447,7 +445,7 @@ fn lifecycle_event_codec_rejects_invalid_persisted_fields() {
     }
     .encode_to_vec();
 
-    let error = CredentialLifecycleEvent::decode(EventData::new(
+    let error = CredentialEvent::decode(EventData::new(
         proto_event_type::<proto::CredentialWriteRequested>(),
         &payload,
     ))
@@ -455,7 +453,7 @@ fn lifecycle_event_codec_rejects_invalid_persisted_fields() {
 
     assert!(matches!(
         error,
-        CredentialLifecycleEventPayloadError::InvalidField {
+        CredentialEventPayloadError::InvalidField {
             field: "credential_id",
             ..
         }
@@ -463,7 +461,7 @@ fn lifecycle_event_codec_rejects_invalid_persisted_fields() {
 }
 
 #[test]
-fn lifecycle_event_codec_rejects_scope_key_that_does_not_match_source() {
+fn event_codec_rejects_scope_key_that_does_not_match_source() {
     let payload = proto::CredentialRotationRequested {
         credential_ref: MessageField::some(proto::CredentialRef {
             id: "openbao:tenant-1:github/primary:webhook_secret".to_string(),
@@ -476,7 +474,7 @@ fn lifecycle_event_codec_rejects_scope_key_that_does_not_match_source() {
     }
     .encode_to_vec();
 
-    let error = CredentialLifecycleEvent::decode(EventData::new(
+    let error = CredentialEvent::decode(EventData::new(
         proto_event_type::<proto::CredentialRotationRequested>(),
         &payload,
     ))
@@ -484,7 +482,7 @@ fn lifecycle_event_codec_rejects_scope_key_that_does_not_match_source() {
 
     assert!(matches!(
         error,
-        CredentialLifecycleEventPayloadError::InvalidField {
+        CredentialEventPayloadError::InvalidField {
             field: "credential_ref.scope_key",
             ..
         }
@@ -492,16 +490,13 @@ fn lifecycle_event_codec_rejects_scope_key_that_does_not_match_source() {
 }
 
 #[tokio::test]
-async fn command_execution_persists_and_replays_lifecycle_events() {
-    let store = LifecycleTestStore::default();
+async fn command_execution_persists_and_replays_events() {
+    let store = CredentialTestStore::default();
 
     let request_result = CommandExecution::new(&store, &request_write()).execute().await.unwrap();
     assert_eq!(request_result.stream_position, position(1));
     assert_eq!(request_result.events.as_slice(), &[write_requested()]);
-    assert!(matches!(
-        request_result.state,
-        CredentialLifecycleState::PendingWrite(_)
-    ));
+    assert!(matches!(request_result.state, CredentialState::PendingWrite(_)));
     assert_eq!(store.write_preconditions(), [StreamWritePrecondition::NoStream]);
 
     let activation = ActivateCredentialWrite::new(metadata(1));
@@ -516,7 +511,7 @@ async fn command_execution_persists_and_replays_lifecycle_events() {
         ]
     );
 
-    let CredentialLifecycleState::Active(active) = activation_result.state else {
+    let CredentialState::Active(active) = activation_result.state else {
         panic!("expected active credential");
     };
     assert_eq!(active.credential_ref(), &credential_ref(1));
@@ -524,7 +519,7 @@ async fn command_execution_persists_and_replays_lifecycle_events() {
 
 #[tokio::test]
 async fn command_execution_rejects_duplicate_write_with_no_stream_precondition() {
-    let store = LifecycleTestStore::default();
+    let store = CredentialTestStore::default();
 
     CommandExecution::new(&store, &request_write()).execute().await.unwrap();
     let error = CommandExecution::new(&store, &request_write())
@@ -532,7 +527,7 @@ async fn command_execution_rejects_duplicate_write_with_no_stream_precondition()
         .await
         .unwrap_err();
 
-    assert!(matches!(error, CommandError::Append(LifecycleTestStoreError)));
+    assert!(matches!(error, CommandError::Append(CredentialTestStoreError)));
     assert_eq!(
         store.write_preconditions(),
         [StreamWritePrecondition::NoStream, StreamWritePrecondition::NoStream]

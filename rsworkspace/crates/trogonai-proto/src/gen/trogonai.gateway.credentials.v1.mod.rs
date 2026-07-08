@@ -61,7 +61,7 @@ pub mod __buffa {
         reg.register_json_any(super::__CREDENTIAL_ROTATION_REQUESTED_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_WRITE_FAILED_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_WRITE_REQUESTED_JSON_ANY);
-        reg.register_json_any(super::__CREDENTIAL_LIFECYCLE_EVENT_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_EVENT_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -101,8 +101,8 @@ pub use self::__buffa::view::CredentialWriteRequestedView;
 #[doc(inline)]
 pub use self::__buffa::view::CredentialWriteRequestedOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleEventView;
+pub use self::__buffa::view::CredentialEventView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleEventOwnedView;
+pub use self::__buffa::view::CredentialEventOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

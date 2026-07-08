@@ -4,7 +4,7 @@ use std::future::Future;
 use trogon_std::SecretString;
 
 use super::SecretMaterial;
-use crate::commands::domain::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope};
+use crate::credential::domain::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope};
 
 pub trait SecretStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;

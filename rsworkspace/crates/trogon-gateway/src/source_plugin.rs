@@ -15,7 +15,7 @@ use tracing::info;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use crate::config::{ResolvedConfig, SourceIntegration};
-use crate::processor::runtime_projection::RuntimeCredentialResolver;
+use crate::credential::processor::runtime_projection::RuntimeCredentialResolver;
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 pub type SourceId = &'static str;

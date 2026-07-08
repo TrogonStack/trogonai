@@ -50,9 +50,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::config::load;
-    use crate::processor::runtime_projection::{
+    use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::credential::processor::runtime_projection::{
         RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
     };
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};

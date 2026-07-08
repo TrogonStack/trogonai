@@ -4,7 +4,7 @@
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
-pub struct CredentialLifecycleRecoveryWorkerCheckpoint {
+pub struct CredentialRecoveryWorkerCheckpoint {
     /// Field 1: `last_scanned_sequence`
     #[serde(
         rename = "lastScannedSequence",
@@ -38,9 +38,9 @@ pub struct CredentialLifecycleRecoveryWorkerCheckpoint {
     )]
     pub retry_after_unix_seconds: ::core::option::Option<u64>,
 }
-impl ::core::fmt::Debug for CredentialLifecycleRecoveryWorkerCheckpoint {
+impl ::core::fmt::Debug for CredentialRecoveryWorkerCheckpoint {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialLifecycleRecoveryWorkerCheckpoint")
+        f.debug_struct("CredentialRecoveryWorkerCheckpoint")
             .field("last_scanned_sequence", &self.last_scanned_sequence)
             .field("consecutive_failure_count", &self.consecutive_failure_count)
             .field("first_failure_unix_seconds", &self.first_failure_unix_seconds)
@@ -48,14 +48,14 @@ impl ::core::fmt::Debug for CredentialLifecycleRecoveryWorkerCheckpoint {
             .finish()
     }
 }
-impl CredentialLifecycleRecoveryWorkerCheckpoint {
+impl CredentialRecoveryWorkerCheckpoint {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint";
 }
-impl CredentialLifecycleRecoveryWorkerCheckpoint {
+impl CredentialRecoveryWorkerCheckpoint {
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::last_scanned_sequence`] to `Some(value)`, consuming and returning `self`.
@@ -85,21 +85,19 @@ impl CredentialLifecycleRecoveryWorkerCheckpoint {
         self
     }
 }
-impl ::buffa::DefaultInstance for CredentialLifecycleRecoveryWorkerCheckpoint {
+impl ::buffa::DefaultInstance for CredentialRecoveryWorkerCheckpoint {
     fn default_instance() -> &'static Self {
-        static VALUE: ::buffa::__private::OnceBox<
-            CredentialLifecycleRecoveryWorkerCheckpoint,
-        > = ::buffa::__private::OnceBox::new();
+        static VALUE: ::buffa::__private::OnceBox<CredentialRecoveryWorkerCheckpoint> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
     }
 }
-impl ::buffa::MessageName for CredentialLifecycleRecoveryWorkerCheckpoint {
+impl ::buffa::MessageName for CredentialRecoveryWorkerCheckpoint {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.checkpoints.v1";
-    const NAME: &'static str = "CredentialLifecycleRecoveryWorkerCheckpoint";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint";
+    const NAME: &'static str = "CredentialRecoveryWorkerCheckpoint";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint";
 }
-impl ::buffa::Message for CredentialLifecycleRecoveryWorkerCheckpoint {
+impl ::buffa::Message for CredentialRecoveryWorkerCheckpoint {
     /// Returns the total encoded size in bytes.
     ///
     /// The result is a `u32`; the protobuf specification requires all
@@ -224,8 +222,7 @@ impl ::buffa::Message for CredentialLifecycleRecoveryWorkerCheckpoint {
         self.retry_after_unix_seconds = ::core::option::Option::None;
     }
 }
-impl ::buffa::json_helpers::ProtoElemJson
-for CredentialLifecycleRecoveryWorkerCheckpoint {
+impl ::buffa::json_helpers::ProtoElemJson for CredentialRecoveryWorkerCheckpoint {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -239,13 +236,11 @@ for CredentialLifecycleRecoveryWorkerCheckpoint {
     }
 }
 #[doc(hidden)]
-pub const __CREDENTIAL_LIFECYCLE_RECOVERY_WORKER_CHECKPOINT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint",
-    to_json: ::buffa::type_registry::any_to_json::<
-        CredentialLifecycleRecoveryWorkerCheckpoint,
-    >,
+pub const __CREDENTIAL_RECOVERY_WORKER_CHECKPOINT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint",
+    to_json: ::buffa::type_registry::any_to_json::<CredentialRecoveryWorkerCheckpoint>,
     from_json: ::buffa::type_registry::any_from_json::<
-        CredentialLifecycleRecoveryWorkerCheckpoint,
+        CredentialRecoveryWorkerCheckpoint,
     >,
     is_wkt: false,
 };

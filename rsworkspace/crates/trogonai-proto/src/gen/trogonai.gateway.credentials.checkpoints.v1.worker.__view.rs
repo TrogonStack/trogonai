@@ -2,7 +2,7 @@
 // source: trogonai/gateway/credentials/checkpoints/v1/worker.proto
 
 #[derive(Clone, Debug, Default)]
-pub struct CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
+pub struct CredentialRecoveryWorkerCheckpointView<'a> {
     /// Field 1: `last_scanned_sequence`
     pub last_scanned_sequence: ::core::option::Option<u64>,
     /// Field 2: `consecutive_failure_count`
@@ -14,7 +14,7 @@ pub struct CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
     #[doc(hidden)]
     pub __buffa_phantom: ::core::marker::PhantomData<&'a ()>,
 }
-impl<'a> CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
+impl<'a> CredentialRecoveryWorkerCheckpointView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
     ///
     /// Called by [`::buffa::MessageView::decode_view`] with [`::buffa::RECURSION_LIMIT`]
@@ -107,9 +107,8 @@ impl<'a> CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
         ::core::result::Result::Ok(())
     }
 }
-impl<'a> ::buffa::MessageView<'a>
-for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
-    type Owned = super::super::CredentialLifecycleRecoveryWorkerCheckpoint;
+impl<'a> ::buffa::MessageView<'a> for CredentialRecoveryWorkerCheckpointView<'a> {
+    type Owned = super::super::CredentialRecoveryWorkerCheckpoint;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, ::buffa::RECURSION_LIMIT)
     }
@@ -119,20 +118,18 @@ for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    fn to_owned_message(
-        &self,
-    ) -> super::super::CredentialLifecycleRecoveryWorkerCheckpoint {
+    fn to_owned_message(&self) -> super::super::CredentialRecoveryWorkerCheckpoint {
         self.to_owned_from_source(None)
     }
     #[allow(clippy::useless_conversion, clippy::needless_update)]
     fn to_owned_from_source(
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
-    ) -> super::super::CredentialLifecycleRecoveryWorkerCheckpoint {
+    ) -> super::super::CredentialRecoveryWorkerCheckpoint {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        super::super::CredentialLifecycleRecoveryWorkerCheckpoint {
+        super::super::CredentialRecoveryWorkerCheckpoint {
             last_scanned_sequence: self.last_scanned_sequence,
             consecutive_failure_count: self.consecutive_failure_count,
             first_failure_unix_seconds: self.first_failure_unix_seconds,
@@ -141,8 +138,7 @@ for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
         }
     }
 }
-impl<'a> ::buffa::ViewEncode<'a>
-for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for CredentialRecoveryWorkerCheckpointView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -203,7 +199,7 @@ for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for CredentialLifecycleRecoveryWorkerCheckpointView<'__a> {
+impl<'__a> ::serde::Serialize for CredentialRecoveryWorkerCheckpointView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -261,43 +257,42 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleRecoveryWorkerCheckpointVie
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for CredentialLifecycleRecoveryWorkerCheckpointView<'a> {
+impl<'a> ::buffa::MessageName for CredentialRecoveryWorkerCheckpointView<'a> {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.checkpoints.v1";
-    const NAME: &'static str = "CredentialLifecycleRecoveryWorkerCheckpoint";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialLifecycleRecoveryWorkerCheckpoint";
+    const NAME: &'static str = "CredentialRecoveryWorkerCheckpoint";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.checkpoints.v1.CredentialRecoveryWorkerCheckpoint";
 }
-impl<'v> ::buffa::DefaultViewInstance
-for CredentialLifecycleRecoveryWorkerCheckpointView<'v> {
+impl<'v> ::buffa::DefaultViewInstance for CredentialRecoveryWorkerCheckpointView<'v> {
     fn default_view_instance<'a>() -> &'a Self
     where
         Self: 'a,
     {
         static VALUE: ::buffa::__private::OnceBox<
-            CredentialLifecycleRecoveryWorkerCheckpointView<'static>,
+            CredentialRecoveryWorkerCheckpointView<'static>,
         > = ::buffa::__private::OnceBox::new();
         VALUE
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
-                <CredentialLifecycleRecoveryWorkerCheckpointView<'static>>::default(),
+                <CredentialRecoveryWorkerCheckpointView<'static>>::default(),
             ))
     }
 }
-impl ::buffa::ViewReborrow for CredentialLifecycleRecoveryWorkerCheckpointView<'static> {
-    type Reborrowed<'b> = CredentialLifecycleRecoveryWorkerCheckpointView<'b>;
+impl ::buffa::ViewReborrow for CredentialRecoveryWorkerCheckpointView<'static> {
+    type Reborrowed<'b> = CredentialRecoveryWorkerCheckpointView<'b>;
     fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
         this
     }
 }
-/** Self-contained, `'static` owned view of a `CredentialLifecycleRecoveryWorkerCheckpoint` message.
+/** Self-contained, `'static` owned view of a `CredentialRecoveryWorkerCheckpoint` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`CredentialLifecycleRecoveryWorkerCheckpointView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`CredentialRecoveryWorkerCheckpointView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialLifecycleRecoveryWorkerCheckpointView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialRecoveryWorkerCheckpointView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct CredentialLifecycleRecoveryWorkerCheckpointOwnedView(
-    ::buffa::OwnedView<CredentialLifecycleRecoveryWorkerCheckpointView<'static>>,
+pub struct CredentialRecoveryWorkerCheckpointOwnedView(
+    ::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>>,
 );
-impl CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
+impl CredentialRecoveryWorkerCheckpointOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -311,7 +306,7 @@ impl CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleRecoveryWorkerCheckpointOwnedView(
+            CredentialRecoveryWorkerCheckpointOwnedView(
                 ::buffa::OwnedView::decode(bytes)?,
             ),
         )
@@ -328,7 +323,7 @@ impl CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleRecoveryWorkerCheckpointOwnedView(
+            CredentialRecoveryWorkerCheckpointOwnedView(
                 ::buffa::OwnedView::decode_with_options(bytes, opts)?,
             ),
         )
@@ -340,24 +335,22 @@ impl CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
     /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::CredentialLifecycleRecoveryWorkerCheckpoint,
+        msg: &super::super::CredentialRecoveryWorkerCheckpoint,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleRecoveryWorkerCheckpointOwnedView(
+            CredentialRecoveryWorkerCheckpointOwnedView(
                 ::buffa::OwnedView::from_owned(msg)?,
             ),
         )
     }
-    /// Borrow the full [`CredentialLifecycleRecoveryWorkerCheckpointView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`CredentialRecoveryWorkerCheckpointView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &CredentialLifecycleRecoveryWorkerCheckpointView<'_> {
+    pub fn view(&self) -> &CredentialRecoveryWorkerCheckpointView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
     #[must_use]
-    pub fn to_owned_message(
-        &self,
-    ) -> super::super::CredentialLifecycleRecoveryWorkerCheckpoint {
+    pub fn to_owned_message(&self) -> super::super::CredentialRecoveryWorkerCheckpoint {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -392,37 +385,34 @@ impl CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
     }
 }
 impl ::core::convert::From<
-    ::buffa::OwnedView<CredentialLifecycleRecoveryWorkerCheckpointView<'static>>,
-> for CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
+    ::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>>,
+> for CredentialRecoveryWorkerCheckpointOwnedView {
     fn from(
-        inner: ::buffa::OwnedView<
-            CredentialLifecycleRecoveryWorkerCheckpointView<'static>,
-        >,
+        inner: ::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>>,
     ) -> Self {
-        CredentialLifecycleRecoveryWorkerCheckpointOwnedView(inner)
+        CredentialRecoveryWorkerCheckpointOwnedView(inner)
     }
 }
-impl ::core::convert::From<CredentialLifecycleRecoveryWorkerCheckpointOwnedView>
-for ::buffa::OwnedView<CredentialLifecycleRecoveryWorkerCheckpointView<'static>> {
-    fn from(wrapper: CredentialLifecycleRecoveryWorkerCheckpointOwnedView) -> Self {
+impl ::core::convert::From<CredentialRecoveryWorkerCheckpointOwnedView>
+for ::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>> {
+    fn from(wrapper: CredentialRecoveryWorkerCheckpointOwnedView) -> Self {
         wrapper.0
     }
 }
 impl ::core::convert::AsRef<
-    ::buffa::OwnedView<CredentialLifecycleRecoveryWorkerCheckpointView<'static>>,
-> for CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
+    ::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>>,
+> for CredentialRecoveryWorkerCheckpointOwnedView {
     fn as_ref(
         &self,
-    ) -> &::buffa::OwnedView<CredentialLifecycleRecoveryWorkerCheckpointView<'static>> {
+    ) -> &::buffa::OwnedView<CredentialRecoveryWorkerCheckpointView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView
-for super::super::CredentialLifecycleRecoveryWorkerCheckpoint {
-    type View<'a> = CredentialLifecycleRecoveryWorkerCheckpointView<'a>;
-    type ViewHandle = CredentialLifecycleRecoveryWorkerCheckpointOwnedView;
+impl ::buffa::HasMessageView for super::super::CredentialRecoveryWorkerCheckpoint {
+    type View<'a> = CredentialRecoveryWorkerCheckpointView<'a>;
+    type ViewHandle = CredentialRecoveryWorkerCheckpointOwnedView;
 }
-impl ::serde::Serialize for CredentialLifecycleRecoveryWorkerCheckpointOwnedView {
+impl ::serde::Serialize for CredentialRecoveryWorkerCheckpointOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

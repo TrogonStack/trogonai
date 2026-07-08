@@ -391,8 +391,8 @@ impl ::serde::Serialize for CredentialManagementIdempotencyRecordOwnedView {
 }
 #[derive(Clone, Debug, Default)]
 pub struct CredentialCommandResponseView<'a> {
-    /// Field 1: `lifecycle_state`
-    pub lifecycle_state: &'a str,
+    /// Field 1: `state`
+    pub state: &'a str,
     /// Field 2: `stream_position`
     pub stream_position: ::core::option::Option<u64>,
     /// Field 3: `credential_ref`
@@ -445,7 +445,7 @@ impl<'a> CredentialCommandResponseView<'a> {
                             actual: tag.wire_type() as u8,
                         });
                     }
-                    view.lifecycle_state = ::buffa::types::borrow_str(&mut cur)?;
+                    view.state = ::buffa::types::borrow_str(&mut cur)?;
                 }
                 2u32 => {
                     if tag.wire_type() != ::buffa::encoding::WireType::Varint {
@@ -514,7 +514,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialCommandResponseView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         super::super::CredentialCommandResponse {
-            lifecycle_state: self.lifecycle_state.to_string(),
+            state: self.state.to_string(),
             stream_position: self.stream_position,
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
@@ -534,7 +534,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialCommandResponseView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.lifecycle_state) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.state) as u32;
         if let Some(v) = self.stream_position {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -558,7 +558,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialCommandResponseView<'a> {
         use ::buffa::Enumeration as _;
         ::buffa::encoding::Tag::new(1u32, ::buffa::encoding::WireType::LengthDelimited)
             .encode(buf);
-        ::buffa::types::encode_string(&self.lifecycle_state, buf);
+        ::buffa::types::encode_string(&self.state, buf);
         if let Some(v) = self.stream_position {
             ::buffa::encoding::Tag::new(2u32, ::buffa::encoding::WireType::Varint)
                 .encode(buf);
@@ -594,7 +594,7 @@ impl<'__a> ::serde::Serialize for CredentialCommandResponseView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            __map.serialize_entry("lifecycleState", self.lifecycle_state)?;
+            __map.serialize_entry("state", self.state)?;
         }
         if let ::core::option::Option::Some(__v) = self.stream_position {
             struct _W(u64);
@@ -718,10 +718,10 @@ impl CredentialCommandResponseOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
-    /// Field 1: `lifecycle_state`
+    /// Field 1: `state`
     #[must_use]
-    pub fn lifecycle_state(&self) -> &'_ str {
-        self.0.reborrow().lifecycle_state
+    pub fn state(&self) -> &'_ str {
+        self.0.reborrow().state
     }
     /// Field 2: `stream_position`
     #[must_use]

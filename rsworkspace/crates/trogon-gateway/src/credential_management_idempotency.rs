@@ -544,7 +544,7 @@ fn decode_status(
 
 fn proto_response(response: &CredentialCommandResponse) -> proto::CredentialCommandResponse {
     proto::CredentialCommandResponse {
-        lifecycle_state: response.lifecycle_state.clone(),
+        state: response.state.clone(),
         stream_position: Some(response.stream_position),
         credential_ref: MessageField::some(proto_credential_ref_response(&response.credential_ref)),
     }
@@ -576,7 +576,7 @@ fn decode_response(
         .and_then(decode_credential_ref_response)?;
 
     Ok(CredentialCommandResponse {
-        lifecycle_state: response.lifecycle_state.clone(),
+        state: response.state.clone(),
         stream_position: response.stream_position.ok_or_else(|| {
             CredentialCommandIdempotencyStoreError::invalid_record(
                 "completed idempotency response is missing stream position",
@@ -627,7 +627,7 @@ mod tests {
 
     fn response(version: u64) -> CredentialCommandResponse {
         CredentialCommandResponse {
-            lifecycle_state: "active".to_string(),
+            state: "active".to_string(),
             stream_position: 2,
             credential_ref: CredentialRefResponse {
                 id: "openbao:tenant-1:github/primary:webhook_secret".to_string(),

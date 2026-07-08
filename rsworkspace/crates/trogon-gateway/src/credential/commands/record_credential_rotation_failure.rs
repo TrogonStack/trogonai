@@ -1,9 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::domain::{CredentialFailureReason, CredentialLifecycleEvent, CredentialRef};
-use super::state::{
-    CredentialLifecycleDecideError, CredentialLifecycleEvolveError, CredentialLifecycleState, validate_same_ref,
-};
+use super::super::domain::{CredentialEvent, CredentialFailureReason, CredentialRef};
+use super::super::state::{CredentialDecideError, CredentialEvolveError, CredentialState, validate_same_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialRotationFailure {
@@ -19,31 +17,31 @@ impl RecordCredentialRotationFailure {
 
 impl Decider for RecordCredentialRotationFailure {
     type StreamId = str;
-    type State = CredentialLifecycleState;
-    type Event = CredentialLifecycleEvent;
-    type DecideError = CredentialLifecycleDecideError;
-    type EvolveError = CredentialLifecycleEvolveError;
+    type State = CredentialState;
+    type Event = CredentialEvent;
+    type DecideError = CredentialDecideError;
+    type EvolveError = CredentialEvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.credential_ref.id().as_str()
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        super::super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        super::super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        let CredentialLifecycleState::RotationPending(rotation) = state else {
-            return Err(CredentialLifecycleDecideError::CredentialRotationNotPending {
+        let CredentialState::RotationPending(rotation) = state else {
+            return Err(CredentialDecideError::CredentialRotationNotPending {
                 credential_id: command.credential_ref.id().clone(),
             });
         };
         validate_same_ref(rotation.active().credential_ref(), &command.credential_ref)?;
-        Ok(Decision::event(CredentialLifecycleEvent::RotationFailed {
+        Ok(Decision::event(CredentialEvent::RotationFailed {
             credential_ref: command.credential_ref.clone(),
             reason: command.reason.clone(),
         }))
@@ -53,5 +51,5 @@ impl Decider for RecordCredentialRotationFailure {
 impl CommandSnapshotPolicy for RecordCredentialRotationFailure {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

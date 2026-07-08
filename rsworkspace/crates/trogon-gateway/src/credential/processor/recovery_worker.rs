@@ -19,14 +19,13 @@ use trogon_nats::jetstream::{
 };
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use crate::commands::credential_lifecycle_handler::{
-    CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialLifecycleRuntimeHandler,
+use crate::credential::domain::CredentialId;
+use crate::credential::handler::{
+    CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialRuntimeHandler,
     activation_recovery_command,
 };
-use crate::commands::domain::CredentialId;
-use crate::commands::{
-    CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
-    CredentialLifecycleState, evolve, initial_state,
+use crate::credential::{
+    CredentialEvent, CredentialEventPayloadError, CredentialEvolveError, CredentialState, evolve, initial_state,
 };
 use crate::secret_store::SecretStoreMetadata;
 
@@ -35,16 +34,15 @@ const DEFAULT_INITIAL_FAILURE_BACKOFF: Duration = Duration::from_secs(30);
 const DEFAULT_MAX_FAILURE_BACKOFF: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_STUCK_AFTER: Duration = Duration::from_secs(30 * 60);
 const RECOVERY_METER_NAME: &str = "trogon-gateway";
-pub(crate) const CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINT_BUCKET: &str =
-    "GATEWAY_CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINTS";
+pub(crate) const CREDENTIAL_WORKER_CHECKPOINT_BUCKET: &str = "GATEWAY_CREDENTIAL_WORKER_CHECKPOINTS";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct CredentialLifecycleRecoveryReport {
+pub(crate) struct CredentialRecoveryReport {
     scanned_events: usize,
     decoded_events: usize,
     skipped_events: usize,
-    changed_lifecycles: usize,
-    skipped_lifecycles: usize,
+    changed_credentials: usize,
+    skipped_credentials: usize,
     planned_recoveries: usize,
     recovered_writes: usize,
     recovered_rotations: usize,
@@ -57,7 +55,7 @@ pub(crate) struct CredentialLifecycleRecoveryReport {
     stuck_recovery: bool,
 }
 
-impl CredentialLifecycleRecoveryReport {
+impl CredentialRecoveryReport {
     pub(crate) fn scanned_events(&self) -> usize {
         self.scanned_events
     }
@@ -70,12 +68,12 @@ impl CredentialLifecycleRecoveryReport {
         self.skipped_events
     }
 
-    pub(crate) fn changed_lifecycles(&self) -> usize {
-        self.changed_lifecycles
+    pub(crate) fn changed_credentials(&self) -> usize {
+        self.changed_credentials
     }
 
-    pub(crate) fn skipped_lifecycles(&self) -> usize {
-        self.skipped_lifecycles
+    pub(crate) fn skipped_credentials(&self) -> usize {
+        self.skipped_credentials
     }
 
     pub(crate) fn planned_recoveries(&self) -> usize {
@@ -143,13 +141,13 @@ impl CredentialLifecycleRecoveryReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CredentialLifecycleRecoveryPolicy {
+pub(crate) struct CredentialRecoveryPolicy {
     initial_failure_backoff: Duration,
     max_failure_backoff: Duration,
     stuck_after: Duration,
 }
 
-impl CredentialLifecycleRecoveryPolicy {
+impl CredentialRecoveryPolicy {
     fn failure_backoff(self, failure_count: u32) -> Duration {
         let shift = failure_count.saturating_sub(1).min(31);
         let seconds = self.initial_failure_backoff.as_secs().max(1);
@@ -161,7 +159,7 @@ impl CredentialLifecycleRecoveryPolicy {
     }
 }
 
-impl Default for CredentialLifecycleRecoveryPolicy {
+impl Default for CredentialRecoveryPolicy {
     fn default() -> Self {
         Self {
             initial_failure_backoff: DEFAULT_INITIAL_FAILURE_BACKOFF,
@@ -172,13 +170,13 @@ impl Default for CredentialLifecycleRecoveryPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CredentialLifecycleRecoveryPlan {
-    report: CredentialLifecycleRecoveryReport,
-    commands: Vec<PlannedCredentialLifecycleRecovery>,
+struct CredentialRecoveryPlan {
+    report: CredentialRecoveryReport,
+    commands: Vec<PlannedCredentialRecovery>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PlannedCredentialLifecycleRecovery {
+struct PlannedCredentialRecovery {
     credential_id: CredentialId,
     command: CredentialActivationRecoveryCommand,
 }
@@ -186,39 +184,39 @@ struct PlannedCredentialLifecycleRecovery {
 pub(crate) async fn run<EventStream, EventStore, Secrets>(
     event_stream: EventStream,
     event_store: EventStore,
-    handler: CredentialLifecycleRuntimeHandler<EventStore, Secrets>,
-    checkpoints: CredentialLifecycleRecoveryKvCheckpointStore<kv::Store>,
+    handler: CredentialRuntimeHandler<EventStore, Secrets>,
+    checkpoints: CredentialRecoveryKvCheckpointStore<kv::Store>,
     interval: Duration,
 ) where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
 {
     let mut interval = tokio::time::interval(interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let metrics = CredentialLifecycleRecoveryMetrics::new();
+    let metrics = CredentialRecoveryMetrics::new();
 
     loop {
         tokio::select! {
             _ = trogon_std::signal::shutdown_signal() => {
-                info!("credential lifecycle recovery worker stopped");
+                info!("credential recovery worker stopped");
                 return;
             }
             _ = interval.tick() => {
-                match recover_pending_lifecycle_activations(&event_stream, &event_store, &handler, &checkpoints).await {
+                match recover_pending_credential_activations(&event_stream, &event_store, &handler, &checkpoints).await {
                     Ok(report) if report.has_recovery_activity() => {
                         metrics.record_report(&report);
                         info!(
                             scanned_events = report.scanned_events(),
                             decoded_events = report.decoded_events(),
                             skipped_events = report.skipped_events(),
-                            changed_lifecycles = report.changed_lifecycles(),
-                            skipped_lifecycles = report.skipped_lifecycles(),
+                            changed_credentials = report.changed_credentials(),
+                            skipped_credentials = report.skipped_credentials(),
                             planned_recoveries = report.planned_recoveries(),
                             recovered_writes = report.recovered_writes(),
                             recovered_rotations = report.recovered_rotations(),
@@ -229,7 +227,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
                             checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
                             retry_delayed = report.retry_delayed(),
                             stuck_recovery = report.stuck_recovery(),
-                            "credential lifecycle recovery pass completed"
+                            "credential recovery pass completed"
                         );
                     }
                     Ok(report) => {
@@ -237,7 +235,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
                     }
                     Err(source) => {
                         metrics.record_error("worker_error");
-                        error!(error = %source, "credential lifecycle recovery pass failed");
+                        error!(error = %source, "credential recovery pass failed");
                     }
                 }
             }
@@ -246,7 +244,7 @@ pub(crate) async fn run<EventStream, EventStore, Secrets>(
 }
 
 #[derive(Clone, Debug)]
-struct CredentialLifecycleRecoveryMetrics {
+struct CredentialRecoveryMetrics {
     passes: Counter<u64>,
     errors: Counter<u64>,
     scanned_events: Counter<u64>,
@@ -254,34 +252,34 @@ struct CredentialLifecycleRecoveryMetrics {
     stuck_reports: Counter<u64>,
 }
 
-impl CredentialLifecycleRecoveryMetrics {
+impl CredentialRecoveryMetrics {
     fn new() -> Self {
         let meter = trogon_telemetry::meter(RECOVERY_METER_NAME);
         Self {
             passes: meter
-                .u64_counter("gateway.credential_lifecycle.recovery.passes")
-                .with_description("Credential lifecycle recovery worker passes by outcome.")
+                .u64_counter("gateway.credential.recovery.passes")
+                .with_description("Credential recovery worker passes by outcome.")
                 .build(),
             errors: meter
-                .u64_counter("gateway.credential_lifecycle.recovery.errors")
-                .with_description("Credential lifecycle recovery worker pass errors by reason.")
+                .u64_counter("gateway.credential.recovery.errors")
+                .with_description("Credential recovery worker pass errors by reason.")
                 .build(),
             scanned_events: meter
-                .u64_counter("gateway.credential_lifecycle.recovery.scanned_events")
-                .with_description("Raw lifecycle stream events scanned by the recovery worker.")
+                .u64_counter("gateway.credential.recovery.scanned_events")
+                .with_description("Raw credential stream events scanned by the recovery worker.")
                 .build(),
             recoveries: meter
-                .u64_counter("gateway.credential_lifecycle.recovery.recoveries")
-                .with_description("Credential lifecycle recovery commands by status and kind.")
+                .u64_counter("gateway.credential.recovery.recoveries")
+                .with_description("Credential recovery commands by status and kind.")
                 .build(),
             stuck_reports: meter
-                .u64_counter("gateway.credential_lifecycle.recovery.stuck_reports")
+                .u64_counter("gateway.credential.recovery.stuck_reports")
                 .with_description("Recovery passes that observed a stuck recovery checkpoint.")
                 .build(),
         }
     }
 
-    fn record_report(&self, report: &CredentialLifecycleRecoveryReport) {
+    fn record_report(&self, report: &CredentialRecoveryReport) {
         self.passes.add(1, &[KeyValue::new("outcome", report.metric_outcome())]);
         if report.scanned_events() > 0 {
             self.scanned_events.add(report.scanned_events() as u64, &[]);
@@ -311,57 +309,57 @@ impl CredentialLifecycleRecoveryMetrics {
     }
 }
 
-pub(crate) async fn recover_pending_lifecycle_activations<EventStream, EventStore, Secrets, Checkpoints>(
+pub(crate) async fn recover_pending_credential_activations<EventStream, EventStore, Secrets, Checkpoints>(
     event_stream: &EventStream,
     event_store: &EventStore,
-    handler: &CredentialLifecycleRuntimeHandler<EventStore, Secrets>,
+    handler: &CredentialRuntimeHandler<EventStore, Secrets>,
     checkpoints: &Checkpoints,
-) -> Result<CredentialLifecycleRecoveryReport, CredentialLifecycleRecoveryWorkerError>
+) -> Result<CredentialRecoveryReport, CredentialRecoveryWorkerError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
-    Checkpoints: CredentialLifecycleRecoveryCheckpointStore,
+    Checkpoints: CredentialRecoveryCheckpointStore,
 {
-    recover_pending_lifecycle_activations_at(
+    recover_pending_credential_activations_at(
         event_stream,
         event_store,
         handler,
         checkpoints,
         SystemTime::now(),
-        CredentialLifecycleRecoveryPolicy::default(),
+        CredentialRecoveryPolicy::default(),
     )
     .await
 }
 
-async fn recover_pending_lifecycle_activations_at<EventStream, EventStore, Secrets, Checkpoints>(
+async fn recover_pending_credential_activations_at<EventStream, EventStore, Secrets, Checkpoints>(
     event_stream: &EventStream,
     event_store: &EventStore,
-    handler: &CredentialLifecycleRuntimeHandler<EventStore, Secrets>,
+    handler: &CredentialRuntimeHandler<EventStore, Secrets>,
     checkpoints: &Checkpoints,
     now: SystemTime,
-    policy: CredentialLifecycleRecoveryPolicy,
-) -> Result<CredentialLifecycleRecoveryReport, CredentialLifecycleRecoveryWorkerError>
+    policy: CredentialRecoveryPolicy,
+) -> Result<CredentialRecoveryReport, CredentialRecoveryWorkerError>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
-    Checkpoints: CredentialLifecycleRecoveryCheckpointStore,
+    Checkpoints: CredentialRecoveryCheckpointStore,
 {
     let checkpoint = checkpoints
         .load()
         .await
-        .map_err(|source| CredentialLifecycleRecoveryWorkerError::Checkpoint { source })?;
+        .map_err(|source| CredentialRecoveryWorkerError::Checkpoint { source })?;
     if checkpoint.retry_delayed_at(now) {
         let report = report_from_checkpoint(checkpoint, now, policy, true);
         if report.stuck_recovery() {
@@ -369,7 +367,7 @@ where
                 checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
                 checkpoint_failure_count = report.checkpoint_failure_count(),
                 checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
-                "credential lifecycle recovery is stuck behind retry backoff"
+                "credential recovery is stuck behind retry backoff"
             );
         }
         return Ok(report);
@@ -378,11 +376,11 @@ where
     let from_sequence = checkpoint.next_sequence();
     let events = trogon_decider_nats::read_stream(event_stream, from_sequence)
         .await
-        .map_err(|source| CredentialLifecycleRecoveryWorkerError::ReadStream { source })?;
+        .map_err(|source| CredentialRecoveryWorkerError::ReadStream { source })?;
     let max_scanned_sequence = events.iter().map(|event| event.stream_position.as_u64()).max();
-    let mut report = recover_pending_lifecycle_activations_from_events(events, event_store, handler)
+    let mut report = recover_pending_credential_activations_from_events(events, event_store, handler)
         .await
-        .map_err(|source| CredentialLifecycleRecoveryWorkerError::BuildPlan { source })?;
+        .map_err(|source| CredentialRecoveryWorkerError::BuildPlan { source })?;
     report.checkpoint_loaded_sequence = checkpoint.last_scanned_sequence();
     report.checkpoint_failure_count = checkpoint.consecutive_failure_count();
     report.checkpoint_retry_after_unix_seconds = checkpoint.retry_after_unix_seconds();
@@ -390,11 +388,11 @@ where
 
     if report.failed_recoveries == 0 {
         if let Some(last_scanned_sequence) = max_scanned_sequence {
-            let checkpoint = CredentialLifecycleRecoveryCheckpoint::new(last_scanned_sequence);
+            let checkpoint = CredentialRecoveryCheckpoint::new(last_scanned_sequence);
             checkpoints
                 .save(checkpoint)
                 .await
-                .map_err(|source| CredentialLifecycleRecoveryWorkerError::Checkpoint { source })?;
+                .map_err(|source| CredentialRecoveryWorkerError::Checkpoint { source })?;
             report.checkpoint_advanced_to = Some(last_scanned_sequence);
             report.checkpoint_failure_count = 0;
             report.checkpoint_retry_after_unix_seconds = None;
@@ -405,7 +403,7 @@ where
         checkpoints
             .save(checkpoint)
             .await
-            .map_err(|source| CredentialLifecycleRecoveryWorkerError::Checkpoint { source })?;
+            .map_err(|source| CredentialRecoveryWorkerError::Checkpoint { source })?;
         report.checkpoint_failure_count = checkpoint.consecutive_failure_count();
         report.checkpoint_retry_after_unix_seconds = checkpoint.retry_after_unix_seconds();
         report.stuck_recovery = checkpoint.stuck_at(now, policy);
@@ -415,7 +413,7 @@ where
             checkpoint_failure_count = report.checkpoint_failure_count(),
             checkpoint_retry_after_unix_seconds = ?report.checkpoint_retry_after_unix_seconds(),
             stuck_recovery = report.stuck_recovery(),
-            "credential lifecycle recovery checkpoint was not advanced"
+            "credential recovery checkpoint was not advanced"
         );
     }
 
@@ -423,12 +421,12 @@ where
 }
 
 fn report_from_checkpoint(
-    checkpoint: CredentialLifecycleRecoveryCheckpoint,
+    checkpoint: CredentialRecoveryCheckpoint,
     now: SystemTime,
-    policy: CredentialLifecycleRecoveryPolicy,
+    policy: CredentialRecoveryPolicy,
     retry_delayed: bool,
-) -> CredentialLifecycleRecoveryReport {
-    CredentialLifecycleRecoveryReport {
+) -> CredentialRecoveryReport {
+    CredentialRecoveryReport {
         checkpoint_loaded_sequence: checkpoint.last_scanned_sequence(),
         checkpoint_failure_count: checkpoint.consecutive_failure_count(),
         checkpoint_retry_after_unix_seconds: checkpoint.retry_after_unix_seconds(),
@@ -438,21 +436,21 @@ fn report_from_checkpoint(
     }
 }
 
-async fn recover_pending_lifecycle_activations_from_events<EventStore, Secrets>(
+async fn recover_pending_credential_activations_from_events<EventStore, Secrets>(
     events: impl IntoIterator<Item = StreamEvent>,
     event_store: &EventStore,
-    handler: &CredentialLifecycleRuntimeHandler<EventStore, Secrets>,
-) -> Result<CredentialLifecycleRecoveryReport, CredentialLifecycleRecoveryPlanBuildError>
+    handler: &CredentialRuntimeHandler<EventStore, Secrets>,
+) -> Result<CredentialRecoveryReport, CredentialRecoveryPlanBuildError>
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + 'static,
     Secrets: SecretStoreMetadata,
 {
-    let plan = recovery_plan_from_lifecycle_events(events, event_store).await?;
+    let plan = recovery_plan_from_credential_events(events, event_store).await?;
     let mut report = plan.report;
 
     for planned in plan.commands {
@@ -489,60 +487,60 @@ where
     Ok(report)
 }
 
-async fn recovery_plan_from_lifecycle_events<EventStore>(
+async fn recovery_plan_from_credential_events<EventStore>(
     events: impl IntoIterator<Item = StreamEvent>,
     event_store: &EventStore,
-) -> Result<CredentialLifecycleRecoveryPlan, CredentialLifecycleRecoveryPlanBuildError>
+) -> Result<CredentialRecoveryPlan, CredentialRecoveryPlanBuildError>
 where
     EventStore: StreamRead<str>,
 {
-    let mut report = CredentialLifecycleRecoveryReport::default();
-    let mut changed_lifecycles: BTreeSet<CredentialId> = BTreeSet::new();
+    let mut report = CredentialRecoveryReport::default();
+    let mut changed_credentials: BTreeSet<CredentialId> = BTreeSet::new();
 
     for event in events {
         report.scanned_events += 1;
         match event
-            .decode::<CredentialLifecycleEvent>()
-            .map_err(|source| CredentialLifecycleRecoveryPlanBuildError::DecodeEvent { source })?
+            .decode::<CredentialEvent>()
+            .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
                 report.decoded_events += 1;
-                changed_lifecycles.insert(event_credential_id(&event).clone());
+                changed_credentials.insert(event_credential_id(&event).clone());
             }
             EventDecodeOutcome::Skipped => {
                 report.skipped_events += 1;
             }
         }
     }
-    report.changed_lifecycles = changed_lifecycles.len();
+    report.changed_credentials = changed_credentials.len();
 
     let mut commands = Vec::new();
-    for credential_id in changed_lifecycles {
-        let state = load_lifecycle_state(event_store, &credential_id).await?;
+    for credential_id in changed_credentials {
+        let state = load_credential_state(event_store, &credential_id).await?;
 
         match activation_recovery_command(credential_id.as_str(), &state).map_err(|source| {
-            CredentialLifecycleRecoveryPlanBuildError::PlanRecovery {
+            CredentialRecoveryPlanBuildError::PlanRecovery {
                 credential_id: credential_id.clone(),
                 source: Box::new(source),
             }
         })? {
             Some(command) => {
                 report.planned_recoveries += 1;
-                commands.push(PlannedCredentialLifecycleRecovery { credential_id, command });
+                commands.push(PlannedCredentialRecovery { credential_id, command });
             }
             None => {
-                report.skipped_lifecycles += 1;
+                report.skipped_credentials += 1;
             }
         }
     }
 
-    Ok(CredentialLifecycleRecoveryPlan { report, commands })
+    Ok(CredentialRecoveryPlan { report, commands })
 }
 
-async fn load_lifecycle_state<EventStore>(
+async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<CredentialLifecycleState, CredentialLifecycleRecoveryPlanBuildError>
+) -> Result<CredentialState, CredentialRecoveryPlanBuildError>
 where
     EventStore: StreamRead<str>,
 {
@@ -552,19 +550,19 @@ where
             from: ReadFrom::Beginning,
         })
         .await
-        .map_err(|source| CredentialLifecycleRecoveryPlanBuildError::ReadLifecycle {
+        .map_err(|source| CredentialRecoveryPlanBuildError::ReadCredential {
             credential_id: credential_id.clone(),
             source: Box::new(source),
         })?;
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialLifecycleEvent>()
-            .map_err(|source| CredentialLifecycleRecoveryPlanBuildError::DecodeEvent { source })?
+            .decode::<CredentialEvent>()
+            .map_err(|source| CredentialRecoveryPlanBuildError::DecodeEvent { source })?
         else {
             continue;
         };
-        state = evolve(state, &event).map_err(|source| CredentialLifecycleRecoveryPlanBuildError::ReplayLifecycle {
+        state = evolve(state, &event).map_err(|source| CredentialRecoveryPlanBuildError::ReplayCredential {
             credential_id: credential_id.clone(),
             source,
         })?;
@@ -572,15 +570,16 @@ where
     Ok(state)
 }
 
-fn event_credential_id(event: &CredentialLifecycleEvent) -> &CredentialId {
+fn event_credential_id(event: &CredentialEvent) -> &CredentialId {
     match event {
-        CredentialLifecycleEvent::WriteRequested { credential_id, .. }
-        | CredentialLifecycleEvent::WriteFailed { credential_id, .. } => credential_id,
-        CredentialLifecycleEvent::Activated { metadata } => metadata.reference().id(),
-        CredentialLifecycleEvent::RotationRequested { credential_ref }
-        | CredentialLifecycleEvent::RotationFailed { credential_ref, .. }
-        | CredentialLifecycleEvent::Revoked { credential_ref } => credential_ref.id(),
-        CredentialLifecycleEvent::Rotated {
+        CredentialEvent::WriteRequested { credential_id, .. } | CredentialEvent::WriteFailed { credential_id, .. } => {
+            credential_id
+        }
+        CredentialEvent::Activated { metadata } => metadata.reference().id(),
+        CredentialEvent::RotationRequested { credential_ref }
+        | CredentialEvent::RotationFailed { credential_ref, .. }
+        | CredentialEvent::Revoked { credential_ref } => credential_ref.id(),
+        CredentialEvent::Rotated {
             previous_credential_ref,
             ..
         } => previous_credential_ref.id(),
@@ -588,44 +587,44 @@ fn event_credential_id(event: &CredentialLifecycleEvent) -> &CredentialId {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleRecoveryWorkerError {
-    #[error("credential lifecycle event stream read failed: {source}")]
+pub(crate) enum CredentialRecoveryWorkerError {
+    #[error("credential event stream read failed: {source}")]
     ReadStream {
         #[source]
         source: StreamStoreError,
     },
-    #[error("credential lifecycle recovery checkpoint failed: {source}")]
+    #[error("credential recovery checkpoint failed: {source}")]
     Checkpoint {
         #[source]
-        source: CredentialLifecycleRecoveryCheckpointStoreError,
+        source: CredentialRecoveryCheckpointStoreError,
     },
-    #[error("credential lifecycle recovery plan failed: {source}")]
+    #[error("credential recovery plan failed: {source}")]
     BuildPlan {
         #[source]
-        source: CredentialLifecycleRecoveryPlanBuildError,
+        source: CredentialRecoveryPlanBuildError,
     },
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleRecoveryPlanBuildError {
-    #[error("credential lifecycle event decode failed: {source}")]
+pub(crate) enum CredentialRecoveryPlanBuildError {
+    #[error("credential event decode failed: {source}")]
     DecodeEvent {
         #[source]
-        source: CredentialLifecycleEventPayloadError,
+        source: CredentialEventPayloadError,
     },
-    #[error("credential lifecycle stream read failed for {credential_id}: {source}")]
-    ReadLifecycle {
+    #[error("credential stream read failed for {credential_id}: {source}")]
+    ReadCredential {
         credential_id: CredentialId,
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
-    #[error("credential lifecycle stream replay failed for {credential_id}: {source}")]
-    ReplayLifecycle {
+    #[error("credential stream replay failed for {credential_id}: {source}")]
+    ReplayCredential {
         credential_id: CredentialId,
         #[source]
-        source: CredentialLifecycleEvolveError,
+        source: CredentialEvolveError,
     },
-    #[error("credential lifecycle recovery planning failed for {credential_id}: {source}")]
+    #[error("credential recovery planning failed for {credential_id}: {source}")]
     PlanRecovery {
         credential_id: CredentialId,
         #[source]
@@ -634,14 +633,14 @@ pub(crate) enum CredentialLifecycleRecoveryPlanBuildError {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct CredentialLifecycleRecoveryCheckpoint {
+pub(crate) struct CredentialRecoveryCheckpoint {
     last_scanned_sequence: u64,
     consecutive_failure_count: u32,
     first_failure_unix_seconds: Option<u64>,
     retry_after_unix_seconds: Option<u64>,
 }
 
-impl CredentialLifecycleRecoveryCheckpoint {
+impl CredentialRecoveryCheckpoint {
     pub(crate) fn new(last_scanned_sequence: u64) -> Self {
         Self {
             last_scanned_sequence,
@@ -690,7 +689,7 @@ impl CredentialLifecycleRecoveryCheckpoint {
             .is_some_and(|retry_after| unix_seconds(now) < retry_after)
     }
 
-    fn record_failure(self, now: SystemTime, policy: CredentialLifecycleRecoveryPolicy) -> Self {
+    fn record_failure(self, now: SystemTime, policy: CredentialRecoveryPolicy) -> Self {
         let failure_count = self.consecutive_failure_count.saturating_add(1);
         let now_seconds = unix_seconds(now);
         let retry_after = now_seconds.saturating_add(policy.failure_backoff(failure_count).as_secs());
@@ -702,7 +701,7 @@ impl CredentialLifecycleRecoveryCheckpoint {
         }
     }
 
-    pub(crate) fn stuck_at(self, now: SystemTime, policy: CredentialLifecycleRecoveryPolicy) -> bool {
+    pub(crate) fn stuck_at(self, now: SystemTime, policy: CredentialRecoveryPolicy) -> bool {
         self.first_failure_unix_seconds.is_some_and(|first_failure| {
             unix_seconds(now).saturating_sub(first_failure) >= policy.stuck_after.as_secs()
         })
@@ -713,36 +712,34 @@ fn unix_seconds(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs()
 }
 
-pub(crate) trait CredentialLifecycleRecoveryCheckpointStore: Clone + Send + Sync + 'static {
+pub(crate) trait CredentialRecoveryCheckpointStore: Clone + Send + Sync + 'static {
     fn load(
         &self,
-    ) -> impl std::future::Future<
-        Output = Result<CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError>,
-    > + Send;
+    ) -> impl std::future::Future<Output = Result<CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError>> + Send;
 
     fn save(
         &self,
-        checkpoint: CredentialLifecycleRecoveryCheckpoint,
-    ) -> impl std::future::Future<Output = Result<(), CredentialLifecycleRecoveryCheckpointStoreError>> + Send;
+        checkpoint: CredentialRecoveryCheckpoint,
+    ) -> impl std::future::Future<Output = Result<(), CredentialRecoveryCheckpointStoreError>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleRecoveryCheckpointStoreError {
-    #[error("credential lifecycle recovery checkpoint codec failed: {source}")]
+pub(crate) enum CredentialRecoveryCheckpointStoreError {
+    #[error("credential recovery checkpoint codec failed: {source}")]
     Codec {
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
-    #[error("credential lifecycle recovery checkpoint backend failed: {source}")]
+    #[error("credential recovery checkpoint backend failed: {source}")]
     Backend {
         #[source]
         source: Box<dyn Error + Send + Sync>,
     },
-    #[error("credential lifecycle recovery checkpoint changed concurrently")]
+    #[error("credential recovery checkpoint changed concurrently")]
     Conflict,
 }
 
-impl CredentialLifecycleRecoveryCheckpointStoreError {
+impl CredentialRecoveryCheckpointStoreError {
     fn backend(source: impl Error + Send + Sync + 'static) -> Self {
         Self::Backend {
             source: Box::new(source),
@@ -757,11 +754,11 @@ impl CredentialLifecycleRecoveryCheckpointStoreError {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CredentialLifecycleRecoveryKvCheckpointStore<S> {
+pub(crate) struct CredentialRecoveryKvCheckpointStore<S> {
     kv: S,
 }
 
-impl<S> CredentialLifecycleRecoveryKvCheckpointStore<S>
+impl<S> CredentialRecoveryKvCheckpointStore<S>
 where
     S: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
@@ -770,24 +767,22 @@ where
     }
 }
 
-impl<S> CredentialLifecycleRecoveryCheckpointStore for CredentialLifecycleRecoveryKvCheckpointStore<S>
+impl<S> CredentialRecoveryCheckpointStore for CredentialRecoveryKvCheckpointStore<S>
 where
     S: JetStreamKvEntry + JetStreamKvCreate + JetStreamKeyValueUpdate,
 {
-    async fn load(
-        &self,
-    ) -> Result<CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError> {
+    async fn load(&self) -> Result<CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError> {
         let Some(entry) = self
             .kv
             .entry(CHECKPOINT_KEY.to_string())
             .await
-            .map_err(CredentialLifecycleRecoveryCheckpointStoreError::backend)?
+            .map_err(CredentialRecoveryCheckpointStoreError::backend)?
         else {
-            return Ok(CredentialLifecycleRecoveryCheckpoint::default());
+            return Ok(CredentialRecoveryCheckpoint::default());
         };
 
         if matches!(entry.operation, kv::Operation::Delete | kv::Operation::Purge) {
-            return Ok(CredentialLifecycleRecoveryCheckpoint::default());
+            return Ok(CredentialRecoveryCheckpoint::default());
         }
 
         decode_checkpoint(&entry.value)
@@ -795,20 +790,20 @@ where
 
     async fn save(
         &self,
-        checkpoint: CredentialLifecycleRecoveryCheckpoint,
-    ) -> Result<(), CredentialLifecycleRecoveryCheckpointStoreError> {
+        checkpoint: CredentialRecoveryCheckpoint,
+    ) -> Result<(), CredentialRecoveryCheckpointStoreError> {
         let encoded = Bytes::from(encode_checkpoint(checkpoint));
         for _ in 0..3 {
             let Some(entry) = self
                 .kv
                 .entry(CHECKPOINT_KEY.to_string())
                 .await
-                .map_err(CredentialLifecycleRecoveryCheckpointStoreError::backend)?
+                .map_err(CredentialRecoveryCheckpointStoreError::backend)?
             else {
                 match self.kv.create(CHECKPOINT_KEY, encoded.clone()).await {
                     Ok(_) => return Ok(()),
                     Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                    Err(source) => return Err(CredentialLifecycleRecoveryCheckpointStoreError::backend(source)),
+                    Err(source) => return Err(CredentialRecoveryCheckpointStoreError::backend(source)),
                 }
             };
 
@@ -816,57 +811,55 @@ where
                 match self.kv.create(CHECKPOINT_KEY, encoded.clone()).await {
                     Ok(_) => return Ok(()),
                     Err(source) if source.kind() == kv::CreateErrorKind::AlreadyExists => continue,
-                    Err(source) => return Err(CredentialLifecycleRecoveryCheckpointStoreError::backend(source)),
+                    Err(source) => return Err(CredentialRecoveryCheckpointStoreError::backend(source)),
                 }
             }
 
             match self.kv.update(CHECKPOINT_KEY, encoded.clone(), entry.revision).await {
                 Ok(_) => return Ok(()),
                 Err(source) if source.kind() == kv::UpdateErrorKind::WrongLastRevision => continue,
-                Err(source) => return Err(CredentialLifecycleRecoveryCheckpointStoreError::backend(source)),
+                Err(source) => return Err(CredentialRecoveryCheckpointStoreError::backend(source)),
             }
         }
 
-        Err(CredentialLifecycleRecoveryCheckpointStoreError::Conflict)
+        Err(CredentialRecoveryCheckpointStoreError::Conflict)
     }
 }
 
 pub(crate) async fn open_checkpoint_store(
     context: jetstream::Context,
-) -> Result<CredentialLifecycleRecoveryKvCheckpointStore<kv::Store>, CredentialLifecycleRecoveryCheckpointOpenError> {
+) -> Result<CredentialRecoveryKvCheckpointStore<kv::Store>, CredentialRecoveryCheckpointOpenError> {
     let store = provision_checkpoint_bucket::<_, kv::Store>(&context).await?;
-    Ok(CredentialLifecycleRecoveryKvCheckpointStore::new(store))
+    Ok(CredentialRecoveryKvCheckpointStore::new(store))
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleRecoveryCheckpointOpenError {
-    #[error("failed to create credential lifecycle recovery checkpoint bucket: {0}")]
+pub(crate) enum CredentialRecoveryCheckpointOpenError {
+    #[error("failed to create credential recovery checkpoint bucket: {0}")]
     Create(#[source] Box<context::CreateKeyValueError>),
-    #[error("failed to open existing credential lifecycle recovery checkpoint bucket: {0}")]
+    #[error("failed to open existing credential recovery checkpoint bucket: {0}")]
     OpenExisting(#[source] Box<context::KeyValueError>),
-    #[error("failed to inspect credential lifecycle recovery checkpoint bucket: {0}")]
+    #[error("failed to inspect credential recovery checkpoint bucket: {0}")]
     Inspect(#[source] kv::StatusError),
     #[error("{source}")]
     Incompatible {
         #[source]
-        source: IncompatibleCredentialLifecycleRecoveryCheckpointBucket,
+        source: IncompatibleCredentialRecoveryCheckpointBucket,
     },
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "credential lifecycle recovery checkpoint bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
+    "credential recovery checkpoint bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub(crate) struct IncompatibleCredentialLifecycleRecoveryCheckpointBucket {
+pub(crate) struct IncompatibleCredentialRecoveryCheckpointBucket {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
     actual_max_age: Duration,
 }
 
-pub(crate) async fn provision_checkpoint_bucket<C, S>(
-    client: &C,
-) -> Result<S, CredentialLifecycleRecoveryCheckpointOpenError>
+pub(crate) async fn provision_checkpoint_bucket<C, S>(client: &C) -> Result<S, CredentialRecoveryCheckpointOpenError>
 where
     C: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
     S: JetStreamKeyValueStatus,
@@ -874,10 +867,10 @@ where
     let store = match client.create_key_value(checkpoint_bucket_config()).await {
         Ok(store) => store,
         Err(source) if is_create_key_value_already_exists(&source) => client
-            .get_key_value(CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINT_BUCKET)
+            .get_key_value(CREDENTIAL_WORKER_CHECKPOINT_BUCKET)
             .await
-            .map_err(|source| CredentialLifecycleRecoveryCheckpointOpenError::OpenExisting(Box::new(source)))?,
-        Err(source) => return Err(CredentialLifecycleRecoveryCheckpointOpenError::Create(Box::new(source))),
+            .map_err(|source| CredentialRecoveryCheckpointOpenError::OpenExisting(Box::new(source)))?,
+        Err(source) => return Err(CredentialRecoveryCheckpointOpenError::Create(Box::new(source))),
     };
 
     validate_checkpoint_bucket(&store).await?;
@@ -886,26 +879,26 @@ where
 
 pub(crate) fn checkpoint_bucket_config() -> kv::Config {
     kv::Config {
-        bucket: CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINT_BUCKET.to_string(),
+        bucket: CREDENTIAL_WORKER_CHECKPOINT_BUCKET.to_string(),
         history: 1,
         max_age: Duration::ZERO,
         ..Default::default()
     }
 }
 
-async fn validate_checkpoint_bucket<S>(store: &S) -> Result<(), CredentialLifecycleRecoveryCheckpointOpenError>
+async fn validate_checkpoint_bucket<S>(store: &S) -> Result<(), CredentialRecoveryCheckpointOpenError>
 where
     S: JetStreamKeyValueStatus,
 {
     let status = store
         .status()
         .await
-        .map_err(CredentialLifecycleRecoveryCheckpointOpenError::Inspect)?;
+        .map_err(CredentialRecoveryCheckpointOpenError::Inspect)?;
     let history = status.history();
     let max_age = status.max_age();
     if history != 1 || max_age != Duration::ZERO {
-        return Err(CredentialLifecycleRecoveryCheckpointOpenError::Incompatible {
-            source: IncompatibleCredentialLifecycleRecoveryCheckpointBucket {
+        return Err(CredentialRecoveryCheckpointOpenError::Incompatible {
+            source: IncompatibleCredentialRecoveryCheckpointBucket {
                 expected_history: 1,
                 actual_history: history,
                 expected_max_age: Duration::ZERO,
@@ -916,8 +909,8 @@ where
     Ok(())
 }
 
-fn encode_checkpoint(checkpoint: CredentialLifecycleRecoveryCheckpoint) -> Vec<u8> {
-    proto::CredentialLifecycleRecoveryWorkerCheckpoint {
+fn encode_checkpoint(checkpoint: CredentialRecoveryCheckpoint) -> Vec<u8> {
+    proto::CredentialRecoveryWorkerCheckpoint {
         last_scanned_sequence: Some(checkpoint.last_scanned_sequence()),
         consecutive_failure_count: Some(checkpoint.consecutive_failure_count()),
         first_failure_unix_seconds: checkpoint.first_failure_unix_seconds,
@@ -926,12 +919,10 @@ fn encode_checkpoint(checkpoint: CredentialLifecycleRecoveryCheckpoint) -> Vec<u
     .encode_to_vec()
 }
 
-fn decode_checkpoint(
-    value: &[u8],
-) -> Result<CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError> {
-    let checkpoint = proto::CredentialLifecycleRecoveryWorkerCheckpoint::decode_from_slice(value)
-        .map_err(CredentialLifecycleRecoveryCheckpointStoreError::codec)?;
-    Ok(CredentialLifecycleRecoveryCheckpoint::with_failure_state(
+fn decode_checkpoint(value: &[u8]) -> Result<CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError> {
+    let checkpoint = proto::CredentialRecoveryWorkerCheckpoint::decode_from_slice(value)
+        .map_err(CredentialRecoveryCheckpointStoreError::codec)?;
+    Ok(CredentialRecoveryCheckpoint::with_failure_state(
         checkpoint.last_scanned_sequence.unwrap_or_default(),
         checkpoint.consecutive_failure_count.unwrap_or_default(),
         checkpoint.first_failure_unix_seconds,
@@ -964,11 +955,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::commands::credential_lifecycle_handler::{CredentialLifecycleHandler, PutCredential, RotateCredential};
-    use crate::commands::domain::{
+    use crate::credential::domain::{
         CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
     };
-    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
+    use crate::credential::handler::{CredentialHandler, PutCredential, RotateCredential};
+    use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
     use crate::secret_store::MockOpenBaoSecretStore;
     use crate::source_integration_id::SourceIntegrationId;
 
@@ -979,7 +970,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct WorkerTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialLifecycleState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
         write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
         fail_append_at: Arc<Mutex<Option<usize>>>,
     }
@@ -996,13 +987,13 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|mut event| {
-                    event.stream_id = "gateway.credentials.lifecycle.events.v1.subject".to_string();
+                    event.stream_id = "gateway.credentials.events.v1.subject".to_string();
                     event
                 })
                 .collect()
         }
 
-        fn push_lifecycle_event(&self, stream_id: &str, event: CredentialLifecycleEvent) {
+        fn push_credential_event(&self, stream_id: &str, event: CredentialEvent) {
             let mut events = self.events.lock().unwrap();
             let stream_position = position(events.len() as u64 + 1);
             events.push(StreamEvent {
@@ -1082,25 +1073,25 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialLifecycleState, str> for WorkerTestStreamStore {
+    impl SnapshotRead<CredentialState, str> for WorkerTestStreamStore {
         type Error = WorkerTestStreamStoreError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialLifecycleState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
             Ok(ReadSnapshotResponse {
                 snapshot: self.snapshots.lock().unwrap().get(request.snapshot_id).cloned(),
             })
         }
     }
 
-    impl SnapshotWrite<CredentialLifecycleState, str> for WorkerTestStreamStore {
+    impl SnapshotWrite<CredentialState, str> for WorkerTestStreamStore {
         type Error = WorkerTestStreamStoreError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialLifecycleState, str>,
+            request: WriteSnapshotRequest<'_, CredentialState, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             self.snapshots
                 .lock()
@@ -1113,9 +1104,9 @@ mod tests {
     #[tokio::test]
     async fn recovery_plan_groups_by_payload_credential_id_instead_of_raw_subject() {
         let store = WorkerTestStreamStore::default();
-        store.push_lifecycle_event(
+        store.push_credential_event(
             credential_id().as_str(),
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1124,19 +1115,17 @@ mod tests {
         );
         let events = store.events_as_raw_stream_scan();
 
-        let plan = recovery_plan_from_lifecycle_events(events, &store).await.unwrap();
+        let plan = recovery_plan_from_credential_events(events, &store).await.unwrap();
 
         assert_eq!(plan.report.scanned_events(), 1);
         assert_eq!(plan.report.decoded_events(), 1);
         assert_eq!(plan.report.planned_recoveries(), 1);
         assert_eq!(
             plan.commands,
-            vec![PlannedCredentialLifecycleRecovery {
+            vec![PlannedCredentialRecovery {
                 credential_id: credential_id(),
                 command: CredentialActivationRecoveryCommand::Write(
-                    crate::commands::credential_lifecycle_handler::RecoverCredentialWriteActivation::new(
-                        credential_ref(1)
-                    )
+                    crate::credential::handler::RecoverCredentialWriteActivation::new(credential_ref(1))
                 ),
             }]
         );
@@ -1146,19 +1135,15 @@ mod tests {
     async fn worker_recovers_pending_write_activation_after_secret_store_success() {
         let events = WorkerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
         let error = handler.put(put_command("super-secret")).await.unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("credential lifecycle write activation failed")
-        );
+        assert!(error.to_string().contains("credential write activation failed"));
 
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let runtime_handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
-        let report = recover_pending_lifecycle_activations_from_events(
+            CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let report = recover_pending_credential_activations_from_events(
             events.events_as_raw_stream_scan(),
             &events,
             &runtime_handler,
@@ -1186,10 +1171,10 @@ mod tests {
     async fn worker_recovers_pending_rotation_activation_after_secret_store_success() {
         let events = WorkerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         let active = handler.put(put_command("old-secret")).await.unwrap();
         let active = active.into_state();
-        let CredentialLifecycleState::Active(active) = active else {
+        let CredentialState::Active(active) = active else {
             panic!("expected active credential");
         };
         let active_ref = active.credential_ref().clone();
@@ -1201,16 +1186,12 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("credential lifecycle rotation activation failed")
-        );
+        assert!(error.to_string().contains("credential rotation activation failed"));
 
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let runtime_handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
-        let report = recover_pending_lifecycle_activations_from_events(
+            CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let report = recover_pending_credential_activations_from_events(
             events.events_as_raw_stream_scan(),
             &events,
             &runtime_handler,
@@ -1237,9 +1218,9 @@ mod tests {
     #[tokio::test]
     async fn worker_continues_when_recovery_metadata_is_not_available() {
         let store = WorkerTestStreamStore::default();
-        store.push_lifecycle_event(
+        store.push_credential_event(
             credential_id().as_str(),
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1249,9 +1230,9 @@ mod tests {
         let events = store.events_as_raw_stream_scan();
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler = CredentialLifecycleRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations_from_events(events, &store, &runtime_handler)
+        let report = recover_pending_credential_activations_from_events(events, &store, &runtime_handler)
             .await
             .unwrap();
 
@@ -1264,7 +1245,7 @@ mod tests {
     async fn checkpoint_store_loads_default_when_record_is_missing() {
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
 
         let checkpoint = checkpoints.load().await.unwrap();
 
@@ -1278,12 +1259,9 @@ mod tests {
     async fn checkpoint_store_creates_checkpoint_when_record_is_missing() {
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
 
-        checkpoints
-            .save(CredentialLifecycleRecoveryCheckpoint::new(42))
-            .await
-            .unwrap();
+        checkpoints.save(CredentialRecoveryCheckpoint::new(42)).await.unwrap();
 
         let calls = kv.create_calls();
         assert_eq!(calls.len(), 1);
@@ -1296,16 +1274,13 @@ mod tests {
     async fn checkpoint_store_updates_checkpoint_when_record_exists() {
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(
-            Bytes::from(encode_checkpoint(CredentialLifecycleRecoveryCheckpoint::new(7))),
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(7))),
             11,
             kv::Operation::Put,
         );
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
 
-        checkpoints
-            .save(CredentialLifecycleRecoveryCheckpoint::new(43))
-            .await
-            .unwrap();
+        checkpoints.save(CredentialRecoveryCheckpoint::new(43)).await.unwrap();
 
         let calls = kv.update_calls();
         assert_eq!(calls.len(), 1);
@@ -1317,7 +1292,7 @@ mod tests {
 
     #[tokio::test]
     async fn checkpoint_codec_preserves_retry_state() {
-        let original = CredentialLifecycleRecoveryCheckpoint::with_failure_state(9, 3, Some(100), Some(220));
+        let original = CredentialRecoveryCheckpoint::with_failure_state(9, 3, Some(100), Some(220));
 
         let decoded = decode_checkpoint(&encode_checkpoint(original)).unwrap();
 
@@ -1331,7 +1306,7 @@ mod tests {
     async fn worker_advances_checkpoint_after_successful_recovery_scan() {
         let events = WorkerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
         handler.put(put_command("super-secret")).await.unwrap_err();
 
@@ -1339,12 +1314,12 @@ mod tests {
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
         kv.enqueue_entry_none();
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let runtime_credentials = RuntimeCredentialRegistry::default();
         let runtime_handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+            CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
 
-        let report = recover_pending_lifecycle_activations(&stream, &events, &runtime_handler, &checkpoints)
+        let report = recover_pending_credential_activations(&stream, &events, &runtime_handler, &checkpoints)
             .await
             .unwrap();
 
@@ -1368,15 +1343,15 @@ mod tests {
     async fn worker_starts_scan_after_loaded_checkpoint() {
         let events = WorkerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
         handler.put(put_command("super-secret")).await.unwrap_err();
 
         let raw_events = vec![
             stream_event(
-                "gateway.credentials.lifecycle.events.v1.old",
+                "gateway.credentials.events.v1.old",
                 1,
-                CredentialLifecycleEvent::WriteRequested {
+                CredentialEvent::WriteRequested {
                     credential_id: credential_id(),
                     owner_id: owner_id(),
                     source: SourceKind::GitHub,
@@ -1384,9 +1359,9 @@ mod tests {
                 },
             ),
             stream_event(
-                "gateway.credentials.lifecycle.events.v1.current",
+                "gateway.credentials.events.v1.current",
                 2,
-                CredentialLifecycleEvent::WriteRequested {
+                CredentialEvent::WriteRequested {
                     credential_id: credential_id(),
                     owner_id: owner_id(),
                     source: SourceKind::GitHub,
@@ -1397,21 +1372,20 @@ mod tests {
         let stream = raw_stream_with_events(raw_events).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(
-            Bytes::from(encode_checkpoint(CredentialLifecycleRecoveryCheckpoint::new(1))),
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1))),
             3,
             kv::Operation::Put,
         );
         kv.enqueue_entry(
-            Bytes::from(encode_checkpoint(CredentialLifecycleRecoveryCheckpoint::new(1))),
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::new(1))),
             4,
             kv::Operation::Put,
         );
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations(&stream, &events, &runtime_handler, &checkpoints)
+        let report = recover_pending_credential_activations(&stream, &events, &runtime_handler, &checkpoints)
             .await
             .unwrap();
 
@@ -1428,9 +1402,9 @@ mod tests {
     #[tokio::test]
     async fn worker_does_not_advance_checkpoint_when_recovery_fails() {
         let store = WorkerTestStreamStore::default();
-        store.push_lifecycle_event(
+        store.push_credential_event(
             credential_id().as_str(),
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1440,12 +1414,12 @@ mod tests {
         let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler = CredentialLifecycleRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations(&stream, &store, &runtime_handler, &checkpoints)
+        let report = recover_pending_credential_activations(&stream, &store, &runtime_handler, &checkpoints)
             .await
             .unwrap();
 
@@ -1470,9 +1444,9 @@ mod tests {
     #[tokio::test]
     async fn worker_saves_retry_backoff_when_recovery_fails() {
         let store = WorkerTestStreamStore::default();
-        store.push_lifecycle_event(
+        store.push_credential_event(
             credential_id().as_str(),
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1483,13 +1457,13 @@ mod tests {
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
         kv.enqueue_entry_none();
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler = CredentialLifecycleRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
         let now = UNIX_EPOCH + Duration::from_secs(1_000);
 
-        let report = recover_pending_lifecycle_activations_at(
+        let report = recover_pending_credential_activations_at(
             &stream,
             &store,
             &runtime_handler,
@@ -1516,9 +1490,9 @@ mod tests {
     #[tokio::test]
     async fn worker_skips_scan_until_retry_after_is_reached() {
         let store = WorkerTestStreamStore::default();
-        store.push_lifecycle_event(
+        store.push_credential_event(
             credential_id().as_str(),
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
                 source: SourceKind::GitHub,
@@ -1528,18 +1502,21 @@ mod tests {
         let stream = raw_stream_with_events(store.events_as_raw_stream_scan()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(
-            Bytes::from(encode_checkpoint(
-                CredentialLifecycleRecoveryCheckpoint::with_failure_state(0, 2, Some(900), Some(1_000)),
-            )),
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::with_failure_state(
+                0,
+                2,
+                Some(900),
+                Some(1_000),
+            ))),
             4,
             kv::Operation::Put,
         );
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler = CredentialLifecycleRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations_at(
+        let report = recover_pending_credential_activations_at(
             &stream,
             &store,
             &runtime_handler,
@@ -1568,18 +1545,21 @@ mod tests {
         let stream = raw_stream_with_events(Vec::new()).await;
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(
-            Bytes::from(encode_checkpoint(
-                CredentialLifecycleRecoveryCheckpoint::with_failure_state(0, 4, Some(100), Some(1_000)),
-            )),
+            Bytes::from(encode_checkpoint(CredentialRecoveryCheckpoint::with_failure_state(
+                0,
+                4,
+                Some(100),
+                Some(1_000),
+            ))),
             4,
             kv::Operation::Put,
         );
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv);
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv);
         let secrets = MockOpenBaoSecretStore::default();
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler = CredentialLifecycleRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(store.clone(), secrets, runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations_at(
+        let report = recover_pending_credential_activations_at(
             &stream,
             &store,
             &runtime_handler,
@@ -1599,21 +1579,20 @@ mod tests {
     async fn worker_resets_retry_state_after_successful_recovery() {
         let events = WorkerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
-        let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
         events.fail_append_at(2);
         handler.put(put_command("super-secret")).await.unwrap_err();
 
         let stream = raw_stream_with_events(events.events_as_raw_stream_scan()).await;
-        let checkpoint = CredentialLifecycleRecoveryCheckpoint::with_failure_state(0, 2, Some(1_000), Some(1_010));
+        let checkpoint = CredentialRecoveryCheckpoint::with_failure_state(0, 2, Some(1_000), Some(1_010));
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry(Bytes::from(encode_checkpoint(checkpoint)), 7, kv::Operation::Put);
         kv.enqueue_entry(Bytes::from(encode_checkpoint(checkpoint)), 8, kv::Operation::Put);
-        let checkpoints = CredentialLifecycleRecoveryKvCheckpointStore::new(kv.clone());
+        let checkpoints = CredentialRecoveryKvCheckpointStore::new(kv.clone());
         let runtime_credentials = RuntimeCredentialRegistry::default();
-        let runtime_handler =
-            CredentialLifecycleRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials);
+        let runtime_handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials);
 
-        let report = recover_pending_lifecycle_activations_at(
+        let report = recover_pending_credential_activations_at(
             &stream,
             &events,
             &runtime_handler,
@@ -1641,7 +1620,7 @@ mod tests {
     #[test]
     fn recovery_report_metric_outcome_is_bounded() {
         assert_eq!(
-            CredentialLifecycleRecoveryReport {
+            CredentialRecoveryReport {
                 retry_delayed: true,
                 ..Default::default()
             }
@@ -1649,7 +1628,7 @@ mod tests {
             "retry_delayed"
         );
         assert_eq!(
-            CredentialLifecycleRecoveryReport {
+            CredentialRecoveryReport {
                 failed_recoveries: 1,
                 ..Default::default()
             }
@@ -1657,7 +1636,7 @@ mod tests {
             "failed_recovery"
         );
         assert_eq!(
-            CredentialLifecycleRecoveryReport {
+            CredentialRecoveryReport {
                 checkpoint_advanced_to: Some(7),
                 ..Default::default()
             }
@@ -1665,7 +1644,7 @@ mod tests {
             "advanced"
         );
         assert_eq!(
-            CredentialLifecycleRecoveryReport {
+            CredentialRecoveryReport {
                 recovered_writes: 1,
                 ..Default::default()
             }
@@ -1673,20 +1652,20 @@ mod tests {
             "recovered"
         );
         assert_eq!(
-            CredentialLifecycleRecoveryReport {
+            CredentialRecoveryReport {
                 stuck_recovery: true,
                 ..Default::default()
             }
             .metric_outcome(),
             "stuck"
         );
-        assert_eq!(CredentialLifecycleRecoveryReport::default().metric_outcome(), "idle");
+        assert_eq!(CredentialRecoveryReport::default().metric_outcome(), "idle");
     }
 
     #[test]
     fn recovery_metrics_recording_is_infallible() {
-        let metrics = CredentialLifecycleRecoveryMetrics::new();
-        let report = CredentialLifecycleRecoveryReport {
+        let metrics = CredentialRecoveryMetrics::new();
+        let report = CredentialRecoveryReport {
             scanned_events: 5,
             planned_recoveries: 2,
             recovered_writes: 1,
@@ -1708,7 +1687,7 @@ mod tests {
 
         let configs = client.create_configs();
         assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].bucket, CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINT_BUCKET);
+        assert_eq!(configs[0].bucket, CREDENTIAL_WORKER_CHECKPOINT_BUCKET);
         assert_eq!(configs[0].history, 1);
         assert_eq!(configs[0].max_age, Duration::ZERO);
     }
@@ -1724,7 +1703,7 @@ mod tests {
 
         assert_eq!(
             client.requested_buckets(),
-            vec![CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINT_BUCKET.to_string()]
+            vec![CREDENTIAL_WORKER_CHECKPOINT_BUCKET.to_string()]
         );
     }
 
@@ -1740,7 +1719,7 @@ mod tests {
         StreamPosition::try_new(value).unwrap()
     }
 
-    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialLifecycleEvent) -> StreamEvent {
+    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialEvent) -> StreamEvent {
         StreamEvent {
             stream_id: stream_id.to_string(),
             event: runtime_event(stream_position, event),
@@ -1761,10 +1740,7 @@ mod tests {
         for event in events {
             stream.add_raw_message(event.stream_position.as_u64(), raw_stream_message(event));
         }
-        stream
-            .get_stream("gateway.credentials.lifecycle.events.v1")
-            .await
-            .unwrap()
+        stream.get_stream("gateway.credentials.events.v1").await.unwrap()
     }
 
     fn raw_stream_message(event: StreamEvent) -> StreamMessage {
@@ -1783,7 +1759,7 @@ mod tests {
     fn make_stream_info(last_sequence: u64) -> async_nats::jetstream::stream::Info {
         serde_json::from_value(serde_json::json!({
             "config": {
-                "name": "GATEWAY_CREDENTIAL_LIFECYCLE_EVENTS",
+                "name": "GATEWAY_CREDENTIAL_EVENTS",
                 "subjects": [],
                 "retention": "limits",
                 "max_consumers": -1,
@@ -1812,7 +1788,7 @@ mod tests {
         .expect("test stream info must be valid")
     }
 
-    fn runtime_event(id: u64, event: CredentialLifecycleEvent) -> Event {
+    fn runtime_event(id: u64, event: CredentialEvent) -> Event {
         Event {
             id: EventId::new(Uuid::from_u128(id as u128)),
             r#type: event.event_type().unwrap().to_string(),
@@ -1850,8 +1826,8 @@ mod tests {
         RuntimeIntegrationKey::new(SourceKind::GitHub, &integration_id())
     }
 
-    fn test_policy() -> CredentialLifecycleRecoveryPolicy {
-        CredentialLifecycleRecoveryPolicy {
+    fn test_policy() -> CredentialRecoveryPolicy {
+        CredentialRecoveryPolicy {
             initial_failure_backoff: Duration::from_secs(10),
             max_failure_backoff: Duration::from_secs(40),
             stuck_after: Duration::from_secs(100),
