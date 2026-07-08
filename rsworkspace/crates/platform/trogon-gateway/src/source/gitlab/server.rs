@@ -22,7 +22,7 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::GITLAB_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -338,7 +338,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};

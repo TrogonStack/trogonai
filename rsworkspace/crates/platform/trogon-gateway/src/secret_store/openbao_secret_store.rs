@@ -13,7 +13,7 @@ use super::{
     SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
     SecretStoreRotate,
 };
-use crate::credential::domain::{
+use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId,
     CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
     StorageBackend,
@@ -536,7 +536,7 @@ fn encode_path_segment(value: &str) -> String {
 mod tests {
     use std::env;
 
-    use crate::credential::domain::{CredentialOwnerId, SourceKind};
+    use crate::credential::commands::domain::{CredentialOwnerId, SourceKind};
     use crate::source_integration_id::SourceIntegrationId;
     use testcontainers_modules::testcontainers::{
         ContainerAsync, GenericImage, ImageExt,

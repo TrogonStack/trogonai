@@ -51,7 +51,7 @@ where
 mod tests {
     use super::*;
     use crate::config::load;
-    use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::credential::processor::runtime_projection::{
         RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
     };
