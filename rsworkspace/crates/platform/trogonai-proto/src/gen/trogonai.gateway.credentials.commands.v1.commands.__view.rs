@@ -885,8 +885,8 @@ impl ::serde::Serialize for RevokeCredentialSecretRequestOwnedView {
 }
 #[derive(Clone, Debug, Default)]
 pub struct CredentialCommandResponseView<'a> {
-    /// Field 1: `lifecycle_state`
-    pub lifecycle_state: &'a str,
+    /// Field 1: `state`
+    pub state: &'a str,
     /// Field 2: `stream_position`
     pub stream_position: ::core::option::Option<u64>,
     /// Field 3: `credential_ref`
@@ -897,12 +897,12 @@ pub struct CredentialCommandResponseView<'a> {
     pub __buffa_required_seen_0: u64,
 }
 impl<'a> CredentialCommandResponseView<'a> {
-    /**Whether required field `lifecycle_state` was present on the wire.
+    /**Whether required field `state` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_lifecycle_state(&self) -> bool {
+    pub const fn has_state(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
     }
     /**Whether required field `credential_ref` is set.
@@ -946,7 +946,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialCommandResponseView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.lifecycle_state = ::buffa::types::borrow_str(&mut cur)?;
+                view.state = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 1u64;
             }
             2u32 => {
@@ -1003,7 +1003,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialCommandResponseView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::CredentialCommandResponse {
-            lifecycle_state: self.lifecycle_state.to_string(),
+            state: self.state.to_string(),
             stream_position: self.stream_position,
             credential_ref: match self.credential_ref.as_option() {
                 Some(v) => {
@@ -1023,7 +1023,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialCommandResponseView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.lifecycle_state) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.state) as u32;
         if let Some(v) = self.stream_position {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -1045,7 +1045,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialCommandResponseView<'a> {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.lifecycle_state, buf);
+        ::buffa::types::put_string_field(1u32, &self.state, buf);
         if let Some(v) = self.stream_position {
             ::buffa::types::put_uint64_field(2u32, v, buf);
         }
@@ -1074,7 +1074,7 @@ impl<'__a> ::serde::Serialize for CredentialCommandResponseView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            __map.serialize_entry("lifecycleState", self.lifecycle_state)?;
+            __map.serialize_entry("state", self.state)?;
         }
         if let ::core::option::Option::Some(__v) = self.stream_position {
             __map
@@ -1184,10 +1184,10 @@ impl CredentialCommandResponseOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
-    /// Field 1: `lifecycle_state`
+    /// Field 1: `state`
     #[must_use]
-    pub fn lifecycle_state(&self) -> &'_ str {
-        self.0.reborrow().lifecycle_state
+    pub fn state(&self) -> &'_ str {
+        self.0.reborrow().state
     }
     /// Field 2: `stream_position`
     #[must_use]

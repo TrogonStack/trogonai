@@ -11,19 +11,17 @@ use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus, is_create_key_value_already_exists,
 };
 
-use super::credential_lifecycle_stream::{
-    CredentialLifecycleEventSubjectResolver, CredentialLifecycleKey, CredentialLifecycleStreamId, stream_config,
-};
+use super::stream::{CredentialEventSubjectResolver, CredentialKey, CredentialStreamId, stream_config};
 
-pub(crate) const CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET: &str = "GATEWAY_CREDENTIAL_LIFECYCLE_SNAPSHOTS";
+pub(crate) const CREDENTIAL_SNAPSHOT_BUCKET: &str = "GATEWAY_CREDENTIAL_SNAPSHOTS";
 
 #[derive(Clone)]
-pub(crate) struct CredentialLifecycleEventStore {
-    inner: JetStreamStore<CredentialLifecycleEventSubjectResolver>,
+pub(crate) struct CredentialEventStore {
+    inner: JetStreamStore<CredentialEventSubjectResolver>,
 }
 
-impl CredentialLifecycleEventStore {
-    fn new(inner: JetStreamStore<CredentialLifecycleEventSubjectResolver>) -> Self {
+impl CredentialEventStore {
+    fn new(inner: JetStreamStore<CredentialEventSubjectResolver>) -> Self {
         Self { inner }
     }
 
@@ -36,33 +34,33 @@ impl CredentialLifecycleEventStore {
     }
 }
 
-impl StreamRead<str> for CredentialLifecycleEventStore {
-    type Error = <JetStreamStore<CredentialLifecycleEventSubjectResolver> as StreamRead<str>>::Error;
+impl StreamRead<str> for CredentialEventStore {
+    type Error = <JetStreamStore<CredentialEventSubjectResolver> as StreamRead<str>>::Error;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
         self.inner.read_stream(request).await
     }
 }
 
-impl StreamAppend<str> for CredentialLifecycleEventStore {
-    type Error = <JetStreamStore<CredentialLifecycleEventSubjectResolver> as StreamAppend<str>>::Error;
+impl StreamAppend<str> for CredentialEventStore {
+    type Error = <JetStreamStore<CredentialEventSubjectResolver> as StreamAppend<str>>::Error;
 
     async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
         self.inner.append_stream(request).await
     }
 }
 
-impl<Payload> SnapshotRead<Payload, str> for CredentialLifecycleEventStore
+impl<Payload> SnapshotRead<Payload, str> for CredentialEventStore
 where
-    JetStreamStore<CredentialLifecycleEventSubjectResolver>: SnapshotRead<Payload, str>,
+    JetStreamStore<CredentialEventSubjectResolver>: SnapshotRead<Payload, str>,
 {
-    type Error = <JetStreamStore<CredentialLifecycleEventSubjectResolver> as SnapshotRead<Payload, str>>::Error;
+    type Error = <JetStreamStore<CredentialEventSubjectResolver> as SnapshotRead<Payload, str>>::Error;
 
     async fn read_snapshot(
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        let snapshot_id = credential_lifecycle_snapshot_id(request.snapshot_id);
+        let snapshot_id = credential_snapshot_id(request.snapshot_id);
         self.inner
             .read_snapshot(ReadSnapshotRequest {
                 snapshot_id: snapshot_id.as_str(),
@@ -71,18 +69,18 @@ where
     }
 }
 
-impl<Payload> SnapshotWrite<Payload, str> for CredentialLifecycleEventStore
+impl<Payload> SnapshotWrite<Payload, str> for CredentialEventStore
 where
-    JetStreamStore<CredentialLifecycleEventSubjectResolver>: SnapshotWrite<Payload, str>,
+    JetStreamStore<CredentialEventSubjectResolver>: SnapshotWrite<Payload, str>,
     Payload: Send,
 {
-    type Error = <JetStreamStore<CredentialLifecycleEventSubjectResolver> as SnapshotWrite<Payload, str>>::Error;
+    type Error = <JetStreamStore<CredentialEventSubjectResolver> as SnapshotWrite<Payload, str>>::Error;
 
     async fn write_snapshot(
         &self,
         request: WriteSnapshotRequest<'_, Payload, str>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
-        let snapshot_id = credential_lifecycle_snapshot_id(request.snapshot_id);
+        let snapshot_id = credential_snapshot_id(request.snapshot_id);
         self.inner
             .write_snapshot(WriteSnapshotRequest {
                 snapshot_id: snapshot_id.as_str(),
@@ -92,33 +90,33 @@ where
     }
 }
 
-fn credential_lifecycle_snapshot_id(stream_id: &str) -> String {
-    let key = CredentialLifecycleKey::for_stream(&CredentialLifecycleStreamId::from(stream_id));
+fn credential_snapshot_id(stream_id: &str) -> String {
+    let key = CredentialKey::for_stream(&CredentialStreamId::from(stream_id));
     format!("credential.{}", key.simple())
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CredentialLifecycleEventStoreError {
-    #[error("failed to create credential lifecycle event stream: {0}")]
+pub(crate) enum CredentialEventStoreError {
+    #[error("failed to create credential event stream: {0}")]
     CreateEventStream(#[source] Box<context::CreateStreamError>),
-    #[error("failed to create credential lifecycle snapshot bucket: {0}")]
+    #[error("failed to create credential snapshot bucket: {0}")]
     CreateSnapshotBucket(#[source] Box<context::CreateKeyValueError>),
-    #[error("failed to open existing credential lifecycle snapshot bucket: {0}")]
+    #[error("failed to open existing credential snapshot bucket: {0}")]
     OpenSnapshotBucket(#[source] Box<context::KeyValueError>),
-    #[error("failed to inspect credential lifecycle snapshot bucket: {0}")]
+    #[error("failed to inspect credential snapshot bucket: {0}")]
     InspectSnapshotBucket(#[source] kv::StatusError),
     #[error("{source}")]
     IncompatibleSnapshotBucket {
         #[source]
-        source: IncompatibleCredentialLifecycleSnapshotBucket,
+        source: IncompatibleCredentialSnapshotBucket,
     },
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "credential lifecycle snapshot bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
+    "credential snapshot bucket is incompatible: expected history {expected_history}, got {actual_history}; expected max age {expected_max_age:?}, got {actual_max_age:?}"
 )]
-pub(crate) struct IncompatibleCredentialLifecycleSnapshotBucket {
+pub(crate) struct IncompatibleCredentialSnapshotBucket {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,
@@ -138,22 +136,20 @@ impl SnapshotBucketSettings {
     };
 }
 
-pub(crate) async fn open(
-    context: jetstream::Context,
-) -> Result<CredentialLifecycleEventStore, CredentialLifecycleEventStoreError> {
+pub(crate) async fn open(context: jetstream::Context) -> Result<CredentialEventStore, CredentialEventStoreError> {
     let events_stream = context
         .get_or_create_stream(stream_config())
         .await
-        .map_err(|source| CredentialLifecycleEventStoreError::CreateEventStream(Box::new(source)))?;
+        .map_err(|source| CredentialEventStoreError::CreateEventStream(Box::new(source)))?;
     let snapshot_bucket = provision_snapshot_bucket::<_, kv::Store>(&context).await?;
 
-    Ok(CredentialLifecycleEventStore::new(
+    Ok(CredentialEventStore::new(
         JetStreamStore::builder(context, events_stream, snapshot_bucket)
-            .with_subject_resolver(CredentialLifecycleEventSubjectResolver),
+            .with_subject_resolver(CredentialEventSubjectResolver),
     ))
 }
 
-pub(crate) async fn provision_snapshot_bucket<C, S>(client: &C) -> Result<S, CredentialLifecycleEventStoreError>
+pub(crate) async fn provision_snapshot_bucket<C, S>(client: &C) -> Result<S, CredentialEventStoreError>
 where
     C: JetStreamCreateKeyValue<Store = S> + JetStreamGetKeyValue<Store = S>,
     S: JetStreamKeyValueStatus,
@@ -161,13 +157,11 @@ where
     let store = match client.create_key_value(snapshot_bucket_config()).await {
         Ok(store) => store,
         Err(source) if is_create_key_value_already_exists(&source) => client
-            .get_key_value(CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET)
+            .get_key_value(CREDENTIAL_SNAPSHOT_BUCKET)
             .await
-            .map_err(|source| CredentialLifecycleEventStoreError::OpenSnapshotBucket(Box::new(source)))?,
+            .map_err(|source| CredentialEventStoreError::OpenSnapshotBucket(Box::new(source)))?,
         Err(source) => {
-            return Err(CredentialLifecycleEventStoreError::CreateSnapshotBucket(Box::new(
-                source,
-            )));
+            return Err(CredentialEventStoreError::CreateSnapshotBucket(Box::new(source)));
         }
     };
 
@@ -178,27 +172,27 @@ where
 
 pub(crate) fn snapshot_bucket_config() -> kv::Config {
     kv::Config {
-        bucket: CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET.to_string(),
+        bucket: CREDENTIAL_SNAPSHOT_BUCKET.to_string(),
         history: SnapshotBucketSettings::EXPECTED.history,
         max_age: SnapshotBucketSettings::EXPECTED.max_age,
         ..Default::default()
     }
 }
 
-async fn validate_snapshot_bucket<S>(store: &S) -> Result<(), CredentialLifecycleEventStoreError>
+async fn validate_snapshot_bucket<S>(store: &S) -> Result<(), CredentialEventStoreError>
 where
     S: JetStreamKeyValueStatus,
 {
     let status = store
         .status()
         .await
-        .map_err(CredentialLifecycleEventStoreError::InspectSnapshotBucket)?;
+        .map_err(CredentialEventStoreError::InspectSnapshotBucket)?;
     let actual = snapshot_bucket_settings_from_status(&status);
     let expected = SnapshotBucketSettings::EXPECTED;
 
     if actual != expected {
-        return Err(CredentialLifecycleEventStoreError::IncompatibleSnapshotBucket {
-            source: IncompatibleCredentialLifecycleSnapshotBucket {
+        return Err(CredentialEventStoreError::IncompatibleSnapshotBucket {
+            source: IncompatibleCredentialSnapshotBucket {
                 expected_history: expected.history,
                 actual_history: actual.history,
                 expected_max_age: expected.max_age,
@@ -224,11 +218,11 @@ mod tests {
     use trogon_decider_nats::snapshot_key;
     use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
 
-    use super::super::CredentialLifecycleState;
+    use super::super::CredentialState;
 
     #[test]
     fn snapshot_id_uses_nats_safe_deterministic_key() {
-        let snapshot_id = credential_lifecycle_snapshot_id("openbao:tenant-1:github/primary:webhook_secret");
+        let snapshot_id = credential_snapshot_id("openbao:tenant-1:github/primary:webhook_secret");
 
         assert!(snapshot_id.starts_with("credential."));
         assert_eq!(snapshot_id.len(), "credential.".len() + 32);
@@ -244,12 +238,10 @@ mod tests {
     #[test]
     fn snapshot_key_keeps_raw_credential_id_out_of_nats_kv_key() {
         let raw_stream_id = "openbao:tenant-1:github/primary:webhook_secret";
-        let snapshot_id = credential_lifecycle_snapshot_id(raw_stream_id);
-        let key = snapshot_key::<CredentialLifecycleState>(&snapshot_id).unwrap();
+        let snapshot_id = credential_snapshot_id(raw_stream_id);
+        let key = snapshot_key::<CredentialState>(&snapshot_id).unwrap();
 
-        assert!(
-            key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot.")
-        );
+        assert!(key.starts_with("snapshots.data.trogonai.gateway.credentials.state.v1.CredentialStateSnapshot."));
         assert!(!key.contains(raw_stream_id));
         assert!(!key.contains(':'));
         assert!(!key.contains('/'));
@@ -260,7 +252,7 @@ mod tests {
     fn snapshot_bucket_config_matches_runtime_contract() {
         let config = snapshot_bucket_config();
 
-        assert_eq!(config.bucket, CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET);
+        assert_eq!(config.bucket, CREDENTIAL_SNAPSHOT_BUCKET);
         assert_eq!(config.history, 1);
         assert_eq!(config.max_age, Duration::ZERO);
     }
@@ -275,7 +267,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(client.requested_buckets().is_empty());
-        assert_eq!(client.create_configs()[0].bucket, CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET);
+        assert_eq!(client.create_configs()[0].bucket, CREDENTIAL_SNAPSHOT_BUCKET);
     }
 
     #[tokio::test]
@@ -287,10 +279,7 @@ mod tests {
         let result = provision_snapshot_bucket::<_, MockJetStreamKvStore>(&client).await;
 
         assert!(result.is_ok());
-        assert_eq!(
-            client.requested_buckets(),
-            vec![CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET.to_string()]
-        );
+        assert_eq!(client.requested_buckets(), vec![CREDENTIAL_SNAPSHOT_BUCKET.to_string()]);
     }
 
     #[tokio::test]
@@ -306,7 +295,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("failed to open existing credential lifecycle snapshot bucket")
+                .contains("failed to open existing credential snapshot bucket")
         );
     }
 
@@ -322,7 +311,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("failed to create credential lifecycle snapshot bucket")
+                .contains("failed to create credential snapshot bucket")
         );
     }
 
@@ -340,7 +329,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("failed to inspect credential lifecycle snapshot bucket")
+                .contains("failed to inspect credential snapshot bucket")
         );
     }
 
@@ -355,11 +344,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("credential lifecycle snapshot bucket is incompatible")
-        );
+        assert!(error.to_string().contains("credential snapshot bucket is incompatible"));
     }
 
     #[tokio::test]
@@ -373,10 +358,6 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("credential lifecycle snapshot bucket is incompatible")
-        );
+        assert!(error.to_string().contains("credential snapshot bucket is incompatible"));
     }
 }

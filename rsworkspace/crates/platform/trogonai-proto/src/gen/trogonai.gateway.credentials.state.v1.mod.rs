@@ -38,8 +38,8 @@ pub mod __buffa {
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__CREDENTIAL_REF_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_METADATA_JSON_ANY);
-        reg.register_json_any(super::__CREDENTIAL_LIFECYCLE_STATE_SNAPSHOT_JSON_ANY);
-        reg.register_json_any(super::__CREDENTIAL_LIFECYCLE_MISSING_STATE_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_STATE_SNAPSHOT_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_MISSING_STATE_JSON_ANY);
         reg.register_json_any(super::__PENDING_CREDENTIAL_WRITE_STATE_JSON_ANY);
         reg.register_json_any(super::__ACTIVE_CREDENTIAL_STATE_JSON_ANY);
         reg.register_json_any(super::__FAILED_CREDENTIAL_WRITE_STATE_JSON_ANY);
@@ -56,13 +56,13 @@ pub use self::__buffa::view::CredentialMetadataView;
 #[doc(inline)]
 pub use self::__buffa::view::CredentialMetadataOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleStateSnapshotView;
+pub use self::__buffa::view::CredentialStateSnapshotView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleStateSnapshotOwnedView;
+pub use self::__buffa::view::CredentialStateSnapshotOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleMissingStateView;
+pub use self::__buffa::view::CredentialMissingStateView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleMissingStateOwnedView;
+pub use self::__buffa::view::CredentialMissingStateOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::PendingCredentialWriteStateView;
 #[doc(inline)]

@@ -25,9 +25,7 @@ pub mod __buffa {
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__RUNTIME_PROJECTION_CHECKPOINT_JSON_ANY);
-        reg.register_json_any(
-            super::__CREDENTIAL_LIFECYCLE_RECOVERY_WORKER_CHECKPOINT_JSON_ANY,
-        );
+        reg.register_json_any(super::__CREDENTIAL_RECOVERY_WORKER_CHECKPOINT_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -35,8 +33,8 @@ pub use self::__buffa::view::RuntimeProjectionCheckpointView;
 #[doc(inline)]
 pub use self::__buffa::view::RuntimeProjectionCheckpointOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleRecoveryWorkerCheckpointView;
+pub use self::__buffa::view::CredentialRecoveryWorkerCheckpointView;
 #[doc(inline)]
-pub use self::__buffa::view::CredentialLifecycleRecoveryWorkerCheckpointOwnedView;
+pub use self::__buffa::view::CredentialRecoveryWorkerCheckpointOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

@@ -6,8 +6,10 @@ use tracing::{info, warn};
 use trogon_std::EmptySecret;
 use twilight_gateway::{Message, Shard, ShardId};
 
-use crate::commands::domain::{CredentialKind, SourceKind};
-use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::processor::runtime_projection::{
+    RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
+};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 use super::config::{DiscordBotToken, DiscordConfig};
@@ -103,9 +105,9 @@ mod tests {
     use trogon_std::SecretString;
 
     use super::*;
-    use crate::commands::domain::{CredentialOwnerId, CredentialScope};
-    use crate::commands::{CredentialLifecycleEvent, evolve, initial_state};
-    use crate::processor::runtime_projection::RuntimeCredentialRegistry;
+    use crate::credential::domain::{CredentialOwnerId, CredentialScope};
+    use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
+    use crate::credential::{CredentialEvent, evolve, initial_state};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 
     fn owner_id() -> CredentialOwnerId {
@@ -129,19 +131,19 @@ mod tests {
             .unwrap();
         let metadata = store.metadata(&credential).await.unwrap();
         let state = [
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential.id().clone(),
                 owner_id: owner_id(),
                 source: SourceKind::Discord,
                 kind: CredentialKind::BotToken,
             },
-            CredentialLifecycleEvent::Activated { metadata },
+            CredentialEvent::Activated { metadata },
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
         let registry = RuntimeCredentialRegistry::default();
-        registry.apply_lifecycle_state(&state, position(2)).await.unwrap();
+        registry.apply_state(&state, position(2)).await.unwrap();
         let resolver = registry.resolver(store);
 
         let token = resolve_runtime_bot_token(&resolver).await.unwrap();

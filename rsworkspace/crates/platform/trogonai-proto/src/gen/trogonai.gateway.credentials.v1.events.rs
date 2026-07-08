@@ -4,30 +4,30 @@
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize)]
 #[serde(default)]
-pub struct CredentialLifecycleEvent {
+pub struct CredentialEvent {
     #[serde(flatten)]
-    pub event: ::core::option::Option<__buffa::oneof::credential_lifecycle_event::Event>,
+    pub event: ::core::option::Option<__buffa::oneof::credential_event::Event>,
 }
-impl ::core::fmt::Debug for CredentialLifecycleEvent {
+impl ::core::fmt::Debug for CredentialEvent {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialLifecycleEvent").field("event", &self.event).finish()
+        f.debug_struct("CredentialEvent").field("event", &self.event).finish()
     }
 }
-impl CredentialLifecycleEvent {
+impl CredentialEvent {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialLifecycleEvent";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialEvent";
 }
-::buffa::impl_default_instance!(CredentialLifecycleEvent);
-impl ::buffa::MessageName for CredentialLifecycleEvent {
+::buffa::impl_default_instance!(CredentialEvent);
+impl ::buffa::MessageName for CredentialEvent {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.v1";
-    const NAME: &'static str = "CredentialLifecycleEvent";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.v1.CredentialLifecycleEvent";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialLifecycleEvent";
+    const NAME: &'static str = "CredentialEvent";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.v1.CredentialEvent";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialEvent";
 }
-impl ::buffa::Message for CredentialLifecycleEvent {
+impl ::buffa::Message for CredentialEvent {
     /// Returns the total encoded size in bytes.
     ///
     /// The result is a `u32`; the protobuf specification requires all
@@ -40,7 +40,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
         let mut size = 0u32;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
-                __buffa::oneof::credential_lifecycle_event::Event::WriteRequested(x) => {
+                __buffa::oneof::credential_event::Event::WriteRequested(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -48,7 +48,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::WriteFailed(x) => {
+                __buffa::oneof::credential_event::Event::WriteFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -56,7 +56,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Activated(x) => {
+                __buffa::oneof::credential_event::Event::Activated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -64,9 +64,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
-                    x,
-                ) => {
+                __buffa::oneof::credential_event::Event::RotationRequested(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -74,7 +72,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::RotationFailed(x) => {
+                __buffa::oneof::credential_event::Event::RotationFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -82,7 +80,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Rotated(x) => {
+                __buffa::oneof::credential_event::Event::Rotated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -90,7 +88,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Revoked(x) => {
+                __buffa::oneof::credential_event::Event::Revoked(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -111,7 +109,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
         use ::buffa::Enumeration as _;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
-                __buffa::oneof::credential_lifecycle_event::Event::WriteRequested(x) => {
+                __buffa::oneof::credential_event::Event::WriteRequested(x) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
                         __cache.consume_next(),
@@ -119,7 +117,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::WriteFailed(x) => {
+                __buffa::oneof::credential_event::Event::WriteFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
                         __cache.consume_next(),
@@ -127,7 +125,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Activated(x) => {
+                __buffa::oneof::credential_event::Event::Activated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
                         __cache.consume_next(),
@@ -135,9 +133,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
-                    x,
-                ) => {
+                __buffa::oneof::credential_event::Event::RotationRequested(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
                         __cache.consume_next(),
@@ -145,7 +141,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::RotationFailed(x) => {
+                __buffa::oneof::credential_event::Event::RotationFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
                         __cache.consume_next(),
@@ -153,7 +149,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Rotated(x) => {
+                __buffa::oneof::credential_event::Event::Rotated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
                         __cache.consume_next(),
@@ -161,7 +157,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_event::Event::Revoked(x) => {
+                __buffa::oneof::credential_event::Event::Revoked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         7u32,
                         __cache.consume_next(),
@@ -189,7 +185,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::WriteRequested(
+                    __buffa::oneof::credential_event::Event::WriteRequested(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -199,7 +195,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::WriteRequested(
+                        __buffa::oneof::credential_event::Event::WriteRequested(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -211,7 +207,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::WriteFailed(
+                    __buffa::oneof::credential_event::Event::WriteFailed(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -221,7 +217,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::WriteFailed(
+                        __buffa::oneof::credential_event::Event::WriteFailed(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -233,9 +229,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::Activated(
-                        ref mut existing,
-                    ),
+                    __buffa::oneof::credential_event::Event::Activated(ref mut existing),
                 ) = self.event
                 {
                     ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
@@ -243,7 +237,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::Activated(
+                        __buffa::oneof::credential_event::Event::Activated(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -255,7 +249,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
+                    __buffa::oneof::credential_event::Event::RotationRequested(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -265,7 +259,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
+                        __buffa::oneof::credential_event::Event::RotationRequested(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -277,7 +271,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::RotationFailed(
+                    __buffa::oneof::credential_event::Event::RotationFailed(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -287,7 +281,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::RotationFailed(
+                        __buffa::oneof::credential_event::Event::RotationFailed(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -299,9 +293,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::Rotated(
-                        ref mut existing,
-                    ),
+                    __buffa::oneof::credential_event::Event::Rotated(ref mut existing),
                 ) = self.event
                 {
                     ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
@@ -309,7 +301,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::Rotated(
+                        __buffa::oneof::credential_event::Event::Rotated(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -321,9 +313,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_event::Event::Revoked(
-                        ref mut existing,
-                    ),
+                    __buffa::oneof::credential_event::Event::Revoked(ref mut existing),
                 ) = self.event
                 {
                     ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
@@ -331,7 +321,7 @@ impl ::buffa::Message for CredentialLifecycleEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_event::Event::Revoked(
+                        __buffa::oneof::credential_event::Event::Revoked(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -347,23 +337,23 @@ impl ::buffa::Message for CredentialLifecycleEvent {
         self.event = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
+impl<'de> serde::Deserialize<'de> for CredentialEvent {
     fn deserialize<D: serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
         impl<'de> serde::de::Visitor<'de> for _V {
-            type Value = CredentialLifecycleEvent;
+            type Value = CredentialEvent;
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("struct CredentialLifecycleEvent")
+                f.write_str("struct CredentialEvent")
             }
             #[allow(clippy::field_reassign_with_default)]
             fn visit_map<A: serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
-            ) -> ::core::result::Result<CredentialLifecycleEvent, A::Error> {
+            ) -> ::core::result::Result<CredentialEvent, A::Error> {
                 let mut __oneof_event: ::core::option::Option<
-                    __buffa::oneof::credential_lifecycle_event::Event,
+                    __buffa::oneof::credential_event::Event,
                 > = None;
                 while let Some(key) = map.next_key::<::buffa::alloc::string::String>()? {
                     match key.as_str() {
@@ -385,7 +375,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::WriteRequested(
+                                    __buffa::oneof::credential_event::Event::WriteRequested(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -409,7 +399,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::WriteFailed(
+                                    __buffa::oneof::credential_event::Event::WriteFailed(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -433,7 +423,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::Activated(
+                                    __buffa::oneof::credential_event::Event::Activated(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -457,7 +447,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::RotationRequested(
+                                    __buffa::oneof::credential_event::Event::RotationRequested(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -481,7 +471,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::RotationFailed(
+                                    __buffa::oneof::credential_event::Event::RotationFailed(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -505,7 +495,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::Rotated(
+                                    __buffa::oneof::credential_event::Event::Rotated(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -529,7 +519,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::credential_lifecycle_event::Event::Revoked(
+                                    __buffa::oneof::credential_event::Event::Revoked(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -540,7 +530,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
                         }
                     }
                 }
-                let mut __r = <CredentialLifecycleEvent as ::core::default::Default>::default();
+                let mut __r = <CredentialEvent as ::core::default::Default>::default();
                 __r.event = __oneof_event;
                 Ok(__r)
             }
@@ -548,7 +538,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleEvent {
         d.deserialize_map(_V)
     }
 }
-impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleEvent {
+impl ::buffa::json_helpers::ProtoElemJson for CredentialEvent {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -562,17 +552,17 @@ impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleEvent {
     }
 }
 #[doc(hidden)]
-pub const __CREDENTIAL_LIFECYCLE_EVENT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialLifecycleEvent",
-    to_json: ::buffa::type_registry::any_to_json::<CredentialLifecycleEvent>,
-    from_json: ::buffa::type_registry::any_from_json::<CredentialLifecycleEvent>,
+pub const __CREDENTIAL_EVENT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialEvent",
+    to_json: ::buffa::type_registry::any_to_json::<CredentialEvent>,
+    from_json: ::buffa::type_registry::any_from_json::<CredentialEvent>,
     is_wkt: false,
 };
-pub mod credential_lifecycle_event {
+pub mod credential_event {
     #[allow(unused_imports)]
     use super::*;
     #[doc(inline)]
-    pub use super::__buffa::oneof::credential_lifecycle_event::Event;
+    pub use super::__buffa::oneof::credential_event::Event;
     #[doc(inline)]
-    pub use super::__buffa::view::oneof::credential_lifecycle_event::Event as EventView;
+    pub use super::__buffa::view::oneof::credential_event::Event as EventView;
 }
