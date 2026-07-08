@@ -15,7 +15,7 @@ use tracing::warn;
 use trogon_decider_runtime::{SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::SecretString;
 
-use crate::credential::domain::{
+use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
 };
 use crate::credential::handler::{

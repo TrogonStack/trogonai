@@ -16,7 +16,7 @@ use trogon_nats::jetstream::{
 use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -483,7 +483,7 @@ mod tests {
     };
     use trogon_nats::mocks::MockError;
 
-    use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source_integration_id::SourceIntegrationId;

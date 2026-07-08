@@ -22,7 +22,7 @@ use trogon_nats::jetstream::{
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use crate::credential::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
+use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
 use crate::credential::{
     CredentialEvent, CredentialEventPayloadError, CredentialEvolveError, CredentialState, evolve, initial_state,
 };
@@ -1219,7 +1219,7 @@ impl std::fmt::Display for RuntimeIntegrationKey {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::credential::domain::{CredentialScope, CredentialVersion};
+    use crate::credential::commands::domain::{CredentialScope, CredentialVersion};
     use crate::secret_store::{
         MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
     };

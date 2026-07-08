@@ -20,7 +20,7 @@ use super::constants::{
 };
 use super::signature;
 
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -347,7 +347,7 @@ mod tests {
         ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
     };
 
-    use crate::credential::domain::{CredentialOwnerId, CredentialScope};
+    use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 

@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use trogon_std::EmptySecret;
 use twilight_gateway::{Message, Shard, ShardId};
 
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -105,7 +105,7 @@ mod tests {
     use trogon_std::SecretString;
 
     use super::*;
-    use crate::credential::domain::{CredentialOwnerId, CredentialScope};
+    use crate::credential::commands::domain::{CredentialOwnerId, CredentialScope};
     use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
     use crate::credential::{CredentialEvent, evolve, initial_state};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};

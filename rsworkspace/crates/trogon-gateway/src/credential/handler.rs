@@ -8,7 +8,7 @@ use trogon_decider_runtime::{
 };
 use trogon_std::SecretString;
 
-use super::domain::{
+use super::commands::domain::{
     CredentialEvent, CredentialEventPayloadError, CredentialId, CredentialIdError, CredentialKind, CredentialOwnerId,
     CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
@@ -830,7 +830,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::credential::domain::{CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend};
+    use crate::credential::commands::domain::{
+        CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend,
+    };
     use crate::credential::processor::runtime_projection::{
         RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
     };

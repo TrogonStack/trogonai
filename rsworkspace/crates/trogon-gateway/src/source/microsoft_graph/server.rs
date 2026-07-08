@@ -19,7 +19,7 @@ use trogon_std::NonZeroDuration;
 use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
-use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential::processor::runtime_projection::{
     RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
 };
@@ -288,7 +288,7 @@ fn validation_token_from_query(query: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credential::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source_integration_id::SourceIntegrationId;

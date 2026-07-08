@@ -19,7 +19,7 @@ use trogon_nats::jetstream::{
 };
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use crate::credential::domain::CredentialId;
+use crate::credential::commands::domain::CredentialId;
 use crate::credential::handler::{
     CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialRuntimeHandler,
     activation_recovery_command,
@@ -955,7 +955,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::credential::domain::{
+    use crate::credential::commands::domain::{
         CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
     };
     use crate::credential::handler::{CredentialHandler, PutCredential, RotateCredential};
