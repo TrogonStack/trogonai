@@ -224,7 +224,7 @@ mod tests {
     use trogon_decider_nats::snapshot_key;
     use trogon_nats::jetstream::{MockJetStreamKvClient, MockJetStreamKvStore};
 
-    use crate::secret_store::credential_lifecycle::CredentialLifecycleState;
+    use super::super::CredentialLifecycleState;
 
     #[test]
     fn snapshot_id_uses_nats_safe_deterministic_key() {

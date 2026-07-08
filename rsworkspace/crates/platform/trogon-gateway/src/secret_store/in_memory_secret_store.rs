@@ -5,9 +5,12 @@ use tokio::sync::Mutex;
 use trogon_std::SecretString;
 
 use super::{
+    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
+};
+use crate::commands::domain::{
     CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
-    CredentialStatus, CredentialVersion, SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
-    SecretStorePut, SecretStoreRevoke, SecretStoreRotate, StorageBackend,
+    CredentialStatus, CredentialVersion, StorageBackend,
 };
 
 #[derive(Clone, Default)]
@@ -150,7 +153,7 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> CredentialM
 
 #[cfg(test)]
 mod tests {
-    use crate::secret_store::{CredentialOwnerId, SourceKind};
+    use crate::commands::domain::{CredentialOwnerId, SourceKind};
 
     use super::*;
 

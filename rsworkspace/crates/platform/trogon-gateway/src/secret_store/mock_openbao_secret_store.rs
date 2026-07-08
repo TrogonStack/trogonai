@@ -5,9 +5,12 @@ use tokio::sync::Mutex;
 use trogon_std::SecretString;
 
 use super::{
-    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
     SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate, StorageBackend,
+    SecretStoreRotate,
+};
+use crate::commands::domain::{
+    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
+    CredentialVersion, StorageBackend,
 };
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 
@@ -54,7 +57,7 @@ impl MockOpenBaoSecretStoreState {
             .filter(|credential| credential.id() == &id)
             .map(|credential| credential.version())
             .max();
-        let version = current.map_or_else(super::CredentialVersion::initial, super::CredentialVersion::next);
+        let version = current.map_or_else(CredentialVersion::initial, CredentialVersion::next);
 
         CredentialRef::new(id, version, &scope, kind)
     }
@@ -191,7 +194,7 @@ fn metadata(credential: &CredentialRef, status: CredentialStatus) -> CredentialM
 
 #[cfg(test)]
 mod tests {
-    use crate::secret_store::{CredentialOwnerId, SourceKind};
+    use crate::commands::domain::{CredentialOwnerId, SourceKind};
 
     use super::*;
 
