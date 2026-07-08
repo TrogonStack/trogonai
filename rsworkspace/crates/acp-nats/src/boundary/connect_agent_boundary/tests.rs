@@ -472,10 +472,11 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
             .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"_bad/note\",\"params\":{}}\n")
             .await
             .unwrap();
-        writer
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"mcp/connect\",\"params\":{\"sessionId\":\"s1\",\"serverId\":\"srv-1\"}}\n")
-            .await
-            .unwrap();
+        let connect_params =
+            serde_json::to_value(agent_client_protocol::schema::v1::ConnectMcpRequest::new("srv-1")).unwrap();
+        let connect_frame =
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "mcp/connect", "params": connect_params});
+        writer.write_all(format!("{connect_frame}\n").as_bytes()).await.unwrap();
         writer
             .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"_probe\",\"params\":{}}\n")
             .await
@@ -503,4 +504,10 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
 
     let (boundary_result, ()) = tokio::join!(boundary, client);
     assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
+#[test]
+fn log_notification_error_covers_both_outcomes() {
+    super::log_notification_error("session/cancel", Ok(()));
+    super::log_notification_error("session/cancel", Err(Error::internal_error()));
 }

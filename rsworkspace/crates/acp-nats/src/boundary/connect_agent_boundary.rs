@@ -168,15 +168,19 @@ async fn ext_method<A: AgentHandler + Send + Sync + 'static>(
     })
 }
 
+fn log_notification_error(method: &'static str, result: Result<()>) {
+    if let Err(error) = result {
+        tracing::warn!(error = %error, method, "notification handler failed");
+    }
+}
+
 async fn cancel<A: AgentHandler + Send + Sync + 'static>(
     agent: Arc<A>,
     notif: CancelNotification,
     cx: ConnectionTo<Client>,
 ) -> Result<()> {
     cx.spawn(async move {
-        if let Err(error) = agent.cancel(notif).await {
-            tracing::warn!(error = %error, "cancel notification handler failed");
-        }
+        log_notification_error("session/cancel", agent.cancel(notif).await);
         Ok(())
     })
 }
@@ -190,9 +194,7 @@ async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
         return Ok(());
     };
     cx.spawn(async move {
-        if let Err(error) = agent.ext_notification(notification).await {
-            tracing::warn!(error = %error, "ext notification handler failed");
-        }
+        log_notification_error("ext notification", agent.ext_notification(notification).await);
         Ok(())
     })
 }
