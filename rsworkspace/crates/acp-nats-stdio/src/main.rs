@@ -2,7 +2,7 @@
 
 mod config;
 
-use acp_nats::boundary::{BoundaryExit, ConnectionClient, connect_agent_boundary};
+use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::schema::v1::SessionNotification;
 use std::rc::Rc;
@@ -95,14 +95,20 @@ where
     ));
 
     let boundary_result = connect_agent_boundary(bridge.clone(), stdout, stdin, async move |cx| {
-        spawn_notification_forwarder(ConnectionClient::new(cx.clone()), notification_rx);
+        let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
+            ConnectionClient::new(cx.clone()),
+            notification_rx,
+        ));
 
-        let mut client_task =
-            tokio::task::spawn_local(client::run(nats_client, Rc::new(ConnectionClient::new(cx)), bridge));
+        let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
+            nats_client,
+            Rc::new(ConnectionClient::new(cx)),
+            bridge,
+        )));
         info!("ACP bridge running on stdio with NATS client proxy");
 
         let shutdown_result = tokio::select! {
-            result = &mut client_task => {
+            result = client_task.handle_mut() => {
                 match result {
                     Ok(()) => {
                         info!("ACP bridge client task completed");
@@ -121,8 +127,7 @@ where
         };
 
         if !client_task.is_finished() {
-            client_task.abort();
-            let _ = client_task.await;
+            client_task.abort_and_wait().await;
         }
 
         Ok(shutdown_result)

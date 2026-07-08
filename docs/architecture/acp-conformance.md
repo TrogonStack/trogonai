@@ -25,7 +25,7 @@ The bridge decodes every message into typed SDK structs and re-serializes them (
 
 ## Conformance matrix
 
-Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enabled but no routing), `dropped` (peers may send it, the bridge strips or rejects it), `unrepresentable` (pinned SDK cannot express it), `not supported` (deliberate opt-out with rationale).
+Status values: `implemented` (routed, typed, tested), `capabilities implemented` (capability payloads round-trip, but the methods behind them are not routed), `unwired` (SDK flag enabled but no routing), `dropped` (peers may send it, the bridge strips or rejects it), `unrepresentable` (pinned SDK cannot express it), `not supported` (deliberate opt-out with rationale), `watch-only` (tracked for adoption, deliberately not implemented while upstream still churns).
 
 ### Agent-side methods (client to agent)
 
@@ -37,9 +37,9 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `session/new` | stable | implemented | includes `additionalDirectories` |
 | `session/load` | stable | implemented | includes `additionalDirectories` |
 | `session/list` | stable | implemented | |
-| `providers/list` | unstable (0.11.7) | unwired | bridge-owned `AgentHandler::list_providers` and NATS subject routing (`providers.list`) implemented and tested; the pinned SDK's byte-stream boundary cannot dispatch it because `agent-client-protocol` 1.2.0 has no `unstable_llm_providers` Cargo feature and omits the Providers variants from its `ClientRequest` `JsonRpcRequest` enum entirely, unlike elicitation and MCP-over-ACP; blocked on upstream SDK support |
-| `providers/set` | unstable (0.11.7) | unwired | see `providers/list`; `AgentHandler::set_provider` and NATS subject routing (`providers.set`) implemented and tested |
-| `providers/disable` | unstable (0.11.7) | unwired | see `providers/list`; `AgentHandler::disable_provider` and NATS subject routing (`providers.disable`) implemented and tested |
+| `providers/list` | unstable (0.11.7) | unrepresentable | not a routing gap: bridge-owned `AgentHandler::list_providers` and NATS subject routing (`providers.list`) are implemented and tested, but `agent-client-protocol` 1.2.0 cannot express the request at the byte-stream boundary (no `unstable_llm_providers` feature, provider types omitted from its `JsonRpcRequest` registrations); blocked on upstream SDK support |
+| `providers/set` | unstable (0.11.7) | unrepresentable | see `providers/list`; `AgentHandler::set_provider` and NATS subject routing (`providers.set`) implemented and tested |
+| `providers/disable` | unstable (0.11.7) | unrepresentable | see `providers/list`; `AgentHandler::disable_provider` and NATS subject routing (`providers.disable`) implemented and tested |
 | `session/prompt` | stable | implemented | |
 | `session/cancel` (notification) | stable | implemented | |
 | `session/set_mode` | stable | implemented | |
@@ -81,7 +81,7 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `model_config` option category | stable (1.1.0) | implemented | round-trip tested |
 | NES (next edit suggestions) | unstable | capabilities implemented | capability payloads round-trip via schema-level flag; NES document sync methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
 | Plan operations | unstable (0.13.4) | implemented | `PlanUpdate`/`PlanRemoved` round-trip tested via schema-level flag |
-| Providers | unstable (0.11.7) | unwired | see `providers/list`/`providers/set`/`providers/disable` rows above |
+| Providers | unstable (0.11.7) | unrepresentable | see `providers/list`/`providers/set`/`providers/disable` rows above |
 | MCP-over-ACP message types | unstable (0.13.0) | implemented | `McpServer::Acp` and `McpCapabilities.acp` payload round-trip tested via schema-level and `unstable_mcp_over_acp` SDK flag; the `mcp/connect`, `mcp/message`, `mcp/disconnect` RPC methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
 | Elicitation enum option descriptions | unstable (1.4.0) | implemented | `EnumOption` descriptions on `StringPropertySchema.one_of` round-trip tested |
 | Protocol v2 | unstable, heavy churn | watch-only | adopt once upstream marks it preview; the freshness workflow surfaces every release it churns in |

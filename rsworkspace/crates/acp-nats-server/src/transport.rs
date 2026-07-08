@@ -4,7 +4,7 @@ use crate::constants::{
     ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, HTTP_CHANNEL_CAPACITY,
     X_ACCEL_BUFFERING_HEADER,
 };
-use acp_nats::boundary::{BoundaryExit, ConnectionClient, connect_agent_boundary};
+use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{RequestId, SessionNotification};
@@ -1112,9 +1112,16 @@ pub async fn run_http_connection<N, J>(
     let handler_connection_id = connection_id.clone();
     let boundary_result = connect_agent_boundary(bridge.clone(), outgoing, incoming, async move |cx| {
         let connection_id = handler_connection_id;
-        spawn_notification_forwarder(ConnectionClient::new(cx.clone()), notification_rx);
+        let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
+            ConnectionClient::new(cx.clone()),
+            notification_rx,
+        ));
 
-        let mut client_task = tokio::task::spawn_local(client::run(nats_client, Rc::new(ConnectionClient::new(cx)), bridge));
+        let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
+            nats_client,
+            Rc::new(ConnectionClient::new(cx)),
+            bridge,
+        )));
 
         let mut pending_request: Option<PendingRequest> = None;
         let mut pending_response_sessions = HashMap::<RequestId, PendingResponseContext>::new();
@@ -1329,7 +1336,7 @@ pub async fn run_http_connection<N, J>(
                     }
                 }
             }
-            result = &mut client_task => {
+            result = client_task.handle_mut() => {
                 match result {
                     Ok(()) => info!(%connection_id, "HTTP client task completed"),
                     Err(error) => warn!(%connection_id, error = %error, "HTTP client task failed"),
@@ -1346,8 +1353,7 @@ pub async fn run_http_connection<N, J>(
         fail_pending_initialize_on_close(&mut pending_request);
 
         if !client_task.is_finished() {
-            client_task.abort();
-            let _ = client_task.await;
+            client_task.abort_and_wait().await;
         }
 
         Ok(())
