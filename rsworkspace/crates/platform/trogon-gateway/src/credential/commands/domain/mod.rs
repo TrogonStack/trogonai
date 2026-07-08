@@ -1,4 +1,3 @@
-pub(crate) mod credential_event;
 mod credential_failure_reason;
 mod credential_fingerprint;
 mod credential_id;
@@ -12,7 +11,6 @@ mod credential_version;
 mod source_kind;
 mod storage_backend;
 
-pub use credential_event::{CredentialEvent, CredentialEventPayloadError};
 pub use credential_failure_reason::CredentialFailureReason;
 pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintError};
 pub use credential_id::{CredentialId, CredentialIdError};

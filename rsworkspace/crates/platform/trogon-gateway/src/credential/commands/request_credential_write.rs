@@ -1,7 +1,9 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
 
-use super::domain::{CredentialEvent, CredentialId, CredentialKind, CredentialOwnerId, SourceKind};
-use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
+use super::super::proto::write_requested_to_proto;
+use super::domain::{CredentialId, CredentialKind, CredentialOwnerId, SourceKind};
+use super::state::{CredentialDecideError, CredentialEvolveError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialWrite {
@@ -45,8 +47,8 @@ impl RequestCredentialWrite {
 
 impl Decider for RequestCredentialWrite {
     type StreamId = str;
-    type State = CredentialState;
-    type Event = CredentialEvent;
+    type State = state_v1::CredentialStateSnapshot;
+    type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
     type EvolveError = CredentialEvolveError;
 
@@ -65,14 +67,16 @@ impl Decider for RequestCredentialWrite {
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-        match state {
-            CredentialState::Missing => Ok(Decision::event(CredentialEvent::WriteRequested {
-                credential_id: command.credential_id.clone(),
-                owner_id: command.owner_id.clone(),
-                source: command.source,
-                kind: command.kind,
+        let current = state.state.as_ref().ok_or(CredentialDecideError::MissingState)?;
+
+        match current {
+            CredentialStateSnapshotCase::Missing(_) => Ok(Decision::event(v1::CredentialEvent {
+                event: Some(
+                    write_requested_to_proto(&command.credential_id, &command.owner_id, command.source, command.kind)
+                        .into(),
+                ),
             })),
-            CredentialState::Revoked(_) => Err(CredentialDecideError::Revoked {
+            CredentialStateSnapshotCase::Revoked(_) => Err(CredentialDecideError::Revoked {
                 credential_id: command.credential_id.clone(),
             }),
             _ => Err(CredentialDecideError::AlreadyExists {
