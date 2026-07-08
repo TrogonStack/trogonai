@@ -191,3 +191,50 @@ fn invalid_confirmation_key_bad_shape_surfaces_deserialize_source() {
         NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(_))
     ));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_duplicate_auth_token_headers() {
+    // AAuth-Auth-Token is not part of the PoP envelope, but a message
+    // carrying two different auth tokens lets verification read one while a
+    // downstream consumer reads the other -- the same smuggling shape the
+    // envelope headers are guarded against.
+    let items = vec![
+        (headers::NATS_AUTH_TOKEN.to_string(), "first".into()),
+        (headers::NATS_AUTH_TOKEN.to_string(), "second".into()),
+    ];
+    let req = NatsRequest {
+        subject: "s",
+        reply: None,
+        payload: b"",
+        headers: NatsHeaders::new(&items),
+    };
+    let verifier = NatsPopVerifier::new(StaticJwks::new(), SystemTimeSource, InMemoryReplayStore::new());
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::DuplicateHeader(name) if name == headers::NATS_AUTH_TOKEN
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_duplicate_mission_headers() {
+    // AAuth-Mission binds a request to its mission context; two values would
+    // let the binding check read one while a downstream consumer reads the
+    // other.
+    let items = vec![
+        (headers::MISSION.to_string(), "approver=\"a\"; s256=\"x\"".into()),
+        (headers::MISSION.to_string(), "approver=\"b\"; s256=\"y\"".into()),
+    ];
+    let req = NatsRequest {
+        subject: "s",
+        reply: None,
+        payload: b"",
+        headers: NatsHeaders::new(&items),
+    };
+    let verifier = NatsPopVerifier::new(StaticJwks::new(), SystemTimeSource, InMemoryReplayStore::new());
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::DuplicateHeader(name) if name == headers::MISSION
+    ));
+}

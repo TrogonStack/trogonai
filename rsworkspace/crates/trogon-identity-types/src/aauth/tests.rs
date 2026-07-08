@@ -140,6 +140,8 @@ fn resource_and_auth_claims_serialize_expected_fields() {
         principal: Some("alice".into()),
         consent_id: None,
         resource: Some("resource".into()),
+        act: None,
+        cnf: None,
     };
     assert_eq!(serde_json::to_value(&resource).unwrap()["dwk"], DWK_RESOURCE);
     assert_eq!(serde_json::to_value(&auth).unwrap()["agent"], "agent-1");
@@ -183,4 +185,56 @@ fn requirement_other_variant_round_trips() {
         raw: "requirement=custom".into(),
     };
     assert_eq!(req.to_header_value(), "requirement=custom");
+}
+
+#[test]
+fn well_known_path_prefixes_dwk_with_well_known_segment() {
+    assert_eq!(well_known_path(DWK_AGENT), "/.well-known/aauth-agent.json");
+    assert_eq!(well_known_path(DWK_RESOURCE), "/.well-known/aauth-resource.json");
+    assert_eq!(well_known_path(DWK_PERSON), "/.well-known/aauth-person.json");
+    assert_eq!(well_known_path(DWK_ACCESS), "/.well-known/aauth-access.json");
+}
+
+#[test]
+fn requirement_header_round_trips_agent_token_approval_and_claims() {
+    for req in [Requirement::AgentToken, Requirement::Approval, Requirement::Claims] {
+        let header = req.to_header_value();
+        assert_eq!(Requirement::parse(&header), req);
+    }
+}
+
+#[test]
+fn requirement_to_header_value_renders_interaction_with_code() {
+    let req = Requirement::Interaction {
+        url: "https://ps.example/i/123".into(),
+        code: Some("AB12".into()),
+    };
+    assert_eq!(
+        req.to_header_value(),
+        "requirement=interaction; url=\"https://ps.example/i/123\"; code=\"AB12\""
+    );
+}
+
+#[test]
+fn requirement_to_header_value_renders_interaction_without_code() {
+    let req = Requirement::Interaction {
+        url: "https://ps.example/i/123".into(),
+        code: None,
+    };
+    assert_eq!(
+        req.to_header_value(),
+        "requirement=interaction; url=\"https://ps.example/i/123\""
+    );
+}
+
+#[test]
+fn requirement_header_round_trips_agent_token() {
+    let req = Requirement::AgentToken;
+    assert_eq!(Requirement::parse(&req.to_header_value()), req);
+}
+
+#[test]
+fn split_header_skips_empty_segments_from_stray_semicolons() {
+    let raw = "requirement=clarification;;  ;";
+    assert_eq!(Requirement::parse(raw), Requirement::Clarification);
 }

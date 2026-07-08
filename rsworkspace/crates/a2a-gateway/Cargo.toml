@@ -21,11 +21,13 @@ workspace = true
 # Enables the SpiceDB-backed Tier-1 gate. Off by default so
 # deployments without an external authoriser don't pay the
 # authzed/tonic/moka compile cost.
-spicedb = ["a2a-nats/spicedb", "dep:async-trait", "dep:authzed", "dep:tonic"]
+spicedb = ["a2a-nats/spicedb", "dep:authzed", "dep:tonic"]
 
 [dependencies]
 a2a = { workspace = true }
-async-trait = { workspace = true, optional = true }
+# Required unconditionally: `aauth.rs` (always compiled) implements
+# `JwksResolver` via `#[async_trait]`, matching trogon-aauth-verify's trait.
+async-trait = { workspace = true }
 authzed = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 a2a-auth-callout = { workspace = true }
@@ -33,11 +35,15 @@ a2a-nats = { workspace = true }
 a2a-pack = { workspace = true }
 a2a-redaction = { workspace = true }
 async-nats = { workspace = true }
+# Required unconditionally: `aauth.rs` decodes an already-verified `aa-auth+jwt`
+# payload segment to read its untyped `mission` claim (see mission.rs module
+# docs on `trogon-aauth-verify` -- `AuthClaims` has no typed `mission` field).
+base64 = { workspace = true }
 bytes = { workspace = true }
 cel-interpreter = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
-jsonwebtoken = { version = "=10.3.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -54,14 +60,19 @@ trogon-std = { workspace = true, features = ["signal"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
-base64 = { workspace = true }
+axum = { workspace = true }
 nkeys = { workspace = true }
 p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
 rand_core = { version = "=0.6.4" }
+reqwest = { workspace = true }
 serde_json = { workspace = true }
 filetime = { workspace = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+trogon-aauth-person = { path = "../trogon-aauth-person" }
+trogon-aauth-sdk = { workspace = true }
 trogon-aauth-verify = { workspace = true }
+trogon-jwks-publisher = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

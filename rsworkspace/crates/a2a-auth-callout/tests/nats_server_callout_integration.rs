@@ -34,7 +34,7 @@ use jsonwebtoken::jwk::{
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rand_core::OsRng;
-use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, SanType};
+use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair, SanType};
 use rsa::RsaPrivateKey;
 use rsa::pkcs8::EncodePrivateKey;
 use rsa::traits::PublicKeyParts;
@@ -585,6 +585,7 @@ fn write_tls_fixture() -> TlsFixture {
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     let ca = ca_params.self_signed(&ca_key).expect("ca cert");
     let ca_pem = ca.pem();
+    let issuer = Issuer::from_params(&ca_params, &ca_key);
 
     let server_key = KeyPair::generate().expect("server key");
     let mut server_dn = DistinguishedName::new();
@@ -595,14 +596,14 @@ fn write_tls_fixture() -> TlsFixture {
         SanType::DnsName("localhost".try_into().expect("dns san")),
         SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)),
     ];
-    let server_cert = server_params.signed_by(&server_key, &ca, &ca_key).expect("server cert");
+    let server_cert = server_params.signed_by(&server_key, &issuer).expect("server cert");
 
     let ee_key = KeyPair::generate().expect("ee key");
     let mut ee_dn = DistinguishedName::new();
     ee_dn.push(DnType::CommonName, "integration-client");
     let mut ee_params = CertificateParams::default();
     ee_params.distinguished_name = ee_dn;
-    let ee = ee_params.signed_by(&ee_key, &ca, &ca_key).expect("ee cert");
+    let ee = ee_params.signed_by(&ee_key, &issuer).expect("ee cert");
 
     std::fs::write(cert_dir.join("server.pem"), server_cert.pem()).expect("server pem");
     std::fs::write(cert_dir.join("server-key.pem"), server_key.serialize_pem()).expect("server key");

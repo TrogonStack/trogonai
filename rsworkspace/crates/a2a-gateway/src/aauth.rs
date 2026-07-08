@@ -10,12 +10,20 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
+use base64::Engine;
+use jsonwebtoken::jwk::JwkSet;
 use trogon_aauth_verify::challenge::ResourceChallenge;
+use trogon_aauth_verify::jwks::JwksError;
+use trogon_aauth_verify::mission::MissionError;
 use trogon_aauth_verify::nats_pop::{NatsHeaders, NatsPopError, NatsRequest};
 use trogon_aauth_verify::{
-    ChallengeMinter, InMemoryReplayStore, JwksResolver, NatsPopVerifier, ReplayStore, SystemTimeSource, TokenError,
-    TokenVerifier,
+    CachedJwksResolver, ChallengeMinter, HttpJwksResolver, InMemoryReplayStore, JwksResolver, NatsPopVerifier,
+    ReplayStore, SystemTimeSource, TokenError, TokenVerifier, extract_mission_claim,
+    verify_mission_header_matches_claim,
 };
+use trogon_identity_types::aauth::headers::Capabilities;
+use trogon_identity_types::aauth::mission::MissionHeader;
 use trogon_identity_types::aauth::{MissionRef, headers as aauth_headers};
 
 /// Anti-replay code returned on enforce-mode AAuth failure. JSON-RPC clients
@@ -153,6 +161,42 @@ pub enum NonNegativeSecsError {
     Negative(i64),
 }
 
+/// The gateway's resource-defined scope grammar (draft "Scopes" -- scope
+/// values are resource-specific and the resource publishes their meaning).
+///
+/// A scope string is a space-separated list of method-glob tokens matched
+/// against the invoked method's dotted form (e.g. `message.send`,
+/// `tasks.get`). A token is one of:
+///
+/// - `*` -- covers every method.
+/// - `{prefix}.*` -- covers every method dotted-prefixed by `{prefix}.`
+///   (e.g. `message.*` covers `message.send` and `message.stream`, but not
+///   bare `message`).
+/// - an exact dotted method name -- covers only that method.
+///
+/// Matching is case-sensitive and requires an exact segment boundary at the
+/// `.` so `message.*` cannot accidentally match `messages.send`. An empty or
+/// all-whitespace scope string covers nothing.
+#[must_use]
+pub fn scope_covers_method(scope: &str, method_dots: &str) -> bool {
+    scope
+        .split_whitespace()
+        .any(|token| scope_token_covers(token, method_dots))
+}
+
+fn scope_token_covers(token: &str, method_dots: &str) -> bool {
+    if token == "*" {
+        return true;
+    }
+    if let Some(prefix) = token.strip_suffix(".*") {
+        return !prefix.is_empty()
+            && method_dots
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('.'));
+    }
+    token == method_dots
+}
+
 pub struct AAuthConfig<R: JwksResolver> {
     pub mode: AAuthMode,
     pub jwks: R,
@@ -218,6 +262,16 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         }
     }
 
+    /// Verify the inline `aa-agent+jwt` + PoP envelope and optional
+    /// `aa-auth+jwt` carried on a NATS ingress message, then apply the
+    /// resource-defined enforcement the draft delegates to us: `scope`
+    /// coverage of `method_dots` (draft "Scopes") and `AAuth-Mission`
+    /// header-vs-claim consistency (draft "Mission Context at Resources").
+    ///
+    /// `method_dots` is the dotted method the caller is invoking (e.g.
+    /// `message.send`); it is only consulted for scope enforcement when an
+    /// auth token is present, so callers that haven't yet resolved a method
+    /// (there are none in the gateway today) may pass `""`.
     pub async fn resolve_nats(
         &self,
         subject: &str,
@@ -225,6 +279,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         payload: &[u8],
         headers: &[(String, String)],
         auth_token: Option<&str>,
+        method_dots: &str,
     ) -> Result<AAuthResolution, AAuthDeny> {
         if self.mode == AAuthMode::Off {
             return Ok(AAuthResolution::anonymous());
@@ -242,6 +297,8 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         };
 
         let mut resolution = AAuthResolution::from_agent(&agent);
+        resolution.capabilities = header_value(headers, aauth_headers::CAPABILITIES).map(Capabilities::parse);
+        let mission_header = header_value(headers, aauth_headers::MISSION).and_then(MissionHeader::parse);
 
         if let Some(auth_jwt) = auth_token {
             let auth = match self
@@ -273,6 +330,68 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                     )
                     .await;
             }
+
+            // Scopes (draft "Scopes"): an uncovered method means the agent
+            // needs a broader auth token, not a fresh PoP/agent-token
+            // exchange -- mint the same `requirement=auth-token` challenge
+            // the auth-token-required path uses.
+            if !method_dots.is_empty() && !scope_covers_method(&auth.claims.scope, method_dots) {
+                let reason = AAuthDenyReason::ScopeNotCovered {
+                    scope: auth.claims.scope.clone(),
+                    method: method_dots.to_owned(),
+                };
+                return self
+                    .deny_or_shadow(reason, Some(ChallengeBinding::from_agent(&agent)))
+                    .await;
+            }
+
+            // Mission (draft "Mission Context at Resources"): a mission
+            // claim on the auth token binds the grant to its mission, so a
+            // malformed claim and a claim presented without the matching
+            // `AAuth-Mission` header are both denials, not skipped checks --
+            // silently ignoring either would let a mission-scoped token act
+            // as an unscoped one.
+            let claims_raw = raw_claims_value(&auth.raw_jwt);
+            let mission_claim = match claims_raw.as_ref().map(extract_mission_claim).transpose() {
+                Ok(claim) => claim.flatten(),
+                Err(e) => {
+                    return self
+                        .deny_or_shadow(
+                            AAuthDenyReason::MissionMismatch(e),
+                            Some(ChallengeBinding::from_agent(&agent)),
+                        )
+                        .await;
+                }
+            };
+            match (mission_header.as_ref(), mission_claim.as_ref()) {
+                (Some(header), Some(claim)) => {
+                    let header_ref = MissionRef {
+                        approver: header.approver.clone(),
+                        s256: header.s256.clone(),
+                    };
+                    if let Err(e) = verify_mission_header_matches_claim(&header_ref, claim) {
+                        return self
+                            .deny_or_shadow(
+                                AAuthDenyReason::MissionMismatch(e),
+                                Some(ChallengeBinding::from_agent(&agent)),
+                            )
+                            .await;
+                    }
+                    resolution.mission_approver = Some(claim.approver.clone());
+                }
+                (None, Some(claim)) => {
+                    return self
+                        .deny_or_shadow(
+                            AAuthDenyReason::MissionHeaderMissing {
+                                approver: claim.approver.clone(),
+                            },
+                            Some(ChallengeBinding::from_agent(&agent)),
+                        )
+                        .await;
+                }
+                (Some(_) | None, None) => {}
+            }
+
             resolution.attach_auth(auth);
         }
 
@@ -341,6 +460,20 @@ pub struct AAuthResolution {
     pub agent_jti: Option<String>,
     pub auth_jti: Option<String>,
     pub principal: Option<String>,
+    /// Parsed `AAuth-Capabilities` request header (draft "AAuth-Capabilities
+    /// Request Header"), when the agent sent one. `None` means the header was
+    /// absent -- per spec, recipients MUST NOT assume any capabilities in
+    /// that case, so callers must not default this to an empty-but-present
+    /// list.
+    pub capabilities: Option<Capabilities>,
+    /// The auth token's `scope` claim (draft "Scopes"), when an `aa-auth+jwt`
+    /// was presented and verified. `None` when no auth token was presented --
+    /// scope enforcement does not apply to agent-only access.
+    pub scope: Option<String>,
+    /// `approver` from a verified `AAuth-Mission` header / auth token mission
+    /// claim match (draft "Mission Context at Resources"), recorded for the
+    /// audit trail once header-vs-claim consistency has been checked.
+    pub mission_approver: Option<String>,
 }
 
 impl AAuthResolution {
@@ -352,6 +485,9 @@ impl AAuthResolution {
             agent_jti: None,
             auth_jti: None,
             principal: None,
+            capabilities: None,
+            scope: None,
+            mission_approver: None,
         }
     }
 
@@ -363,12 +499,16 @@ impl AAuthResolution {
             agent_jti: Some(agent.claims.jti.clone()),
             auth_jti: None,
             principal: None,
+            capabilities: None,
+            scope: None,
+            mission_approver: None,
         }
     }
 
     fn attach_auth(&mut self, auth: trogon_aauth_verify::VerifiedAuth) {
         self.auth_jti = Some(auth.claims.jti.clone());
         self.principal = auth.claims.principal.clone();
+        self.scope = Some(auth.claims.scope.clone());
     }
 }
 
@@ -395,6 +535,24 @@ pub enum AAuthDenyReason {
         auth_agent: String,
         auth_agent_jkt: String,
     },
+    /// The verified `aa-auth+jwt`'s `scope` claim does not cover the invoked
+    /// method under the gateway's scope grammar (see [`scope_covers_method`]).
+    /// Distinct from [`AAuthDenyReason::Auth`] because the token itself is
+    /// valid -- it simply doesn't authorize this method, so the agent needs a
+    /// step-up auth token rather than a fresh PoP/agent-token exchange.
+    #[error("aa-auth+jwt scope {scope:?} does not cover method {method:?}")]
+    ScopeNotCovered { scope: String, method: String },
+    /// The request's `AAuth-Mission` header did not match the verified
+    /// `aa-auth+jwt`'s `mission` claim (draft "Mission Context at Resources",
+    /// "Request-Context Binding" rule 9).
+    #[error("aauth-mission header does not match auth token mission claim: {0}")]
+    MissionMismatch(#[source] MissionError),
+    /// The verified `aa-auth+jwt` carries a `mission` claim but the request
+    /// has no parseable `AAuth-Mission` header. A mission-scoped grant is
+    /// only valid inside its mission context, so the binding check cannot be
+    /// skipped just because the presenter omitted the header.
+    #[error("aa-auth+jwt is mission-scoped (approver {approver:?}) but the request carries no AAuth-Mission header")]
+    MissionHeaderMissing { approver: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -429,9 +587,64 @@ fn uuid_like() -> String {
     format!("jti-{nanos:x}")
 }
 
+/// Case-insensitive lookup of a NATS header pair by name. `NatsHeaders`
+/// (the PoP verifier's own header view) does not expose a public getter, so
+/// callers that need to read an AAuth header outside the PoP envelope (e.g.
+/// `AAuth-Capabilities`, `AAuth-Mission`) look the raw pairs up directly.
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+/// Decode a JWT's payload segment into raw claims JSON without verifying the
+/// signature -- the token has already been signature-and-freshness verified
+/// by [`TokenVerifier::verify_auth`] by the time this runs; this only exists
+/// because `AuthClaims` has no typed `mission` field (see
+/// `trogon_aauth_verify::mission` module docs), so the `mission` claim must
+/// be read off the raw payload via `extract_mission_claim`.
+fn raw_claims_value(jwt: &str) -> Option<serde_json::Value> {
+    let payload_b64 = jwt.split('.').nth(1)?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64.as_bytes())
+        .ok()?;
+    serde_json::from_slice(&payload).ok()
+}
+
 pub use trogon_aauth_verify::StaticJwks;
 
 pub type DefaultAAuthIngress<R> = Arc<AAuthIngress<R, InMemoryReplayStore>>;
+
+/// The gateway's JWKS resolution strategy, selected at boot from
+/// `A2A_GATEWAY_AAUTH_JWKS_PATH` (static) or
+/// `A2A_GATEWAY_AAUTH_JWKS_DISCOVERY` (HTTP well-known, TTL-cached).
+///
+/// `CachedJwksResolver` has no `Clone` impl of its own (it owns interior
+/// mutable cache state behind an `RwLock`), so the discovery variant wraps it
+/// in an `Arc` -- cheap to clone and consistent with how `AAuthIngress`
+/// already clones its `JwksResolver` into each of its sub-verifiers.
+#[derive(Clone)]
+pub enum GatewayJwksResolver {
+    Static(StaticJwks),
+    WellKnown(Arc<CachedJwksResolver<HttpJwksResolver, SystemTimeSource>>),
+}
+
+#[async_trait]
+impl JwksResolver for GatewayJwksResolver {
+    async fn resolve(&self, iss: &str) -> Result<JwkSet, JwksError> {
+        match self {
+            GatewayJwksResolver::Static(jwks) => jwks.resolve(iss).await,
+            GatewayJwksResolver::WellKnown(cached) => cached.resolve(iss).await,
+        }
+    }
+}
+
+/// The gateway's concrete AAuth ingress type. Parameterized over
+/// [`GatewayJwksResolver`] so a single ingress layer supports either a
+/// static JWKS file or HTTP well-known discovery, chosen at boot from
+/// environment (see `runtime::aauth_env`).
+pub type GatewayAAuthIngress = DefaultAAuthIngress<GatewayJwksResolver>;
 
 #[cfg(test)]
 mod tests;

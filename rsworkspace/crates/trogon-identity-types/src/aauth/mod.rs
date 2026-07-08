@@ -19,8 +19,25 @@ pub const TYP_AUTH: &str = "aa-auth+jwt";
 pub const DWK_AGENT: &str = "aauth-agent.json";
 pub const DWK_RESOURCE: &str = "aauth-resource.json";
 pub const DWK_PERSON: &str = "aauth-person.json";
+/// `dwk` value for an Access Server, per "Auth Token Structure" / "Access Server Metadata".
+pub const DWK_ACCESS: &str = "aauth-access.json";
 
+/// Returns the well-known path (per RFC 8615) for a `dwk` value, e.g. `aauth-agent.json`
+/// becomes `/.well-known/aauth-agent.json`. See "Metadata Documents".
+#[must_use]
+pub fn well_known_path(dwk: &str) -> String {
+    format!("/.well-known/{dwk}")
+}
+
+pub mod delegation;
+pub mod error;
+pub mod federation;
 pub mod headers;
+pub mod login;
+pub mod mission;
+pub mod person_server;
+
+pub use delegation::Act;
 
 /// Public-key confirmation claim (`cnf`) as carried in `aa-agent+jwt`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,16 +101,44 @@ pub struct AuthClaims {
     pub consent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
+    /// Delegation chain per "Auth Token Structure" / "Delegation Chain". Optional so
+    /// existing minted tokens (no chaining) keep parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub act: Option<Act>,
+    /// Confirmation claim per "Auth Token Structure" (verification rule 7 requires
+    /// `cnf.jwk`). Optional so existing minted tokens keep parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cnf: Option<Cnf>,
 }
 
-/// Parsed `AAuth-Requirement` header value.
+/// Parsed `AAuth-Requirement` header value. See draft "Requirement Responses" /
+/// "Requirement Values" for the full registry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Requirement {
-    AuthToken { resource_token: String },
-    Interaction { url: String, code: Option<String> },
+    AuthToken {
+        resource_token: String,
+    },
+    Interaction {
+        url: String,
+        code: Option<String>,
+    },
     Clarification,
+    /// Deprecated wire form kept for backward compatibility with already-minted
+    /// Trogon responses; the draft's wire value is `requirement=approval`, modeled
+    /// as [`Requirement::Approval`].
     ApprovalPending,
-    Other { raw: String },
+    /// `requirement=agent-token` per "Agent Token Required": AAuth agent token
+    /// required for identity-only access. Carries no parameters.
+    AgentToken,
+    /// `requirement=approval` per "Requirement Values" / "Approval Pending": approval
+    /// pending from another party, no user direction required.
+    Approval,
+    /// `requirement=claims` per "Claims Required": identity claims required before
+    /// the request can proceed.
+    Claims,
+    Other {
+        raw: String,
+    },
 }
 
 impl Requirement {
@@ -110,6 +155,9 @@ impl Requirement {
             },
             Requirement::Clarification => "requirement=clarification".into(),
             Requirement::ApprovalPending => "requirement=approval-pending".into(),
+            Requirement::AgentToken => "requirement=agent-token".into(),
+            Requirement::Approval => "requirement=approval".into(),
+            Requirement::Claims => "requirement=claims".into(),
             Requirement::Other { raw } => raw.clone(),
         }
     }
@@ -141,6 +189,9 @@ impl Requirement {
             },
             Some("clarification") => Requirement::Clarification,
             Some("approval-pending") => Requirement::ApprovalPending,
+            Some("agent-token") => Requirement::AgentToken,
+            Some("approval") => Requirement::Approval,
+            Some("claims") => Requirement::Claims,
             _ => Requirement::Other { raw: raw.to_string() },
         }
     }
