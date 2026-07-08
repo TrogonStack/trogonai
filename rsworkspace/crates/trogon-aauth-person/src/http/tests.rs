@@ -446,8 +446,10 @@ async fn audit_endpoint_requires_known_mission() {
         .body(Body::from(body))
         .unwrap();
 
+    // An unknown mission ref is a caller-correctable request fault, not a
+    // persistence failure, so it is a 4xx rather than a 500.
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -739,8 +741,10 @@ async fn permission_endpoint_without_mission_returns_mission_not_found() {
         .body(Body::from(body))
         .unwrap();
 
+    // A missing mission ref is a caller-correctable request fault, not a
+    // persistence failure, so it is a 4xx rather than a 500.
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -824,8 +828,10 @@ async fn interaction_endpoint_without_mission_returns_mission_not_found() {
         .body(Body::from(body))
         .unwrap();
 
+    // A missing mission ref is a caller-correctable request fault, not a
+    // persistence failure, so it is a 4xx rather than a 500.
     let response = app.oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

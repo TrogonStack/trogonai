@@ -40,10 +40,25 @@ fn denied_maps_to_denied_wire_code_and_403() {
 
 #[test]
 fn server_error_fallback_maps_to_500() {
-    let err = PersonServerError::MissionNotFound(crate::mission::MissionId::from_s256("abc"));
+    let err = PersonServerError::Store(crate::store::StoreError("backend down".into()));
     assert_eq!(err.token_endpoint_code(), TokenEndpointError::ServerError);
     assert_eq!(err.http_status(), 500);
     assert_eq!(err.wire_code(), "server_error");
+}
+
+#[test]
+fn missing_or_terminated_mission_maps_to_400_invalid_request() {
+    let missing = PersonServerError::MissionNotFound(crate::mission::MissionId::from_s256("abc"));
+    assert_eq!(missing.token_endpoint_code(), TokenEndpointError::InvalidRequest);
+    assert_eq!(missing.http_status(), 400);
+    assert_eq!(missing.wire_code(), "invalid_request");
+
+    let terminated = PersonServerError::MissionNotActive(
+        crate::mission::MissionId::from_s256("abc"),
+        trogon_identity_types::aauth::error::MissionStatus::Terminated,
+    );
+    assert_eq!(terminated.http_status(), 400);
+    assert_eq!(terminated.wire_code(), "invalid_request");
 }
 
 #[test]

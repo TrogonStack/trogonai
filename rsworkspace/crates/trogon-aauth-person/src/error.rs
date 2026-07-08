@@ -185,6 +185,12 @@ impl PersonServerError {
             PersonServerError::Verification(RequestVerificationError::UpstreamToken(_)) => {
                 TokenEndpointError::InvalidRequest
             }
+            // A missing or terminated mission is a caller-correctable request
+            // fault (wrong/stale mission ref), not a persistence failure, so
+            // it maps to a 4xx rather than the server_error catch-all.
+            PersonServerError::MissionNotFound(_) | PersonServerError::MissionNotActive(_, _) => {
+                TokenEndpointError::InvalidRequest
+            }
             PersonServerError::UserUnreachable
             | PersonServerError::Interaction(InteractionRelayError::UserUnreachable) => {
                 TokenEndpointError::UserUnreachable
