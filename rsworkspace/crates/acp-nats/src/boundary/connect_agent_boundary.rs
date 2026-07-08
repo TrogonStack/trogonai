@@ -2,12 +2,15 @@ use super::boundary_exit::BoundaryExit;
 use super::eof_signal_reader::EofSignalReader;
 use crate::agent_handler::AgentHandler;
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, CancelRequestNotification, ClientNotification, ClientRequest,
-    CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
-    LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CancelRequestNotification, ClientNotification,
+    ClientRequest, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
+    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo, Error, JsonRpcResponse, Responder, Result};
+use std::future::Future;
 use std::sync::Arc;
 
 /// Spawns `work` onto the connection's task actor and responds when it
@@ -21,7 +24,7 @@ use std::sync::Arc;
 fn respond_in_task<T: JsonRpcResponse + Send + 'static>(
     cx: &ConnectionTo<Client>,
     responder: Responder<T>,
-    work: impl std::future::Future<Output = Result<T>> + Send + 'static,
+    work: impl Future<Output = Result<T>> + Send + 'static,
 ) -> Result<()> {
     cx.spawn(async move {
         let cancellation = responder.cancellation();
@@ -29,13 +32,168 @@ fn respond_in_task<T: JsonRpcResponse + Send + 'static>(
     })
 }
 
+async fn initialize<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: InitializeRequest,
+    responder: Responder<InitializeResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.initialize(req).await })
+}
+
+async fn authenticate<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: AuthenticateRequest,
+    responder: Responder<AuthenticateResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.authenticate(req).await })
+}
+
+async fn logout<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: LogoutRequest,
+    responder: Responder<LogoutResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.logout(req).await })
+}
+
+async fn new_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: NewSessionRequest,
+    responder: Responder<NewSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.new_session(req).await })
+}
+
+async fn load_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: LoadSessionRequest,
+    responder: Responder<LoadSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.load_session(req).await })
+}
+
+async fn prompt<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: PromptRequest,
+    responder: Responder<PromptResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.prompt(req).await })
+}
+
+async fn set_session_mode<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: SetSessionModeRequest,
+    responder: Responder<SetSessionModeResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.set_session_mode(req).await })
+}
+
+async fn set_session_config_option<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: SetSessionConfigOptionRequest,
+    responder: Responder<SetSessionConfigOptionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(
+        &cx,
+        responder,
+        async move { agent.set_session_config_option(req).await },
+    )
+}
+
+async fn fork_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: ForkSessionRequest,
+    responder: Responder<ForkSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.fork_session(req).await })
+}
+
+async fn resume_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: ResumeSessionRequest,
+    responder: Responder<ResumeSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.resume_session(req).await })
+}
+
+async fn close_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: CloseSessionRequest,
+    responder: Responder<CloseSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.close_session(req).await })
+}
+
+async fn delete_session<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: DeleteSessionRequest,
+    responder: Responder<DeleteSessionResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.delete_session(req).await })
+}
+
+async fn list_sessions<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: ListSessionsRequest,
+    responder: Responder<ListSessionsResponse>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    respond_in_task(&cx, responder, async move { agent.list_sessions(req).await })
+}
+
+async fn ext_method<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    req: ClientRequest,
+    responder: Responder<serde_json::Value>,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    let ClientRequest::ExtMethodRequest(ext_request) = req else {
+        return responder.respond_with_error(Error::method_not_found());
+    };
+    respond_in_task(&cx, responder, async move {
+        let response = agent.ext_method(ext_request).await?;
+        serde_json::to_value(response).map_err(Error::into_internal_error)
+    })
+}
+
+async fn cancel<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    notif: CancelNotification,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    cx.spawn(async move { agent.cancel(notif).await })
+}
+
+async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
+    agent: Arc<A>,
+    notif: ClientNotification,
+    cx: ConnectionTo<Client>,
+) -> Result<()> {
+    let ClientNotification::ExtNotification(notification) = notif else {
+        return Ok(());
+    };
+    cx.spawn(async move { agent.ext_notification(notification).await })
+}
+
 /// Connects an [`AgentHandler`] implementation to a byte-stream boundary.
 ///
-/// Registers one `on_receive_request`/`on_receive_notification` callback per
-/// [`AgentHandler`] method, then falls through to the SDK's `ClientRequest`/
-/// `ClientNotification` catch-all for extension methods, matching ADR 0017's
-/// "SDK builder callbacks adapt boundaries to bridge traits" decision. Shared
-/// by `acp-nats-server` (WebSocket and HTTP duplex) and `acp-nats-stdio`.
+/// Registers one named handler per [`AgentHandler`] method, then falls
+/// through to the SDK's `ClientRequest`/`ClientNotification` catch-all for
+/// extension methods, matching ADR 0017's "SDK builder callbacks adapt
+/// boundaries to bridge traits" decision. Shared by `acp-nats-server`
+/// (WebSocket and HTTP duplex) and `acp-nats-stdio`.
 ///
 /// The SDK treats incoming EOF as a graceful stream end and keeps the
 /// connection alive, so the incoming stream is wrapped to detect closure:
@@ -53,186 +211,51 @@ where
     R: futures::AsyncRead + Send + Unpin + 'static,
 {
     let (incoming, eof_rx) = EofSignalReader::new(incoming);
-    let handler_agent = agent.clone();
-    let builder = Agent
-        .builder()
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: InitializeRequest, responder, cx| {
+
+    macro_rules! route_request {
+        ($builder:expr, $handler:path) => {
+            $builder.on_receive_request(
+                {
                     let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.initialize(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: AuthenticateRequest, responder, cx| {
+                    async move |req, responder, cx| $handler(agent.clone(), req, responder, cx).await
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+        };
+    }
+    macro_rules! route_notification {
+        ($builder:expr, $handler:path) => {
+            $builder.on_receive_notification(
+                {
                     let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.authenticate(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: LogoutRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.logout(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: NewSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.new_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: LoadSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.load_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: PromptRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.prompt(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: SetSessionModeRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.set_session_mode(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: SetSessionConfigOptionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(
-                        &cx,
-                        responder,
-                        async move { agent.set_session_config_option(req).await },
-                    )
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: ForkSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.fork_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: ResumeSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.resume_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: CloseSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.close_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: DeleteSessionRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.delete_session(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: ListSessionsRequest, responder, cx| {
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move { agent.list_sessions(req).await })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_notification(
-            async move |_notif: CancelRequestNotification, _cx| Ok(()),
-            agent_client_protocol::on_receive_notification!(),
-        )
-        .on_receive_notification(
-            {
-                let agent = handler_agent.clone();
-                async move |notif: CancelNotification, cx| {
-                    let agent = agent.clone();
-                    cx.spawn(async move { agent.cancel(notif).await })
-                }
-            },
-            agent_client_protocol::on_receive_notification!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: ClientRequest, responder, cx| {
-                    let ClientRequest::ExtMethodRequest(ext_request) = req else {
-                        return responder.respond_with_error(Error::method_not_found());
-                    };
-                    let agent = agent.clone();
-                    respond_in_task(&cx, responder, async move {
-                        let response = agent.ext_method(ext_request).await?;
-                        serde_json::to_value(response).map_err(Error::into_internal_error)
-                    })
-                }
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_notification(
-            {
-                let agent = handler_agent.clone();
-                async move |notif: ClientNotification, cx| {
-                    let ClientNotification::ExtNotification(ext_notification) = notif else {
-                        return Ok(());
-                    };
-                    let agent = agent.clone();
-                    cx.spawn(async move { agent.ext_notification(ext_notification).await })
-                }
-            },
-            agent_client_protocol::on_receive_notification!(),
-        );
+                    async move |notif, cx| $handler(agent.clone(), notif, cx).await
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+        };
+    }
+
+    let builder = Agent.builder();
+    let builder = route_request!(builder, initialize);
+    let builder = route_request!(builder, authenticate);
+    let builder = route_request!(builder, logout);
+    let builder = route_request!(builder, new_session);
+    let builder = route_request!(builder, load_session);
+    let builder = route_request!(builder, prompt);
+    let builder = route_request!(builder, set_session_mode);
+    let builder = route_request!(builder, set_session_config_option);
+    let builder = route_request!(builder, fork_session);
+    let builder = route_request!(builder, resume_session);
+    let builder = route_request!(builder, close_session);
+    let builder = route_request!(builder, delete_session);
+    let builder = route_request!(builder, list_sessions);
+    let builder = builder.on_receive_notification(
+        async move |_notif: CancelRequestNotification, _cx| Ok(()),
+        agent_client_protocol::on_receive_notification!(),
+    );
+    let builder = route_notification!(builder, cancel);
+    let builder = route_request!(builder, ext_method);
+    let builder = route_notification!(builder, ext_notification);
 
     builder
         .connect_with(ByteStreams::new(outgoing, incoming), async move |cx| {
