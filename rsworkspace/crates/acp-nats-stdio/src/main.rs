@@ -2,9 +2,11 @@
 
 mod config;
 
+use acp_nats::boundary::{BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, SessionNotification};
+use agent_client_protocol::schema::v1::SessionNotification;
 use std::rc::Rc;
+use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
 
@@ -78,12 +80,12 @@ where
     N: acp_nats::RequestClient + acp_nats::PublishClient + acp_nats::FlushClient + acp_nats::SubscribeClient + 'static,
     J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
-    W: futures::AsyncWrite + Unpin + 'static,
-    R: futures::AsyncRead + Unpin + 'static,
+    W: futures::AsyncWrite + Send + Unpin + 'static,
+    R: futures::AsyncRead + Send + Unpin + 'static,
 {
     let meter = trogon_telemetry::meter("acp-io-bridge-nats");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
-    let bridge = Rc::new(Bridge::new(
+    let bridge = Arc::new(Bridge::new(
         nats_client.clone(),
         js_client,
         SystemClock,
@@ -92,56 +94,48 @@ where
         notification_tx,
     ));
 
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), stdout, stdin, |fut| {
-        tokio::task::spawn_local(fut);
-    });
+    let boundary_result = connect_agent_boundary(bridge.clone(), stdout, stdin, async move |cx| {
+        spawn_notification_forwarder(ConnectionClient::new(cx.clone()), notification_rx);
 
-    let connection = Rc::new(connection);
+        let mut client_task =
+            tokio::task::spawn_local(client::run(nats_client, Rc::new(ConnectionClient::new(cx)), bridge));
+        info!("ACP bridge running on stdio with NATS client proxy");
 
-    spawn_notification_forwarder(connection.clone(), notification_rx);
-
-    let client_connection = connection.clone();
-    let bridge_for_client = bridge.clone();
-    let mut client_task = tokio::task::spawn_local(client::run(nats_client, client_connection, bridge_for_client));
-    info!("ACP bridge running on stdio with NATS client proxy");
-
-    let shutdown_result = tokio::select! {
-        result = &mut client_task => {
-            match result {
-                Ok(()) => {
-                    info!("ACP bridge client task completed");
-                    Ok(())
-                }
-                Err(e) => {
-                    error!(error = %e, "Client task ended with error");
-                    Err(e.into())
+        let shutdown_result = tokio::select! {
+            result = &mut client_task => {
+                match result {
+                    Ok(()) => {
+                        info!("ACP bridge client task completed");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Client task ended with error");
+                        Err(e.into())
+                    }
                 }
             }
-        }
-        result = io_task => {
-            match result {
-                Err(e) => {
-                    error!(error = %e, "IO task error");
-                    Err(e.into())
-                }
-                Ok(()) => {
-                    info!("ACP bridge shutting down (IO closed)");
-                    Ok(())
-                }
+            _ = shutdown_signal => {
+                info!("ACP bridge shutting down (signal received)");
+                Ok(())
             }
+        };
+
+        if !client_task.is_finished() {
+            client_task.abort();
+            let _ = client_task.await;
         }
-        _ = shutdown_signal => {
-            info!("ACP bridge shutting down (signal received)");
+
+        Ok(shutdown_result)
+    })
+    .await;
+
+    match boundary_result? {
+        BoundaryExit::Main(result) => result,
+        BoundaryExit::TransportClosed => {
+            info!("ACP bridge stdin closed; shutting down");
             Ok(())
         }
-    };
-
-    if !client_task.is_finished() {
-        client_task.abort();
-        let _ = client_task.await;
     }
-
-    shutdown_result
 }
 
 #[cfg(test)]

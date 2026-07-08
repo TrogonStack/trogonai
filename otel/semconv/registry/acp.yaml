@@ -117,10 +117,6 @@ groups:
         type: string
         stability: development
         brief: Session id of the newly forked ACP session.
-      - id: model_id
-        type: string
-        stability: development
-        brief: Model id being set on an ACP session.
       - id: mode_id
         type: string
         stability: development
@@ -250,6 +246,13 @@ groups:
     brief: ACP close_session handling.
     attributes:
       - ref: session_id
+  - id: span.acp.session.delete
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP delete_session handling.
+    attributes:
+      - ref: session_id
   - id: span.acp.session.resume
     type: span
     span_kind: internal
@@ -276,14 +279,6 @@ groups:
     brief: ACP cancel handling.
     attributes:
       - ref: session_id
-  - id: span.acp.session.set_model
-    type: span
-    span_kind: internal
-    stability: development
-    brief: ACP set_session_model handling.
-    attributes:
-      - ref: session_id
-      - ref: model_id
   - id: span.acp.session.set_mode
     type: span
     span_kind: internal

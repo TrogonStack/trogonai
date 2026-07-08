@@ -93,6 +93,9 @@ pub const ACP_SESSION_CANCEL: &str = "acp.session.cancel";
 /// ACP close_session handling
 pub const ACP_SESSION_CLOSE: &str = "acp.session.close";
 
+/// ACP delete_session handling
+pub const ACP_SESSION_DELETE: &str = "acp.session.delete";
+
 /// ACP fork_session handling
 pub const ACP_SESSION_FORK: &str = "acp.session.fork";
 
@@ -116,9 +119,6 @@ pub const ACP_SESSION_SET_CONFIG_OPTION: &str = "acp.session.set_config_option";
 
 /// ACP set_session_mode handling
 pub const ACP_SESSION_SET_MODE: &str = "acp.session.set_mode";
-
-/// ACP set_session_model handling
-pub const ACP_SESSION_SET_MODEL: &str = "acp.session.set_model";
 
 /// Datadog webhook ingestion
 pub const DATADOG_WEBHOOK: &str = "datadog.webhook";

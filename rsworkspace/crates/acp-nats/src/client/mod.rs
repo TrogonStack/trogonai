@@ -27,6 +27,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use tracing::{Span, error, info, instrument, warn};
 use trogon_semconv::attribute::SESSION_ID;
 use trogon_semconv::span::DISPATCH_CLIENT_METHOD;
@@ -72,7 +73,7 @@ pub async fn run<
 >(
     nats: N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C, J>>,
+    bridge: Arc<Bridge<N, C, J>>,
 ) {
     let wildcard = crate::nats::subscriptions::AllClientSubject::new(bridge.config.acp_prefix_ref());
     info!("Starting client proxy - subscribing to {}", wildcard);
@@ -104,7 +105,7 @@ async fn process_message<
     msg: Message,
     nats: &N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C, J>>,
+    bridge: Arc<Bridge<N, C, J>>,
     in_flight: &Rc<Cell<usize>>,
     max_concurrent: usize,
 ) {

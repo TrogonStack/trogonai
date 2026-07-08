@@ -3,6 +3,7 @@
 pub mod acp_prefix;
 pub mod agent;
 pub mod agent_handler;
+pub mod boundary;
 pub mod client;
 pub mod client_handler;
 pub mod client_proxy;

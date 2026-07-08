@@ -4,8 +4,10 @@ use crate::constants::{
     ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER, HTTP_CHANNEL_CAPACITY,
     X_ACCEL_BUFFERING_HEADER,
 };
+use acp_nats::boundary::{BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, ProtocolVersion, RequestId, SessionNotification};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{RequestId, SessionNotification};
 use axum::extract::FromRequestParts;
 use axum::extract::Request;
 use axum::extract::State;
@@ -21,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error as tracing_error, info, warn};
@@ -677,7 +680,7 @@ async fn http_post(headers: HeaderMap, state: AppState, body: String) -> Result<
             .manager_tx
             .send(ManagerRequest::HttpPost {
                 connection_id: connection_id.clone(),
-                protocol_version: protocol_version.clone(),
+                protocol_version,
                 session_id: session_id.clone(),
                 message,
                 response: response_tx,
@@ -1063,7 +1066,7 @@ pub async fn run_http_connection<N, J>(
 
     let meter = trogon_telemetry::meter("acp-nats-server");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
-    let bridge = Rc::new(Bridge::new(
+    let bridge = Arc::new(Bridge::new(
         nats_client.clone(),
         js_client,
         SystemClock,
@@ -1071,13 +1074,6 @@ pub async fn run_http_connection<N, J>(
         config,
         notification_tx,
     ));
-
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
-    });
-
-    let connection = Rc::new(connection);
-    spawn_notification_forwarder(connection.clone(), notification_rx);
 
     let (input_tx, mut input_rx) = mpsc::channel::<String>(HTTP_CHANNEL_CAPACITY);
     let input_task = tokio::task::spawn_local(async move {
@@ -1113,19 +1109,23 @@ pub async fn run_http_connection<N, J>(
         }
     });
 
-    let mut client_task = tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge));
-    let mut io_task = tokio::task::spawn_local(io_task);
+    let handler_connection_id = connection_id.clone();
+    let boundary_result = connect_agent_boundary(bridge.clone(), outgoing, incoming, async move |cx| {
+        let connection_id = handler_connection_id;
+        spawn_notification_forwarder(ConnectionClient::new(cx.clone()), notification_rx);
 
-    let mut pending_request: Option<PendingRequest> = None;
-    let mut pending_response_sessions = HashMap::<RequestId, PendingResponseContext>::new();
-    let mut initialized = false;
-    let mut protocol_version: Option<ProtocolVersion> = None;
-    let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
-    let mut get_listeners = Vec::<SseSender>::new();
+        let mut client_task = tokio::task::spawn_local(client::run(nats_client, Rc::new(ConnectionClient::new(cx)), bridge));
 
-    info!(%connection_id, "HTTP connection established");
+        let mut pending_request: Option<PendingRequest> = None;
+        let mut pending_response_sessions = HashMap::<RequestId, PendingResponseContext>::new();
+        let mut initialized = false;
+        let mut protocol_version: Option<ProtocolVersion> = None;
+        let mut sessions = HashSet::<acp_nats::AcpSessionId>::new();
+        let mut get_listeners = Vec::<SseSender>::new();
 
-    loop {
+        info!(%connection_id, "HTTP connection established");
+
+        loop {
         tokio::select! {
             command = command_rx.recv() => {
                 let Some(command) = command else {
@@ -1226,7 +1226,7 @@ pub async fn run_http_connection<N, J>(
                         let (stream_tx, stream_rx) = mpsc::channel(HTTP_CHANNEL_CAPACITY);
                         get_listeners.push(stream_tx);
                         let _ = response.send(Ok(HttpGetOutcome {
-                            protocol_version: protocol_version.clone(),
+                            protocol_version,
                             stream: stream_rx,
                         }));
                     }
@@ -1242,7 +1242,7 @@ pub async fn run_http_connection<N, J>(
                             continue;
                         }
 
-                        let _ = response.send(Ok(protocol_version.clone()));
+                        let _ = response.send(Ok(protocol_version));
                         break;
                     }
                 }
@@ -1276,7 +1276,7 @@ pub async fn run_http_connection<N, J>(
                     if let Some(PendingRequest::Initialize { response, .. }) = pending_request.take() {
                         let _ = response.send(Ok(HttpPostOutcome::Json {
                             connection_id: connection_id.clone(),
-                            protocol_version: protocol_version.clone(),
+                            protocol_version,
                             body: response_body,
                         }));
                     }
@@ -1336,33 +1336,30 @@ pub async fn run_http_connection<N, J>(
                 }
                 break;
             }
-            result = &mut io_task => {
-                match result {
-                    Ok(Ok(())) => info!(%connection_id, "HTTP IO task completed"),
-                    Ok(Err(error)) => warn!(%connection_id, error = %error, "HTTP IO task failed"),
-                    Err(error) => warn!(%connection_id, error = %error, "HTTP IO task join failed"),
-                }
-                break;
-            }
             _ = shutdown_rx.wait_for(|&shutdown| shutdown) => {
                 info!(%connection_id, "HTTP connection shutting down");
                 break;
             }
         }
-    }
+        }
 
-    fail_pending_initialize_on_close(&mut pending_request);
+        fail_pending_initialize_on_close(&mut pending_request);
+
+        if !client_task.is_finished() {
+            client_task.abort();
+            let _ = client_task.await;
+        }
+
+        Ok(())
+    })
+    .await;
 
     input_task.abort();
     output_task.abort();
 
-    if !client_task.is_finished() {
-        client_task.abort();
-        let _ = client_task.await;
-    }
-    if !io_task.is_finished() {
-        io_task.abort();
-        let _ = io_task.await;
+    match boundary_result {
+        Ok(BoundaryExit::Main(())) | Ok(BoundaryExit::TransportClosed) => {}
+        Err(error) => warn!(%connection_id, error = %error, "HTTP connection closed with error"),
     }
 
     info!(%connection_id, "HTTP connection closed");

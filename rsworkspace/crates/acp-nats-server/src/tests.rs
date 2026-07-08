@@ -1,7 +1,7 @@
 use super::*;
 use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER};
 use acp_nats::Config;
-use agent_client_protocol::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
+use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use axum::body::{Body, to_bytes};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{Request, StatusCode};
@@ -231,7 +231,7 @@ async fn test_websocket_connection_lifecycle() {
         .expect("stream closed")
         .unwrap();
 
-    let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}}"#;
+    let expected_ws_response = r#"{"id":1,"jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"acp":false,"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}}"#;
 
     match msg {
         Message::Text(t) => {

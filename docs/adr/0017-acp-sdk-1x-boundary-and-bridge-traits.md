@@ -58,6 +58,11 @@ implementation. Outbound calls from the bridge to the peer go through the
 connection handle (`ConnectionTo<...>`). Adapters contain no logic beyond
 delegation, per the zero-cost passthrough rule in `rsworkspace/crates/AGENTS.md`.
 
+The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
+`acp-nats-stdio`, so they live in one place: the `boundary` module of
+`acp-nats`. That module is the single SDK-connection-aware part of the crate;
+the NATS routing core remains free of connection machinery.
+
 ## Consequences
 
 - The bridge's method surface is defined in one place (the bridge traits), and

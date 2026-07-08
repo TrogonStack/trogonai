@@ -22,3 +22,4 @@ future implementation work.
 - [ADR 0015: Rust TLS Library](./0015-rust-tls-library.md)
 - [ADR 0016: Protocol Buffers RPC over NATS micro Binding](./0016-protobuf-rpc-over-nats-micro-binding.md)
 - [ADR 0017: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits](./0017-acp-sdk-1x-boundary-and-bridge-traits.md)
+- [ADR 0018: Typed Decode over Passthrough Forwarding](./0018-typed-decode-over-passthrough-forwarding.md)

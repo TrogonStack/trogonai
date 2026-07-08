@@ -34,8 +34,8 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `initialize` | stable | implemented | |
 | `authenticate` | stable | implemented | `unstable_auth_methods` shapes enabled |
 | `logout` | stable (0.13.3) | implemented | via 0.10.4-era `unstable_logout` |
-| `session/new` | stable | implemented | `additionalDirectories` currently dropped, see below |
-| `session/load` | stable | implemented | same `additionalDirectories` caveat |
+| `session/new` | stable | implemented | includes `additionalDirectories` |
+| `session/load` | stable | implemented | includes `additionalDirectories` |
 | `session/list` | stable | implemented | |
 | `session/prompt` | stable | implemented | |
 | `session/cancel` (notification) | stable | implemented | |

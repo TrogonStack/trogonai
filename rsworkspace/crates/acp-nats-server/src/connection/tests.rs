@@ -3,7 +3,6 @@ use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Response;
 use std::error::Error;
-use std::io;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
@@ -36,14 +35,17 @@ async fn start_echo_server() -> String {
     format!("ws://{}{}", addr, ACP_ENDPOINT)
 }
 
-#[test]
-fn shutdown_error_display_includes_source_details() {
-    let error = ConnectionShutdownError::IoTask {
-        source: Box::new(io::Error::other("duplex closed")),
-    };
+#[tokio::test]
+async fn shutdown_error_display_includes_source_details() {
+    let handle = tokio::spawn(std::future::pending::<()>());
+    handle.abort();
+    let source = handle.await.unwrap_err();
+    assert!(source.is_cancelled());
 
-    assert_eq!(error.to_string(), "io task error: duplex closed");
-    assert_eq!(error.source().unwrap().to_string(), "duplex closed");
+    let error = ConnectionShutdownError::ClientTask { source };
+
+    assert!(error.to_string().starts_with("client task error: "));
+    assert!(error.source().is_some());
 }
 
 #[tokio::test]

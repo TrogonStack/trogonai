@@ -10,7 +10,7 @@ use agent_client_protocol::schema::v1::{
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 use trogon_std::time::SystemClock;
 
@@ -115,8 +115,8 @@ fn make_msg(subject: &str, headers: Option<HeaderMap>, payload: &[u8], reply: Op
     }
 }
 
-fn make_bridge(nats: MockNatsClient) -> Rc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
-    Rc::new(Bridge::new(
+fn make_bridge(nats: MockNatsClient) -> Arc<Bridge<MockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
+    Arc::new(Bridge::new(
         nats,
         crate::agent::test_support::MockJs::new(),
         SystemClock,
@@ -128,8 +128,8 @@ fn make_bridge(nats: MockNatsClient) -> Rc<Bridge<MockNatsClient, SystemClock, c
 
 fn make_bridge_advanced(
     nats: AdvancedMockNatsClient,
-) -> Rc<Bridge<AdvancedMockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
-    Rc::new(Bridge::new(
+) -> Arc<Bridge<AdvancedMockNatsClient, SystemClock, crate::agent::test_support::MockJs>> {
+    Arc::new(Bridge::new(
         nats,
         crate::agent::test_support::MockJs::new(),
         SystemClock,
