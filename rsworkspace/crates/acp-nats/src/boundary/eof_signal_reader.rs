@@ -28,7 +28,8 @@ impl<R> EofSignalReader<R> {
 impl<R: AsyncRead + Unpin> AsyncRead for EofSignalReader<R> {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_read(cx, buf);
-        if let Poll::Ready(Ok(0) | Err(_)) = &result
+        if !buf.is_empty()
+            && let Poll::Ready(Ok(0) | Err(_)) = &result
             && let Some(signal) = self.signal.take()
         {
             let _ = signal.send(());

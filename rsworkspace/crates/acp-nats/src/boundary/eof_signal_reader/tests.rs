@@ -21,3 +21,14 @@ async fn no_signal_before_eof() {
 
     assert!(rx.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn no_signal_on_zero_length_read() {
+    let (mut reader, mut rx) = EofSignalReader::new(futures::io::Cursor::new(b"ab".to_vec()));
+
+    let mut empty = [0u8; 0];
+    let read = futures::AsyncReadExt::read(&mut reader, &mut empty).await.unwrap();
+
+    assert_eq!(read, 0);
+    assert!(rx.try_recv().is_err());
+}
