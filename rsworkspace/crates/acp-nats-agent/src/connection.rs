@@ -5,9 +5,10 @@ use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, 
 use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
 use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, CloseSessionRequest, DeleteSessionRequest, ExtNotification, ExtRequest,
-    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest,
-    PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    AuthenticateRequest, CancelNotification, CloseSessionRequest, DeleteSessionRequest, DisableProviderRequest,
+    ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest, ListProvidersRequest, ListSessionsRequest,
+    LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest, SetProviderRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -273,6 +274,27 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ListSessionsRequest| {
                 agent.list_sessions(req)
             })
+            .await
+        }
+        GlobalAgentMethod::ProvidersList => {
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ListProvidersRequest| {
+                agent.list_providers(req)
+            })
+            .await
+        }
+        GlobalAgentMethod::ProvidersSet => {
+            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: SetProviderRequest| {
+                agent.set_provider(req)
+            })
+            .await
+        }
+        GlobalAgentMethod::ProvidersDisable => {
+            handle_jsonrpc_request(
+                msg,
+                method.wire_method().as_str(),
+                nats,
+                |req: DisableProviderRequest| agent.disable_provider(req),
+            )
             .await
         }
         GlobalAgentMethod::Ext(_) => {

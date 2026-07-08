@@ -946,6 +946,80 @@ async fn dispatch_client_method_dispatches_request_permission_with_advanced_mock
 }
 
 #[tokio::test]
+async fn dispatch_client_method_dispatches_elicitation_create_method_not_found() {
+    let nats = MockNatsClient::new();
+    let client = MockClient::new();
+    let session_id = AcpSessionId::new("sess-1").unwrap();
+
+    let mode = agent_client_protocol::schema::v1::ElicitationFormMode::new(
+        agent_client_protocol::schema::v1::ElicitationSessionScope::new("sess-1"),
+        agent_client_protocol::schema::v1::ElicitationSchema::new(),
+    );
+    let request = agent_client_protocol::schema::v1::CreateElicitationRequest::new(mode, "please respond");
+    let (headers, payload_bytes) =
+        crate::client::test_support::encode_wire_request("elicitation/create", RequestId::Number(1), &request);
+    let payload = bytes::Bytes::from(payload_bytes);
+
+    let parsed = crate::nats::ParsedClientSubject {
+        session_id,
+        method: ClientMethod::ElicitationCreate,
+    };
+
+    let bridge = make_bridge(nats.clone());
+    let ctx = DispatchContext {
+        nats: &nats,
+        client: &client,
+        bridge: &bridge,
+    };
+    dispatch_client_method(
+        "acp.session.sess-1.client.elicitation.create",
+        parsed,
+        &headers,
+        payload,
+        Some("_INBOX.err".to_string()),
+        &ctx,
+    )
+    .await;
+
+    assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
+}
+
+#[tokio::test]
+async fn dispatch_client_method_dispatches_elicitation_complete() {
+    let nats = MockNatsClient::new();
+    let client = MockClient::new();
+    let session_id = AcpSessionId::new("sess-1").unwrap();
+
+    let notification = agent_client_protocol::schema::v1::CompleteElicitationNotification::new("elicitation-1");
+    let (headers, payload_bytes) =
+        crate::client::test_support::encode_wire_notification("elicitation/complete", &notification);
+    let payload = bytes::Bytes::from(payload_bytes);
+
+    let parsed = crate::nats::ParsedClientSubject {
+        session_id,
+        method: ClientMethod::ElicitationComplete,
+    };
+
+    let bridge = make_bridge(nats.clone());
+    let ctx = DispatchContext {
+        nats: &nats,
+        client: &client,
+        bridge: &bridge,
+    };
+    dispatch_client_method(
+        "acp.session.sess-1.client.elicitation.complete",
+        parsed,
+        &headers,
+        payload,
+        None,
+        &ctx,
+    )
+    .await;
+
+    assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
 async fn process_message_invalid_subject_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());

@@ -50,6 +50,30 @@ fn parse_agent_session_list() {
 }
 
 #[test]
+fn parse_agent_providers_list() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.list").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersList)
+    );
+}
+
+#[test]
+fn parse_agent_providers_set() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.set").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersSet)
+    );
+}
+
+#[test]
+fn parse_agent_providers_disable() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.disable").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersDisable)
+    );
+}
+
+#[test]
 fn parse_agent_ext() {
     assert_eq!(
         parse_agent_subject("acp.agent.ext.my_tool").unwrap(),
@@ -246,6 +270,20 @@ fn parse_client_terminal_wait() {
     let parsed = parse_client_subject("acp.session.s1.client.terminal.wait_for_exit").unwrap();
     assert_eq!(parsed.session_id.as_str(), "s1");
     assert_eq!(parsed.method, ClientMethod::TerminalWaitForExit);
+}
+
+#[test]
+fn parse_client_elicitation_create() {
+    let parsed = parse_client_subject("acp.session.s1.client.elicitation.create").unwrap();
+    assert_eq!(parsed.session_id.as_str(), "s1");
+    assert_eq!(parsed.method, ClientMethod::ElicitationCreate);
+}
+
+#[test]
+fn parse_client_elicitation_complete() {
+    let parsed = parse_client_subject("acp.session.s1.client.elicitation.complete").unwrap();
+    assert_eq!(parsed.session_id.as_str(), "s1");
+    assert_eq!(parsed.method, ClientMethod::ElicitationComplete);
 }
 
 #[test]

@@ -3,11 +3,12 @@ use agent_client_protocol::Error;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, ClientCapabilities, ClientNesCapabilities, ConfigOptionUpdate, ContentBlock, ContentChunk,
-    ElicitationCapabilities, ElicitationFormCapabilities, InitializeRequest, InitializeResponse, LoadSessionRequest,
-    MessageId, NesCapabilities, NewSessionRequest, PlanEntry, PlanEntryPriority, PlanEntryStatus, PlanId, PlanRemoved,
-    PlanUpdate, PlanUpdateContent, PositionEncodingKind, SessionConfigId, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigOptionValue, SessionInfoUpdate, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, UsageUpdate,
+    CreateElicitationRequest, ElicitationCapabilities, ElicitationFormCapabilities, ElicitationFormMode,
+    ElicitationSchema, ElicitationSessionScope, EnumOption, InitializeRequest, InitializeResponse, LoadSessionRequest,
+    McpCapabilities, McpServer, McpServerAcp, MessageId, NesCapabilities, NewSessionRequest, PlanEntry,
+    PlanEntryPriority, PlanEntryStatus, PlanId, PlanRemoved, PlanUpdate, PlanUpdateContent, PositionEncodingKind,
+    SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue, SessionInfoUpdate,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StringPropertySchema, UsageUpdate,
 };
 use std::path::PathBuf;
 
@@ -248,4 +249,68 @@ fn set_session_config_option_request_model_config_category_option_survives_round
 
     assert_eq!(decoded.config_id, SessionConfigId::new("temperature"));
     assert_eq!(option.category, Some(SessionConfigOptionCategory::ModelConfig));
+}
+
+#[test]
+fn elicitation_create_enum_option_descriptions_survive_round_trip() {
+    let schema = ElicitationSchema::new().property(
+        "priority",
+        StringPropertySchema::new().one_of(vec![
+            EnumOption::new("low", "Low").description("Handle when convenient"),
+            EnumOption::new("high", "High").description("Handle immediately"),
+        ]),
+        true,
+    );
+    let mode = ElicitationFormMode::new(ElicitationSessionScope::new("s1"), schema);
+    let request = CreateElicitationRequest::new(mode, "Select a priority");
+
+    let encoded = encode_request("elicitation/create", RequestId::Number(1), &request).unwrap();
+    let decoded: CreateElicitationRequest =
+        decode_request_params("elicitation/create", &encoded.headers, &encoded.body).unwrap();
+
+    match decoded.mode {
+        agent_client_protocol::schema::v1::ElicitationMode::Form(form) => {
+            match form.requested_schema.properties.get("priority") {
+                Some(agent_client_protocol::schema::v1::ElicitationPropertySchema::String(prop)) => {
+                    let options = prop.one_of.clone().expect("expected oneOf options");
+                    assert_eq!(options.len(), 2);
+                    assert_eq!(options[0].description.as_deref(), Some("Handle when convenient"));
+                    assert_eq!(options[1].description.as_deref(), Some("Handle immediately"));
+                }
+                other => panic!("expected String property schema, got {other:?}"),
+            }
+        }
+        other => panic!("expected ElicitationMode::Form, got {other:?}"),
+    }
+}
+
+#[test]
+fn new_session_request_mcp_over_acp_server_survives_round_trip() {
+    let request = NewSessionRequest::new("/workspace").mcp_servers(vec![McpServer::Acp(McpServerAcp::new(
+        "project-tools",
+        "project-tools-id",
+    ))]);
+
+    let encoded = encode_request("session/new", RequestId::Number(1), &request).unwrap();
+    let decoded: NewSessionRequest = decode_request_params("session/new", &encoded.headers, &encoded.body).unwrap();
+
+    match decoded.mcp_servers.first() {
+        Some(McpServer::Acp(server)) => {
+            assert_eq!(server.name, "project-tools");
+            assert_eq!(server.server_id, "project-tools-id".into());
+        }
+        other => panic!("expected McpServer::Acp, got {other:?}"),
+    }
+}
+
+#[test]
+fn initialize_response_mcp_over_acp_capability_survives_round_trip() {
+    let response = InitializeResponse::new(ProtocolVersion::LATEST)
+        .agent_capabilities(AgentCapabilities::new().mcp_capabilities(McpCapabilities::new().acp(true)));
+
+    let encoded = encode_success(ResponseId::Number(1), &response).unwrap();
+    let decoded: Result<InitializeResponse, Error> = decode_response(&encoded.headers, &encoded.body).unwrap();
+    let decoded = decoded.unwrap();
+
+    assert!(decoded.agent_capabilities.mcp_capabilities.acp);
 }

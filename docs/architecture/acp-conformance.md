@@ -11,7 +11,7 @@ This document is the single source of truth for where this repository stands rel
 | Bundled schema (effective spec level) | 1.4.0 (plus direct `agent-client-protocol-schema` dependency for schema-only unstable flags) |
 | Latest upstream SDK at last review | 1.2.0 (2026-07-07) |
 | Latest upstream schema at last review | 1.4.0 (2026-07-06) |
-| Last reviewed | 2026-07-07 |
+| Last reviewed | 2026-07-08 |
 
 Upstream repositories: [spec/schema](https://github.com/agentclientprotocol/agent-client-protocol), [Rust SDK](https://github.com/agentclientprotocol/rust-sdk).
 
@@ -37,6 +37,9 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `session/new` | stable | implemented | includes `additionalDirectories` |
 | `session/load` | stable | implemented | includes `additionalDirectories` |
 | `session/list` | stable | implemented | |
+| `providers/list` | unstable (0.11.7) | unwired | bridge-owned `AgentHandler::list_providers` and NATS subject routing (`providers.list`) implemented and tested; the pinned SDK's byte-stream boundary cannot dispatch it because `agent-client-protocol` 1.2.0 has no `unstable_llm_providers` Cargo feature and omits the Providers variants from its `ClientRequest` `JsonRpcRequest` enum entirely, unlike elicitation and MCP-over-ACP; blocked on upstream SDK support |
+| `providers/set` | unstable (0.11.7) | unwired | see `providers/list`; `AgentHandler::set_provider` and NATS subject routing (`providers.set`) implemented and tested |
+| `providers/disable` | unstable (0.11.7) | unwired | see `providers/list`; `AgentHandler::disable_provider` and NATS subject routing (`providers.disable`) implemented and tested |
 | `session/prompt` | stable | implemented | |
 | `session/cancel` (notification) | stable | implemented | |
 | `session/set_mode` | stable | implemented | |
@@ -62,7 +65,8 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `terminal/release` | stable | implemented | |
 | `terminal/wait_for_exit` | stable | implemented | |
 | `terminal/kill` | stable | implemented | |
-| Elicitation requests | unstable | capabilities implemented | flag enabled, capability fields round-trip; the 0.10.4 SDK trait surface has no elicitation methods (SDK support landed in 0.14.0), full wiring lands with SDK 1.x in Phase 4 of PLAN.md |
+| `elicitation/create` | unstable | implemented | `unstable_elicitation` SDK flag; routed both through the bridge-owned `ClientHandler::elicitation_create` and the SDK byte-stream boundary (`AgentRequest::CreateElicitationRequest`); `ElicitationScope::Request` (pre-session, no session id) is not routable since all NATS client subjects and `NatsClientProxy` construction are session-scoped |
+| `elicitation/complete` (notification) | unstable | implemented | `unstable_elicitation` SDK flag; routed as a `ClientHandler::elicitation_complete` notification |
 | `ext/*` | stable | implemented | passthrough, plus bullard-specific `ext/session/prompt_response` |
 
 ### Payload-level capabilities
@@ -77,9 +81,9 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | `model_config` option category | stable (1.1.0) | implemented | round-trip tested |
 | NES (next edit suggestions) | unstable | capabilities implemented | capability payloads round-trip via schema-level flag; NES document sync methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
 | Plan operations | unstable (0.13.4) | implemented | `PlanUpdate`/`PlanRemoved` round-trip tested via schema-level flag |
-| Providers | unstable (0.11.7) | unrepresentable | requires SDK 1.x; Phase 4 |
-| MCP-over-ACP message types | unstable (0.13.0) | unrepresentable | requires SDK 1.x; Phase 4 |
-| Elicitation enum option descriptions | unstable (1.4.0) | unrepresentable | requires SDK 1.x; Phase 4 |
+| Providers | unstable (0.11.7) | unwired | see `providers/list`/`providers/set`/`providers/disable` rows above |
+| MCP-over-ACP message types | unstable (0.13.0) | implemented | `McpServer::Acp` and `McpCapabilities.acp` payload round-trip tested via schema-level and `unstable_mcp_over_acp` SDK flag; the `mcp/connect`, `mcp/message`, `mcp/disconnect` RPC methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
+| Elicitation enum option descriptions | unstable (1.4.0) | implemented | `EnumOption` descriptions on `StringPropertySchema.one_of` round-trip tested |
 | Protocol v2 | unstable, heavy churn | watch-only | adopt at preview per PLAN.md Phase 4 |
 
 ## Upgrade ritual

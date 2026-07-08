@@ -1,6 +1,7 @@
 use agent_client_protocol::schema::v1::{
-    CreateTerminalRequest, CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest,
-    KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
+    CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest, KillTerminalResponse,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TerminalOutputRequest,
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
@@ -49,6 +50,14 @@ pub trait ClientHandler {
     }
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
+        Err(Error::method_not_found())
+    }
+
+    async fn elicitation_create(&self, _args: CreateElicitationRequest) -> Result<CreateElicitationResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn elicitation_complete(&self, _args: CompleteElicitationNotification) -> Result<()> {
         Err(Error::method_not_found())
     }
 }

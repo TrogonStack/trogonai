@@ -102,14 +102,15 @@ The 0.11.0 release was a full SDK redesign. Official guide: `agentclientprotocol
 
 Per the opt-in policy, adopt every unstable feature the 1.x SDK exposes. Each one gets its flag enabled, subject mapping where it adds methods, round-trip tests, and a conformance matrix row. Opting out requires a written rationale.
 
-- [ ] Elicitation enum option descriptions (schema 1.4.0).
-- [ ] Plan operations (schema 0.13.4).
-- [ ] Providers (schema 0.11.7).
-- [ ] MCP-over-ACP message types (schema 0.13.0).
-- [ ] Session fork and auth methods (carried over from our current flags, under their 1.x names).
-- [ ] New unstable features as upstream ships them: the freshness CI job from Phase 0 is the trigger; each new flag becomes a task here.
-- [ ] Protocol v2: heavy `unstable-v2` churn in every recent schema release. Track it actively and plan early adoption once upstream marks it preview; until then it is watch-only since the wire format is still changing under our feet.
-- [ ] Revisit the typed-decode-vs-passthrough architecture: consider lossless forwarding (raw `serde_json::Value` passthrough with typed validation only where the bridge needs to read fields) so future spec additions degrade to "forwarded" instead of "dropped". If adopted, record as an ADR; this materially reduces the cost of every future spec bump.
+- [x] Elicitation method routing (`elicitation/create`, `elicitation/complete`): routed through the bridge-owned `ClientHandler` and the SDK byte-stream boundary now that the 1.x SDK trait surface exists; `ElicitationScope::Request` (pre-session) is unroutable since bridge subjects are session-scoped.
+- [x] Elicitation enum option descriptions (schema 1.4.0): `EnumOption` descriptions on `StringPropertySchema.one_of` round-trip tested.
+- [x] Plan operations (schema 0.13.4): enabled via the schema-level flag; `PlanUpdate`/`PlanRemoved` round-trip tested (landed with Phase 3).
+- [x] Providers (schema 0.11.7): `AgentHandler::list_providers/set_provider/disable_provider` and NATS subject routing implemented and tested; the pinned SDK's byte-stream boundary cannot dispatch these methods because `agent-client-protocol` 1.2.0 has no `unstable_llm_providers` Cargo feature and omits the Providers variants from its `ClientRequest` enum entirely, unlike elicitation and MCP-over-ACP; blocked on upstream SDK support.
+- [x] MCP-over-ACP message types (schema 0.13.0): `McpServer::Acp` and `McpCapabilities.acp` payload round-trip tested; the `mcp/connect`, `mcp/message`, `mcp/disconnect` RPC methods are not routed (no runner demand yet).
+- [x] Session fork and auth methods: `unstable_session_fork` and `unstable_auth_methods` enabled under their 1.x names; fork is routed end to end and auth method shapes ride `authenticate`/`initialize` payloads.
+- [x] New unstable features as upstream ships them: standing process established. The weekly freshness workflow files a drift issue embedding the upgrade ritual, and the ritual mandates enabling and wiring each new flag.
+- [x] Protocol v2: recorded as watch-only in the conformance matrix with the adopt-at-preview trigger; the freshness workflow surfaces every schema release where it churns.
+- [x] Typed-decode-vs-passthrough evaluated and decided: keep typed decode. Rationale and re-evaluation triggers recorded in ADR 0018.
 
 ## Sequencing and dependencies
 

@@ -1,10 +1,11 @@
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    DeleteSessionRequest, DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
+    ListProvidersRequest, ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SetProviderRequest, SetProviderResponse,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use agent_client_protocol::{Error, Result};
 
@@ -67,6 +68,18 @@ pub trait AgentHandler {
     }
 
     async fn ext_notification(&self, _args: ExtNotification) -> Result<()> {
+        Err(Error::method_not_found())
+    }
+
+    async fn list_providers(&self, _args: ListProvidersRequest) -> Result<ListProvidersResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn set_provider(&self, _args: SetProviderRequest) -> Result<SetProviderResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn disable_provider(&self, _args: DisableProviderRequest) -> Result<DisableProviderResponse> {
         Err(Error::method_not_found())
     }
 }

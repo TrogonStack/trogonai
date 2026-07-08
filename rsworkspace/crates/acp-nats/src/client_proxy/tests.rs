@@ -1,7 +1,8 @@
 use super::*;
 use crate::agent::test_support::set_wire_json_response;
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
+    ContentBlock, ContentChunk, ElicitationAcceptAction, ElicitationFormMode, ElicitationSchema,
+    ElicitationSessionScope, ReadTextFileResponse, RequestPermissionOutcome, RequestPermissionResponse,
     SessionNotification, SessionUpdate, ToolCallUpdate, ToolCallUpdateFields,
 };
 use trogon_nats::AdvancedMockNatsClient;
@@ -161,6 +162,37 @@ async fn notification_returns_error_when_publish_fails() {
 
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().code, ErrorCode::InternalError);
+}
+
+#[tokio::test]
+async fn elicitation_create_publishes_to_correct_subject() {
+    let nats = AdvancedMockNatsClient::new();
+    let response = CreateElicitationResponse::new(ElicitationAcceptAction::new());
+    set_wire_json_response(&nats, "acp.session.s1.client.elicitation.create", &response);
+
+    let p = proxy(nats.clone());
+    let mode = ElicitationFormMode::new(ElicitationSessionScope::new("s1"), ElicitationSchema::new());
+    let result = p
+        .elicitation_create(CreateElicitationRequest::new(mode, "please respond"))
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn elicitation_complete_publishes_to_correct_subject() {
+    let nats = AdvancedMockNatsClient::new();
+    let p = proxy(nats.clone());
+
+    let result = p
+        .elicitation_complete(CompleteElicitationNotification::new("elicitation-1"))
+        .await;
+
+    assert!(result.is_ok());
+    assert_eq!(
+        nats.published_messages(),
+        vec!["acp.session.s1.client.elicitation.complete"]
+    );
 }
 
 #[test]

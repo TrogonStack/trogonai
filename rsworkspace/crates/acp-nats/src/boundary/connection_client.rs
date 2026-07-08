@@ -1,7 +1,8 @@
 use crate::client_handler::ClientHandler;
 use agent_client_protocol::schema::v1::{
-    CreateTerminalRequest, CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest,
-    KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
+    CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest, KillTerminalResponse,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TerminalOutputRequest,
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
@@ -77,5 +78,13 @@ impl ClientHandler for ConnectionClient {
         let wire_method = format!("_{}", args.method);
         self.cx
             .send_notification(UntypedMessage::new(&wire_method, args.params)?)
+    }
+
+    async fn elicitation_create(&self, args: CreateElicitationRequest) -> Result<CreateElicitationResponse> {
+        self.cx.send_request(args).block_task().await
+    }
+
+    async fn elicitation_complete(&self, args: CompleteElicitationNotification) -> Result<()> {
+        self.cx.send_notification(args)
     }
 }

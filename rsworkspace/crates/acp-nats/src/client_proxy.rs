@@ -5,10 +5,11 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, headers_with_trace_
 use crate::session_id::AcpSessionId;
 use crate::wire::{encode_notification, merge_jsonrpc_headers};
 use agent_client_protocol::schema::v1::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
-    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, TerminalOutputRequest, TerminalOutputResponse,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
+    CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Error, ErrorCode, Result};
 use std::time::Duration;
@@ -120,6 +121,16 @@ impl<N: RequestClient + PublishClient + FlushClient + Sync> ClientHandler for Na
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
         let s = client_ops::TerminalKillSubject::new(self.prefix(), self.session_id());
         self.request(&s, "terminal/kill", &args).await
+    }
+
+    async fn elicitation_create(&self, args: CreateElicitationRequest) -> Result<CreateElicitationResponse> {
+        let s = client_ops::ElicitationCreateSubject::new(self.prefix(), self.session_id());
+        self.request(&s, "elicitation/create", &args).await
+    }
+
+    async fn elicitation_complete(&self, args: CompleteElicitationNotification) -> Result<()> {
+        let s = client_ops::ElicitationCompleteSubject::new(self.prefix(), self.session_id());
+        self.notify(&s, "elicitation/complete", &args).await
     }
 }
 

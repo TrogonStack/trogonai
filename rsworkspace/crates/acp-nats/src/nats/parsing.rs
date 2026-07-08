@@ -9,6 +9,9 @@ pub enum GlobalAgentMethod {
     Logout,
     SessionNew,
     SessionList,
+    ProvidersList,
+    ProvidersSet,
+    ProvidersDisable,
     Ext(ExtMethodName),
 }
 
@@ -33,6 +36,9 @@ impl GlobalAgentMethod {
             Self::Logout => "logout".to_string(),
             Self::SessionNew => "session.new".to_string(),
             Self::SessionList => "session.list".to_string(),
+            Self::ProvidersList => "providers.list".to_string(),
+            Self::ProvidersSet => "providers.set".to_string(),
+            Self::ProvidersDisable => "providers.disable".to_string(),
             Self::Ext(name) => format!("ext.{}", name.as_str()),
         }
     }
@@ -44,6 +50,9 @@ impl GlobalAgentMethod {
             "logout" => Some(Self::Logout),
             "session.new" => Some(Self::SessionNew),
             "session.list" => Some(Self::SessionList),
+            "providers.list" => Some(Self::ProvidersList),
+            "providers.set" => Some(Self::ProvidersSet),
+            "providers.disable" => Some(Self::ProvidersDisable),
             other => {
                 let ext_name = other.strip_prefix("ext.")?;
                 Some(Self::Ext(ExtMethodName::new(ext_name).ok()?))
@@ -131,6 +140,8 @@ pub enum ClientMethod {
     TerminalRelease,
     TerminalWaitForExit,
     ExtSessionPromptResponse,
+    ElicitationCreate,
+    ElicitationComplete,
     Ext(String),
 }
 
@@ -147,6 +158,8 @@ impl ClientMethod {
             Self::TerminalRelease => "terminal/release".to_string(),
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
             Self::ExtSessionPromptResponse => "ext/session/prompt_response".to_string(),
+            Self::ElicitationCreate => "elicitation/create".to_string(),
+            Self::ElicitationComplete => "elicitation/complete".to_string(),
             Self::Ext(name) => format!("ext/{name}"),
         }
     }
@@ -163,6 +176,8 @@ impl ClientMethod {
             "terminal.release" => Some(Self::TerminalRelease),
             "terminal.wait_for_exit" => Some(Self::TerminalWaitForExit),
             "ext.session.prompt_response" => Some(Self::ExtSessionPromptResponse),
+            "elicitation.create" => Some(Self::ElicitationCreate),
+            "elicitation.complete" => Some(Self::ElicitationComplete),
             other => {
                 let ext_name = other.strip_prefix(EXT_SUBJECT_PREFIX)?;
                 ExtMethodName::new(ext_name).ok()?;

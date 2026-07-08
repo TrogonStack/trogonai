@@ -11,11 +11,13 @@ use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    DeleteSessionRequest, DeleteSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
-    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    DeleteSessionRequest, DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
+    ListProvidersRequest, ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetProviderRequest,
+    SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -26,8 +28,8 @@ use trogon_std::time::GetElapsed;
 
 use super::{
     authenticate, cancel, close_session, delete_session, ext_method, ext_notification, fork_session, initialize,
-    js_request, list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
-    set_session_mode,
+    js_request, list_sessions, load_session, logout, new_session, prompt, providers_disable, providers_list,
+    providers_set, resume_session, set_session_config_option, set_session_mode,
 };
 
 use crate::constants::SESSION_READY_DELAY;
@@ -249,5 +251,17 @@ where
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
         ext_notification::handle(self, args).await
+    }
+
+    async fn list_providers(&self, args: ListProvidersRequest) -> Result<ListProvidersResponse> {
+        providers_list::handle(self, args).await
+    }
+
+    async fn set_provider(&self, args: SetProviderRequest) -> Result<SetProviderResponse> {
+        providers_set::handle(self, args).await
+    }
+
+    async fn disable_provider(&self, args: DisableProviderRequest) -> Result<DisableProviderResponse> {
+        providers_disable::handle(self, args).await
     }
 }

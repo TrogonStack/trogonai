@@ -1,3 +1,5 @@
+mod elicitation_complete;
+mod elicitation_create;
 mod fs_read_text_file;
 mod fs_write_text_file;
 mod session_request_permission;
@@ -8,6 +10,8 @@ mod terminal_output;
 mod terminal_release;
 mod terminal_wait_for_exit;
 
+pub use elicitation_complete::ElicitationCompleteSubject;
+pub use elicitation_create::ElicitationCreateSubject;
 pub use fs_read_text_file::FsReadTextFileSubject;
 pub use fs_write_text_file::FsWriteTextFileSubject;
 pub use session_request_permission::SessionRequestPermissionSubject;

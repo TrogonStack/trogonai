@@ -381,6 +381,26 @@ async fn dispatch_list_sessions_publishes_response() {
 }
 
 #[tokio::test]
+async fn dispatch_providers_list_publishes_response() {
+    assert_dispatch_method_not_found("acp.agent.providers.list", &ListProvidersRequest::new()).await;
+}
+
+#[tokio::test]
+async fn dispatch_providers_set_publishes_response() {
+    let request = SetProviderRequest::new(
+        "anthropic",
+        agent_client_protocol::schema::v1::LlmProtocol::Anthropic,
+        "https://api.anthropic.com",
+    );
+    assert_dispatch_method_not_found("acp.agent.providers.set", &request).await;
+}
+
+#[tokio::test]
+async fn dispatch_providers_disable_publishes_response() {
+    assert_dispatch_method_not_found("acp.agent.providers.disable", &DisableProviderRequest::new("anthropic")).await;
+}
+
+#[tokio::test]
 async fn dispatch_set_session_mode_publishes_response() {
     assert_dispatch_method_not_found(
         "acp.session.s1.agent.set_mode",
