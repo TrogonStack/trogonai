@@ -5,10 +5,10 @@ use crate::config::ResolvedConfig;
 use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-    crate::commands::credential_lifecycle_stream::provision(client).await?;
+    crate::credential::stream::provision(client).await?;
     info!(
-        stream = crate::commands::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
-        "credential lifecycle stream provisioned"
+        stream = crate::credential::stream::CREDENTIAL_STREAM,
+        "credential stream provisioned"
     );
 
     // Discord is gateway-WebSocket, not a webhook source; it doesn't fit `SourcePlugin`.
@@ -22,10 +22,8 @@ pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &Resolved
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::credential_lifecycle_stream::{
-        CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX, CREDENTIAL_LIFECYCLE_STREAM,
-    };
     use crate::config::load;
+    use crate::credential::stream::{CREDENTIAL_EVENT_SUBJECT_PREFIX, CREDENTIAL_STREAM};
     use std::io::Write;
     use trogon_nats::jetstream::MockJetStreamContext;
 
@@ -78,7 +76,7 @@ client_secret = "sentry-client-secret"
     }
 
     #[tokio::test]
-    async fn provision_no_sources_creates_credential_lifecycle_stream() {
+    async fn provision_no_sources_creates_credential_stream() {
         let cfg = load(None).expect("load failed");
         let js = MockJetStreamContext::new();
 
@@ -86,10 +84,10 @@ client_secret = "sentry-client-secret"
 
         let streams = js.created_streams();
         assert_eq!(streams.len(), 1);
-        assert_eq!(streams[0].name, CREDENTIAL_LIFECYCLE_STREAM);
+        assert_eq!(streams[0].name, CREDENTIAL_STREAM);
         assert_eq!(
             streams[0].subjects,
-            vec![format!("{CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX}.>")]
+            vec![format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.>")]
         );
         assert!(streams[0].allow_atomic_publish);
     }
@@ -122,7 +120,7 @@ webhook_secret = "underscore-secret"
 
         let streams = js.created_streams();
         assert_eq!(streams.len(), 3);
-        assert_eq!(streams[0].name, CREDENTIAL_LIFECYCLE_STREAM);
+        assert_eq!(streams[0].name, CREDENTIAL_STREAM);
         assert_eq!(streams[1].name, "GITHUB_ACME-MAIN");
         assert_eq!(streams[1].subjects, vec!["github-acme-main.>"]);
         assert_eq!(streams[2].name, "GITHUB_ACME_MAIN");

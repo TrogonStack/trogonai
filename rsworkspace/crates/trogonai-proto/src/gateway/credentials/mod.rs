@@ -18,5 +18,5 @@ pub mod v1 {
     pub use crate::r#gen::trogonai::gateway::credentials::v1::*;
 }
 
-pub use state_v1::__buffa::oneof::credential_lifecycle_state_snapshot::State as CredentialLifecycleStateSnapshotCase;
-pub use v1::__buffa::oneof::credential_lifecycle_event::Event as CredentialLifecycleEventCase;
+pub use state_v1::__buffa::oneof::credential_state_snapshot::State as CredentialStateSnapshotCase;
+pub use v1::__buffa::oneof::credential_event::Event as CredentialEventCase;

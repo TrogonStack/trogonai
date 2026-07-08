@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
 
-use super::domain::{CredentialId, CredentialKind, CredentialLifecycleEvent, CredentialOwnerId, SourceKind};
-use super::state::{CredentialLifecycleDecideError, CredentialLifecycleEvolveError, CredentialLifecycleState};
+use super::super::domain::{CredentialEvent, CredentialId, CredentialKind, CredentialOwnerId, SourceKind};
+use super::super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialWrite {
@@ -45,10 +45,10 @@ impl RequestCredentialWrite {
 
 impl Decider for RequestCredentialWrite {
     type StreamId = str;
-    type State = CredentialLifecycleState;
-    type Event = CredentialLifecycleEvent;
-    type DecideError = CredentialLifecycleDecideError;
-    type EvolveError = CredentialLifecycleEvolveError;
+    type State = CredentialState;
+    type Event = CredentialEvent;
+    type DecideError = CredentialDecideError;
+    type EvolveError = CredentialEvolveError;
 
     const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
 
@@ -57,25 +57,25 @@ impl Decider for RequestCredentialWrite {
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        super::super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        super::super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         match state {
-            CredentialLifecycleState::Missing => Ok(Decision::event(CredentialLifecycleEvent::WriteRequested {
+            CredentialState::Missing => Ok(Decision::event(CredentialEvent::WriteRequested {
                 credential_id: command.credential_id.clone(),
                 owner_id: command.owner_id.clone(),
                 source: command.source,
                 kind: command.kind,
             })),
-            CredentialLifecycleState::Revoked(_) => Err(CredentialLifecycleDecideError::Revoked {
+            CredentialState::Revoked(_) => Err(CredentialDecideError::Revoked {
                 credential_id: command.credential_id.clone(),
             }),
-            _ => Err(CredentialLifecycleDecideError::AlreadyExists {
+            _ => Err(CredentialDecideError::AlreadyExists {
                 credential_id: command.credential_id.clone(),
             }),
         }
@@ -85,5 +85,5 @@ impl Decider for RequestCredentialWrite {
 impl CommandSnapshotPolicy for RequestCredentialWrite {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

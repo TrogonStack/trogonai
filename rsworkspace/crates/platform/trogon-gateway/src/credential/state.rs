@@ -1,10 +1,10 @@
 use super::domain::{
-    CredentialFailureReason, CredentialId, CredentialKind, CredentialLifecycleEvent, CredentialMetadata,
-    CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
+    CredentialEvent, CredentialFailureReason, CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId,
+    CredentialRef, CredentialStatus, SourceKind,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CredentialLifecycleState {
+pub enum CredentialState {
     Missing,
     PendingWrite(PendingCredentialWrite),
     Active(ActiveCredential),
@@ -88,7 +88,7 @@ impl RevokedCredential {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum CredentialLifecycleDecideError {
+pub enum CredentialDecideError {
     #[error("credential '{credential_id}' already exists")]
     AlreadyExists { credential_id: CredentialId },
     #[error("credential '{credential_id}' was revoked")]
@@ -103,7 +103,7 @@ pub enum CredentialLifecycleDecideError {
     CredentialRotationAlreadyPending { credential_id: CredentialId },
     #[error("credential '{credential_id}' rotation is not pending")]
     CredentialRotationNotPending { credential_id: CredentialId },
-    #[error("credential ref does not match lifecycle stream: expected '{expected}', got '{actual}'")]
+    #[error("credential ref does not match credential stream: expected '{expected}', got '{actual}'")]
     CredentialRefMismatch {
         expected: CredentialId,
         actual: CredentialId,
@@ -115,8 +115,8 @@ pub enum CredentialLifecycleDecideError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum CredentialLifecycleEvolveError {
-    #[error("credential write was requested after lifecycle already started")]
+pub enum CredentialEvolveError {
+    #[error("credential write was requested after write already started")]
     WriteRequestedAfterStart,
     #[error("credential write failure was recorded without a pending write")]
     WriteFailedWithoutPendingWrite,
@@ -130,7 +130,7 @@ pub enum CredentialLifecycleEvolveError {
     RotatedWithoutPendingRotation,
     #[error("credential was revoked without an active credential")]
     RevokedWithoutActiveCredential,
-    #[error("event credential ref does not match lifecycle stream: expected '{expected}', got '{actual}'")]
+    #[error("event credential ref does not match credential stream: expected '{expected}', got '{actual}'")]
     CredentialRefMismatch {
         expected: CredentialId,
         actual: CredentialId,
@@ -141,117 +141,108 @@ pub enum CredentialLifecycleEvolveError {
     RotationVersionNotNewer,
 }
 
-pub fn initial_state() -> CredentialLifecycleState {
-    CredentialLifecycleState::Missing
+pub fn initial_state() -> CredentialState {
+    CredentialState::Missing
 }
 
-pub fn evolve(
-    state: CredentialLifecycleState,
-    event: &CredentialLifecycleEvent,
-) -> Result<CredentialLifecycleState, CredentialLifecycleEvolveError> {
+pub fn evolve(state: CredentialState, event: &CredentialEvent) -> Result<CredentialState, CredentialEvolveError> {
     match event {
-        CredentialLifecycleEvent::WriteRequested {
+        CredentialEvent::WriteRequested {
             credential_id,
             owner_id,
             source,
             kind,
         } => match state {
-            CredentialLifecycleState::Missing => Ok(CredentialLifecycleState::PendingWrite(PendingCredentialWrite {
+            CredentialState::Missing => Ok(CredentialState::PendingWrite(PendingCredentialWrite {
                 credential_id: credential_id.clone(),
                 owner_id: owner_id.clone(),
                 source: *source,
                 kind: *kind,
             })),
-            _ => Err(CredentialLifecycleEvolveError::WriteRequestedAfterStart),
+            _ => Err(CredentialEvolveError::WriteRequestedAfterStart),
         },
-        CredentialLifecycleEvent::WriteFailed { credential_id, reason } => match state {
-            CredentialLifecycleState::PendingWrite(pending) if &pending.credential_id == credential_id => {
-                Ok(CredentialLifecycleState::WriteFailed(FailedCredentialWrite {
+        CredentialEvent::WriteFailed { credential_id, reason } => match state {
+            CredentialState::PendingWrite(pending) if &pending.credential_id == credential_id => {
+                Ok(CredentialState::WriteFailed(FailedCredentialWrite {
                     credential_id: credential_id.clone(),
                     reason: reason.clone(),
                 }))
             }
-            CredentialLifecycleState::PendingWrite(pending) => {
-                Err(CredentialLifecycleEvolveError::CredentialRefMismatch {
-                    expected: pending.credential_id,
-                    actual: credential_id.clone(),
-                })
-            }
-            _ => Err(CredentialLifecycleEvolveError::WriteFailedWithoutPendingWrite),
+            CredentialState::PendingWrite(pending) => Err(CredentialEvolveError::CredentialRefMismatch {
+                expected: pending.credential_id,
+                actual: credential_id.clone(),
+            }),
+            _ => Err(CredentialEvolveError::WriteFailedWithoutPendingWrite),
         },
-        CredentialLifecycleEvent::Activated { metadata } => match state {
-            CredentialLifecycleState::PendingWrite(pending) => {
+        CredentialEvent::Activated { metadata } => match state {
+            CredentialState::PendingWrite(pending) => {
                 validate_activation_metadata_for_evolve(metadata)?;
                 validate_ref_matches_pending_for_evolve(metadata.reference(), &pending)?;
-                Ok(CredentialLifecycleState::Active(ActiveCredential {
+                Ok(CredentialState::Active(ActiveCredential {
                     metadata: metadata.clone(),
                     previous_versions: Vec::new(),
                 }))
             }
-            _ => Err(CredentialLifecycleEvolveError::ActivatedWithoutPendingWrite),
+            _ => Err(CredentialEvolveError::ActivatedWithoutPendingWrite),
         },
-        CredentialLifecycleEvent::RotationRequested { credential_ref } => match state {
-            CredentialLifecycleState::Active(active) => {
+        CredentialEvent::RotationRequested { credential_ref } => match state {
+            CredentialState::Active(active) => {
                 validate_same_ref_for_evolve(active.credential_ref(), credential_ref)?;
-                Ok(CredentialLifecycleState::RotationPending(RotationPendingCredential {
-                    active,
-                }))
+                Ok(CredentialState::RotationPending(RotationPendingCredential { active }))
             }
-            _ => Err(CredentialLifecycleEvolveError::RotationRequestedWithoutActiveCredential),
+            _ => Err(CredentialEvolveError::RotationRequestedWithoutActiveCredential),
         },
-        CredentialLifecycleEvent::RotationFailed { credential_ref, .. } => match state {
-            CredentialLifecycleState::RotationPending(rotation) => {
+        CredentialEvent::RotationFailed { credential_ref, .. } => match state {
+            CredentialState::RotationPending(rotation) => {
                 validate_same_ref_for_evolve(rotation.active.credential_ref(), credential_ref)?;
-                Ok(CredentialLifecycleState::Active(rotation.active))
+                Ok(CredentialState::Active(rotation.active))
             }
-            _ => Err(CredentialLifecycleEvolveError::RotationFailedWithoutPendingRotation),
+            _ => Err(CredentialEvolveError::RotationFailedWithoutPendingRotation),
         },
-        CredentialLifecycleEvent::Rotated {
+        CredentialEvent::Rotated {
             previous_credential_ref,
             metadata,
         } => match state {
-            CredentialLifecycleState::RotationPending(rotation) => {
+            CredentialState::RotationPending(rotation) => {
                 validate_same_ref_for_evolve(rotation.active.credential_ref(), previous_credential_ref)?;
                 validate_activation_metadata_for_evolve(metadata)?;
                 validate_same_logical_ref_for_evolve(previous_credential_ref, metadata.reference())?;
                 validate_newer_version_for_evolve(previous_credential_ref, metadata.reference())?;
                 let mut previous_versions = rotation.active.previous_versions;
                 previous_versions.push(previous_credential_ref.clone());
-                Ok(CredentialLifecycleState::Active(ActiveCredential {
+                Ok(CredentialState::Active(ActiveCredential {
                     metadata: metadata.clone(),
                     previous_versions,
                 }))
             }
-            _ => Err(CredentialLifecycleEvolveError::RotatedWithoutPendingRotation),
+            _ => Err(CredentialEvolveError::RotatedWithoutPendingRotation),
         },
-        CredentialLifecycleEvent::Revoked { credential_ref } => match state {
-            CredentialLifecycleState::Active(active) => {
+        CredentialEvent::Revoked { credential_ref } => match state {
+            CredentialState::Active(active) => {
                 validate_same_ref_for_evolve(active.credential_ref(), credential_ref)?;
-                Ok(CredentialLifecycleState::Revoked(RevokedCredential {
+                Ok(CredentialState::Revoked(RevokedCredential {
                     credential_ref: credential_ref.clone(),
                 }))
             }
-            _ => Err(CredentialLifecycleEvolveError::RevokedWithoutActiveCredential),
+            _ => Err(CredentialEvolveError::RevokedWithoutActiveCredential),
         },
     }
 }
 
-pub(crate) fn validate_activation_metadata(
-    metadata: &CredentialMetadata,
-) -> Result<(), CredentialLifecycleDecideError> {
+pub(crate) fn validate_activation_metadata(metadata: &CredentialMetadata) -> Result<(), CredentialDecideError> {
     let status = metadata.status();
     if status != CredentialStatus::Active {
-        return Err(CredentialLifecycleDecideError::MetadataNotActive { status });
+        return Err(CredentialDecideError::MetadataNotActive { status });
     }
     Ok(())
 }
 
 pub(crate) fn validate_activation_metadata_for_evolve(
     metadata: &CredentialMetadata,
-) -> Result<(), CredentialLifecycleEvolveError> {
+) -> Result<(), CredentialEvolveError> {
     let status = metadata.status();
     if status != CredentialStatus::Active {
-        return Err(CredentialLifecycleEvolveError::MetadataNotActive { status });
+        return Err(CredentialEvolveError::MetadataNotActive { status });
     }
     Ok(())
 }
@@ -259,9 +250,9 @@ pub(crate) fn validate_activation_metadata_for_evolve(
 pub(crate) fn validate_ref_matches_pending(
     credential_ref: &CredentialRef,
     pending: &PendingCredentialWrite,
-) -> Result<(), CredentialLifecycleDecideError> {
+) -> Result<(), CredentialDecideError> {
     if credential_ref.id() != &pending.credential_id {
-        return Err(CredentialLifecycleDecideError::CredentialRefMismatch {
+        return Err(CredentialDecideError::CredentialRefMismatch {
             expected: pending.credential_id.clone(),
             actual: credential_ref.id().clone(),
         });
@@ -270,7 +261,7 @@ pub(crate) fn validate_ref_matches_pending(
         || credential_ref.source() != pending.source
         || credential_ref.kind() != pending.kind
     {
-        return Err(CredentialLifecycleDecideError::CredentialRefMismatch {
+        return Err(CredentialDecideError::CredentialRefMismatch {
             expected: pending.credential_id.clone(),
             actual: credential_ref.id().clone(),
         });
@@ -281,9 +272,9 @@ pub(crate) fn validate_ref_matches_pending(
 pub(crate) fn validate_ref_matches_pending_for_evolve(
     credential_ref: &CredentialRef,
     pending: &PendingCredentialWrite,
-) -> Result<(), CredentialLifecycleEvolveError> {
+) -> Result<(), CredentialEvolveError> {
     if credential_ref.id() != &pending.credential_id {
-        return Err(CredentialLifecycleEvolveError::CredentialRefMismatch {
+        return Err(CredentialEvolveError::CredentialRefMismatch {
             expected: pending.credential_id.clone(),
             actual: credential_ref.id().clone(),
         });
@@ -292,7 +283,7 @@ pub(crate) fn validate_ref_matches_pending_for_evolve(
         || credential_ref.source() != pending.source
         || credential_ref.kind() != pending.kind
     {
-        return Err(CredentialLifecycleEvolveError::CredentialRefMismatch {
+        return Err(CredentialEvolveError::CredentialRefMismatch {
             expected: pending.credential_id.clone(),
             actual: credential_ref.id().clone(),
         });
@@ -300,12 +291,9 @@ pub(crate) fn validate_ref_matches_pending_for_evolve(
     Ok(())
 }
 
-pub(crate) fn validate_same_ref(
-    expected: &CredentialRef,
-    actual: &CredentialRef,
-) -> Result<(), CredentialLifecycleDecideError> {
+pub(crate) fn validate_same_ref(expected: &CredentialRef, actual: &CredentialRef) -> Result<(), CredentialDecideError> {
     if expected != actual {
-        return Err(CredentialLifecycleDecideError::CredentialRefMismatch {
+        return Err(CredentialDecideError::CredentialRefMismatch {
             expected: expected.id().clone(),
             actual: actual.id().clone(),
         });
@@ -316,9 +304,9 @@ pub(crate) fn validate_same_ref(
 pub(crate) fn validate_same_ref_for_evolve(
     expected: &CredentialRef,
     actual: &CredentialRef,
-) -> Result<(), CredentialLifecycleEvolveError> {
+) -> Result<(), CredentialEvolveError> {
     if expected != actual {
-        return Err(CredentialLifecycleEvolveError::CredentialRefMismatch {
+        return Err(CredentialEvolveError::CredentialRefMismatch {
             expected: expected.id().clone(),
             actual: actual.id().clone(),
         });
@@ -329,13 +317,13 @@ pub(crate) fn validate_same_ref_for_evolve(
 pub(crate) fn validate_same_logical_ref(
     expected: &CredentialRef,
     actual: &CredentialRef,
-) -> Result<(), CredentialLifecycleDecideError> {
+) -> Result<(), CredentialDecideError> {
     if expected.id() != actual.id()
         || expected.owner_id() != actual.owner_id()
         || expected.source() != actual.source()
         || expected.kind() != actual.kind()
     {
-        return Err(CredentialLifecycleDecideError::CredentialRefMismatch {
+        return Err(CredentialDecideError::CredentialRefMismatch {
             expected: expected.id().clone(),
             actual: actual.id().clone(),
         });
@@ -346,13 +334,13 @@ pub(crate) fn validate_same_logical_ref(
 pub(crate) fn validate_same_logical_ref_for_evolve(
     expected: &CredentialRef,
     actual: &CredentialRef,
-) -> Result<(), CredentialLifecycleEvolveError> {
+) -> Result<(), CredentialEvolveError> {
     if expected.id() != actual.id()
         || expected.owner_id() != actual.owner_id()
         || expected.source() != actual.source()
         || expected.kind() != actual.kind()
     {
-        return Err(CredentialLifecycleEvolveError::CredentialRefMismatch {
+        return Err(CredentialEvolveError::CredentialRefMismatch {
             expected: expected.id().clone(),
             actual: actual.id().clone(),
         });
@@ -363,9 +351,9 @@ pub(crate) fn validate_same_logical_ref_for_evolve(
 pub(crate) fn validate_newer_version(
     current: &CredentialRef,
     next: &CredentialRef,
-) -> Result<(), CredentialLifecycleDecideError> {
+) -> Result<(), CredentialDecideError> {
     if next.version() <= current.version() {
-        return Err(CredentialLifecycleDecideError::RotationVersionNotNewer);
+        return Err(CredentialDecideError::RotationVersionNotNewer);
     }
     Ok(())
 }
@@ -373,9 +361,9 @@ pub(crate) fn validate_newer_version(
 pub(crate) fn validate_newer_version_for_evolve(
     current: &CredentialRef,
     next: &CredentialRef,
-) -> Result<(), CredentialLifecycleEvolveError> {
+) -> Result<(), CredentialEvolveError> {
     if next.version() <= current.version() {
-        return Err(CredentialLifecycleEvolveError::RotationVersionNotNewer);
+        return Err(CredentialEvolveError::RotationVersionNotNewer);
     }
     Ok(())
 }

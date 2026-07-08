@@ -411,13 +411,9 @@ pub const __REVOKE_CREDENTIAL_SECRET_REQUEST_JSON_ANY: ::buffa::type_registry::J
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialCommandResponse {
-    /// Field 1: `lifecycle_state`
-    #[serde(
-        rename = "lifecycleState",
-        alias = "lifecycle_state",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub lifecycle_state: ::buffa::alloc::string::String,
+    /// Field 1: `state`
+    #[serde(rename = "state", with = "::buffa::json_helpers::proto_string")]
+    pub state: ::buffa::alloc::string::String,
     /// Field 2: `stream_position`
     #[serde(
         rename = "streamPosition",
@@ -433,7 +429,7 @@ pub struct CredentialCommandResponse {
 impl ::core::fmt::Debug for CredentialCommandResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CredentialCommandResponse")
-            .field("lifecycle_state", &self.lifecycle_state)
+            .field("state", &self.state)
             .field("stream_position", &self.stream_position)
             .field("credential_ref", &self.credential_ref)
             .finish()
@@ -473,7 +469,7 @@ impl ::buffa::Message for CredentialCommandResponse {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.lifecycle_state) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.state) as u32;
         if let Some(v) = self.stream_position {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -494,7 +490,7 @@ impl ::buffa::Message for CredentialCommandResponse {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.lifecycle_state, buf);
+        ::buffa::types::put_string_field(1u32, &self.state, buf);
         if let Some(v) = self.stream_position {
             ::buffa::types::put_uint64_field(2u32, v, buf);
         }
@@ -519,7 +515,7 @@ impl ::buffa::Message for CredentialCommandResponse {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.lifecycle_state, buf)?;
+                ::buffa::types::merge_string(&mut self.state, buf)?;
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -548,7 +544,7 @@ impl ::buffa::Message for CredentialCommandResponse {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.lifecycle_state.clear();
+        self.state.clear();
         self.stream_position = ::core::option::Option::None;
         self.credential_ref = ::buffa::MessageField::none();
     }

@@ -2,15 +2,13 @@
 // source: trogonai/gateway/credentials/state/v1/state.proto
 
 #[derive(Clone, Debug, Default)]
-pub struct CredentialLifecycleStateSnapshotView<'a> {
+pub struct CredentialStateSnapshotView<'a> {
     pub state: ::core::option::Option<
-        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State<
-            'a,
-        >,
+        super::super::__buffa::view::oneof::credential_state_snapshot::State<'a>,
     >,
 }
-impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
-    type Owned = super::super::CredentialLifecycleStateSnapshot;
+impl<'a> ::buffa::MessageView<'a> for CredentialStateSnapshotView<'a> {
+    type Owned = super::super::CredentialStateSnapshot;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
@@ -44,7 +42,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -56,9 +54,9 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                             ::buffa::alloc::boxed::Box::new(
-                                <super::super::__buffa::view::CredentialLifecycleMissingStateView as ::buffa::MessageView>::decode_view_ctx(
+                                <super::super::__buffa::view::CredentialMissingStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
                                     __sub_ctx,
                                 )?,
@@ -75,7 +73,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -87,7 +85,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::PendingCredentialWriteStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -106,7 +104,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -118,7 +116,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::ActiveCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -137,7 +135,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -149,7 +147,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::FailedCredentialWriteStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -168,7 +166,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -180,7 +178,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::RotationPendingCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -199,7 +197,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                         ref mut existing,
                     ),
                 ) = view.state
@@ -211,7 +209,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     )?;
                 } else {
                     view.state = Some(
-                        super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::RevokedCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -231,7 +229,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
     fn to_owned_message(
         &self,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleStateSnapshot,
+        super::super::CredentialStateSnapshot,
         ::buffa::DecodeError,
     > {
         self.to_owned_from_source(None)
@@ -241,66 +239,66 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleStateSnapshot,
+        super::super::CredentialStateSnapshot,
         ::buffa::DecodeError,
     > {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        ::core::result::Result::Ok(super::super::CredentialLifecycleStateSnapshot {
+        ::core::result::Result::Ok(super::super::CredentialStateSnapshot {
             state: match self.state.as_ref() {
                 ::core::option::Option::Some(v) => {
                     ::core::option::Option::Some(
                         match v {
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::Missing(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::PendingWrite(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::Active(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::WriteFailed(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::RotationPending(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                                super::super::__buffa::oneof::credential_state_snapshot::State::Revoked(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
@@ -315,7 +313,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleStateSnapshotView<'a> {
         })
     }
 }
-impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for CredentialStateSnapshotView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -323,7 +321,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
         let mut size = 0u32;
         if let ::core::option::Option::Some(ref v) = self.state {
             match v {
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -333,7 +331,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -343,7 +341,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -353,7 +351,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -363,7 +361,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -373,7 +371,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -397,7 +395,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
         use ::buffa::Enumeration as _;
         if let ::core::option::Option::Some(ref v) = self.state {
             match v {
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -407,7 +405,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -417,7 +415,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -427,7 +425,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -437,7 +435,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -447,7 +445,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -472,7 +470,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleStateSnapshotView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for CredentialLifecycleStateSnapshotView<'__a> {
+impl<'__a> ::serde::Serialize for CredentialStateSnapshotView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -481,32 +479,32 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleStateSnapshotView<'__a> {
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         if let ::core::option::Option::Some(ref __ov) = self.state {
             match __ov {
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Missing(
                     v,
                 ) => {
                     __map.serialize_entry("missing", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::PendingWrite(
                     v,
                 ) => {
                     __map.serialize_entry("pendingWrite", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Active(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Active(
                     v,
                 ) => {
                     __map.serialize_entry("active", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::WriteFailed(
                     v,
                 ) => {
                     __map.serialize_entry("writeFailed", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::RotationPending(
                     v,
                 ) => {
                     __map.serialize_entry("rotationPending", v)?;
                 }
-                super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
                     v,
                 ) => {
                     __map.serialize_entry("revoked", v)?;
@@ -516,24 +514,24 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleStateSnapshotView<'__a> {
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for CredentialLifecycleStateSnapshotView<'a> {
+impl<'a> ::buffa::MessageName for CredentialStateSnapshotView<'a> {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
-    const NAME: &'static str = "CredentialLifecycleStateSnapshot";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot";
+    const NAME: &'static str = "CredentialStateSnapshot";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialStateSnapshot";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialStateSnapshot";
 }
-::buffa::impl_default_view_instance!(CredentialLifecycleStateSnapshotView);
-::buffa::impl_view_reborrow!(CredentialLifecycleStateSnapshotView);
-/** Self-contained, `'static` owned view of a `CredentialLifecycleStateSnapshot` message.
+::buffa::impl_default_view_instance!(CredentialStateSnapshotView);
+::buffa::impl_view_reborrow!(CredentialStateSnapshotView);
+/** Self-contained, `'static` owned view of a `CredentialStateSnapshot` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`CredentialLifecycleStateSnapshotView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`CredentialStateSnapshotView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialLifecycleStateSnapshotView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialStateSnapshotView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct CredentialLifecycleStateSnapshotOwnedView(
-    ::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>>,
+pub struct CredentialStateSnapshotOwnedView(
+    ::buffa::OwnedView<CredentialStateSnapshotView<'static>>,
 );
-impl CredentialLifecycleStateSnapshotOwnedView {
+impl CredentialStateSnapshotOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -547,7 +545,7 @@ impl CredentialLifecycleStateSnapshotOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleStateSnapshotOwnedView(::buffa::OwnedView::decode(bytes)?),
+            CredentialStateSnapshotOwnedView(::buffa::OwnedView::decode(bytes)?),
         )
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
@@ -562,7 +560,7 @@ impl CredentialLifecycleStateSnapshotOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleStateSnapshotOwnedView(
+            CredentialStateSnapshotOwnedView(
                 ::buffa::OwnedView::decode_with_options(bytes, opts)?,
             ),
         )
@@ -574,17 +572,15 @@ impl CredentialLifecycleStateSnapshotOwnedView {
     /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::CredentialLifecycleStateSnapshot,
+        msg: &super::super::CredentialStateSnapshot,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleStateSnapshotOwnedView(
-                ::buffa::OwnedView::from_owned(msg)?,
-            ),
+            CredentialStateSnapshotOwnedView(::buffa::OwnedView::from_owned(msg)?),
         )
     }
-    /// Borrow the full [`CredentialLifecycleStateSnapshotView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`CredentialStateSnapshotView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &CredentialLifecycleStateSnapshotView<'_> {
+    pub fn view(&self) -> &CredentialStateSnapshotView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
@@ -596,7 +592,7 @@ impl CredentialLifecycleStateSnapshotOwnedView {
     pub fn to_owned_message(
         &self,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleStateSnapshot,
+        super::super::CredentialStateSnapshot,
         ::buffa::DecodeError,
     > {
         self.0.to_owned_message()
@@ -616,42 +612,34 @@ impl CredentialLifecycleStateSnapshotOwnedView {
     pub fn state(
         &self,
     ) -> ::core::option::Option<
-        &super::super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State<
-            '_,
-        >,
+        &super::super::__buffa::view::oneof::credential_state_snapshot::State<'_>,
     > {
         self.0.reborrow().state.as_ref()
     }
 }
-impl ::core::convert::From<
-    ::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>>,
-> for CredentialLifecycleStateSnapshotOwnedView {
-    fn from(
-        inner: ::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>>,
-    ) -> Self {
-        CredentialLifecycleStateSnapshotOwnedView(inner)
+impl ::core::convert::From<::buffa::OwnedView<CredentialStateSnapshotView<'static>>>
+for CredentialStateSnapshotOwnedView {
+    fn from(inner: ::buffa::OwnedView<CredentialStateSnapshotView<'static>>) -> Self {
+        CredentialStateSnapshotOwnedView(inner)
     }
 }
-impl ::core::convert::From<CredentialLifecycleStateSnapshotOwnedView>
-for ::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>> {
-    fn from(wrapper: CredentialLifecycleStateSnapshotOwnedView) -> Self {
+impl ::core::convert::From<CredentialStateSnapshotOwnedView>
+for ::buffa::OwnedView<CredentialStateSnapshotView<'static>> {
+    fn from(wrapper: CredentialStateSnapshotOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<
-    ::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>>,
-> for CredentialLifecycleStateSnapshotOwnedView {
-    fn as_ref(
-        &self,
-    ) -> &::buffa::OwnedView<CredentialLifecycleStateSnapshotView<'static>> {
+impl ::core::convert::AsRef<::buffa::OwnedView<CredentialStateSnapshotView<'static>>>
+for CredentialStateSnapshotOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<CredentialStateSnapshotView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView for super::super::CredentialLifecycleStateSnapshot {
-    type View<'a> = CredentialLifecycleStateSnapshotView<'a>;
-    type ViewHandle = CredentialLifecycleStateSnapshotOwnedView;
+impl ::buffa::HasMessageView for super::super::CredentialStateSnapshot {
+    type View<'a> = CredentialStateSnapshotView<'a>;
+    type ViewHandle = CredentialStateSnapshotOwnedView;
 }
-impl ::serde::Serialize for CredentialLifecycleStateSnapshotOwnedView {
+impl ::serde::Serialize for CredentialStateSnapshotOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -660,12 +648,12 @@ impl ::serde::Serialize for CredentialLifecycleStateSnapshotOwnedView {
     }
 }
 #[derive(Clone, Debug, Default)]
-pub struct CredentialLifecycleMissingStateView<'a> {
+pub struct CredentialMissingStateView<'a> {
     #[doc(hidden)]
     pub __buffa_phantom: ::core::marker::PhantomData<&'a ()>,
 }
-impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleMissingStateView<'a> {
-    type Owned = super::super::CredentialLifecycleMissingState;
+impl<'a> ::buffa::MessageView<'a> for CredentialMissingStateView<'a> {
+    type Owned = super::super::CredentialMissingState;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
@@ -700,7 +688,7 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleMissingStateView<'a> {
     fn to_owned_message(
         &self,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleMissingState,
+        super::super::CredentialMissingState,
         ::buffa::DecodeError,
     > {
         self.to_owned_from_source(None)
@@ -710,18 +698,18 @@ impl<'a> ::buffa::MessageView<'a> for CredentialLifecycleMissingStateView<'a> {
         &self,
         __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleMissingState,
+        super::super::CredentialMissingState,
         ::buffa::DecodeError,
     > {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
-        ::core::result::Result::Ok(super::super::CredentialLifecycleMissingState {
+        ::core::result::Result::Ok(super::super::CredentialMissingState {
             ..::core::default::Default::default()
         })
     }
 }
-impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleMissingStateView<'a> {
+impl<'a> ::buffa::ViewEncode<'a> for CredentialMissingStateView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
@@ -750,7 +738,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialLifecycleMissingStateView<'a> {
 /// fields depends on default-omission rules; serializers that require
 /// known map lengths (e.g. `bincode`) will return a runtime error.
 /// Use the owned message type for those formats.
-impl<'__a> ::serde::Serialize for CredentialLifecycleMissingStateView<'__a> {
+impl<'__a> ::serde::Serialize for CredentialMissingStateView<'__a> {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,
@@ -760,24 +748,24 @@ impl<'__a> ::serde::Serialize for CredentialLifecycleMissingStateView<'__a> {
         __map.end()
     }
 }
-impl<'a> ::buffa::MessageName for CredentialLifecycleMissingStateView<'a> {
+impl<'a> ::buffa::MessageName for CredentialMissingStateView<'a> {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
-    const NAME: &'static str = "CredentialLifecycleMissingState";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState";
+    const NAME: &'static str = "CredentialMissingState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialMissingState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialMissingState";
 }
-::buffa::impl_default_view_instance!(CredentialLifecycleMissingStateView);
-::buffa::impl_view_reborrow!(CredentialLifecycleMissingStateView);
-/** Self-contained, `'static` owned view of a `CredentialLifecycleMissingState` message.
+::buffa::impl_default_view_instance!(CredentialMissingStateView);
+::buffa::impl_view_reborrow!(CredentialMissingStateView);
+/** Self-contained, `'static` owned view of a `CredentialMissingState` message.
 
- Wraps [`::buffa::OwnedView`]`<`[`CredentialLifecycleMissingStateView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+ Wraps [`::buffa::OwnedView`]`<`[`CredentialMissingStateView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
 
- Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialLifecycleMissingStateView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CredentialMissingStateView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
 #[derive(Clone, Debug)]
-pub struct CredentialLifecycleMissingStateOwnedView(
-    ::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>>,
+pub struct CredentialMissingStateOwnedView(
+    ::buffa::OwnedView<CredentialMissingStateView<'static>>,
 );
-impl CredentialLifecycleMissingStateOwnedView {
+impl CredentialMissingStateOwnedView {
     /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
     ///
     /// The view borrows directly from the buffer's data; the buffer is
@@ -791,7 +779,7 @@ impl CredentialLifecycleMissingStateOwnedView {
         bytes: ::buffa::bytes::Bytes,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleMissingStateOwnedView(::buffa::OwnedView::decode(bytes)?),
+            CredentialMissingStateOwnedView(::buffa::OwnedView::decode(bytes)?),
         )
     }
     /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
@@ -806,7 +794,7 @@ impl CredentialLifecycleMissingStateOwnedView {
         opts: &::buffa::DecodeOptions,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleMissingStateOwnedView(
+            CredentialMissingStateOwnedView(
                 ::buffa::OwnedView::decode_with_options(bytes, opts)?,
             ),
         )
@@ -818,17 +806,15 @@ impl CredentialLifecycleMissingStateOwnedView {
     /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
-        msg: &super::super::CredentialLifecycleMissingState,
+        msg: &super::super::CredentialMissingState,
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         ::core::result::Result::Ok(
-            CredentialLifecycleMissingStateOwnedView(
-                ::buffa::OwnedView::from_owned(msg)?,
-            ),
+            CredentialMissingStateOwnedView(::buffa::OwnedView::from_owned(msg)?),
         )
     }
-    /// Borrow the full [`CredentialLifecycleMissingStateView`] with its lifetime tied to `&self`.
+    /// Borrow the full [`CredentialMissingStateView`] with its lifetime tied to `&self`.
     #[must_use]
-    pub fn view(&self) -> &CredentialLifecycleMissingStateView<'_> {
+    pub fn view(&self) -> &CredentialMissingStateView<'_> {
         self.0.reborrow()
     }
     /// Convert to the owned message type.
@@ -840,7 +826,7 @@ impl CredentialLifecycleMissingStateOwnedView {
     pub fn to_owned_message(
         &self,
     ) -> ::core::result::Result<
-        super::super::CredentialLifecycleMissingState,
+        super::super::CredentialMissingState,
         ::buffa::DecodeError,
     > {
         self.0.to_owned_message()
@@ -856,35 +842,29 @@ impl CredentialLifecycleMissingStateOwnedView {
         self.0.into_bytes()
     }
 }
-impl ::core::convert::From<
-    ::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>>,
-> for CredentialLifecycleMissingStateOwnedView {
-    fn from(
-        inner: ::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>>,
-    ) -> Self {
-        CredentialLifecycleMissingStateOwnedView(inner)
+impl ::core::convert::From<::buffa::OwnedView<CredentialMissingStateView<'static>>>
+for CredentialMissingStateOwnedView {
+    fn from(inner: ::buffa::OwnedView<CredentialMissingStateView<'static>>) -> Self {
+        CredentialMissingStateOwnedView(inner)
     }
 }
-impl ::core::convert::From<CredentialLifecycleMissingStateOwnedView>
-for ::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>> {
-    fn from(wrapper: CredentialLifecycleMissingStateOwnedView) -> Self {
+impl ::core::convert::From<CredentialMissingStateOwnedView>
+for ::buffa::OwnedView<CredentialMissingStateView<'static>> {
+    fn from(wrapper: CredentialMissingStateOwnedView) -> Self {
         wrapper.0
     }
 }
-impl ::core::convert::AsRef<
-    ::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>>,
-> for CredentialLifecycleMissingStateOwnedView {
-    fn as_ref(
-        &self,
-    ) -> &::buffa::OwnedView<CredentialLifecycleMissingStateView<'static>> {
+impl ::core::convert::AsRef<::buffa::OwnedView<CredentialMissingStateView<'static>>>
+for CredentialMissingStateOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<CredentialMissingStateView<'static>> {
         &self.0
     }
 }
-impl ::buffa::HasMessageView for super::super::CredentialLifecycleMissingState {
-    type View<'a> = CredentialLifecycleMissingStateView<'a>;
-    type ViewHandle = CredentialLifecycleMissingStateOwnedView;
+impl ::buffa::HasMessageView for super::super::CredentialMissingState {
+    type View<'a> = CredentialMissingStateView<'a>;
+    type ViewHandle = CredentialMissingStateOwnedView;
 }
-impl ::serde::Serialize for CredentialLifecycleMissingStateOwnedView {
+impl ::serde::Serialize for CredentialMissingStateOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

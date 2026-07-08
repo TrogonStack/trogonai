@@ -22,10 +22,9 @@ use trogon_nats::jetstream::{
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use crate::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
-use crate::commands::{
-    CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
-    CredentialLifecycleState, evolve, initial_state,
+use crate::credential::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
+use crate::credential::{
+    CredentialEvent, CredentialEventPayloadError, CredentialEvolveError, CredentialState, evolve, initial_state,
 };
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
@@ -174,21 +173,19 @@ impl RuntimeIntegrationProjection {
         })
     }
 
-    pub fn from_lifecycle_state(
-        state: &CredentialLifecycleState,
+    pub fn from_credential_state(
+        state: &CredentialState,
         version: u64,
     ) -> Result<Option<Self>, RuntimeProjectionBuildError> {
         match state {
-            CredentialLifecycleState::Active(active) => {
-                active_runtime_projection(active.credential_ref().clone(), version)
-            }
-            CredentialLifecycleState::RotationPending(rotation) => {
+            CredentialState::Active(active) => active_runtime_projection(active.credential_ref().clone(), version),
+            CredentialState::RotationPending(rotation) => {
                 active_runtime_projection(rotation.active().credential_ref().clone(), version)
             }
-            CredentialLifecycleState::Missing
-            | CredentialLifecycleState::PendingWrite(_)
-            | CredentialLifecycleState::WriteFailed(_)
-            | CredentialLifecycleState::Revoked(_) => Ok(None),
+            CredentialState::Missing
+            | CredentialState::PendingWrite(_)
+            | CredentialState::WriteFailed(_)
+            | CredentialState::Revoked(_) => Ok(None),
         }
     }
 
@@ -248,8 +245,8 @@ pub struct RuntimeProjectionRefreshReport {
     scanned_events: usize,
     decoded_events: usize,
     skipped_events: usize,
-    changed_lifecycles: usize,
-    applied_lifecycles: usize,
+    changed_credentials: usize,
+    applied_credentials: usize,
     projected_integrations: usize,
     checkpoint_loaded_sequence: u64,
     checkpoint_advanced_to: Option<u64>,
@@ -268,12 +265,12 @@ impl RuntimeProjectionRefreshReport {
         self.skipped_events
     }
 
-    pub fn changed_lifecycles(self) -> usize {
-        self.changed_lifecycles
+    pub fn changed_credentials(self) -> usize {
+        self.changed_credentials
     }
 
-    pub fn applied_lifecycles(self) -> usize {
-        self.applied_lifecycles
+    pub fn applied_credentials(self) -> usize {
+        self.applied_credentials
     }
 
     pub fn projected_integrations(self) -> usize {
@@ -292,8 +289,8 @@ impl RuntimeProjectionRefreshReport {
         self.scanned_events > 0
             || self.decoded_events > 0
             || self.skipped_events > 0
-            || self.changed_lifecycles > 0
-            || self.applied_lifecycles > 0
+            || self.changed_credentials > 0
+            || self.applied_credentials > 0
             || self.projected_integrations > 0
             || self.checkpoint_advanced_to.is_some()
     }
@@ -301,18 +298,18 @@ impl RuntimeProjectionRefreshReport {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeProjectionRefreshError {
-    #[error("credential lifecycle event decode failed: {source}")]
+    #[error("credential event decode failed: {source}")]
     DecodeEvent {
         #[source]
-        source: CredentialLifecycleEventPayloadError,
+        source: CredentialEventPayloadError,
     },
-    #[error("credential lifecycle stream replay failed: {source}")]
+    #[error("credential stream replay failed: {source}")]
     ReplayStream {
         #[source]
-        source: CredentialLifecycleEvolveError,
+        source: CredentialEvolveError,
     },
-    #[error("credential lifecycle stream read failed for {credential_id}: {source}")]
-    ReadLifecycle {
+    #[error("credential stream read failed for {credential_id}: {source}")]
+    ReadCredential {
         credential_id: CredentialId,
         #[source]
         source: Box<dyn Error + Send + Sync>,
@@ -337,7 +334,7 @@ pub enum RuntimeProjectionRefreshError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeProjectionStreamRefreshError {
-    #[error("credential lifecycle event stream read failed: {source}")]
+    #[error("credential event stream read failed: {source}")]
     ReadStream {
         #[source]
         source: StreamStoreError,
@@ -386,7 +383,7 @@ pub async fn run_checkpointed_refresh_worker<EventStream, EventStore, Checkpoint
             }
             _ = interval.tick() => {
                 match registry
-                    .refresh_from_lifecycle_stream_checkpointed(&event_stream, &event_store, &checkpoints)
+                    .refresh_from_credential_stream_checkpointed(&event_stream, &event_store, &checkpoints)
                     .await
                 {
                     Ok(report) if report.has_projection_activity() => {
@@ -394,8 +391,8 @@ pub async fn run_checkpointed_refresh_worker<EventStream, EventStore, Checkpoint
                             scanned_events = report.scanned_events(),
                             decoded_events = report.decoded_events(),
                             skipped_events = report.skipped_events(),
-                            changed_lifecycles = report.changed_lifecycles(),
-                            applied_lifecycles = report.applied_lifecycles(),
+                            changed_credentials = report.changed_credentials(),
+                            applied_credentials = report.applied_credentials(),
                             projected_integrations = report.projected_integrations(),
                             checkpoint_loaded_sequence = report.checkpoint_loaded_sequence(),
                             checkpoint_advanced_to = ?report.checkpoint_advanced_to(),
@@ -715,7 +712,7 @@ impl RuntimeCredentialRegistry {
         RuntimeCredentialResolver::with_cache(self.projections.clone(), self.cache.clone(), store)
     }
 
-    pub async fn refresh_from_lifecycle_stream<S>(
+    pub async fn refresh_from_credential_stream<S>(
         &self,
         stream: &S,
         from_sequence: u64,
@@ -723,10 +720,10 @@ impl RuntimeCredentialRegistry {
     where
         S: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     {
-        refresh_runtime_projections_from_lifecycle_stream(&self.projections, &self.cache, stream, from_sequence).await
+        refresh_runtime_projections_from_credential_stream(&self.projections, &self.cache, stream, from_sequence).await
     }
 
-    pub async fn refresh_from_lifecycle_stream_checkpointed<EventStream, EventStore, Checkpoints>(
+    pub async fn refresh_from_credential_stream_checkpointed<EventStream, EventStore, Checkpoints>(
         &self,
         event_stream: &EventStream,
         event_store: &EventStore,
@@ -738,7 +735,7 @@ impl RuntimeCredentialRegistry {
         <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
         Checkpoints: RuntimeProjectionCheckpointStore,
     {
-        refresh_runtime_projections_from_lifecycle_stream_checkpointed(
+        refresh_runtime_projections_from_credential_stream_checkpointed(
             &self.projections,
             &self.cache,
             event_stream,
@@ -748,7 +745,7 @@ impl RuntimeCredentialRegistry {
         .await
     }
 
-    pub async fn refresh_from_lifecycle_stream_incremental<EventStream, EventStore>(
+    pub async fn refresh_from_credential_stream_incremental<EventStream, EventStore>(
         &self,
         event_stream: &EventStream,
         event_store: &EventStore,
@@ -759,7 +756,7 @@ impl RuntimeCredentialRegistry {
         EventStore: StreamRead<str>,
         <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
     {
-        refresh_runtime_projections_from_lifecycle_stream_incremental(
+        refresh_runtime_projections_from_credential_stream_incremental(
             &self.projections,
             &self.cache,
             event_stream,
@@ -769,19 +766,19 @@ impl RuntimeCredentialRegistry {
         .await
     }
 
-    pub async fn refresh_from_lifecycle_events(
+    pub async fn refresh_from_credential_events(
         &self,
         events: impl IntoIterator<Item = StreamEvent>,
     ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionRefreshError> {
-        refresh_runtime_projections_from_lifecycle_events(&self.projections, &self.cache, events).await
+        refresh_runtime_projections_from_credential_events(&self.projections, &self.cache, events).await
     }
 
-    pub async fn apply_lifecycle_state(
+    pub async fn apply_state(
         &self,
-        state: &CredentialLifecycleState,
+        state: &CredentialState,
         stream_position: StreamPosition,
     ) -> Result<(), RuntimeProjectionRefreshError> {
-        if let Some(projection) = RuntimeIntegrationProjection::from_lifecycle_state(state, stream_position.as_u64())
+        if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
         {
             self.projections.merge(projection).await?;
@@ -789,7 +786,7 @@ impl RuntimeCredentialRegistry {
             return Ok(());
         }
 
-        if let CredentialLifecycleState::Revoked(revoked) = state {
+        if let CredentialState::Revoked(revoked) = state {
             self.remove_credential_ref(revoked.credential_ref()).await?;
         }
         Ok(())
@@ -804,7 +801,7 @@ impl RuntimeCredentialRegistry {
     }
 }
 
-pub async fn refresh_runtime_projections_from_lifecycle_stream<S>(
+pub async fn refresh_runtime_projections_from_credential_stream<S>(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     stream: &S,
@@ -816,12 +813,12 @@ where
     let events = trogon_decider_nats::read_stream(stream, from_sequence)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::ReadStream { source })?;
-    refresh_runtime_projections_from_lifecycle_events(projections, cache, events)
+    refresh_runtime_projections_from_credential_events(projections, cache, events)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::Refresh { source })
 }
 
-pub async fn refresh_runtime_projections_from_lifecycle_stream_checkpointed<EventStream, EventStore, Checkpoints>(
+pub async fn refresh_runtime_projections_from_credential_stream_checkpointed<EventStream, EventStore, Checkpoints>(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     event_stream: &EventStream,
@@ -838,7 +835,7 @@ where
         .load()
         .await
         .map_err(|source| RuntimeProjectionCheckpointedRefreshError::Checkpoint { source })?;
-    let mut report = refresh_runtime_projections_from_lifecycle_stream_incremental(
+    let mut report = refresh_runtime_projections_from_credential_stream_incremental(
         projections,
         cache,
         event_stream,
@@ -859,7 +856,7 @@ where
     Ok(report)
 }
 
-pub async fn refresh_runtime_projections_from_lifecycle_stream_incremental<EventStream, EventStore>(
+pub async fn refresh_runtime_projections_from_credential_stream_incremental<EventStream, EventStore>(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     event_stream: &EventStream,
@@ -874,25 +871,25 @@ where
     let events = trogon_decider_nats::read_stream(event_stream, from_sequence)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::ReadStream { source })?;
-    refresh_runtime_projections_from_changed_lifecycle_events(projections, cache, event_store, events)
+    refresh_runtime_projections_from_changed_credential_events(projections, cache, event_store, events)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::Refresh { source })
 }
 
-pub async fn refresh_runtime_projections_from_lifecycle_events(
+pub async fn refresh_runtime_projections_from_credential_events(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     events: impl IntoIterator<Item = StreamEvent>,
 ) -> Result<RuntimeProjectionRefreshReport, RuntimeProjectionRefreshError> {
     let mut report = RuntimeProjectionRefreshReport::default();
-    let mut streams: BTreeMap<String, Vec<(u64, CredentialLifecycleEvent)>> = BTreeMap::new();
+    let mut streams: BTreeMap<String, Vec<(u64, CredentialEvent)>> = BTreeMap::new();
 
     for event in events {
         report.scanned_events += 1;
         let stream_id = event.stream_id().to_string();
         let stream_position = event.stream_position.as_u64();
         match event
-            .decode::<CredentialLifecycleEvent>()
+            .decode::<CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
@@ -917,7 +914,7 @@ pub async fn refresh_runtime_projections_from_lifecycle_events(
             .try_fold(initial_state(), |state, event| evolve(state, &event))
             .map_err(|source| RuntimeProjectionRefreshError::ReplayStream { source })?;
 
-        let Some(projection) = RuntimeIntegrationProjection::from_lifecycle_state(&state, version)
+        let Some(projection) = RuntimeIntegrationProjection::from_credential_state(&state, version)
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
         else {
             continue;
@@ -931,7 +928,7 @@ pub async fn refresh_runtime_projections_from_lifecycle_events(
     Ok(report)
 }
 
-async fn refresh_runtime_projections_from_changed_lifecycle_events<EventStore>(
+async fn refresh_runtime_projections_from_changed_credential_events<EventStore>(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
     event_store: &EventStore,
@@ -942,20 +939,20 @@ where
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
 {
     let mut report = RuntimeProjectionRefreshReport::default();
-    let mut changed_lifecycles = BTreeMap::<CredentialId, u64>::new();
+    let mut changed_credentials = BTreeMap::<CredentialId, u64>::new();
 
     for event in events {
         report.scanned_events += 1;
         let stream_position = event.stream_position.as_u64();
         report.checkpoint_advanced_to = Some(report.checkpoint_advanced_to.unwrap_or(0).max(stream_position));
         match event
-            .decode::<CredentialLifecycleEvent>()
+            .decode::<CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         {
             EventDecodeOutcome::Decoded(event) => {
                 report.decoded_events += 1;
                 let credential_id = event_credential_id(&event).clone();
-                changed_lifecycles
+                changed_credentials
                     .entry(credential_id)
                     .and_modify(|position| *position = (*position).max(stream_position))
                     .or_insert(stream_position);
@@ -966,22 +963,22 @@ where
         }
     }
 
-    report.changed_lifecycles = changed_lifecycles.len();
+    report.changed_credentials = changed_credentials.len();
 
-    for (credential_id, version) in changed_lifecycles {
-        let state = load_lifecycle_state(event_store, &credential_id).await?;
-        apply_lifecycle_state_to_projection(projections, cache, &state, position(version)?).await?;
-        report.applied_lifecycles += 1;
+    for (credential_id, version) in changed_credentials {
+        let state = load_credential_state(event_store, &credential_id).await?;
+        apply_state_to_projection(projections, cache, &state, position(version)?).await?;
+        report.applied_credentials += 1;
     }
     report.projected_integrations = projections.len().await;
 
     Ok(report)
 }
 
-async fn load_lifecycle_state<EventStore>(
+async fn load_credential_state<EventStore>(
     event_store: &EventStore,
     credential_id: &CredentialId,
-) -> Result<CredentialLifecycleState, RuntimeProjectionRefreshError>
+) -> Result<CredentialState, RuntimeProjectionRefreshError>
 where
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
@@ -992,14 +989,14 @@ where
             from: ReadFrom::Beginning,
         })
         .await
-        .map_err(|source| RuntimeProjectionRefreshError::ReadLifecycle {
+        .map_err(|source| RuntimeProjectionRefreshError::ReadCredential {
             credential_id: credential_id.clone(),
             source: Box::new(source),
         })?;
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
-            .decode::<CredentialLifecycleEvent>()
+            .decode::<CredentialEvent>()
             .map_err(|source| RuntimeProjectionRefreshError::DecodeEvent { source })?
         else {
             continue;
@@ -1009,13 +1006,13 @@ where
     Ok(state)
 }
 
-async fn apply_lifecycle_state_to_projection(
+async fn apply_state_to_projection(
     projections: &InMemoryRuntimeProjectionRepository,
     cache: &RuntimeCredentialCache,
-    state: &CredentialLifecycleState,
+    state: &CredentialState,
     stream_position: StreamPosition,
 ) -> Result<(), RuntimeProjectionRefreshError> {
-    if let Some(projection) = RuntimeIntegrationProjection::from_lifecycle_state(state, stream_position.as_u64())
+    if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
         .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
     {
         projections.merge(projection).await?;
@@ -1023,7 +1020,7 @@ async fn apply_lifecycle_state_to_projection(
         return Ok(());
     }
 
-    if let CredentialLifecycleState::Revoked(revoked) = state {
+    if let CredentialState::Revoked(revoked) = state {
         cache.invalidate(revoked.credential_ref()).await;
         let key = RuntimeIntegrationKey::from_credential_ref(revoked.credential_ref())
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
@@ -1034,15 +1031,16 @@ async fn apply_lifecycle_state_to_projection(
     Ok(())
 }
 
-fn event_credential_id(event: &CredentialLifecycleEvent) -> &CredentialId {
+fn event_credential_id(event: &CredentialEvent) -> &CredentialId {
     match event {
-        CredentialLifecycleEvent::WriteRequested { credential_id, .. }
-        | CredentialLifecycleEvent::WriteFailed { credential_id, .. } => credential_id,
-        CredentialLifecycleEvent::Activated { metadata } => metadata.reference().id(),
-        CredentialLifecycleEvent::RotationRequested { credential_ref }
-        | CredentialLifecycleEvent::RotationFailed { credential_ref, .. }
-        | CredentialLifecycleEvent::Revoked { credential_ref } => credential_ref.id(),
-        CredentialLifecycleEvent::Rotated {
+        CredentialEvent::WriteRequested { credential_id, .. } | CredentialEvent::WriteFailed { credential_id, .. } => {
+            credential_id
+        }
+        CredentialEvent::Activated { metadata } => metadata.reference().id(),
+        CredentialEvent::RotationRequested { credential_ref }
+        | CredentialEvent::RotationFailed { credential_ref, .. }
+        | CredentialEvent::Revoked { credential_ref } => credential_ref.id(),
+        CredentialEvent::Rotated {
             previous_credential_ref,
             ..
         } => previous_credential_ref.id(),
@@ -1221,7 +1219,7 @@ impl std::fmt::Display for RuntimeIntegrationKey {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::commands::domain::{CredentialScope, CredentialVersion};
+    use crate::credential::domain::{CredentialScope, CredentialVersion};
     use crate::secret_store::{
         MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
     };
@@ -1246,7 +1244,7 @@ mod tests {
     struct ProjectionTestEventStoreError;
 
     impl ProjectionTestEventStore {
-        fn push(&self, stream_id: &str, stream_position: u64, event: CredentialLifecycleEvent) {
+        fn push(&self, stream_id: &str, stream_position: u64, event: CredentialEvent) {
             self.events
                 .lock()
                 .unwrap()
@@ -1322,7 +1320,7 @@ mod tests {
         StreamPosition::try_new(value).unwrap()
     }
 
-    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialLifecycleEvent) -> StreamEvent {
+    fn stream_event(stream_id: &str, stream_position: u64, event: CredentialEvent) -> StreamEvent {
         StreamEvent {
             stream_id: stream_id.to_string(),
             event: runtime_event(stream_position, event),
@@ -1331,7 +1329,7 @@ mod tests {
         }
     }
 
-    fn runtime_event(id: u64, event: CredentialLifecycleEvent) -> Event {
+    fn runtime_event(id: u64, event: CredentialEvent) -> Event {
         Event {
             id: EventId::new(Uuid::from_u128(id as u128)),
             r#type: event.event_type().unwrap().to_string(),
@@ -1348,7 +1346,7 @@ mod tests {
         }
         append_stream(
             &stream,
-            StreamSubject::new("gateway.credentials.lifecycle.events.v1.raw").unwrap(),
+            StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
             None,
             &events,
         )
@@ -1357,8 +1355,8 @@ mod tests {
         stream
     }
 
-    fn write_requested(credential: &CredentialRef) -> CredentialLifecycleEvent {
-        CredentialLifecycleEvent::WriteRequested {
+    fn write_requested(credential: &CredentialRef) -> CredentialEvent {
+        CredentialEvent::WriteRequested {
             credential_id: credential.id().clone(),
             owner_id: owner_id(),
             source: credential.source(),
@@ -1366,7 +1364,7 @@ mod tests {
         }
     }
 
-    fn lifecycle_state(events: impl IntoIterator<Item = CredentialLifecycleEvent>) -> CredentialLifecycleState {
+    fn build_state(events: impl IntoIterator<Item = CredentialEvent>) -> CredentialState {
         events
             .into_iter()
             .try_fold(initial_state(), |state, event| evolve(state, &event))
@@ -1374,7 +1372,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_projection_can_be_built_from_lifecycle_credential_ref() {
+    async fn active_projection_can_be_built_from_credential_ref() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let projection = RuntimeIntegrationProjection::active_from_credential_ref(credential, 7).unwrap();
@@ -1397,23 +1395,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_projection_can_be_refreshed_from_replayed_lifecycle_state() {
+    async fn active_projection_can_be_refreshed_from_replayed_state() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
         let state = [
-            CredentialLifecycleEvent::WriteRequested {
+            CredentialEvent::WriteRequested {
                 credential_id: credential.id().clone(),
                 owner_id: owner_id(),
                 source: credential.source(),
                 kind: credential.kind(),
             },
-            CredentialLifecycleEvent::Activated { metadata },
+            CredentialEvent::Activated { metadata },
         ]
         .into_iter()
         .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
-        let projection = RuntimeIntegrationProjection::from_lifecycle_state(&state, 2)
+        let projection = RuntimeIntegrationProjection::from_credential_state(&state, 2)
             .unwrap()
             .unwrap();
         let projections = InMemoryRuntimeProjectionRepository::default();
@@ -1431,7 +1429,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_rebuilds_runtime_projection_from_lifecycle_events() {
+    async fn refresh_rebuilds_runtime_projection_from_credential_events() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
@@ -1439,9 +1437,9 @@ mod tests {
         let resolver = registry.resolver(store);
 
         let report = registry
-            .refresh_from_lifecycle_events([
+            .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialLifecycleEvent::Activated { metadata }),
+                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
             ])
             .await
             .unwrap();
@@ -1461,7 +1459,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_rebuilds_runtime_projection_from_persisted_lifecycle_stream() {
+    async fn refresh_rebuilds_runtime_projection_from_persisted_credential_stream() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
@@ -1472,7 +1470,7 @@ mod tests {
             None,
             &[
                 runtime_event(1, write_requested(&credential)),
-                runtime_event(2, CredentialLifecycleEvent::Activated { metadata }),
+                runtime_event(2, CredentialEvent::Activated { metadata }),
             ],
         )
         .await
@@ -1480,7 +1478,7 @@ mod tests {
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store);
 
-        let report = registry.refresh_from_lifecycle_stream(&stream, 1).await.unwrap();
+        let report = registry.refresh_from_credential_stream(&stream, 1).await.unwrap();
 
         assert_eq!(report.scanned_events(), 2);
         assert_eq!(report.decoded_events(), 2);
@@ -1538,13 +1536,13 @@ mod tests {
         event_store.push(
             credential.id().as_str(),
             2,
-            CredentialLifecycleEvent::Activated {
+            CredentialEvent::Activated {
                 metadata: metadata.clone(),
             },
         );
         let stream = raw_stream([
             runtime_event(1, write_requested(&credential)),
-            runtime_event(2, CredentialLifecycleEvent::Activated { metadata }),
+            runtime_event(2, CredentialEvent::Activated { metadata }),
         ])
         .await;
         let kv = MockJetStreamKvStore::new();
@@ -1555,14 +1553,14 @@ mod tests {
         let resolver = registry.resolver(store);
 
         let report = registry
-            .refresh_from_lifecycle_stream_checkpointed(&stream, &event_store, &checkpoints)
+            .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
             .await
             .unwrap();
 
         assert_eq!(report.scanned_events(), 2);
         assert_eq!(report.decoded_events(), 2);
-        assert_eq!(report.changed_lifecycles(), 1);
-        assert_eq!(report.applied_lifecycles(), 1);
+        assert_eq!(report.changed_credentials(), 1);
+        assert_eq!(report.applied_credentials(), 1);
         assert_eq!(report.projected_integrations(), 1);
         assert_eq!(report.checkpoint_loaded_sequence(), 0);
         assert_eq!(report.checkpoint_advanced_to(), Some(2));
@@ -1594,13 +1592,13 @@ mod tests {
         event_store.push(
             credential.id().as_str(),
             2,
-            CredentialLifecycleEvent::Activated {
+            CredentialEvent::Activated {
                 metadata: metadata.clone(),
             },
         );
         let stream = raw_stream([
             runtime_event(1, write_requested(&credential)),
-            runtime_event(2, CredentialLifecycleEvent::Activated { metadata }),
+            runtime_event(2, CredentialEvent::Activated { metadata }),
         ])
         .await;
         let checkpoint = RuntimeProjectionCheckpoint::new(1);
@@ -1619,14 +1617,14 @@ mod tests {
         let registry = RuntimeCredentialRegistry::default();
 
         let report = registry
-            .refresh_from_lifecycle_stream_checkpointed(&stream, &event_store, &checkpoints)
+            .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
             .await
             .unwrap();
 
         assert_eq!(report.scanned_events(), 1);
         assert_eq!(report.decoded_events(), 1);
-        assert_eq!(report.changed_lifecycles(), 1);
-        assert_eq!(report.applied_lifecycles(), 1);
+        assert_eq!(report.changed_credentials(), 1);
+        assert_eq!(report.applied_credentials(), 1);
         assert_eq!(report.checkpoint_loaded_sequence(), 1);
         assert_eq!(report.checkpoint_advanced_to(), Some(2));
         let calls = kv.update_calls();
@@ -1655,7 +1653,7 @@ mod tests {
         let registry = RuntimeCredentialRegistry::default();
 
         let report = registry
-            .refresh_from_lifecycle_stream_checkpointed(&stream, &event_store, &checkpoints)
+            .refresh_from_credential_stream_checkpointed(&stream, &event_store, &checkpoints)
             .await
             .unwrap();
 
@@ -1675,12 +1673,12 @@ mod tests {
         let resolver = registry.resolver(store.clone());
 
         registry
-            .refresh_from_lifecycle_events([
+            .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
                 stream_event(
                     "credential-a",
                     2,
-                    CredentialLifecycleEvent::Activated {
+                    CredentialEvent::Activated {
                         metadata: metadata.clone(),
                     },
                 ),
@@ -1698,13 +1696,13 @@ mod tests {
 
         store.revoke(&credential).await.unwrap();
         let report = registry
-            .refresh_from_lifecycle_events([
+            .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialLifecycleEvent::Activated { metadata }),
+                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
                 stream_event(
                     "credential-a",
                     3,
-                    CredentialLifecycleEvent::Revoked {
+                    CredentialEvent::Revoked {
                         credential_ref: credential.clone(),
                     },
                 ),
@@ -1729,7 +1727,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_projects_source_scoped_active_lifecycle_state() {
+    async fn refresh_projects_source_scoped_active_state() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_source_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
@@ -1737,9 +1735,9 @@ mod tests {
         let resolver = registry.resolver(store);
 
         let report = registry
-            .refresh_from_lifecycle_events([
+            .refresh_from_credential_events([
                 stream_event("credential-a", 1, write_requested(&credential)),
-                stream_event("credential-a", 2, CredentialLifecycleEvent::Activated { metadata }),
+                stream_event("credential-a", 2, CredentialEvent::Activated { metadata }),
             ])
             .await
             .unwrap();
@@ -1758,18 +1756,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_applies_active_lifecycle_state_incrementally() {
+    async fn registry_applies_active_state_incrementally() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store);
-        let state = lifecycle_state([
-            write_requested(&credential),
-            CredentialLifecycleEvent::Activated { metadata },
-        ]);
+        let state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
 
-        registry.apply_lifecycle_state(&state, position(2)).await.unwrap();
+        registry.apply_state(&state, position(2)).await.unwrap();
 
         assert_eq!(
             resolver
@@ -1782,18 +1777,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_apply_projects_source_scoped_active_lifecycle_state() {
+    async fn registry_apply_projects_source_scoped_active_state() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_source_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store);
-        let state = lifecycle_state([
-            write_requested(&credential),
-            CredentialLifecycleEvent::Activated { metadata },
-        ]);
+        let state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
 
-        registry.apply_lifecycle_state(&state, position(2)).await.unwrap();
+        registry.apply_state(&state, position(2)).await.unwrap();
 
         assert_eq!(
             resolver
@@ -1806,20 +1798,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registry_applies_revoked_lifecycle_state_incrementally_and_invalidates_cache() {
+    async fn registry_applies_revoked_state_incrementally_and_invalidates_cache() {
         let store = MockOpenBaoSecretStore::default();
         let credential = put_bot_token(&store, "Bot token").await;
         let metadata = store.metadata(&credential).await.unwrap();
         let registry = RuntimeCredentialRegistry::default();
         let resolver = registry.resolver(store.clone());
-        let active_state = lifecycle_state([
-            write_requested(&credential),
-            CredentialLifecycleEvent::Activated { metadata },
-        ]);
-        registry
-            .apply_lifecycle_state(&active_state, position(2))
-            .await
-            .unwrap();
+        let active_state = build_state([write_requested(&credential), CredentialEvent::Activated { metadata }]);
+        registry.apply_state(&active_state, position(2)).await.unwrap();
         assert_eq!(
             resolver
                 .resolve_plaintext(&key(), CredentialKind::BotToken)
@@ -1832,15 +1818,12 @@ mod tests {
         store.revoke(&credential).await.unwrap();
         let revoked_state = evolve(
             active_state,
-            &CredentialLifecycleEvent::Revoked {
+            &CredentialEvent::Revoked {
                 credential_ref: credential.clone(),
             },
         )
         .unwrap();
-        registry
-            .apply_lifecycle_state(&revoked_state, position(3))
-            .await
-            .unwrap();
+        registry.apply_state(&revoked_state, position(3)).await.unwrap();
 
         assert!(matches!(
             resolver.resolve(&key(), CredentialKind::BotToken).await,

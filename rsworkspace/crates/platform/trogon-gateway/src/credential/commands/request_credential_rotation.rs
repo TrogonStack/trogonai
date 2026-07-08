@@ -1,9 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::domain::{CredentialLifecycleEvent, CredentialRef};
-use super::state::{
-    CredentialLifecycleDecideError, CredentialLifecycleEvolveError, CredentialLifecycleState, validate_same_ref,
-};
+use super::super::domain::{CredentialEvent, CredentialRef};
+use super::super::state::{CredentialDecideError, CredentialEvolveError, CredentialState, validate_same_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialRotation {
@@ -22,39 +20,39 @@ impl RequestCredentialRotation {
 
 impl Decider for RequestCredentialRotation {
     type StreamId = str;
-    type State = CredentialLifecycleState;
-    type Event = CredentialLifecycleEvent;
-    type DecideError = CredentialLifecycleDecideError;
-    type EvolveError = CredentialLifecycleEvolveError;
+    type State = CredentialState;
+    type Event = CredentialEvent;
+    type DecideError = CredentialDecideError;
+    type EvolveError = CredentialEvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.credential_ref.id().as_str()
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        super::super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        super::super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let active = match state {
-            CredentialLifecycleState::Active(active) => active,
-            CredentialLifecycleState::RotationPending(_) => {
-                return Err(CredentialLifecycleDecideError::CredentialRotationAlreadyPending {
+            CredentialState::Active(active) => active,
+            CredentialState::RotationPending(_) => {
+                return Err(CredentialDecideError::CredentialRotationAlreadyPending {
                     credential_id: command.credential_ref.id().clone(),
                 });
             }
             _ => {
-                return Err(CredentialLifecycleDecideError::CredentialNotActive {
+                return Err(CredentialDecideError::CredentialNotActive {
                     credential_id: command.credential_ref.id().clone(),
                 });
             }
         };
         validate_same_ref(active.credential_ref(), &command.credential_ref)?;
-        Ok(Decision::event(CredentialLifecycleEvent::RotationRequested {
+        Ok(Decision::event(CredentialEvent::RotationRequested {
             credential_ref: command.credential_ref.clone(),
         }))
     }
@@ -63,5 +61,5 @@ impl Decider for RequestCredentialRotation {
 impl CommandSnapshotPolicy for RequestCredentialRotation {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

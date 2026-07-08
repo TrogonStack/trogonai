@@ -1,9 +1,9 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::domain::{CredentialLifecycleEvent, CredentialMetadata};
-use super::state::{
-    CredentialLifecycleDecideError, CredentialLifecycleEvolveError, CredentialLifecycleState,
-    validate_activation_metadata, validate_ref_matches_pending,
+use super::super::domain::{CredentialEvent, CredentialMetadata};
+use super::super::state::{
+    CredentialDecideError, CredentialEvolveError, CredentialState, validate_activation_metadata,
+    validate_ref_matches_pending,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,28 +19,28 @@ impl ActivateCredentialWrite {
 
 impl Decider for ActivateCredentialWrite {
     type StreamId = str;
-    type State = CredentialLifecycleState;
-    type Event = CredentialLifecycleEvent;
-    type DecideError = CredentialLifecycleDecideError;
-    type EvolveError = CredentialLifecycleEvolveError;
+    type State = CredentialState;
+    type Event = CredentialEvent;
+    type DecideError = CredentialDecideError;
+    type EvolveError = CredentialEvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.metadata.reference().id().as_str()
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        super::super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        super::super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         let pending = match state {
-            CredentialLifecycleState::PendingWrite(pending) => pending,
+            CredentialState::PendingWrite(pending) => pending,
             _ => {
-                return Err(CredentialLifecycleDecideError::CredentialWriteNotPending {
+                return Err(CredentialDecideError::CredentialWriteNotPending {
                     credential_id: command.metadata.reference().id().clone(),
                 });
             }
@@ -48,7 +48,7 @@ impl Decider for ActivateCredentialWrite {
         validate_activation_metadata(&command.metadata)?;
         validate_ref_matches_pending(command.metadata.reference(), pending)?;
 
-        Ok(Decision::event(CredentialLifecycleEvent::Activated {
+        Ok(Decision::event(CredentialEvent::Activated {
             metadata: command.metadata.clone(),
         }))
     }
@@ -57,5 +57,5 @@ impl Decider for ActivateCredentialWrite {
 impl CommandSnapshotPolicy for ActivateCredentialWrite {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

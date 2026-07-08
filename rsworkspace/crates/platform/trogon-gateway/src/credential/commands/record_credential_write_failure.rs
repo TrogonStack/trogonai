@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::domain::{CredentialFailureReason, CredentialId, CredentialLifecycleEvent};
-use super::state::{CredentialLifecycleDecideError, CredentialLifecycleEvolveError, CredentialLifecycleState};
+use super::super::domain::{CredentialEvent, CredentialFailureReason, CredentialId};
+use super::super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialWriteFailure {
@@ -17,30 +17,30 @@ impl RecordCredentialWriteFailure {
 
 impl Decider for RecordCredentialWriteFailure {
     type StreamId = str;
-    type State = CredentialLifecycleState;
-    type Event = CredentialLifecycleEvent;
-    type DecideError = CredentialLifecycleDecideError;
-    type EvolveError = CredentialLifecycleEvolveError;
+    type State = CredentialState;
+    type Event = CredentialEvent;
+    type DecideError = CredentialDecideError;
+    type EvolveError = CredentialEvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
         self.credential_id.as_str()
     }
 
     fn initial_state() -> Self::State {
-        super::state::initial_state()
+        super::super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        super::super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
         match state {
-            CredentialLifecycleState::PendingWrite(_) => Ok(Decision::event(CredentialLifecycleEvent::WriteFailed {
+            CredentialState::PendingWrite(_) => Ok(Decision::event(CredentialEvent::WriteFailed {
                 credential_id: command.credential_id.clone(),
                 reason: command.reason.clone(),
             })),
-            _ => Err(CredentialLifecycleDecideError::CredentialWriteNotPending {
+            _ => Err(CredentialDecideError::CredentialWriteNotPending {
                 credential_id: command.credential_id.clone(),
             }),
         }
@@ -50,5 +50,5 @@ impl Decider for RecordCredentialWriteFailure {
 impl CommandSnapshotPolicy for RecordCredentialWriteFailure {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_LIFECYCLE_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

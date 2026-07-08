@@ -15,24 +15,21 @@ use tracing::warn;
 use trogon_decider_runtime::{SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::SecretString;
 
-use crate::commands::credential_lifecycle_handler::{
-    CredentialLifecycleRuntimeHandler, CredentialLifecycleRuntimeHandlerError, PutCredential, RevokeStoredCredential,
-    RotateCredential,
-};
-use crate::commands::domain::{
+use crate::credential::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
 };
-use crate::commands::{ActiveCredential, CredentialLifecycleState};
+use crate::credential::handler::{
+    CredentialRuntimeHandler, CredentialRuntimeHandlerError, PutCredential, RevokeStoredCredential, RotateCredential,
+};
+use crate::credential::processor::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
+use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
+use crate::credential::{ActiveCredential, CredentialState};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{
     CredentialCommandIdempotencyStore, CredentialCommandIdempotencyStoreError, IdempotencyDecision, IdempotencyKey,
     IdempotencyScope, RequestFingerprint,
 };
-use crate::processor::credential_lifecycle_worker::{
-    CredentialLifecycleRecoveryCheckpointStore, CredentialLifecycleRecoveryPolicy,
-};
-use crate::processor::runtime_projection::RuntimeCredentialRegistry;
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
     SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
@@ -46,7 +43,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
 struct CredentialManagementState<EventStore, Secrets, Idempotency> {
-    handler: CredentialLifecycleRuntimeHandler<EventStore, Secrets>,
+    handler: CredentialRuntimeHandler<EventStore, Secrets>,
     admin_token: SecretString,
     idempotency: Idempotency,
 }
@@ -128,8 +125,8 @@ pub(crate) fn router<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -147,7 +144,7 @@ where
     Idempotency: CredentialCommandIdempotencyStore,
 {
     let state = CredentialManagementState {
-        handler: CredentialLifecycleRuntimeHandler::new(event_store, secrets, runtime_credentials),
+        handler: CredentialRuntimeHandler::new(event_store, secrets, runtime_credentials),
         admin_token,
         idempotency,
     };
@@ -257,7 +254,7 @@ where
 
 pub(crate) fn recovery_status_router<Checkpoints>(admin_token: SecretString, checkpoints: Checkpoints) -> Router
 where
-    Checkpoints: CredentialLifecycleRecoveryCheckpointStore,
+    Checkpoints: CredentialRecoveryCheckpointStore,
 {
     Router::new()
         .route("/recovery/status", get(recovery_status::<Checkpoints>))
@@ -277,8 +274,8 @@ fn test_router<EventStore, Secrets>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -308,7 +305,7 @@ async fn recovery_status<Checkpoints>(
     headers: HeaderMap,
 ) -> Result<Json<CredentialRecoveryStatusResponse>, CredentialManagementHttpError>
 where
-    Checkpoints: CredentialLifecycleRecoveryCheckpointStore,
+    Checkpoints: CredentialRecoveryCheckpointStore,
 {
     authorize(&headers, &state.admin_token)?;
     let checkpoint = state
@@ -317,7 +314,7 @@ where
         .await
         .map_err(CredentialManagementHttpError::recovery_checkpoint)?;
     let now = SystemTime::now();
-    let policy = CredentialLifecycleRecoveryPolicy::default();
+    let policy = CredentialRecoveryPolicy::default();
     Ok(Json(CredentialRecoveryStatusResponse {
         last_scanned_sequence: checkpoint.last_scanned_sequence(),
         next_scan_sequence: checkpoint.next_sequence(),
@@ -337,8 +334,8 @@ async fn put_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -360,8 +357,8 @@ async fn put_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -383,8 +380,8 @@ async fn put_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -406,8 +403,8 @@ async fn put_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -429,8 +426,8 @@ async fn put_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -452,8 +449,8 @@ async fn put_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -475,8 +472,8 @@ async fn put_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -498,8 +495,8 @@ async fn put_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -521,8 +518,8 @@ async fn put_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -544,8 +541,8 @@ async fn put_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -567,8 +564,8 @@ async fn put_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -591,8 +588,8 @@ async fn put_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -615,8 +612,8 @@ async fn put_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -640,8 +637,8 @@ async fn put_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -718,8 +715,8 @@ async fn rotate_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -741,8 +738,8 @@ async fn rotate_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -764,8 +761,8 @@ async fn rotate_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -787,8 +784,8 @@ async fn rotate_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -810,8 +807,8 @@ async fn rotate_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -833,8 +830,8 @@ async fn rotate_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -856,8 +853,8 @@ async fn rotate_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -879,8 +876,8 @@ async fn rotate_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -902,8 +899,8 @@ async fn rotate_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -925,8 +922,8 @@ async fn rotate_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -948,8 +945,8 @@ async fn rotate_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -972,8 +969,8 @@ async fn rotate_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -996,8 +993,8 @@ async fn rotate_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1022,8 +1019,8 @@ async fn rotate_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1101,8 +1098,8 @@ async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1124,8 +1121,8 @@ async fn revoke_github_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1147,8 +1144,8 @@ async fn revoke_gitlab_signing_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1170,8 +1167,8 @@ async fn revoke_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1193,8 +1190,8 @@ async fn revoke_slack_signing_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1216,8 +1213,8 @@ async fn revoke_linear_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1239,8 +1236,8 @@ async fn revoke_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1262,8 +1259,8 @@ async fn revoke_sentry_client_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1285,8 +1282,8 @@ async fn revoke_notion_verification_token<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1308,8 +1305,8 @@ async fn revoke_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1331,8 +1328,8 @@ async fn revoke_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1355,8 +1352,8 @@ async fn revoke_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1379,8 +1376,8 @@ async fn revoke_source_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1404,8 +1401,8 @@ async fn revoke_scoped_credential_secret<EventStore, Secrets, Idempotency>(
 where
     EventStore: StreamRead<str>
         + StreamAppend<str>
-        + SnapshotRead<CredentialLifecycleState, str>
-        + SnapshotWrite<CredentialLifecycleState, str>
+        + SnapshotRead<CredentialState, str>
+        + SnapshotWrite<CredentialState, str>
         + Clone
         + Send
         + Sync
@@ -1527,7 +1524,7 @@ struct RevokeCredentialSecretRequest {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct CredentialCommandResponse {
-    pub(crate) lifecycle_state: String,
+    pub(crate) state: String,
     pub(crate) stream_position: u64,
     pub(crate) credential_ref: CredentialRefResponse,
 }
@@ -1569,7 +1566,7 @@ enum CredentialManagementHttpError {
     RecoveryCheckpoint(String),
     InvalidInput(String),
     CommandFailed(String),
-    UnexpectedLifecycleState(&'static str),
+    UnexpectedCredentialState(&'static str),
 }
 
 impl CredentialManagementHttpError {
@@ -1578,7 +1575,7 @@ impl CredentialManagementHttpError {
     }
 
     fn command_failed<SnapshotReadError, ReadError, AppendError>(
-        error: CredentialLifecycleRuntimeHandlerError<SecretStoreError, SnapshotReadError, ReadError, AppendError>,
+        error: CredentialRuntimeHandlerError<SecretStoreError, SnapshotReadError, ReadError, AppendError>,
     ) -> Self
     where
         SnapshotReadError: Error + Send + Sync + 'static,
@@ -1598,7 +1595,7 @@ impl CredentialManagementHttpError {
     }
 
     fn recovery_checkpoint(error: impl fmt::Display) -> Self {
-        warn!(error = %error, "credential lifecycle recovery checkpoint status failed");
+        warn!(error = %error, "credential recovery checkpoint status failed");
         Self::RecoveryCheckpoint(error.to_string())
     }
 }
@@ -1618,10 +1615,10 @@ impl IntoResponse for CredentialManagementHttpError {
                 )
             }
             Self::RecoveryCheckpoint(error) => {
-                warn!(error = %error, "credential lifecycle recovery checkpoint request failed");
+                warn!(error = %error, "credential recovery checkpoint request failed");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "credential lifecycle recovery checkpoint failed",
+                    "credential recovery checkpoint failed",
                 )
             }
             Self::InvalidInput(error) => {
@@ -1635,11 +1632,8 @@ impl IntoResponse for CredentialManagementHttpError {
                     "credential management request failed",
                 )
             }
-            Self::UnexpectedLifecycleState(state) => {
-                warn!(
-                    state,
-                    "credential management command returned an unexpected lifecycle state"
-                );
+            Self::UnexpectedCredentialState(state) => {
+                warn!(state, "credential management command returned an unexpected state");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management request failed",
@@ -1715,37 +1709,37 @@ fn credential_ref_from_request(
 
 fn command_response(
     stream_position: StreamPosition,
-    state: CredentialLifecycleState,
+    state: CredentialState,
 ) -> Result<CredentialCommandResponse, CredentialManagementHttpError> {
     match state {
-        CredentialLifecycleState::Active(active) => Ok(response_for_active("active", stream_position, active)),
-        CredentialLifecycleState::RotationPending(rotation) => Ok(response_for_active(
+        CredentialState::Active(active) => Ok(response_for_active("active", stream_position, active)),
+        CredentialState::RotationPending(rotation) => Ok(response_for_active(
             "rotation_pending",
             stream_position,
             rotation.active().clone(),
         )),
-        CredentialLifecycleState::Revoked(revoked) => Ok(CredentialCommandResponse {
-            lifecycle_state: "revoked".to_string(),
+        CredentialState::Revoked(revoked) => Ok(CredentialCommandResponse {
+            state: "revoked".to_string(),
             stream_position: stream_position.as_u64(),
             credential_ref: credential_ref_response(revoked.credential_ref(), CredentialStatus::Revoked),
         }),
-        CredentialLifecycleState::Missing => Err(CredentialManagementHttpError::UnexpectedLifecycleState("missing")),
-        CredentialLifecycleState::PendingWrite(_) => {
-            Err(CredentialManagementHttpError::UnexpectedLifecycleState("pending_write"))
-        }
-        CredentialLifecycleState::WriteFailed(_) => {
-            Err(CredentialManagementHttpError::UnexpectedLifecycleState("write_failed"))
+        CredentialState::Missing => Err(CredentialManagementHttpError::UnexpectedCredentialState("missing")),
+        CredentialState::PendingWrite(_) => Err(CredentialManagementHttpError::UnexpectedCredentialState(
+            "pending_write",
+        )),
+        CredentialState::WriteFailed(_) => {
+            Err(CredentialManagementHttpError::UnexpectedCredentialState("write_failed"))
         }
     }
 }
 
 fn response_for_active(
-    lifecycle_state: &'static str,
+    state: &'static str,
     stream_position: StreamPosition,
     active: ActiveCredential,
 ) -> CredentialCommandResponse {
     CredentialCommandResponse {
-        lifecycle_state: lifecycle_state.to_string(),
+        state: state.to_string(),
         stream_position: stream_position.as_u64(),
         credential_ref: credential_ref_response(active.credential_ref(), active.metadata().status()),
     }
@@ -1781,17 +1775,17 @@ mod tests {
     };
 
     use super::*;
-    use crate::commands::CredentialLifecycleEvent;
-    use crate::processor::credential_lifecycle_worker::{
-        CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError,
+    use crate::credential::CredentialEvent;
+    use crate::credential::processor::recovery_worker::{
+        CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError,
     };
-    use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
+    use crate::credential::processor::runtime_projection::{RuntimeCredentialError, RuntimeIntegrationKey};
     use crate::secret_store::MockOpenBaoSecretStore;
 
     #[derive(Clone, Default)]
     struct ManagementTestStreamStore {
         events: Arc<Mutex<Vec<StreamEvent>>>,
-        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialLifecycleState>>>>,
+        snapshots: Arc<Mutex<BTreeMap<String, Snapshot<CredentialState>>>>,
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -1799,11 +1793,11 @@ mod tests {
     struct ManagementTestStreamError;
 
     impl ManagementTestStreamStore {
-        async fn decoded_events(&self) -> Vec<CredentialLifecycleEvent> {
+        async fn decoded_events(&self) -> Vec<CredentialEvent> {
             let events = self.events.lock().await.clone();
             events
                 .into_iter()
-                .filter_map(|event| event.decode::<CredentialLifecycleEvent>().unwrap().into_decoded())
+                .filter_map(|event| event.decode::<CredentialEvent>().unwrap().into_decoded())
                 .collect()
         }
     }
@@ -1864,13 +1858,13 @@ mod tests {
         }
     }
 
-    impl SnapshotRead<CredentialLifecycleState, str> for ManagementTestStreamStore {
+    impl SnapshotRead<CredentialState, str> for ManagementTestStreamStore {
         type Error = ManagementTestStreamError;
 
         async fn read_snapshot(
             &self,
             request: ReadSnapshotRequest<'_, str>,
-        ) -> Result<ReadSnapshotResponse<CredentialLifecycleState>, Self::Error> {
+        ) -> Result<ReadSnapshotResponse<CredentialState>, Self::Error> {
             let snapshots = self.snapshots.lock().await;
             Ok(ReadSnapshotResponse {
                 snapshot: snapshots.get(request.snapshot_id).cloned(),
@@ -1878,12 +1872,12 @@ mod tests {
         }
     }
 
-    impl SnapshotWrite<CredentialLifecycleState, str> for ManagementTestStreamStore {
+    impl SnapshotWrite<CredentialState, str> for ManagementTestStreamStore {
         type Error = ManagementTestStreamError;
 
         async fn write_snapshot(
             &self,
-            request: WriteSnapshotRequest<'_, CredentialLifecycleState, str>,
+            request: WriteSnapshotRequest<'_, CredentialState, str>,
         ) -> Result<WriteSnapshotResponse, Self::Error> {
             let mut snapshots = self.snapshots.lock().await;
             snapshots.insert(request.snapshot_id.to_string(), request.snapshot);
@@ -1893,28 +1887,26 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct ManagementTestRecoveryCheckpointStore {
-        checkpoint: Arc<Mutex<CredentialLifecycleRecoveryCheckpoint>>,
+        checkpoint: Arc<Mutex<CredentialRecoveryCheckpoint>>,
     }
 
     impl ManagementTestRecoveryCheckpointStore {
-        async fn with_checkpoint(checkpoint: CredentialLifecycleRecoveryCheckpoint) -> Self {
+        async fn with_checkpoint(checkpoint: CredentialRecoveryCheckpoint) -> Self {
             Self {
                 checkpoint: Arc::new(Mutex::new(checkpoint)),
             }
         }
     }
 
-    impl CredentialLifecycleRecoveryCheckpointStore for ManagementTestRecoveryCheckpointStore {
-        async fn load(
-            &self,
-        ) -> Result<CredentialLifecycleRecoveryCheckpoint, CredentialLifecycleRecoveryCheckpointStoreError> {
+    impl CredentialRecoveryCheckpointStore for ManagementTestRecoveryCheckpointStore {
+        async fn load(&self) -> Result<CredentialRecoveryCheckpoint, CredentialRecoveryCheckpointStoreError> {
             Ok(*self.checkpoint.lock().await)
         }
 
         async fn save(
             &self,
-            checkpoint: CredentialLifecycleRecoveryCheckpoint,
-        ) -> Result<(), CredentialLifecycleRecoveryCheckpointStoreError> {
+            checkpoint: CredentialRecoveryCheckpoint,
+        ) -> Result<(), CredentialRecoveryCheckpointStoreError> {
             *self.checkpoint.lock().await = checkpoint;
             Ok(())
         }
@@ -2037,7 +2029,7 @@ mod tests {
     #[tokio::test]
     async fn recovery_status_returns_metadata_only_checkpoint_state() {
         let checkpoints = ManagementTestRecoveryCheckpointStore::with_checkpoint(
-            CredentialLifecycleRecoveryCheckpoint::with_failure_state(41, 3, Some(0), Some(u64::MAX)),
+            CredentialRecoveryCheckpoint::with_failure_state(41, 3, Some(0), Some(u64::MAX)),
         )
         .await;
         let app = recovery_app(checkpoints);
@@ -2060,7 +2052,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_rejects_missing_admin_token_before_mutating_lifecycle() {
+    async fn put_rejects_missing_admin_token_before_mutating_state() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2081,7 +2073,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_rejects_missing_idempotency_key_before_mutating_lifecycle() {
+    async fn put_rejects_missing_idempotency_key_before_mutating_state() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2105,7 +2097,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_writes_through_lifecycle_handler_without_echoing_plaintext() {
+    async fn put_writes_through_credential_handler_without_echoing_plaintext() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2123,7 +2115,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
-        assert_eq!(body["lifecycle_state"], "active");
+        assert_eq!(body["state"], "active");
         assert_eq!(body["stream_position"], 2);
         assert_eq!(
             body["credential_ref"]["id"],
@@ -2136,7 +2128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discord_bot_token_uses_source_scoped_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn discord_bot_token_uses_source_scoped_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2155,7 +2147,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(put_body["credential_ref"]["id"], "openbao:tenant-1:discord:bot_token");
         assert_eq!(put_body["credential_ref"]["source"], "discord");
         assert_eq!(put_body["credential_ref"]["scope_key"], "discord");
@@ -2186,7 +2178,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("Bot new-token"));
         assert_eq!(
@@ -2213,7 +2205,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_source_plaintext(&registry, secrets, SourceKind::Discord, CredentialKind::BotToken).await,
@@ -2223,7 +2215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slack_signing_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn slack_signing_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2242,7 +2234,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:slack/primary:signing_secret"
@@ -2276,7 +2268,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-slack-secret"));
         assert_eq!(
@@ -2304,7 +2296,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2321,7 +2313,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gitlab_signing_token_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn gitlab_signing_token_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2340,7 +2332,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:gitlab/primary:signing_token"
@@ -2378,7 +2370,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(
             !rotate_body
@@ -2410,7 +2402,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2427,7 +2419,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incidentio_signing_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn incidentio_signing_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2446,7 +2438,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:incidentio/primary:signing_secret"
@@ -2480,7 +2472,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("whsec_bmV3LXNlY3JldA=="));
         assert_eq!(
@@ -2508,7 +2500,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2525,7 +2517,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn linear_webhook_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn linear_webhook_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2544,7 +2536,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:linear/primary:webhook_secret"
@@ -2578,7 +2570,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-linear-secret"));
         assert_eq!(
@@ -2606,7 +2598,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2623,7 +2615,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn microsoft_graph_client_state_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn microsoft_graph_client_state_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2642,7 +2634,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:microsoft_graph/primary:client_state"
@@ -2676,7 +2668,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-microsoft-graph-secret"));
         assert_eq!(
@@ -2704,7 +2696,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2721,7 +2713,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sentry_client_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn sentry_client_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2740,7 +2732,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:sentry/primary:client_secret"
@@ -2774,7 +2766,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-sentry-secret"));
         assert_eq!(
@@ -2802,7 +2794,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2819,7 +2811,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn notion_verification_token_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn notion_verification_token_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2838,7 +2830,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:notion/primary:verification_token"
@@ -2872,7 +2864,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-notion-secret"));
         assert_eq!(
@@ -2900,7 +2892,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -2917,7 +2909,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telegram_webhook_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn telegram_webhook_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -2936,7 +2928,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:telegram/primary:webhook_secret"
@@ -2970,7 +2962,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-telegram-secret"));
         assert_eq!(
@@ -2998,7 +2990,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -3015,7 +3007,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn twitter_consumer_secret_uses_lifecycle_handler_for_put_rotate_and_revoke() {
+    async fn twitter_consumer_secret_uses_credential_handler_for_put_rotate_and_revoke() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -3034,7 +3026,7 @@ mod tests {
 
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
-        assert_eq!(put_body["lifecycle_state"], "active");
+        assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
             "openbao:tenant-1:twitter/primary:consumer_secret"
@@ -3068,7 +3060,7 @@ mod tests {
 
         assert_eq!(rotate_response.status(), StatusCode::OK);
         let rotate_body = response_json(rotate_response).await;
-        assert_eq!(rotate_body["lifecycle_state"], "active");
+        assert_eq!(rotate_body["state"], "active");
         assert_eq!(rotate_body["credential_ref"]["version"], 2);
         assert!(!rotate_body.to_string().contains("new-twitter-secret"));
         assert_eq!(
@@ -3096,7 +3088,7 @@ mod tests {
 
         assert_eq!(revoke_response.status(), StatusCode::OK);
         let revoke_body = response_json(revoke_response).await;
-        assert_eq!(revoke_body["lifecycle_state"], "revoked");
+        assert_eq!(revoke_body["state"], "revoked");
         assert_eq!(revoke_body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_target_plaintext(
@@ -3113,7 +3105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_replay_returns_same_metadata_snapshot_without_new_lifecycle_events() {
+    async fn put_replay_returns_same_metadata_snapshot_without_new_credential_events() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
@@ -3255,7 +3247,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
-        assert_eq!(body["lifecycle_state"], "active");
+        assert_eq!(body["state"], "active");
         assert_eq!(body["credential_ref"]["version"], 2);
         assert!(!body.to_string().contains("new-secret"));
         assert_eq!(resolved_plaintext(&registry, secrets).await.unwrap(), "new-secret");
@@ -3291,7 +3283,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_json(response).await;
-        assert_eq!(body["lifecycle_state"], "revoked");
+        assert_eq!(body["state"], "revoked");
         assert_eq!(body["credential_ref"]["status"], "revoked");
         assert!(matches!(
             resolved_plaintext(&registry, secrets).await,
@@ -3301,7 +3293,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_input_is_rejected_without_recording_lifecycle_events() {
+    async fn invalid_input_is_rejected_without_recording_credential_events() {
         let events = ManagementTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
         let registry = RuntimeCredentialRegistry::default();
