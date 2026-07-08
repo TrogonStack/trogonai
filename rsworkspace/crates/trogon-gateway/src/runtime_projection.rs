@@ -20,7 +20,7 @@ use trogon_nats::jetstream::{
     is_create_key_value_already_exists,
 };
 use trogon_std::SecretString;
-use trogonai_proto::gateway::credentials::v1 as proto;
+use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
 use crate::secret_store::{
     CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SecretMaterial, SecretStoreError, SecretStoreGet,

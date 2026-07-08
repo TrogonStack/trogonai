@@ -17,7 +17,7 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
     is_create_key_value_already_exists,
 };
-use trogonai_proto::gateway::credentials::v1 as proto;
+use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
 use super::credential_lifecycle::{
     self, CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
