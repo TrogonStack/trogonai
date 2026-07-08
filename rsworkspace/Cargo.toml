@@ -49,6 +49,8 @@ trogon-std = { path = "crates/trogon-std" }
 trogonai-proto = { path = "crates/trogonai-proto" }
 telegram-types = { path = "crates/telegram-types" }
 telegram-nats = { path = "crates/telegram-nats" }
+trogon-chat = { path = "crates/trogon-chat" }
+chat-bridge-telegram = { path = "crates/chat-bridge-telegram" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }

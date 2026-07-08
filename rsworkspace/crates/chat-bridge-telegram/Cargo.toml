@@ -1,0 +1,25 @@
+[package]
+name = "chat-bridge-telegram"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+acp-nats = { workspace = true }
+trogon-chat = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["signal"] }
+trogon-telemetry = { workspace = true }
+
+agent-client-protocol = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+futures = { workspace = true }
+serde_json = { workspace = true }
+teloxide = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tracing = { workspace = true }
