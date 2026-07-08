@@ -8,18 +8,19 @@ use trogon_decider_runtime::{
 };
 use trogon_std::SecretString;
 
-use super::credential_lifecycle::{
-    self, ActivateCredentialRotation, ActivateCredentialWrite, CredentialFailureReason, CredentialLifecycleDecideError,
-    CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
-    CredentialLifecycleState, PendingCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
-    RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,
+use super::domain::{
+    CredentialId, CredentialIdError, CredentialKind, CredentialLifecycleEvent, CredentialLifecycleEventPayloadError,
+    CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
 };
 use super::{
-    CredentialId, CredentialKind, CredentialRef, CredentialScope, SecretStoreMetadata, SecretStorePut,
-    SecretStoreRevoke, SecretStoreRotate,
-    openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id},
+    ActivateCredentialRotation, ActivateCredentialWrite, CredentialFailureReason, CredentialLifecycleDecideError,
+    CredentialLifecycleEvolveError, CredentialLifecycleState, PendingCredentialWrite, RecordCredentialRotationFailure,
+    RecordCredentialWriteFailure, RequestCredentialRotation, RequestCredentialWrite, RevokeCredential, evolve,
+    initial_state,
 };
-use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
+use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
+use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
+use crate::secret_store::{SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate};
 
 type LifecycleExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialLifecycleDecideError,
@@ -191,7 +192,7 @@ fn pending_write_credential_ref(
 ) -> Result<CredentialRef, CredentialActivationRecoveryPlanError> {
     let credential_id =
         CredentialId::new(stream_id).map_err(CredentialActivationRecoveryPlanError::InvalidCredentialId)?;
-    let credential = openbao_credential_ref_from_id(credential_id, super::CredentialVersion::initial())
+    let credential = openbao_credential_ref_from_id(credential_id, CredentialVersion::initial())
         .map_err(CredentialActivationRecoveryPlanError::InvalidOpenBaoCredentialId)?;
 
     if credential.id() != pending.credential_id()
@@ -214,7 +215,7 @@ fn pending_write_credential_ref(
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CredentialActivationRecoveryPlanError {
     #[error("credential lifecycle recovery stream id is invalid: {0}")]
-    InvalidCredentialId(#[source] super::CredentialIdError),
+    InvalidCredentialId(#[source] CredentialIdError),
     #[error("credential lifecycle recovery stream id is not an OpenBao credential id: {0}")]
     InvalidOpenBaoCredentialId(#[source] OpenBaoCredentialIdParseError),
     #[error(
@@ -223,8 +224,8 @@ pub(crate) enum CredentialActivationRecoveryPlanError {
     PendingWriteMismatch {
         credential: CredentialRef,
         expected_id: CredentialId,
-        expected_owner_id: super::CredentialOwnerId,
-        expected_source: super::SourceKind,
+        expected_owner_id: CredentialOwnerId,
+        expected_source: SourceKind,
         expected_kind: CredentialKind,
     },
 }
@@ -813,7 +814,7 @@ where
         })
         .await
         .map_err(|source| CredentialLifecycleHandlerError::ReadState { source })?;
-    let mut state = credential_lifecycle::initial_state();
+    let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<CredentialLifecycleEvent>()
@@ -821,8 +822,7 @@ where
         else {
             continue;
         };
-        state = credential_lifecycle::evolve(state, &event)
-            .map_err(|source| CredentialLifecycleHandlerError::ReplayState { source })?;
+        state = evolve(state, &event).map_err(|source| CredentialLifecycleHandlerError::ReplayState { source })?;
     }
     Ok(state)
 }
@@ -855,14 +855,12 @@ mod tests {
     };
 
     use super::*;
-    use crate::runtime_projection::{
+    use crate::commands::domain::{CredentialFingerprint, CredentialMetadata, CredentialStatus, StorageBackend};
+    use crate::processor::runtime_projection::{
         RuntimeCredentialError, RuntimeCredentialRegistry, RuntimeIntegrationKey, RuntimeIntegrationProjection,
     };
     use crate::secret_store::openbao_secret_store::OpenBaoSecretStore;
-    use crate::secret_store::{
-        CredentialFingerprint, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus,
-        CredentialVersion, MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet, SourceKind, StorageBackend,
-    };
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreError, SecretStoreGet};
     use crate::source_integration_id::SourceIntegrationId;
 
     const OPENBAO_IMAGE: &str = "openbao/openbao";
@@ -1017,12 +1015,7 @@ mod tests {
             kind: CredentialKind,
             _value: SecretString,
         ) -> Result<CredentialRef, Self::Error> {
-            let credential = CredentialRef::new(
-                credential_id(),
-                crate::secret_store::CredentialVersion::initial(),
-                &scope,
-                kind,
-            );
+            let credential = CredentialRef::new(credential_id(), CredentialVersion::initial(), &scope, kind);
             Err(SecretStoreError::BackendUnavailable {
                 backend: StorageBackend::OpenBao,
                 message: format!("OpenBao refused {}", credential.id()),
@@ -1174,8 +1167,8 @@ mod tests {
 
     #[test]
     fn recovery_plan_builds_write_activation_command_for_pending_write() {
-        let state = credential_lifecycle::evolve(
-            credential_lifecycle::initial_state(),
+        let state = evolve(
+            initial_state(),
             &CredentialLifecycleEvent::WriteRequested {
                 credential_id: credential_id(),
                 owner_id: owner_id(),
@@ -1216,9 +1209,7 @@ mod tests {
             },
         ]
         .into_iter()
-        .try_fold(credential_lifecycle::initial_state(), |state, event| {
-            credential_lifecycle::evolve(state, &event)
-        })
+        .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
         let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();
@@ -1249,9 +1240,7 @@ mod tests {
             CredentialLifecycleEvent::Activated { metadata: active },
         ]
         .into_iter()
-        .try_fold(credential_lifecycle::initial_state(), |state, event| {
-            credential_lifecycle::evolve(state, &event)
-        })
+        .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
 
         let command = activation_recovery_command(credential_id().as_str(), &state).unwrap();

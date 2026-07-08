@@ -5,9 +5,9 @@ use crate::config::ResolvedConfig;
 use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-    crate::secret_store::credential_lifecycle_stream::provision(client).await?;
+    crate::commands::credential_lifecycle_stream::provision(client).await?;
     info!(
-        stream = crate::secret_store::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
+        stream = crate::commands::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
         "credential lifecycle stream provisioned"
     );
 
@@ -22,10 +22,10 @@ pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &Resolved
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::load;
-    use crate::secret_store::credential_lifecycle_stream::{
+    use crate::commands::credential_lifecycle_stream::{
         CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX, CREDENTIAL_LIFECYCLE_STREAM,
     };
+    use crate::config::load;
     use std::io::Write;
     use trogon_nats::jetstream::MockJetStreamContext;
 

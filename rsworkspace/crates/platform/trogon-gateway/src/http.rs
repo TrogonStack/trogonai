@@ -50,13 +50,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
     use crate::config::load;
-    use crate::runtime_projection::{
+    use crate::processor::runtime_projection::{
         RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
     };
-    use crate::secret_store::{
-        CredentialKind, CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut, SourceKind,
-    };
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source::github::constants::{HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE};
     use crate::source::gitlab::GitLabSigningToken;
     use crate::source::gitlab::constants as gitlab_constants;

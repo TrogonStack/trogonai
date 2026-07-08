@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::secret_store::{
-    CredentialKind, CredentialOwnerId, CredentialScope, SourceKind, StaticConfigSecretInput, StaticConfigSecretStore,
-    StaticConfigSecretStoreError,
-};
+use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
