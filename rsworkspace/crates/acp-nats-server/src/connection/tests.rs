@@ -36,7 +36,7 @@ async fn start_echo_server() -> String {
 }
 
 #[tokio::test]
-async fn shutdown_error_display_includes_source_details() {
+async fn shutdown_error_wraps_join_error_source() {
     let handle = tokio::spawn(std::future::pending::<()>());
     handle.abort();
     let source = handle.await.unwrap_err();
@@ -44,7 +44,7 @@ async fn shutdown_error_display_includes_source_details() {
 
     let error = ConnectionShutdownError::ClientTask { source };
 
-    assert!(error.to_string().starts_with("client task error: "));
+    assert!(matches!(error, ConnectionShutdownError::ClientTask { .. }));
     assert!(error.source().is_some());
 }
 

@@ -83,3 +83,6 @@ pub trait AgentHandler {
         Err(Error::method_not_found())
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -173,7 +173,12 @@ async fn cancel<A: AgentHandler + Send + Sync + 'static>(
     notif: CancelNotification,
     cx: ConnectionTo<Client>,
 ) -> Result<()> {
-    cx.spawn(async move { agent.cancel(notif).await })
+    cx.spawn(async move {
+        if let Err(error) = agent.cancel(notif).await {
+            tracing::warn!(error = %error, "cancel notification handler failed");
+        }
+        Ok(())
+    })
 }
 
 async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
@@ -184,7 +189,12 @@ async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
     let ClientNotification::ExtNotification(notification) = notif else {
         return Ok(());
     };
-    cx.spawn(async move { agent.ext_notification(notification).await })
+    cx.spawn(async move {
+        if let Err(error) = agent.ext_notification(notification).await {
+            tracing::warn!(error = %error, "ext notification handler failed");
+        }
+        Ok(())
+    })
 }
 
 macro_rules! route_request {

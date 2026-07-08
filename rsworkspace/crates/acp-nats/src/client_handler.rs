@@ -61,3 +61,6 @@ pub trait ClientHandler {
         Err(Error::method_not_found())
     }
 }
+
+#[cfg(test)]
+mod tests;

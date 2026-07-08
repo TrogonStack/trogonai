@@ -362,3 +362,71 @@ fn parse_client_ext_method() {
     assert_eq!(parsed.session_id.as_str(), "s1");
     assert_eq!(parsed.method, ClientMethod::Ext("my_tool".to_string()));
 }
+
+#[test]
+fn global_agent_methods_round_trip_through_wire_method() {
+    let methods = [
+        GlobalAgentMethod::Initialize,
+        GlobalAgentMethod::Authenticate,
+        GlobalAgentMethod::Logout,
+        GlobalAgentMethod::SessionNew,
+        GlobalAgentMethod::SessionList,
+        GlobalAgentMethod::ProvidersList,
+        GlobalAgentMethod::ProvidersSet,
+        GlobalAgentMethod::ProvidersDisable,
+    ];
+    for method in methods {
+        let subject = format!("acp.agent.{}", method.wire_method());
+        let parsed = parse_agent_subject(&subject);
+        assert_eq!(parsed, Some(ParsedAgentSubject::Global(method)));
+    }
+}
+
+#[test]
+fn session_agent_methods_round_trip_through_wire_method() {
+    let methods = [
+        SessionAgentMethod::Load,
+        SessionAgentMethod::Prompt,
+        SessionAgentMethod::Cancel,
+        SessionAgentMethod::SetMode,
+        SessionAgentMethod::SetConfigOption,
+        SessionAgentMethod::Fork,
+        SessionAgentMethod::Resume,
+        SessionAgentMethod::Close,
+        SessionAgentMethod::Delete,
+    ];
+    for method in methods {
+        let subject = format!("acp.session.s1.agent.{}", method.wire_method());
+        let parsed = parse_agent_subject(&subject);
+        match parsed {
+            Some(ParsedAgentSubject::Session { session_id, method: m }) => {
+                assert_eq!(session_id.as_str(), "s1");
+                assert_eq!(m, method);
+            }
+            other => panic!("expected session subject for {subject}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn client_methods_round_trip_through_subject_suffix() {
+    let methods = [
+        ClientMethod::FsReadTextFile,
+        ClientMethod::FsWriteTextFile,
+        ClientMethod::SessionRequestPermission,
+        ClientMethod::SessionUpdate,
+        ClientMethod::TerminalCreate,
+        ClientMethod::TerminalKill,
+        ClientMethod::TerminalOutput,
+        ClientMethod::TerminalRelease,
+        ClientMethod::TerminalWaitForExit,
+        ClientMethod::ElicitationCreate,
+        ClientMethod::ElicitationComplete,
+        ClientMethod::ExtSessionPromptResponse,
+    ];
+    for method in methods {
+        let suffix = method.wire_method().replace('/', ".");
+        let parsed = ClientMethod::from_subject_suffix(&suffix);
+        assert_eq!(parsed, Some(method));
+    }
+}
