@@ -22,3 +22,5 @@ future implementation work.
 - [ADR 0015: Rust TLS Library](./0015-rust-tls-library.md)
 - [ADR 0016: Protocol Buffers RPC over NATS micro Binding](./0016-protobuf-rpc-over-nats-micro-binding.md)
 - [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
+- [ADR 0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
+- [ADR 0019: Console Webapp Stack](./0019-console-webapp-stack.md)

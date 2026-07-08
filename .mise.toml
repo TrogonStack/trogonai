@@ -20,19 +20,27 @@ run = "docker compose -f devops/docker/compose/compose.yml up -d"
 
 [tasks.build]
 description = "Build all"
-depends = ["build:rust", "build:docs"]
+depends = ["build:rust", "build:docs", "build:web"]
 
 [tasks."build:docs"]
 dir = "docs"
 run = "pnpm docs:build"
+
+[tasks."build:web"]
+dir = "tsworkspace"
+run = "pnpm build"
+
+[tasks."check:web"]
+dir = "tsworkspace"
+run = "pnpm fmt:check && pnpm lint && pnpm typecheck"
 
 [tasks."build:rust"]
 dir = "rsworkspace"
 run = "cargo build"
 
 [tasks.check]
-description = "Check Rust"
-depends = ["check:rust"]
+description = "Check workspaces"
+depends = ["check:rust", "check:web"]
 
 [tasks."check:rust"]
 dir = "rsworkspace"
