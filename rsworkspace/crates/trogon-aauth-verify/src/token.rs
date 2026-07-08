@@ -55,6 +55,87 @@ pub struct VerifiedAuth {
     pub raw_jwt: String,
 }
 
+/// The request-signing context a resource observed for an inbound request:
+/// the agent identifier and JWK thumbprint of the key that actually produced
+/// the HTTP Message Signature (or PoP-equivalent). [`TokenVerifier::verify_auth_request_context`]
+/// compares an auth token's claims against this to implement "Request-Context
+/// Binding" rules 5-9.
+#[derive(Debug, Clone)]
+pub struct RequestSigningContext {
+    /// Agent identifier taken from the request's signing context (e.g. the
+    /// `sub` of the agent token, or the sub-agent identifier for a
+    /// parent-mediated request). Compared against the auth token's `agent`
+    /// claim (rule 6).
+    pub agent: String,
+    /// RFC 7638 JWK Thumbprint of the key that signed the HTTP request.
+    /// Compared against the auth token's `cnf.jwk` (rule 7).
+    pub signing_jkt: String,
+}
+
+/// Typed error for each "Request-Context Binding" rule (#auth-token-verification,
+/// rules 5-9). Distinct from [`TokenError`] because these checks run only
+/// after JWT Trust Verification (rules 1-4, `TokenVerifier::verify_auth`) has
+/// already succeeded and operate against request-time context the resource
+/// supplies, not the token alone.
+#[derive(Debug, thiserror::Error)]
+pub enum RequestContextError {
+    /// Rule 5: `aud` must match the resource's own identifier. Distinct from
+    /// [`TokenError::AudienceMismatch`], which is enforced during JWT decode;
+    /// this variant exists for callers that verify context bindings as a
+    /// separate step against an already-decoded [`VerifiedAuth`].
+    #[error("aud does not match resource identifier: expected {expected}, got {actual}")]
+    AudienceMismatch { expected: String, actual: String },
+    /// Rule 6: `agent` must match the agent identifier from the request's
+    /// signing context.
+    #[error("agent claim does not match request signing context: expected {expected}, got {actual}")]
+    AgentMismatch { expected: String, actual: String },
+    /// Rule 7 (verbatim): `cnf.jwk` is REQUIRED. Absent entirely.
+    #[error("cnf.jwk is required and was absent")]
+    MissingConfirmationKey,
+    /// Rule 7 (verbatim): `cnf.jwk` is missing `kty` or the members required
+    /// for that key type. This is a *distinct* rejection from
+    /// [`RequestContextError::InvalidKeyMaterial`] -- the draft calls out
+    /// "reject the token as structurally incomplete before attempting key
+    /// decoding" as separate from "present but not parseable as a supported
+    /// public key".
+    #[error("cnf.jwk is structurally incomplete: {0}")]
+    StructurallyIncompleteKey(#[source] crate::jkt::JktError),
+    /// Rule 7 (verbatim): `cnf.jwk` was structurally complete but not
+    /// parseable as a supported public key. The source is either a
+    /// deserialize failure (malformed JSON shape not caught by the
+    /// structural pre-check) or a `jsonwebtoken` decoding-key construction
+    /// failure (e.g. an invalid curve point).
+    #[error("cnf.jwk is not valid key material")]
+    InvalidKeyMaterial(#[source] InvalidKeyMaterialSource),
+    /// Rule 7: `cnf.jwk` (structurally valid, parseable key material) does
+    /// not match the key that signed the HTTP request.
+    #[error("cnf.jwk does not match the request signing key")]
+    ConfirmationKeyMismatch,
+    /// Rule 8: `act.agent` is not a syntactically valid AAuth agent
+    /// identifier.
+    #[error("act chain is invalid: {0}")]
+    InvalidActChain(#[source] crate::delegation::DelegationError),
+    /// Rule 9: neither `sub` nor `scope` is present. `AuthClaims::sub` is a
+    /// required (non-`Option`) field on the current claim struct, so in
+    /// practice only an empty `scope` alongside an empty `sub` string trips
+    /// this; the check is expressed explicitly so a future claim-struct
+    /// change that makes `sub` optional stays correctly enforced.
+    #[error("neither sub nor scope is present")]
+    MissingSubOrScope,
+}
+
+/// Source of an [`RequestContextError::InvalidKeyMaterial`] failure: either
+/// `cnf.jwk` did not deserialize into the `jsonwebtoken` JWK shape, or it
+/// deserialized but `jsonwebtoken` rejected the key material itself (e.g. a
+/// curve point that doesn't lie on the curve).
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidKeyMaterialSource {
+    #[error("cnf.jwk did not deserialize into a supported JWK shape")]
+    Deserialize(#[source] serde_json::Error),
+    #[error("cnf.jwk failed to produce a decoding key")]
+    DecodingKey(#[source] jsonwebtoken::errors::Error),
+}
+
 #[derive(Debug, Clone)]
 pub struct VerifiedResource {
     pub claims: ResourceClaims,
@@ -138,6 +219,83 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
             claims,
             raw_jwt: jwt.to_string(),
         })
+    }
+
+    /// Checks an already-verified auth token's "Request-Context Binding"
+    /// rules 5-9 (#auth-token-verification) against the resource's own
+    /// identifier and the request's actual signing context.
+    ///
+    /// Rules 1-4 (JWT Trust Verification: `typ`, `dwk`/signature, freshness,
+    /// `iss` shape) are already enforced by [`Self::verify_auth`] before this
+    /// runs. This method is a distinct step (not folded into `verify_auth`)
+    /// because rules 5-9 need request-time inputs -- the resource's own
+    /// identifier and the key that actually signed the inbound request --
+    /// that are not available inside token decoding alone.
+    ///
+    /// `expected_aud` MUST be the same value passed to `verify_auth`; it is
+    /// re-checked here (rather than trusted from the prior call) so this
+    /// method is safe to call standalone against a [`VerifiedAuth`] obtained
+    /// by any means.
+    pub fn verify_auth_request_context(
+        &self,
+        verified: &VerifiedAuth,
+        expected_aud: &str,
+        ctx: &RequestSigningContext,
+    ) -> Result<(), RequestContextError> {
+        let claims = &verified.claims;
+
+        // Rule 5.
+        if claims.aud != expected_aud {
+            return Err(RequestContextError::AudienceMismatch {
+                expected: expected_aud.to_string(),
+                actual: claims.aud.clone(),
+            });
+        }
+
+        // Rule 6.
+        if claims.agent != ctx.agent {
+            return Err(RequestContextError::AgentMismatch {
+                expected: ctx.agent.clone(),
+                actual: claims.agent.clone(),
+            });
+        }
+
+        // Rule 7 (verbatim): cnf.jwk is REQUIRED. Structural incompleteness
+        // (missing kty, or missing the members required for that key type)
+        // is rejected distinctly from key material that is structurally
+        // complete but fails to decode as a supported public key.
+        let cnf = claims.cnf.as_ref().ok_or(RequestContextError::MissingConfirmationKey)?;
+        // `jwk_thumbprint` fails on exactly the shapes rule 7 calls
+        // "structurally incomplete": missing `kty`, missing a member the
+        // key's `kty` requires, or a `kty` this crate doesn't recognize.
+        // None of its error variants indicate key material that parses
+        // structurally but is cryptographically invalid -- that case is
+        // caught below by `DecodingKey::from_jwk`.
+        let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(RequestContextError::StructurallyIncompleteKey)?;
+        // jwk_thumbprint already validates presence of the type-specific
+        // required members (crv/x/y for EC, crv/x for OKP, n/e for RSA); a
+        // JWK that reaches this point but still cannot be parsed into a
+        // `jsonwebtoken` decoding key is invalid key material, not merely
+        // structurally incomplete.
+        let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk.clone())
+            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSource::Deserialize(e)))?;
+        DecodingKey::from_jwk(&parsed_jwk)
+            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSource::DecodingKey(e)))?;
+        if jkt != ctx.signing_jkt {
+            return Err(RequestContextError::ConfirmationKeyMismatch);
+        }
+
+        // Rule 8.
+        if let Some(act) = &claims.act {
+            crate::delegation::verify_act_chain(act).map_err(RequestContextError::InvalidActChain)?;
+        }
+
+        // Rule 9.
+        if claims.sub.is_empty() && claims.scope.is_empty() {
+            return Err(RequestContextError::MissingSubOrScope);
+        }
+
+        Ok(())
     }
 
     fn assert_freshness(&self, iat: i64, exp: i64) -> Result<(), TokenError> {

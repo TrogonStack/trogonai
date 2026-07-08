@@ -1,11 +1,11 @@
 ---
-number: "0017"
+number: "0020"
 slug: acp-sdk-1x-boundary-and-bridge-traits
 status: accepted
 date: 2026-07-07
 ---
 
-# ADR 0017: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits
+# ADR 0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits
 
 ## Context
 

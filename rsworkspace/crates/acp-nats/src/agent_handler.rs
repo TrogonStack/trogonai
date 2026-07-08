@@ -11,7 +11,7 @@ use agent_client_protocol::{Error, Result};
 
 /// Bridge-owned replacement for the SDK's removed `Agent` trait.
 ///
-/// See ADR 0017 for why this trait exists instead of implementing an SDK trait directly.
+/// See ADR 0020 for why this trait exists instead of implementing an SDK trait directly.
 #[async_trait::async_trait]
 pub trait AgentHandler {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse>;

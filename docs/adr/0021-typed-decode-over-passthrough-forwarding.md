@@ -1,11 +1,11 @@
 ---
-number: "0018"
+number: "0021"
 slug: typed-decode-over-passthrough-forwarding
 status: accepted
 date: 2026-07-07
 ---
 
-# ADR 0018: Typed Decode over Passthrough Forwarding
+# ADR 0021: Typed Decode over Passthrough Forwarding
 
 ## Context
 

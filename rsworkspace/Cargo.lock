@@ -73,6 +73,7 @@ dependencies = [
  "a2a-redaction",
  "async-nats",
  "async-trait",
+ "axum",
  "base64",
  "bytes",
  "cel-interpreter",
@@ -83,6 +84,7 @@ dependencies = [
  "nkeys",
  "p256",
  "rand_core 0.6.4",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -96,8 +98,11 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "trogon-aauth-person",
+ "trogon-aauth-sdk",
  "trogon-aauth-verify",
  "trogon-identity-types",
+ "trogon-jwks-publisher",
  "trogon-nats",
  "trogon-std",
  "uuid",
@@ -6335,6 +6340,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-aauth-as"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "jsonwebtoken",
+ "p256",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-aauth-person"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "jsonwebtoken",
+ "p256",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "trogon-aauth-sdk"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64",
+ "jsonwebtoken",
+ "p256",
+ "rand_core 0.6.4",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "url",
+ "wiremock",
+]
+
+[[package]]
 name = "trogon-aauth-verify"
 version = "0.0.1"
 dependencies = [
@@ -6345,6 +6414,7 @@ dependencies = [
  "p256",
  "pkcs8",
  "rand_core 0.6.4",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -6352,6 +6422,8 @@ dependencies = [
  "time",
  "tokio",
  "trogon-identity-types",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -6535,6 +6607,25 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "trogon-jwks-publisher"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "base64",
+ "jsonwebtoken",
+ "p256",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower",
+ "trogon-aauth-verify",
+ "trogon-identity-types",
+ "uuid",
 ]
 
 [[package]]

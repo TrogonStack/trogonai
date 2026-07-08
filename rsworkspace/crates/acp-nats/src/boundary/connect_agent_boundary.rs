@@ -191,7 +191,7 @@ async fn ext_notification<A: AgentHandler + Send + Sync + 'static>(
 ///
 /// Registers one named handler per [`AgentHandler`] method, then falls
 /// through to the SDK's `ClientRequest`/`ClientNotification` catch-all for
-/// extension methods, matching ADR 0017's "SDK builder callbacks adapt
+/// extension methods, matching ADR 0020's "SDK builder callbacks adapt
 /// boundaries to bridge traits" decision. Shared by `acp-nats-server`
 /// (WebSocket and HTTP duplex) and `acp-nats-stdio`.
 ///

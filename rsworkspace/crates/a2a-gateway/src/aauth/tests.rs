@@ -67,7 +67,7 @@ async fn resolve_nats_with_off_mode_returns_anonymous() {
     };
     let ingress = AAuthIngress::new_in_memory(cfg);
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None)
+        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
         .await
         .expect("off-mode short-circuits");
     assert!(res.agent_id.is_none());
@@ -101,7 +101,7 @@ async fn resolve_nats_shadow_mode_swallows_pop_failure_to_anonymous() {
     // so production traffic isn't blocked while operators evaluate.
     let ingress = AAuthIngress::new_in_memory(shadow_cfg());
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None)
+        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
         .await
         .expect("shadow mode never errors");
     assert!(res.agent_id.is_none());
@@ -114,7 +114,7 @@ async fn resolve_nats_enforce_mode_denies_without_jkt_carries_no_challenge() {
     // challenge=None rather than panicking or fabricating one.
     let ingress = AAuthIngress::new_in_memory(enforce_cfg());
     let err = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None)
+        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
         .await
         .expect_err("enforce mode denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
@@ -203,4 +203,104 @@ fn uuid_like_is_non_empty_and_prefixed() {
     let v = uuid_like();
     assert!(v.starts_with("jti-"), "got {v}");
     assert!(v.len() > "jti-".len());
+}
+
+#[test]
+fn scope_covers_method_matrix() {
+    // Exact match.
+    assert!(scope_covers_method("message.send", "message.send"));
+    assert!(!scope_covers_method("message.send", "message.stream"));
+    // Prefix glob: `message.*` covers dotted children, not the bare prefix.
+    assert!(scope_covers_method("message.*", "message.send"));
+    assert!(scope_covers_method("message.*", "message.stream"));
+    assert!(!scope_covers_method("message.*", "message"));
+    assert!(!scope_covers_method("message.*", "messages.send"));
+    // Star covers everything.
+    assert!(scope_covers_method("*", "message.send"));
+    assert!(scope_covers_method("*", "tasks.get"));
+    // Space-separated tokens: any covering token is sufficient.
+    assert!(scope_covers_method("tasks.* message.send", "message.send"));
+    assert!(!scope_covers_method("tasks.* message.send", "message.stream"));
+    // Non-covering / empty scope covers nothing.
+    assert!(!scope_covers_method("tasks.*", "message.send"));
+    assert!(!scope_covers_method("", "message.send"));
+    assert!(!scope_covers_method("   ", "message.send"));
+}
+
+#[test]
+fn scope_not_covered_variant_carries_scope_and_method() {
+    let reason = AAuthDenyReason::ScopeNotCovered {
+        scope: "tasks.*".into(),
+        method: "message.send".into(),
+    };
+    let display = format!("{reason}");
+    assert!(display.contains("tasks.*"));
+    assert!(display.contains("message.send"));
+}
+
+#[test]
+fn mission_mismatch_variant_carries_source() {
+    let header = trogon_identity_types::aauth::MissionRef {
+        approver: "approver-1".into(),
+        s256: "hash-a".into(),
+    };
+    let claim = trogon_identity_types::aauth::MissionRef {
+        approver: "approver-2".into(),
+        s256: "hash-a".into(),
+    };
+    let err = verify_mission_header_matches_claim(&header, &claim).expect_err("approver mismatch");
+    let reason = AAuthDenyReason::MissionMismatch(err);
+    let display = format!("{reason}");
+    assert!(display.contains("mismatch"));
+    let source = std::error::Error::source(&reason).expect("typed source");
+    assert!(format!("{source}").contains("approver-1"));
+}
+
+#[test]
+fn capabilities_parse_pass_through() {
+    let parsed = Capabilities::parse("interaction, clarification, payment");
+    assert_eq!(parsed.0.len(), 3);
+    assert!(parsed.contains(&trogon_identity_types::aauth::headers::Capability::Interaction));
+    assert!(parsed.contains(&trogon_identity_types::aauth::headers::Capability::Payment));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn gateway_jwks_resolver_static_variant_delegates() {
+    let jwks = StaticJwks::new().with("https://ap.test".to_string(), JwkSet { keys: vec![] });
+    let resolver = GatewayJwksResolver::Static(jwks);
+    let resolved = resolver
+        .resolve("https://ap.test")
+        .await
+        .expect("known issuer resolves");
+    assert!(resolved.keys.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn gateway_jwks_resolver_well_known_variant_delegates() {
+    // A non-https issuer is rejected by `HttpJwksResolver` before any network
+    // call, so this exercises the `WellKnown` delegation arm without
+    // requiring a live discovery endpoint.
+    let cached = CachedJwksResolver::new(HttpJwksResolver::new(), SystemTimeSource);
+    let resolver = GatewayJwksResolver::WellKnown(Arc::new(cached));
+    let err = resolver
+        .resolve("http://insecure.test")
+        .await
+        .expect_err("non-https issuer rejected");
+    assert!(matches!(err, JwksError::Transport(_)), "got {err}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_nats_records_capabilities_header_on_resolution() {
+    // Off mode short-circuits before capabilities parsing, so this exercises
+    // shadow mode's PoP-failure path -- capabilities parsing happens after
+    // PoP verification, so a PoP failure still yields no capabilities. This
+    // test documents that absence-of-header means `None`, not empty-but-Some
+    // (draft "AAuth-Capabilities Request Header": recipients MUST NOT assume
+    // any capabilities when the header is absent).
+    let ingress = AAuthIngress::new_in_memory(shadow_cfg());
+    let res = ingress
+        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .await
+        .expect("shadow mode never errors");
+    assert!(res.capabilities.is_none());
 }
