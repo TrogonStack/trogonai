@@ -23,3 +23,6 @@ teloxide = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tracing = { workspace = true }
+
+[dev-dependencies]
+testcontainers-modules = { version = "0.15", features = ["nats"] }

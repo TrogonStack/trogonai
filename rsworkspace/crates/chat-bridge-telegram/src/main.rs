@@ -9,7 +9,9 @@
 
 mod acp_port;
 mod config;
+mod outbound;
 mod parse;
+mod pipeline;
 mod render;
 
 use acp_port::{AcpBridge, AcpPort};
@@ -17,24 +19,18 @@ use agent_client_protocol::{Agent, Client, InitializeRequest, ProtocolVersion};
 use anyhow::Context as _;
 use config::BridgeConfig;
 use futures::StreamExt;
-use render::{TEXT_CHUNK_LIMIT, TelegramRenderClient, chunk_text};
+use outbound::TelegramOutbound;
+use pipeline::Pipeline;
+use render::TelegramRenderClient;
 use std::rc::Rc;
 use teloxide::Bot;
-use teloxide::requests::Requester;
-use teloxide::types::{ChatAction, ChatId};
 use tracing::{error, info, warn};
 use trogon_chat::store::PrincipalRecord;
-use trogon_chat::{AgentId, AgentPort, ChatStore, ConversationRecord, Endpoint, PrincipalId};
+use trogon_chat::{ChatStore, Endpoint, PrincipalId};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_std::signal::shutdown_signal;
 use trogon_telemetry::ServiceName;
-
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -139,6 +135,15 @@ async fn run(
     info!("ACP agent initialized; consuming inbound updates");
 
     let port = AcpPort::new(bridge.clone(), config.agent_cwd.clone());
+    let telegram = TelegramOutbound::new(bot);
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &telegram,
+        bot_account: &config.bot_account,
+        agent_id: &config.agent_id,
+    };
 
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
@@ -155,7 +160,7 @@ async fn run(
                 };
                 match next {
                     Ok(msg) => {
-                        if let Err(e) = handle_message(&msg, &store, &port, &renderer, &bot, &config).await {
+                        if let Err(e) = pipeline.handle_message(&msg).await {
                             // Left unacked on purpose: JetStream redelivers
                             // (max_deliver bounds the retries).
                             error!(error = ?e, "Failed to process update; leaving unacked for redelivery");
@@ -170,103 +175,4 @@ async fn run(
     client_task.abort();
     notification_task.abort();
     Ok(())
-}
-
-async fn ack(msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
-    msg.ack().await.map_err(|e| anyhow::anyhow!("ack failed: {e}"))
-}
-
-async fn handle_message(
-    msg: &async_nats::jetstream::Message,
-    store: &ChatStore,
-    port: &AcpPort,
-    renderer: &Rc<TelegramRenderClient>,
-    bot: &Bot,
-    config: &BridgeConfig,
-) -> anyhow::Result<()> {
-    let update = match serde_json::from_slice::<teloxide::types::Update>(&msg.payload) {
-        Ok(update) => update,
-        Err(e) => {
-            warn!(error = %e, body_len = msg.payload.len(), "Unparseable Telegram update; dropping");
-            return ack(msg).await;
-        }
-    };
-
-    let Some(event) = parse::inbound_event(&update, &config.bot_account) else {
-        return ack(msg).await;
-    };
-
-    let Some(principal) = store.principal_for(&event.endpoint).await? else {
-        info!(endpoint = %event.endpoint, "Unknown endpoint; ignoring (no principal linked)");
-        return ack(msg).await;
-    };
-
-    let chat_id = ChatId(
-        event
-            .endpoint
-            .peer()
-            .parse::<i64>()
-            .context("telegram peer is not an i64 chat id")?,
-    );
-
-    let now = now_unix();
-    let (conversation_id, mut record) = match store.conversation_for(&event.endpoint).await? {
-        Some(found) => found,
-        None => {
-            // Routing policy, v1: every new conversation binds to the single
-            // configured agent. Sticky from here on.
-            let record = ConversationRecord {
-                principal: principal.clone(),
-                agent_id: AgentId::new(&config.agent_id),
-                current_session: None,
-                created_at: now,
-                last_activity_at: now,
-            };
-            let id = store.create_conversation(&event.endpoint, &record).await?;
-            info!(conversation = %id, endpoint = %event.endpoint, agent = %record.agent_id, "Created conversation");
-            (id, record)
-        }
-    };
-
-    let mut active_session = match record.current_session.clone() {
-        Some(session) => session,
-        None => {
-            let session = port.create_session(&record).await?;
-            record.current_session = Some(session.clone());
-            store.update_conversation(&conversation_id, &record).await?;
-            session
-        }
-    };
-
-    let _ = bot.send_chat_action(chat_id, ChatAction::Typing).await;
-
-    let outcome = match port.prompt(&active_session, &event).await {
-        Ok(outcome) => outcome,
-        Err(first_error) => {
-            // Sessions are ephemeral and belong to the agent: repair the
-            // session in place, never re-run routing policy.
-            warn!(error = %first_error, session = %active_session, "Prompt failed; retrying with a fresh session");
-            let fresh = port.create_session(&record).await?;
-            record.current_session = Some(fresh.clone());
-            store.update_conversation(&conversation_id, &record).await?;
-            active_session = fresh;
-            port.prompt(&active_session, &event).await?
-        }
-    };
-
-    record.last_activity_at = now_unix();
-    store.update_conversation(&conversation_id, &record).await?;
-
-    match renderer.take_buffer(active_session.as_str()) {
-        Some(text) => {
-            for chunk in chunk_text(&text, TEXT_CHUNK_LIMIT) {
-                bot.send_message(chat_id, chunk)
-                    .await
-                    .context("telegram send failed")?;
-            }
-        }
-        None => warn!(outcome = ?outcome, session = %active_session, "Agent turn produced no text"),
-    }
-
-    ack(msg).await
 }
