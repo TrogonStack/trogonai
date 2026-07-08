@@ -4,34 +4,30 @@
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize)]
 #[serde(default)]
-pub struct CredentialLifecycleStateSnapshot {
+pub struct CredentialStateSnapshot {
     #[serde(flatten)]
-    pub state: ::core::option::Option<
-        __buffa::oneof::credential_lifecycle_state_snapshot::State,
-    >,
+    pub state: ::core::option::Option<__buffa::oneof::credential_state_snapshot::State>,
 }
-impl ::core::fmt::Debug for CredentialLifecycleStateSnapshot {
+impl ::core::fmt::Debug for CredentialStateSnapshot {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialLifecycleStateSnapshot")
-            .field("state", &self.state)
-            .finish()
+        f.debug_struct("CredentialStateSnapshot").field("state", &self.state).finish()
     }
 }
-impl CredentialLifecycleStateSnapshot {
+impl CredentialStateSnapshot {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialStateSnapshot";
 }
-::buffa::impl_default_instance!(CredentialLifecycleStateSnapshot);
-impl ::buffa::MessageName for CredentialLifecycleStateSnapshot {
+::buffa::impl_default_instance!(CredentialStateSnapshot);
+impl ::buffa::MessageName for CredentialStateSnapshot {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
-    const NAME: &'static str = "CredentialLifecycleStateSnapshot";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot";
+    const NAME: &'static str = "CredentialStateSnapshot";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialStateSnapshot";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialStateSnapshot";
 }
-impl ::buffa::Message for CredentialLifecycleStateSnapshot {
+impl ::buffa::Message for CredentialStateSnapshot {
     /// Returns the total encoded size in bytes.
     ///
     /// The result is a `u32`; the protobuf specification requires all
@@ -44,9 +40,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
         let mut size = 0u32;
         if let ::core::option::Option::Some(ref v) = self.state {
             match v {
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Missing(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -54,9 +48,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::PendingWrite(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -64,9 +56,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Active(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -74,9 +64,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::WriteFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -84,9 +72,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::RotationPending(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -94,9 +80,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Revoked(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -117,9 +101,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
         use ::buffa::Enumeration as _;
         if let ::core::option::Option::Some(ref v) = self.state {
             match v {
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Missing(x) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
                         __cache.consume_next(),
@@ -127,9 +109,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::PendingWrite(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
                         __cache.consume_next(),
@@ -137,9 +117,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Active(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
                         __cache.consume_next(),
@@ -147,9 +125,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::WriteFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
                         __cache.consume_next(),
@@ -157,9 +133,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::RotationPending(x) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
                         __cache.consume_next(),
@@ -167,9 +141,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
-                    x,
-                ) => {
+                __buffa::oneof::credential_state_snapshot::State::Revoked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
                         __cache.consume_next(),
@@ -197,7 +169,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                    __buffa::oneof::credential_state_snapshot::State::Missing(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -207,7 +179,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                        __buffa::oneof::credential_state_snapshot::State::Missing(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -219,7 +191,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                    __buffa::oneof::credential_state_snapshot::State::PendingWrite(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -229,7 +201,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                        __buffa::oneof::credential_state_snapshot::State::PendingWrite(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -241,7 +213,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
+                    __buffa::oneof::credential_state_snapshot::State::Active(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -251,7 +223,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
+                        __buffa::oneof::credential_state_snapshot::State::Active(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -263,7 +235,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                    __buffa::oneof::credential_state_snapshot::State::WriteFailed(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -273,7 +245,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                        __buffa::oneof::credential_state_snapshot::State::WriteFailed(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -285,7 +257,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                    __buffa::oneof::credential_state_snapshot::State::RotationPending(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -295,7 +267,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                        __buffa::oneof::credential_state_snapshot::State::RotationPending(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -307,7 +279,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                    __buffa::oneof::credential_state_snapshot::State::Revoked(
                         ref mut existing,
                     ),
                 ) = self.state
@@ -317,7 +289,7 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
-                        __buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                        __buffa::oneof::credential_state_snapshot::State::Revoked(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -333,34 +305,32 @@ impl ::buffa::Message for CredentialLifecycleStateSnapshot {
         self.state = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
+impl<'de> serde::Deserialize<'de> for CredentialStateSnapshot {
     fn deserialize<D: serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
         impl<'de> serde::de::Visitor<'de> for _V {
-            type Value = CredentialLifecycleStateSnapshot;
+            type Value = CredentialStateSnapshot;
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("struct CredentialLifecycleStateSnapshot")
+                f.write_str("struct CredentialStateSnapshot")
             }
             #[allow(clippy::field_reassign_with_default)]
             fn visit_map<A: serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
-            ) -> ::core::result::Result<CredentialLifecycleStateSnapshot, A::Error> {
+            ) -> ::core::result::Result<CredentialStateSnapshot, A::Error> {
                 let mut __oneof_state: ::core::option::Option<
-                    __buffa::oneof::credential_lifecycle_state_snapshot::State,
+                    __buffa::oneof::credential_state_snapshot::State,
                 > = None;
                 while let Some(key) = map.next_key::<::buffa::alloc::string::String>()? {
                     match key.as_str() {
                         "missing" => {
-                            let v: ::core::option::Option<
-                                CredentialLifecycleMissingState,
-                            > = map
+                            let v: ::core::option::Option<CredentialMissingState> = map
                                 .next_value_seed(
                                     ::buffa::json_helpers::NullableDeserializeSeed(
                                         ::buffa::json_helpers::DefaultDeserializeSeed::<
-                                            CredentialLifecycleMissingState,
+                                            CredentialMissingState,
                                         >::new(),
                                     ),
                                 )?;
@@ -373,7 +343,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Missing(
+                                    __buffa::oneof::credential_state_snapshot::State::Missing(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -397,7 +367,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::PendingWrite(
+                                    __buffa::oneof::credential_state_snapshot::State::PendingWrite(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -421,7 +391,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Active(
+                                    __buffa::oneof::credential_state_snapshot::State::Active(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -445,7 +415,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::WriteFailed(
+                                    __buffa::oneof::credential_state_snapshot::State::WriteFailed(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -471,7 +441,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::RotationPending(
+                                    __buffa::oneof::credential_state_snapshot::State::RotationPending(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -495,7 +465,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                                     );
                                 }
                                 __oneof_state = Some(
-                                    __buffa::oneof::credential_lifecycle_state_snapshot::State::Revoked(
+                                    __buffa::oneof::credential_state_snapshot::State::Revoked(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -506,7 +476,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
                         }
                     }
                 }
-                let mut __r = <CredentialLifecycleStateSnapshot as ::core::default::Default>::default();
+                let mut __r = <CredentialStateSnapshot as ::core::default::Default>::default();
                 __r.state = __oneof_state;
                 Ok(__r)
             }
@@ -514,7 +484,7 @@ impl<'de> serde::Deserialize<'de> for CredentialLifecycleStateSnapshot {
         d.deserialize_map(_V)
     }
 }
-impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleStateSnapshot {
+impl ::buffa::json_helpers::ProtoElemJson for CredentialStateSnapshot {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -528,44 +498,44 @@ impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleStateSnapshot {
     }
 }
 #[doc(hidden)]
-pub const __CREDENTIAL_LIFECYCLE_STATE_SNAPSHOT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleStateSnapshot",
-    to_json: ::buffa::type_registry::any_to_json::<CredentialLifecycleStateSnapshot>,
-    from_json: ::buffa::type_registry::any_from_json::<CredentialLifecycleStateSnapshot>,
+pub const __CREDENTIAL_STATE_SNAPSHOT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialStateSnapshot",
+    to_json: ::buffa::type_registry::any_to_json::<CredentialStateSnapshot>,
+    from_json: ::buffa::type_registry::any_from_json::<CredentialStateSnapshot>,
     is_wkt: false,
 };
-pub mod credential_lifecycle_state_snapshot {
+pub mod credential_state_snapshot {
     #[allow(unused_imports)]
     use super::*;
     #[doc(inline)]
-    pub use super::__buffa::oneof::credential_lifecycle_state_snapshot::State;
+    pub use super::__buffa::oneof::credential_state_snapshot::State;
     #[doc(inline)]
-    pub use super::__buffa::view::oneof::credential_lifecycle_state_snapshot::State as StateView;
+    pub use super::__buffa::view::oneof::credential_state_snapshot::State as StateView;
 }
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
-pub struct CredentialLifecycleMissingState {}
-impl ::core::fmt::Debug for CredentialLifecycleMissingState {
+pub struct CredentialMissingState {}
+impl ::core::fmt::Debug for CredentialMissingState {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("CredentialLifecycleMissingState").finish()
+        f.debug_struct("CredentialMissingState").finish()
     }
 }
-impl CredentialLifecycleMissingState {
+impl CredentialMissingState {
     /// Protobuf type URL for this message, for use with `Any::pack` and
     /// `Any::unpack_if`.
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState";
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialMissingState";
 }
-::buffa::impl_default_instance!(CredentialLifecycleMissingState);
-impl ::buffa::MessageName for CredentialLifecycleMissingState {
+::buffa::impl_default_instance!(CredentialMissingState);
+impl ::buffa::MessageName for CredentialMissingState {
     const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
-    const NAME: &'static str = "CredentialLifecycleMissingState";
-    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState";
+    const NAME: &'static str = "CredentialMissingState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CredentialMissingState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialMissingState";
 }
-impl ::buffa::Message for CredentialLifecycleMissingState {
+impl ::buffa::Message for CredentialMissingState {
     /// Returns the total encoded size in bytes.
     ///
     /// The result is a `u32`; the protobuf specification requires all
@@ -605,7 +575,7 @@ impl ::buffa::Message for CredentialLifecycleMissingState {
     }
     fn clear(&mut self) {}
 }
-impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleMissingState {
+impl ::buffa::json_helpers::ProtoElemJson for CredentialMissingState {
     fn serialize_proto_json<S: ::serde::Serializer>(
         v: &Self,
         s: S,
@@ -619,10 +589,10 @@ impl ::buffa::json_helpers::ProtoElemJson for CredentialLifecycleMissingState {
     }
 }
 #[doc(hidden)]
-pub const __CREDENTIAL_LIFECYCLE_MISSING_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialLifecycleMissingState",
-    to_json: ::buffa::type_registry::any_to_json::<CredentialLifecycleMissingState>,
-    from_json: ::buffa::type_registry::any_from_json::<CredentialLifecycleMissingState>,
+pub const __CREDENTIAL_MISSING_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.CredentialMissingState",
+    to_json: ::buffa::type_registry::any_to_json::<CredentialMissingState>,
+    from_json: ::buffa::type_registry::any_from_json::<CredentialMissingState>,
     is_wkt: false,
 };
 #[derive(Clone, PartialEq, Default)]

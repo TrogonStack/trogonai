@@ -19,8 +19,10 @@ use trogon_nats::jetstream::{
 use trogon_semconv::span::TELEGRAM_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
-use crate::commands::domain::{CredentialKind, SourceKind};
-use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::credential::domain::{CredentialKind, SourceKind};
+use crate::credential::processor::runtime_projection::{
+    RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey,
+};
 use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -273,8 +275,8 @@ mod tests {
     };
     use trogon_std::NonZeroDuration;
 
-    use crate::commands::domain::{CredentialOwnerId, CredentialScope};
-    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::credential::domain::{CredentialOwnerId, CredentialScope};
+    use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
     use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
     const TEST_SECRET: &str = "test-secret";

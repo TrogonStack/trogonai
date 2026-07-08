@@ -1,8 +1,8 @@
+pub(crate) mod credential_event;
 mod credential_failure_reason;
 mod credential_fingerprint;
 mod credential_id;
 mod credential_kind;
-pub(crate) mod credential_lifecycle_event;
 mod credential_metadata;
 mod credential_owner_id;
 mod credential_ref;
@@ -12,11 +12,11 @@ mod credential_version;
 mod source_kind;
 mod storage_backend;
 
+pub use credential_event::{CredentialEvent, CredentialEventPayloadError};
 pub use credential_failure_reason::CredentialFailureReason;
 pub use credential_fingerprint::{CredentialFingerprint, CredentialFingerprintError};
 pub use credential_id::{CredentialId, CredentialIdError};
 pub use credential_kind::CredentialKind;
-pub use credential_lifecycle_event::{CredentialLifecycleEvent, CredentialLifecycleEventPayloadError};
 pub use credential_metadata::CredentialMetadata;
 pub use credential_owner_id::{CredentialOwnerId, CredentialOwnerIdError};
 pub use credential_ref::CredentialRef;
