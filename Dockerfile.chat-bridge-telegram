@@ -1,0 +1,19 @@
+# Dockerfile for chat-bridge-telegram
+#
+# Expected build context: rsworkspace/
+# Binary must be pre-built: cargo build --release --package chat-bridge-telegram
+# Build: docker build -f Dockerfile.chat-bridge-telegram -t chat-bridge-telegram rsworkspace/
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY target/release/chat-bridge-telegram /usr/local/bin/chat-bridge-telegram
+
+RUN useradd -m -u 1000 trogonai
+USER trogonai
+
+ENTRYPOINT ["chat-bridge-telegram"]

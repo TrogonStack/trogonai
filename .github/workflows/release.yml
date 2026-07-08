@@ -55,34 +55,19 @@ jobs:
       - name: Build release binaries
         run: cd rsworkspace && cargo build --release --target ${{ matrix.target }}
 
-      - name: Package telegram-bot
+      - name: Package chat-bridge-telegram
         run: |
           cd rsworkspace/target/${{ matrix.target }}/release
-          tar czf telegram-bot-${{ matrix.asset_suffix }}.tar.gz telegram-bot
+          tar czf chat-bridge-telegram-${{ matrix.asset_suffix }}.tar.gz chat-bridge-telegram
 
-      - name: Package telegram-agent
-        run: |
-          cd rsworkspace/target/${{ matrix.target }}/release
-          tar czf telegram-agent-${{ matrix.asset_suffix }}.tar.gz telegram-agent
-
-      - name: Upload telegram-bot
+      - name: Upload chat-bridge-telegram
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: rsworkspace/target/${{ matrix.target }}/release/telegram-bot-${{ matrix.asset_suffix }}.tar.gz
-          asset_name: telegram-bot-${{ matrix.asset_suffix }}.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload telegram-agent
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: rsworkspace/target/${{ matrix.target }}/release/telegram-agent-${{ matrix.asset_suffix }}.tar.gz
-          asset_name: telegram-agent-${{ matrix.asset_suffix }}.tar.gz
+          asset_path: rsworkspace/target/${{ matrix.target }}/release/chat-bridge-telegram-${{ matrix.asset_suffix }}.tar.gz
+          asset_name: chat-bridge-telegram-${{ matrix.asset_suffix }}.tar.gz
           asset_content_type: application/gzip
 
   # Build and push Docker images
@@ -105,24 +90,13 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build and push telegram-bot
+      - name: Build and push chat-bridge-telegram
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.bot
+          file: ./Dockerfile.chat-bridge-telegram
           push: true
           tags: |
-            trogonai/telegram-bot:latest
-            trogonai/telegram-bot:${{ steps.get_version.outputs.VERSION }}
-          platforms: linux/amd64,linux/arm64
-
-      - name: Build and push telegram-agent
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.agent
-          push: true
-          tags: |
-            trogonai/telegram-agent:latest
-            trogonai/telegram-agent:${{ steps.get_version.outputs.VERSION }}
+            trogonai/chat-bridge-telegram:latest
+            trogonai/chat-bridge-telegram:${{ steps.get_version.outputs.VERSION }}
           platforms: linux/amd64,linux/arm64

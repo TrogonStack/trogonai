@@ -109,19 +109,12 @@ jobs:
       - name: Build all packages
         run: cd rsworkspace && cargo build --release --all-features
 
-      - name: Upload telegram-bot binary
+      - name: Upload chat-bridge-telegram binary
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-bot-linux
-          path: rsworkspace/target/release/telegram-bot
-
-      - name: Upload telegram-agent binary
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: telegram-agent-linux
-          path: rsworkspace/target/release/telegram-agent
+          name: chat-bridge-telegram-linux
+          path: rsworkspace/target/release/chat-bridge-telegram
 
   # Security audit
   security-audit:
@@ -158,24 +151,15 @@ jobs:
       - name: Build binaries
         run: |
           cd rsworkspace
-          cargo build --release --package telegram-bot
-          cargo build --release --package telegram-agent
+          cargo build --release --package chat-bridge-telegram
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build telegram-bot image
+      - name: Build chat-bridge-telegram image
         uses: docker/build-push-action@v5
         with:
           context: rsworkspace
-          file: ./Dockerfile.bot
+          file: ./Dockerfile.chat-bridge-telegram
           push: false
-          tags: trogonai/telegram-bot:test
-
-      - name: Build telegram-agent image
-        uses: docker/build-push-action@v5
-        with:
-          context: rsworkspace
-          file: ./Dockerfile.agent
-          push: false
-          tags: trogonai/telegram-agent:test
+          tags: trogonai/chat-bridge-telegram:test

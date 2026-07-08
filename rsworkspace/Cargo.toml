@@ -47,8 +47,6 @@ trogon-semconv = { path = "crates/trogon-semconv" }
 trogon-service-config = { path = "crates/trogon-service-config" }
 trogon-std = { path = "crates/trogon-std" }
 trogonai-proto = { path = "crates/trogonai-proto" }
-telegram-types = { path = "crates/telegram-types" }
-telegram-nats = { path = "crates/telegram-nats" }
 trogon-chat = { path = "crates/trogon-chat" }
 chat-bridge-telegram = { path = "crates/chat-bridge-telegram" }
 
@@ -86,7 +84,6 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 
 # Telegram
 teloxide = { version = "=0.14.1", features = ["macros", "webhooks-axum"] }
-dptree = "=0.3.0"
 
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }
@@ -121,7 +118,6 @@ tonic = { version = "=0.14.6", default-features = false, features = ["transport"
 moka = { version = "=0.12.15", features = ["future"] }
 
 # Misc
-chrono = { version = "=0.4.43", features = ["serde"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.2"
@@ -151,9 +147,6 @@ rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.15.0", default-features = false, features = ["std"] }
 rustls-webpki = { version = "=0.103.13", default-features = false, features = ["std", "alloc", "ring"] }
 x509-parser = "=0.18.1"
-
-# Misc
-mime = "=0.3.17"
 
 [profile.release]
 lto = "thin"
