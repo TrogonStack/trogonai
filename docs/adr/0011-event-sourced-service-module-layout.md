@@ -48,12 +48,17 @@ is a single command model.
 A stream module contains:
 
 - `commands/`: one file per command decider, named after the command. Each file
-  holds the command struct and its `Decider` implementation.
-- `state`: the aggregate state type, `initial_state`, `evolve`, and the
-  decide-time and evolve-time validators.
-- `snapshot`: the snapshot policy and the state-to-persistence codec.
-- `domain`: the aggregate's value objects and event definitions, one type per
-  file.
+  holds the command struct and its `Decider` implementation. The decider's
+  `Event` and `State` associated types are the generated proto types used
+  directly (see "Proto types are the event and state" below), not hand-written
+  domain enums.
+- `state`: `initial_state`, `evolve`, and the decide-time and evolve-time
+  validators, operating on the proto state type.
+- `snapshot`: the snapshot policy only, for example the snapshot frequency. It
+  does not contain the snapshot codec.
+- `domain`: the aggregate's value objects used as command inputs, one type per
+  file. The event and state shapes are proto, so this module holds value objects,
+  not event or state definitions.
 - `processor` (or a named projection): the read model that consumes the stream.
   A processor's own rebuildable checkpoint store nests under that processor.
 - The aggregate's persistence and command handler: the event store, stream and
@@ -98,6 +103,28 @@ conventions applies to value-object and library crates that own no aggregate. Th
 read model depending on the aggregate's `domain` is expected, not a layering
 violation.
 
+### Proto types are the event and state; their codec lives in the proto crate
+
+The decider's `Event` and `State` are the generated proto messages, used
+directly (`type Event = v1::CredentialEvent; type State = state_v1::CredentialStateSnapshot`).
+Do not wrap them in parallel hand-written domain enums with manual proto-to-domain
+conversion; that duplicates the schema (ADR 0009) and drags the codec into the
+consuming crate.
+
+The event and snapshot codec, the `EventEncode`, `EventDecode`, `EventType`,
+`SnapshotType`, and `SnapshotPayload*` implementations, lives in `trogonai-proto`,
+implemented on the proto types. This is forced by the orphan rule: both the trait
+(`trogon-decider-runtime`) and the type (generated proto) are foreign to the
+consuming crate, so the impl must live in the crate that owns the proto type.
+
+Register a per-domain cargo feature in `trogonai-proto` for each event-sourced
+domain (`schedules`, `gateway`), pulling in `trogon-decider-runtime` and any codec
+dependencies, and gating that domain's hand-written support module (codec, payload
+error types, oneof re-exports). The consuming crate enables that feature and uses
+the proto types as its decider types. `trogon-scheduler` with the `schedules`
+feature is the reference; its `commands/snapshot.rs` is only the policy const
+because the codec lives in `trogonai-proto`.
+
 ### Domain stays free of infrastructure
 
 `commands`, `state`, `snapshot`, `domain`, and `processor` contain domain and
@@ -108,9 +135,14 @@ that owns them, not scattered at the crate root.
 
 ## Design Rules
 
-- One command decider per file. Do not accumulate multiple deciders, the state
-  type, the snapshot codec, and conversions in one module.
-- Keep the fold (`evolve`) separate from the snapshot format.
+- One command decider per file.
+- The decider `Event`/`State` are proto types used directly; do not add parallel
+  domain enums or hand-written proto conversion for them (ADR 0009).
+- The event and snapshot codec and the `trogon-decider-runtime` trait impls live
+  in `trogonai-proto` on the proto types, behind a registered per-domain feature
+  that pulls in `trogon-decider-runtime`. The consuming crate's `snapshot` module
+  holds only the snapshot policy.
+- Keep the fold (`evolve`) separate from the snapshot policy.
 - Name a stream for the workflow it represents, expressed as a noun (a workflow
   made noun), not for the event-sourcing mechanism. Reject `Lifecycle`,
   `Manager`, `Service`, `Info`, and similar mechanism or filler qualifiers in
@@ -135,12 +167,16 @@ that owns them, not scattered at the crate root.
 - `rsworkspace/crates/AGENTS.md` gains a pointer to this ADR and to
   `trogon-scheduler` as the reference.
 - `trogon-gateway` migrates: the credential aggregate consolidates under
-  `credential/`, and `CredentialLifecycle*` names and the
-  `...credential.lifecycle...` stream, subject, and proto identifiers drop the
-  `lifecycle` qualifier. This is done before the contract ships.
+  `credential/` with `lifecycle` dropped, and its event and snapshot codec moves
+  out of `credential/commands/` into `trogonai-proto` behind the `gateway`
+  feature (which gains `trogon-decider-runtime`), so the deciders use the proto
+  `CredentialEvent`/`CredentialStateSnapshot` types directly and the hand-written
+  domain-enum conversion is removed. Done before the contract ships.
 
 ## References
 
 - [ADR 0002: Rust Crate Boundaries](/adr/0002-rust-crate-boundaries)
 - [ADR 0009: Protocol Buffers Wire Contracts](/adr/0009-protocol-buffers-wire-contracts)
 - `rsworkspace/crates/AGENTS.md`
+- `rsworkspace/crates/trogonai-proto` (per-domain feature + codec convention)
+- `rsworkspace/crates/trogon-scheduler` (reference implementation)
