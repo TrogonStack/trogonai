@@ -420,3 +420,99 @@ async fn connection_client_forwards_every_client_method() {
     let (boundary_result, ()) = tokio::join!(boundary, peer);
     assert!(matches!(boundary_result, Ok(BoundaryExit::Main(()))));
 }
+
+struct ContraryAgent;
+
+#[async_trait::async_trait]
+impl AgentHandler for ContraryAgent {
+    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        Ok(InitializeResponse::new(args.protocol_version))
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        Ok(AuthenticateResponse::new())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> Result<NewSessionResponse> {
+        Ok(NewSessionResponse::new("sess-1"))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
+        Err(Error::internal_error())
+    }
+
+    async fn ext_method(
+        &self,
+        _args: agent_client_protocol::schema::v1::ExtRequest,
+    ) -> Result<agent_client_protocol::schema::v1::ExtResponse> {
+        Ok(agent_client_protocol::schema::v1::ExtResponse::new(
+            std::sync::Arc::from(serde_json::value::RawValue::from_string("{\"ok\":true}".to_string()).unwrap()),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn boundary_covers_ext_success_and_notification_fallthroughs() {
+    let (client_io, server_io) = tokio::io::duplex(8192);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary(
+        Arc::new(ContraryAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let mut writer = client_write;
+
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"session/cancel\",\"params\":{\"sessionId\":\"s1\"}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"mcp/message\",\"params\":{\"sessionId\":\"s1\",\"connectionId\":\"c1\",\"message\":{}}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"_bad/note\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"mcp/connect\",\"params\":{\"sessionId\":\"s1\",\"server\":{}}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"_probe\",\"params\":{}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let mut seen = std::collections::HashMap::new();
+        while seen.len() < 2 {
+            let line = lines.next_line().await.unwrap().unwrap();
+            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            let Some(id) = value["id"].as_u64() else {
+                continue;
+            };
+            seen.insert(id, value);
+        }
+        assert_eq!(
+            seen[&1]["error"]["code"],
+            i32::from(agent_client_protocol::ErrorCode::MethodNotFound)
+        );
+        assert_eq!(seen[&2]["result"]["ok"], true);
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}

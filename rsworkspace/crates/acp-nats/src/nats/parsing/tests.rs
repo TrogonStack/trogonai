@@ -430,3 +430,14 @@ fn client_methods_round_trip_through_subject_suffix() {
         assert_eq!(parsed, Some(method));
     }
 }
+
+#[test]
+fn client_ext_method_formats_wire_method() {
+    let method = ClientMethod::Ext("custom".to_string());
+    assert_eq!(method.wire_method(), "ext/custom");
+}
+
+#[test]
+fn parse_client_subject_rejects_agent_subjects() {
+    assert!(parse_client_subject("acp.session.s1.agent.prompt").is_none());
+}
