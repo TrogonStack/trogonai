@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::super::domain::{CredentialEvent, CredentialFailureReason, CredentialId};
-use super::super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
+use super::domain::{CredentialEvent, CredentialFailureReason, CredentialId};
+use super::state::{CredentialDecideError, CredentialEvolveError, CredentialState};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialWriteFailure {
@@ -27,11 +27,11 @@ impl Decider for RecordCredentialWriteFailure {
     }
 
     fn initial_state() -> Self::State {
-        super::super::state::initial_state()
+        super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::super::state::evolve(state, event)
+        super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -50,5 +50,5 @@ impl Decider for RecordCredentialWriteFailure {
 impl CommandSnapshotPolicy for RecordCredentialWriteFailure {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }

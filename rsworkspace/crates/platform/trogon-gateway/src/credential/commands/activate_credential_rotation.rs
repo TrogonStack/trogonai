@@ -1,7 +1,7 @@
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot};
 
-use super::super::domain::{CredentialEvent, CredentialMetadata};
-use super::super::state::{
+use super::domain::{CredentialEvent, CredentialMetadata};
+use super::state::{
     CredentialDecideError, CredentialEvolveError, CredentialState, validate_activation_metadata,
     validate_newer_version, validate_same_logical_ref,
 };
@@ -29,11 +29,11 @@ impl Decider for ActivateCredentialRotation {
     }
 
     fn initial_state() -> Self::State {
-        super::super::state::initial_state()
+        super::state::initial_state()
     }
 
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::super::state::evolve(state, event)
+        super::state::evolve(state, event)
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -56,5 +56,5 @@ impl Decider for ActivateCredentialRotation {
 impl CommandSnapshotPolicy for ActivateCredentialRotation {
     type SnapshotPolicy = FrequencySnapshot;
 
-    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
+    const SNAPSHOT_POLICY: Self::SnapshotPolicy = super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 }
