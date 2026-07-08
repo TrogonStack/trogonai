@@ -51,6 +51,7 @@ impl AcpStream {
                 format!("{p}.session.*.agent.fork"),
                 format!("{p}.session.*.agent.resume"),
                 format!("{p}.session.*.agent.close"),
+                format!("{p}.session.*.agent.delete"),
             ],
             Self::Responses => vec![
                 format!("{p}.session.*.agent.prompt.response.>"),

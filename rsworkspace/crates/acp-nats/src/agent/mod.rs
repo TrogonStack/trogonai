@@ -2,6 +2,7 @@ mod authenticate;
 mod bridge;
 mod cancel;
 mod close_session;
+mod delete_session;
 mod ext_method;
 mod ext_notification;
 mod fork_session;

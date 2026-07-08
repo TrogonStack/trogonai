@@ -163,6 +163,14 @@ fn session_agent_close() {
 }
 
 #[test]
+fn session_agent_delete() {
+    assert_eq!(
+        commands::DeleteSubject::new(&p("acp"), &sid("s1")).to_string(),
+        "acp.session.s1.agent.delete"
+    );
+}
+
+#[test]
 fn session_agent_ext_ready() {
     assert_eq!(
         responses::ExtReadySubject::new(&p("acp"), &sid("s1")).to_string(),
@@ -344,6 +352,7 @@ fn stream_assignments() {
     assert_eq!(commands::PromptSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::CancelSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::CloseSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::DeleteSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::ForkSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));
@@ -455,6 +464,11 @@ fn session_scoped_agent_subjects_share_layout() {
             .to_string()
             .starts_with(&expected)
     );
+    assert!(
+        commands::DeleteSubject::new(&prefix, &session_id)
+            .to_string()
+            .starts_with(&expected)
+    );
 }
 
 #[test]
@@ -526,6 +540,10 @@ fn to_subject_produces_correct_nats_subject() {
     assert_eq!(
         commands::CloseSubject::new(&prefix, &sid).to_subject().as_str(),
         "acp.session.s1.agent.close"
+    );
+    assert_eq!(
+        commands::DeleteSubject::new(&prefix, &sid).to_subject().as_str(),
+        "acp.session.s1.agent.delete"
     );
     assert_eq!(
         commands::ForkSubject::new(&prefix, &sid).to_subject().as_str(),

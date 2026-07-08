@@ -413,6 +413,11 @@ async fn dispatch_close_session_publishes_response() {
     assert_dispatch_method_not_found("acp.session.s1.agent.close", &CloseSessionRequest::new("s1")).await;
 }
 
+#[tokio::test]
+async fn dispatch_delete_session_publishes_response() {
+    assert_dispatch_method_not_found("acp.session.s1.agent.delete", &DeleteSessionRequest::new("s1")).await;
+}
+
 #[test]
 fn dispatch_error_display_reply_variant() {
     let err = DispatchError::Reply(trogon_nats::NatsError::Timeout {
@@ -990,6 +995,17 @@ async fn dispatch_js_message_close_session() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let js_msg = make_js_msg("acp.session.s1.agent.close", &CloseSessionRequest::new("s1"), None);
+
+    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+
+    assert_js_response_method_not_found(&nats, "acp.session.s1.agent.response.req-1");
+}
+
+#[tokio::test]
+async fn dispatch_js_message_delete_session() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = make_js_msg("acp.session.s1.agent.delete", &DeleteSessionRequest::new("s1"), None);
 
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
 

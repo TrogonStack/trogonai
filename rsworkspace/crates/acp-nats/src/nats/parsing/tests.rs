@@ -132,6 +132,14 @@ fn parse_session_agent_close() {
 }
 
 #[test]
+fn parse_session_agent_delete() {
+    assert_eq!(
+        parse_agent_subject("acp.session.s1.agent.delete").unwrap(),
+        session("s1", SessionAgentMethod::Delete)
+    );
+}
+
+#[test]
 fn parse_agent_custom_prefix() {
     assert_eq!(
         parse_agent_subject("myapp.agent.initialize").unwrap(),

@@ -7,8 +7,8 @@ This document is the single source of truth for where this repository stands rel
 | Fact | Value |
 | --- | --- |
 | Wire protocol | v1 |
-| Pinned Rust SDK | `agent-client-protocol` 0.10.4 (`rsworkspace/Cargo.toml`) |
-| Bundled schema (effective spec level) | 0.11.4 |
+| Pinned Rust SDK | `agent-client-protocol` 1.2.0 (`rsworkspace/Cargo.toml`) |
+| Bundled schema (effective spec level) | 1.4.0 (plus direct `agent-client-protocol-schema` dependency for schema-only unstable flags) |
 | Latest upstream SDK at last review | 1.2.0 (2026-07-07) |
 | Latest upstream schema at last review | 1.4.0 (2026-07-06) |
 | Last reviewed | 2026-07-07 |
@@ -33,20 +33,20 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | --- | --- | --- | --- |
 | `initialize` | stable | implemented | |
 | `authenticate` | stable | implemented | `unstable_auth_methods` shapes enabled |
-| `logout` | stable (0.13.3) | implemented | via 0.10.4-era `unstable_logout` |
+| `logout` | stable (0.13.3) | implemented | |
 | `session/new` | stable | implemented | includes `additionalDirectories` |
 | `session/load` | stable | implemented | includes `additionalDirectories` |
 | `session/list` | stable | implemented | |
 | `session/prompt` | stable | implemented | |
 | `session/cancel` (notification) | stable | implemented | |
 | `session/set_mode` | stable | implemented | |
-| `session/set_config_option` | stable | implemented | 0.10.4-era shape |
-| `session/set_model` | **removed upstream** (0.13.5) | implemented | to remove during SDK migration; replaced by `model_config` config options |
+| `session/set_config_option` | stable | implemented | 1.4.0 shape, boolean and `model_config` round-trip tested |
+| `session/set_model` | **removed upstream** (0.13.5) | removed | deleted with the SDK migration; model switching goes through `model_config` config options |
 | `session/fork` | unstable | implemented | |
-| `session/resume` | stable (0.12.2) | implemented | via 0.10.4-era flag |
-| `session/close` | stable (0.12.2) | implemented | via 0.10.4-era flag |
-| `session/delete` | stable (0.13.6) | unrepresentable | requires SDK 1.x; Phase 3 of PLAN.md |
-| JSON-RPC request cancellation | stable (1.2.0) | unwired, blocked at ingress | flag enabled, but the 0.10.4 SDK connection drops `$/cancel_request` before the bridge sees it, so no routing can be exercised end to end at this pin; implemented with the 1.x SDK in Phase 3 of PLAN.md |
+| `session/resume` | stable (0.12.2) | implemented | |
+| `session/close` | stable (0.12.2) | implemented | |
+| `session/delete` | stable (0.13.6) | implemented | routed end to end with tests, span `acp.session.delete` |
+| JSON-RPC request cancellation | stable (1.2.0) | implemented | boundary honors `$/cancel_request`: bridge-side work is dropped and the request answers with `request_cancelled` (tested); prompt-turn cancellation on the runner side remains `session/cancel` per spec |
 | `ext/*` (extension methods) | stable | implemented | passthrough |
 
 ### Client-side methods (agent to client)
@@ -70,13 +70,13 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | Spec surface | Spec stage | Our status | Notes |
 | --- | --- | --- | --- |
 | `additionalDirectories` (session/new, session/load) | stable (0.13.5) | implemented | round-trip tested through the bridge |
-| Message IDs on chunks | stable (0.13.6) | implemented | 0.10.4-era `unstable_message_id` shape |
-| Session usage updates | stable (0.13.6) | implemented | 0.10.4-era `unstable_session_usage` shape |
-| Session config options | stable | implemented | 0.10.4-era shape |
-| Boolean config options | stable (1.3.0) | implemented (draft shape) | stabilized shape requires SDK 1.x |
-| `model_config` option category | stable (1.1.0) | unrepresentable | requires SDK 1.x; Phase 3 |
-| NES (next edit suggestions) | unstable | capabilities implemented | capability payloads round-trip; NES document methods have no trait surface at this pin, full wiring lands with SDK 1.x |
-| Plan operations | unstable (0.13.4) | unrepresentable | requires SDK 1.x; Phase 4 |
+| Message IDs on chunks | stable (0.13.6) | implemented | 1.4.0 shape, round-trip tested |
+| Session usage updates | stable (0.13.6) | implemented | 1.4.0 shape, round-trip tested |
+| Session config options | stable | implemented | 1.4.0 shape, `ConfigOptionUpdate` round-trip tested |
+| Boolean config options | stable (1.3.0) | implemented | stabilized shape, round-trip tested |
+| `model_config` option category | stable (1.1.0) | implemented | round-trip tested |
+| NES (next edit suggestions) | unstable | capabilities implemented | capability payloads round-trip via schema-level flag; NES document sync methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
+| Plan operations | unstable (0.13.4) | implemented | `PlanUpdate`/`PlanRemoved` round-trip tested via schema-level flag |
 | Providers | unstable (0.11.7) | unrepresentable | requires SDK 1.x; Phase 4 |
 | MCP-over-ACP message types | unstable (0.13.0) | unrepresentable | requires SDK 1.x; Phase 4 |
 | Elicitation enum option descriptions | unstable (1.4.0) | unrepresentable | requires SDK 1.x; Phase 4 |

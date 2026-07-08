@@ -89,12 +89,12 @@ The 0.11.0 release was a full SDK redesign. Official guide: `agentclientprotocol
 
 ## Phase 3: Map newly stable spec surface (post-upgrade)
 
-- [ ] `session/delete`: add `SessionAgentMethod::Delete`, subject, handler in `acp-nats/src/agent/`, JetStream/stream wiring, metrics span name in `trogon-semconv`, and tests.
-- [ ] Stable request cancellation: adopt the 1.x shape end to end (supersedes the Phase 1 interim decision).
-- [ ] New `session/update` variants (plan operations, usage updates, stabilized message IDs): confirm they round-trip through the bridge with tests per variant.
-- [ ] Stable boolean config options and `model_config` category: round-trip tests through `set_config_option`.
-- [ ] `Acp-Protocol-Version` header validation in `acp-nats-server`: confirm negotiation still matches the 1.x transport spec wording.
-- [ ] Update the conformance matrix to the new position (target: schema 1.4.0, everything stable either implemented or explicitly recorded as not supported).
+- [x] `session/delete`: routed end to end (parsing, subject, stream wiring, Bridge handler, boundary callback, runner dispatch on both core and JetStream paths, `acp.session.delete` span) with tests at every layer.
+- [x] Stable request cancellation: the boundary honors `$/cancel_request` (bridge work dropped, `request_cancelled` response, tested). Required moving handler work off the SDK dispatch loop onto the connection task actor, which also unblocked concurrent requests per connection; a typed no-op `CancelRequestNotification` handler suppresses method-not-found noise.
+- [x] New `session/update` variants round-trip with a test per variant: `PlanUpdate`, `PlanRemoved`, `UsageUpdate`, `ConfigOptionUpdate`, `SessionInfoUpdate`, and message IDs on chunks.
+- [x] Stable boolean config options and `model_config` category: round-trip tests through `set_config_option` and `ConfigOptionUpdate`.
+- [x] `Acp-Protocol-Version` header validation verified against the current transport RFD ("Clients SHOULD include it on all requests after initialization"): the server validates when present and rejects mismatches, covered by existing tests. No change needed.
+- [x] Conformance matrix updated to SDK 1.2.0 / schema 1.4.0: no stable spec feature is dropped or unrepresentable.
 
 **Acceptance**: conformance matrix shows no "dropped" status for any stable spec feature.
 

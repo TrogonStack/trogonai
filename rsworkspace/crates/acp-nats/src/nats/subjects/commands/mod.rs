@@ -1,5 +1,6 @@
 mod cancel;
 mod close;
+mod delete;
 mod fork;
 mod load;
 mod prompt;
@@ -9,6 +10,7 @@ mod set_mode;
 
 pub use cancel::CancelSubject;
 pub use close::CloseSubject;
+pub use delete::DeleteSubject;
 pub use fork::ForkSubject;
 pub use load::LoadSubject;
 pub use prompt::PromptSubject;

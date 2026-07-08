@@ -11,11 +11,11 @@ use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    DeleteSessionRequest, DeleteSessionResponse, ExtNotification, ExtRequest, ExtResponse, ForkSessionRequest,
+    ForkSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse,
+    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::sync::mpsc;
@@ -25,8 +25,8 @@ use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMe
 use trogon_std::time::GetElapsed;
 
 use super::{
-    authenticate, cancel, close_session, ext_method, ext_notification, fork_session, initialize, js_request,
-    list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
+    authenticate, cancel, close_session, delete_session, ext_method, ext_notification, fork_session, initialize,
+    js_request, list_sessions, load_session, logout, new_session, prompt, resume_session, set_session_config_option,
     set_session_mode,
 };
 
@@ -237,6 +237,10 @@ where
 
     async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
         close_session::handle(self, args).await
+    }
+
+    async fn delete_session(&self, args: DeleteSessionRequest) -> Result<DeleteSessionResponse> {
+        delete_session::handle(self, args).await
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {

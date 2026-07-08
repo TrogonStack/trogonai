@@ -5,9 +5,9 @@ use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, 
 use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
 use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification, ExtRequest, ForkSessionRequest,
-    InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    AuthenticateRequest, CancelNotification, CloseSessionRequest, DeleteSessionRequest, ExtNotification, ExtRequest,
+    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest,
+    PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -337,6 +337,12 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
             })
             .await
         }
+        SessionAgentMethod::Delete => {
+            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: DeleteSessionRequest| {
+                agent.delete_session(req)
+            })
+            .await
+        }
     }
 }
 
@@ -652,6 +658,12 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
         SessionAgentMethod::Close => {
             handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: CloseSessionRequest| {
                 agent.close_session(req)
+            })
+            .await
+        }
+        SessionAgentMethod::Delete => {
+            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: DeleteSessionRequest| {
+                agent.delete_session(req)
             })
             .await
         }

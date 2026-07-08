@@ -22,6 +22,7 @@ pub enum SessionAgentMethod {
     Fork,
     Resume,
     Close,
+    Delete,
 }
 
 impl GlobalAgentMethod {
@@ -62,6 +63,7 @@ impl SessionAgentMethod {
             Self::Fork => "fork",
             Self::Resume => "resume",
             Self::Close => "close",
+            Self::Delete => "delete",
         }
     }
 
@@ -75,6 +77,7 @@ impl SessionAgentMethod {
             "fork" => Some(Self::Fork),
             "resume" => Some(Self::Resume),
             "close" => Some(Self::Close),
+            "delete" => Some(Self::Delete),
             _ => None,
         }
     }

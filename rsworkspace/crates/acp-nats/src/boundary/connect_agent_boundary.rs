@@ -2,12 +2,32 @@ use super::boundary_exit::BoundaryExit;
 use super::eof_signal_reader::EofSignalReader;
 use crate::agent_handler::AgentHandler;
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, ClientNotification, ClientRequest, CloseSessionRequest,
-    ForkSessionRequest, InitializeRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest,
-    PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    AuthenticateRequest, CancelNotification, CancelRequestNotification, ClientNotification, ClientRequest,
+    CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest, InitializeRequest, ListSessionsRequest,
+    LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo, Error, Result};
+use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo, Error, JsonRpcResponse, Responder, Result};
 use std::sync::Arc;
+
+/// Spawns `work` onto the connection's task actor and responds when it
+/// settles, honoring `$/cancel_request`.
+///
+/// Handler callbacks run inline on the SDK dispatch loop, so awaiting bridge
+/// work there would block every subsequent message on the connection,
+/// including the cancellation notification itself. If the peer cancels first,
+/// `work` is dropped and the response is the SDK's standard
+/// `Error::request_cancelled`.
+fn respond_in_task<T: JsonRpcResponse + Send + 'static>(
+    cx: &ConnectionTo<Client>,
+    responder: Responder<T>,
+    work: impl std::future::Future<Output = Result<T>> + Send + 'static,
+) -> Result<()> {
+    cx.spawn(async move {
+        let cancellation = responder.cancellation();
+        responder.respond_with_result(cancellation.run_until_cancelled(work).await)
+    })
+}
 
 /// Connects an [`AgentHandler`] implementation to a byte-stream boundary.
 ///
@@ -39,50 +59,9 @@ where
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: InitializeRequest, responder, _cx| responder.respond(agent.initialize(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: AuthenticateRequest, responder, _cx| responder.respond(agent.authenticate(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: LogoutRequest, responder, _cx| responder.respond(agent.logout(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: NewSessionRequest, responder, _cx| responder.respond(agent.new_session(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: LoadSessionRequest, responder, _cx| responder.respond(agent.load_session(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: PromptRequest, responder, _cx| responder.respond(agent.prompt(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: SetSessionModeRequest, responder, _cx| {
-                    responder.respond(agent.set_session_mode(req).await?)
+                async move |req: InitializeRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.initialize(req).await })
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -90,8 +69,9 @@ where
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: SetSessionConfigOptionRequest, responder, _cx| {
-                    responder.respond(agent.set_session_config_option(req).await?)
+                async move |req: AuthenticateRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.authenticate(req).await })
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -99,15 +79,9 @@ where
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: ForkSessionRequest, responder, _cx| responder.respond(agent.fork_session(req).await?)
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .on_receive_request(
-            {
-                let agent = handler_agent.clone();
-                async move |req: ResumeSessionRequest, responder, _cx| {
-                    responder.respond(agent.resume_session(req).await?)
+                async move |req: LogoutRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.logout(req).await })
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -115,23 +89,117 @@ where
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: CloseSessionRequest, responder, _cx| responder.respond(agent.close_session(req).await?)
+                async move |req: NewSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.new_session(req).await })
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: ListSessionsRequest, responder, _cx| responder.respond(agent.list_sessions(req).await?)
+                async move |req: LoadSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.load_session(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: PromptRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.prompt(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: SetSessionModeRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.set_session_mode(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: SetSessionConfigOptionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(
+                        &cx,
+                        responder,
+                        async move { agent.set_session_config_option(req).await },
+                    )
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: ForkSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.fork_session(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: ResumeSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.resume_session(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: CloseSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.close_session(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: DeleteSessionRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.delete_session(req).await })
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let agent = handler_agent.clone();
+                async move |req: ListSessionsRequest, responder, cx| {
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move { agent.list_sessions(req).await })
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_notification(
+            async move |_notif: CancelRequestNotification, _cx| Ok(()),
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_notification(
             {
                 let agent = handler_agent.clone();
-                async move |notif: CancelNotification, _cx| {
-                    agent.cancel(notif).await?;
-                    Ok(())
+                async move |notif: CancelNotification, cx| {
+                    let agent = agent.clone();
+                    cx.spawn(async move { agent.cancel(notif).await })
                 }
             },
             agent_client_protocol::on_receive_notification!(),
@@ -139,17 +207,15 @@ where
         .on_receive_request(
             {
                 let agent = handler_agent.clone();
-                async move |req: ClientRequest, responder, _cx| {
+                async move |req: ClientRequest, responder, cx| {
                     let ClientRequest::ExtMethodRequest(ext_request) = req else {
                         return responder.respond_with_error(Error::method_not_found());
                     };
-                    match agent.ext_method(ext_request).await {
-                        Ok(response) => {
-                            let value = serde_json::to_value(response).map_err(Error::into_internal_error)?;
-                            responder.respond(value)
-                        }
-                        Err(error) => responder.respond_with_error(error),
-                    }
+                    let agent = agent.clone();
+                    respond_in_task(&cx, responder, async move {
+                        let response = agent.ext_method(ext_request).await?;
+                        serde_json::to_value(response).map_err(Error::into_internal_error)
+                    })
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -157,12 +223,12 @@ where
         .on_receive_notification(
             {
                 let agent = handler_agent.clone();
-                async move |notif: ClientNotification, _cx| {
+                async move |notif: ClientNotification, cx| {
                     let ClientNotification::ExtNotification(ext_notification) = notif else {
                         return Ok(());
                     };
-                    agent.ext_notification(ext_notification).await?;
-                    Ok(())
+                    let agent = agent.clone();
+                    cx.spawn(async move { agent.ext_notification(ext_notification).await })
                 }
             },
             agent_client_protocol::on_receive_notification!(),

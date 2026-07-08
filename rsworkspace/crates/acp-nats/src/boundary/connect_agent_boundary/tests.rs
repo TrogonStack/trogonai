@@ -98,3 +98,70 @@ async fn initialize_round_trips_through_boundary() {
     let (boundary_result, ()) = tokio::join!(boundary, client);
     assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
 }
+
+struct PendingPromptAgent;
+
+#[async_trait::async_trait]
+impl AgentHandler for PendingPromptAgent {
+    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        Ok(InitializeResponse::new(args.protocol_version))
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        Ok(AuthenticateResponse::new())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> Result<NewSessionResponse> {
+        Ok(NewSessionResponse::new("sess-1"))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> Result<PromptResponse> {
+        std::future::pending().await
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn cancel_request_answers_pending_prompt_with_request_cancelled_error() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary(
+        Arc::new(PendingPromptAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let mut writer = client_write;
+        writer
+            .write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"session/prompt\",\"params\":{\"sessionId\":\"sess-1\",\"prompt\":[]}}\n",
+            )
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"$/cancel_request\",\"params\":{\"requestId\":1}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["id"], 1);
+        assert_eq!(
+            value["error"]["code"],
+            i32::from(agent_client_protocol::ErrorCode::RequestCancelled)
+        );
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
