@@ -16,25 +16,8 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Compare pinned agent-client-protocol against crates.io
-        id: compare
-        env:
-          ISSUE_BODY_FILE: ${{ runner.temp }}/acp-drift-issue.md
-        run: ./.config/mise/tasks/acp-freshness
-
-      - name: Open or update drift issue
-        if: steps.compare.outputs.drift == 'true'
+      - name: Check ACP freshness and file a drift issue if behind
         env:
           GH_TOKEN: ${{ github.token }}
-          TITLE: "ACP drift: agent-client-protocol ${{ steps.compare.outputs.pinned }} is behind ${{ steps.compare.outputs.latest_sdk }}"
-          ISSUE_BODY_FILE: ${{ runner.temp }}/acp-drift-issue.md
-        run: |
-          set -euo pipefail
-          existing=$(gh issue list --state open --search "in:title \"ACP drift:\"" --json number --jq '.[0].number // empty')
-          if [ -n "$existing" ]; then
-            gh issue edit "$existing" --title "$TITLE" --body-file "$ISSUE_BODY_FILE"
-            echo "Updated issue #$existing"
-          else
-            gh issue create --title "$TITLE" --body-file "$ISSUE_BODY_FILE" --label dependencies
-            echo "Created new drift issue"
-          fi
+          ACP_FRESHNESS_FILE_ISSUE: 'true'
+        run: ./.config/mise/tasks/acp-freshness
