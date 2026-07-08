@@ -22,3 +22,4 @@
 
 - [`docs/`](docs/) - Documentation website and contribution workflow.
 - [`rsworkspace/`](rsworkspace/) - Rust components and crate documentation.
+- [`tsworkspace/`](tsworkspace/) - TypeScript workspace, including the console webapp.
