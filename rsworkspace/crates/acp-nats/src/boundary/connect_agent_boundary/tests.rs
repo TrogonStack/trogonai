@@ -465,7 +465,7 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
             .await
             .unwrap();
         writer
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"mcp/message\",\"params\":{\"sessionId\":\"s1\",\"connectionId\":\"c1\",\"message\":{}}}\n")
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"mcp/message\",\"params\":{\"connectionId\":\"c1\",\"method\":\"tools/list\"}}\n")
             .await
             .unwrap();
         writer
@@ -473,7 +473,7 @@ async fn boundary_covers_ext_success_and_notification_fallthroughs() {
             .await
             .unwrap();
         writer
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"mcp/connect\",\"params\":{\"sessionId\":\"s1\",\"server\":{}}}\n")
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"mcp/connect\",\"params\":{\"sessionId\":\"s1\",\"serverId\":\"srv-1\"}}\n")
             .await
             .unwrap();
         writer
