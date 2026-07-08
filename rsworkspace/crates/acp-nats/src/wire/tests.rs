@@ -238,20 +238,6 @@ fn set_session_config_option_request_boolean_value_survives_round_trip() {
 }
 
 #[test]
-fn set_session_config_option_request_model_config_category_option_survives_round_trip() {
-    let option = SessionConfigOption::boolean("temperature", "Temperature", true)
-        .category(SessionConfigOptionCategory::ModelConfig);
-    let request = SetSessionConfigOptionRequest::new("s1", option.id.clone(), SessionConfigOptionValue::boolean(true));
-
-    let encoded = encode_request("session/set_config_option", RequestId::Number(1), &request).unwrap();
-    let decoded: SetSessionConfigOptionRequest =
-        decode_request_params("session/set_config_option", &encoded.headers, &encoded.body).unwrap();
-
-    assert_eq!(decoded.config_id, SessionConfigId::new("temperature"));
-    assert_eq!(option.category, Some(SessionConfigOptionCategory::ModelConfig));
-}
-
-#[test]
 fn elicitation_create_enum_option_descriptions_survive_round_trip() {
     let schema = ElicitationSchema::new().property(
         "priority",

@@ -5,14 +5,15 @@ use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
 use agent_client_protocol::schema::v1::{CreateElicitationRequest, CreateElicitationResponse, ElicitationScope};
 use async_nats::header::HeaderMap;
-use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_ELICITATION_CREATE;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ElicitationCreateError {
     #[error("invalid request: {0}")]
-    InvalidRequest(#[source] serde_json::Error),
+    InvalidRequest(#[source] crate::wire::WireError),
+    #[error("scope.sessionId ({params}) does not match subject session id ({subject})")]
+    SessionMismatch { params: String, subject: String },
     #[error("client error: {0}")]
     ClientError(#[source] agent_client_protocol::Error),
 }
@@ -23,6 +24,7 @@ pub fn error_code_and_message(e: &ElicitationCreateError) -> (ErrorCode, String)
             ErrorCode::InvalidParams,
             format!("Invalid elicitation/create request: {}", inner),
         ),
+        ElicitationCreateError::SessionMismatch { .. } => (ErrorCode::InvalidParams, e.to_string()),
         ElicitationCreateError::ClientError(inner) => (inner.code, inner.message.clone()),
     }
 }
@@ -81,17 +83,15 @@ async fn forward_to_client<C: ClientHandler + Sync>(
     expected_session_id: &str,
 ) -> Result<CreateElicitationResponse, ElicitationCreateError> {
     let request: CreateElicitationRequest = decode_request_params("elicitation/create", headers, payload)
-        .map_err(|e| ElicitationCreateError::InvalidRequest(serde_json::Error::custom(format!("{e}"))))?;
+        .map_err(ElicitationCreateError::InvalidRequest)?;
 
     if let ElicitationScope::Session(scope) = request.scope() {
         let params_session_id = scope.session_id.to_string();
         if params_session_id != expected_session_id {
-            return Err(ElicitationCreateError::InvalidRequest(serde_json::Error::custom(
-                format!(
-                    "scope.sessionId ({}) does not match subject session id ({})",
-                    params_session_id, expected_session_id
-                ),
-            )));
+            return Err(ElicitationCreateError::SessionMismatch {
+                params: params_session_id,
+                subject: expected_session_id.to_string(),
+            });
         }
     }
 
