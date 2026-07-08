@@ -16,15 +16,22 @@ temporary, duplicated, or incomplete while an idea is being tested.
 
 ## License
 
-By default, experiments are licensed under the
+This directory exists so ideas can be built in public while they are still
+half-baked. Final licensing is deliberately deferred until an experiment
+proves itself and graduates.
+
+Until then, experiments default to the
 [PolyForm Noncommercial License 1.0.0](./LICENSE) unless a more specific
 license file, package manifest, source header, or written notice in the
-relevant child path says otherwise.
+relevant child path says otherwise. You are welcome to clone, run, modify,
+and tinker with anything here for any noncommercial purpose.
 
-You are welcome to clone, run, modify, and test anything here for any
-noncommercial purpose. Commercial use is not permitted; those rights remain
-reserved to Straw Hat, LLC. If you want to use an experiment commercially,
-open an issue and ask.
+The noncommercial default is not a statement of intent to stay closed. It is
+a placeholder that keeps every option open: code can always be relicensed
+permissively later, but a permissive grant cannot be taken back. Graduated
+work has historically shipped as MIT or Apache 2.0, and the rest of this
+repository is Apache 2.0. If you want to use an experiment commercially
+before it graduates, open an issue and ask.
 
 ## Contributions
 
