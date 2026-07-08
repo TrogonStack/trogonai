@@ -19,8 +19,9 @@ use trogon_std::NonZeroDuration;
 use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
-use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::commands::domain::{CredentialKind, SourceKind};
+use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Deserialize)]
@@ -285,10 +286,9 @@ fn validation_token_from_query(query: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-    use crate::secret_store::{
-        CredentialKind, CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut, SourceKind,
-    };
+    use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source_integration_id::SourceIntegrationId;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;

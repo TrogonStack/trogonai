@@ -6,8 +6,9 @@ use tracing::{info, warn};
 use trogon_std::EmptySecret;
 use twilight_gateway::{Message, Shard, ShardId};
 
-use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::commands::domain::{CredentialKind, SourceKind};
+use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 use super::config::{DiscordBotToken, DiscordConfig};
 use super::gateway::GatewayBridge;
@@ -102,14 +103,13 @@ mod tests {
     use trogon_std::SecretString;
 
     use super::*;
-    use crate::runtime_projection::RuntimeCredentialRegistry;
-    use crate::secret_store::{
-        CredentialScope, MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, credential_lifecycle,
-        credential_lifecycle::CredentialLifecycleEvent,
-    };
+    use crate::commands::domain::{CredentialOwnerId, CredentialScope};
+    use crate::commands::{CredentialLifecycleEvent, evolve, initial_state};
+    use crate::processor::runtime_projection::RuntimeCredentialRegistry;
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut};
 
-    fn owner_id() -> crate::secret_store::CredentialOwnerId {
-        crate::secret_store::CredentialOwnerId::new("tenant-1").unwrap()
+    fn owner_id() -> CredentialOwnerId {
+        CredentialOwnerId::new("tenant-1").unwrap()
     }
 
     fn position(value: u64) -> StreamPosition {
@@ -138,9 +138,7 @@ mod tests {
             CredentialLifecycleEvent::Activated { metadata },
         ]
         .into_iter()
-        .try_fold(credential_lifecycle::initial_state(), |state, event| {
-            credential_lifecycle::evolve(state, &event)
-        })
+        .try_fold(initial_state(), |state, event| evolve(state, &event))
         .unwrap();
         let registry = RuntimeCredentialRegistry::default();
         registry.apply_lifecycle_state(&state, position(2)).await.unwrap();

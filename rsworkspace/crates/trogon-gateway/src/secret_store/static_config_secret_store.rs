@@ -3,9 +3,10 @@ use std::fmt;
 
 use trogon_std::{EmptySecret, SecretString};
 
-use super::{
-    CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, SecretMaterial, StorageBackend,
+use super::SecretMaterial;
+use crate::commands::domain::{
+    CredentialFingerprintError, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialRef,
+    CredentialScope, CredentialStatus, CredentialVersion, StorageBackend,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,8 +82,9 @@ impl StaticConfigSecretStore {
     }
 
     pub fn metadata(secret: &StaticConfigSecret) -> Result<CredentialMetadata, StaticConfigSecretStoreError> {
-        let fingerprint = super::CredentialFingerprint::new(format!("static-config:{}", secret.reference()))
-            .map_err(StaticConfigSecretStoreError::InvalidFingerprint)?;
+        let fingerprint =
+            crate::commands::domain::CredentialFingerprint::new(format!("static-config:{}", secret.reference()))
+                .map_err(StaticConfigSecretStoreError::InvalidFingerprint)?;
 
         Ok(CredentialMetadata::new(
             secret.reference().clone(),
@@ -116,14 +118,14 @@ pub enum StaticConfigSecretStoreError {
     #[error("credential is verifier-only: {credential}")]
     VerifierOnly { credential: CredentialRef },
     #[error("invalid credential id: {0}")]
-    InvalidCredentialId(#[source] super::CredentialIdError),
+    InvalidCredentialId(#[source] CredentialIdError),
     #[error("invalid credential fingerprint: {0}")]
-    InvalidFingerprint(#[source] super::CredentialFingerprintError),
+    InvalidFingerprint(#[source] CredentialFingerprintError),
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::secret_store::{CredentialOwnerId, SourceKind};
+    use crate::commands::domain::{CredentialOwnerId, SourceKind};
     use crate::source_integration_id::SourceIntegrationId;
 
     use super::*;

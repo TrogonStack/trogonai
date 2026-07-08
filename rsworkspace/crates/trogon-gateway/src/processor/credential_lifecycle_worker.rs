@@ -19,15 +19,16 @@ use trogon_nats::jetstream::{
 };
 use trogonai_proto::gateway::credentials::checkpoints_v1 as proto;
 
-use super::credential_lifecycle::{
-    self, CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
-    CredentialLifecycleState,
-};
-use super::credential_lifecycle_handler::{
+use crate::commands::credential_lifecycle_handler::{
     CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialLifecycleRuntimeHandler,
     activation_recovery_command,
 };
-use super::{CredentialId, SecretStoreMetadata};
+use crate::commands::domain::CredentialId;
+use crate::commands::{
+    CredentialLifecycleEvent, CredentialLifecycleEventPayloadError, CredentialLifecycleEvolveError,
+    CredentialLifecycleState, evolve, initial_state,
+};
+use crate::secret_store::SecretStoreMetadata;
 
 const CHECKPOINT_KEY: &str = "v1.recovery-worker";
 const DEFAULT_INITIAL_FAILURE_BACKOFF: Duration = Duration::from_secs(30);
@@ -555,7 +556,7 @@ where
             credential_id: credential_id.clone(),
             source: Box::new(source),
         })?;
-    let mut state = credential_lifecycle::initial_state();
+    let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
             .decode::<CredentialLifecycleEvent>()
@@ -563,11 +564,9 @@ where
         else {
             continue;
         };
-        state = credential_lifecycle::evolve(state, &event).map_err(|source| {
-            CredentialLifecycleRecoveryPlanBuildError::ReplayLifecycle {
-                credential_id: credential_id.clone(),
-                source,
-            }
+        state = evolve(state, &event).map_err(|source| CredentialLifecycleRecoveryPlanBuildError::ReplayLifecycle {
+            credential_id: credential_id.clone(),
+            source,
         })?;
     }
     Ok(state)
@@ -965,14 +964,12 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
-    use crate::secret_store::credential_lifecycle_handler::{
-        CredentialLifecycleHandler, CredentialLifecycleRuntimeHandler, PutCredential, RotateCredential,
+    use crate::commands::credential_lifecycle_handler::{CredentialLifecycleHandler, PutCredential, RotateCredential};
+    use crate::commands::domain::{
+        CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, SourceKind,
     };
-    use crate::secret_store::{
-        CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialVersion, MockOpenBaoSecretStore,
-        SourceKind,
-    };
+    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationKey};
+    use crate::secret_store::MockOpenBaoSecretStore;
     use crate::source_integration_id::SourceIntegrationId;
 
     #[derive(Debug, thiserror::Error)]
@@ -1137,9 +1134,9 @@ mod tests {
             vec![PlannedCredentialLifecycleRecovery {
                 credential_id: credential_id(),
                 command: CredentialActivationRecoveryCommand::Write(
-                    super::super::credential_lifecycle_handler::RecoverCredentialWriteActivation::new(credential_ref(
-                        1
-                    ))
+                    crate::commands::credential_lifecycle_handler::RecoverCredentialWriteActivation::new(
+                        credential_ref(1)
+                    )
                 ),
             }]
         );
@@ -1192,7 +1189,7 @@ mod tests {
         let handler = CredentialLifecycleHandler::new(events.clone(), secrets.clone());
         let active = handler.put(put_command("old-secret")).await.unwrap();
         let active = active.into_state();
-        let credential_lifecycle::CredentialLifecycleState::Active(active) = active else {
+        let CredentialLifecycleState::Active(active) = active else {
             panic!("expected active credential");
         };
         let active_ref = active.credential_ref().clone();

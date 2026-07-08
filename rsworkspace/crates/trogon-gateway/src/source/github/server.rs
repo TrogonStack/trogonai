@@ -19,8 +19,9 @@ use trogon_nats::jetstream::{
 };
 use trogon_std::NonZeroDuration;
 
-use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::commands::domain::{CredentialKind, SourceKind};
+use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
@@ -307,8 +308,9 @@ mod tests {
     };
     use trogon_std::NonZeroDuration;
 
-    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-    use crate::secret_store::{CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut};
+    use crate::commands::domain::{CredentialOwnerId, CredentialScope};
+    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
     type HmacSha256 = Hmac<Sha256>;
 

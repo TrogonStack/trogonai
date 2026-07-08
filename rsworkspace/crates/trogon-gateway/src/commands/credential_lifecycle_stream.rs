@@ -7,7 +7,7 @@ use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::JetStreamContext;
 use uuid::Uuid;
 
-use super::CredentialId;
+use super::domain::CredentialId;
 
 pub(crate) const CREDENTIAL_LIFECYCLE_STREAM: &str = "GATEWAY_CREDENTIAL_LIFECYCLE_EVENTS";
 pub(crate) const CREDENTIAL_LIFECYCLE_EVENT_SUBJECT_PREFIX: &str = "gateway.credentials.lifecycle.events.v1";

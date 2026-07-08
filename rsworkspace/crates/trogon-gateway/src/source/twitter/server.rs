@@ -16,8 +16,9 @@ use trogon_nats::jetstream::{
 use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
-use crate::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{CredentialKind, SecretStoreError, SecretStoreGet, SourceKind};
+use crate::commands::domain::{CredentialKind, SourceKind};
+use crate::processor::runtime_projection::{RuntimeCredentialError, RuntimeCredentialResolver, RuntimeIntegrationKey};
+use crate::secret_store::{SecretStoreError, SecretStoreGet};
 use crate::source_integration_id::SourceIntegrationId;
 
 use super::config::{TwitterConfig, TwitterConsumerSecret};
@@ -480,10 +481,9 @@ mod tests {
     };
     use trogon_nats::mocks::MockError;
 
-    use crate::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-    use crate::secret_store::{
-        CredentialKind, CredentialOwnerId, CredentialScope, MockOpenBaoSecretStore, SecretStorePut, SourceKind,
-    };
+    use crate::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+    use crate::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+    use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
     use crate::source_integration_id::SourceIntegrationId;
 
     type HmacSha256 = Hmac<Sha256>;

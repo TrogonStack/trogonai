@@ -1,6 +1,8 @@
 #[cfg(not(coverage))]
 mod cli;
 #[cfg_attr(coverage, allow(dead_code))]
+mod commands;
+#[cfg_attr(coverage, allow(dead_code))]
 mod config;
 #[cfg_attr(coverage, allow(dead_code))]
 mod constants;
@@ -11,7 +13,7 @@ mod credential_management_idempotency;
 #[cfg_attr(coverage, allow(dead_code))]
 mod http;
 #[cfg_attr(coverage, allow(dead_code))]
-mod runtime_projection;
+mod processor;
 #[cfg_attr(coverage, allow(dead_code))]
 mod secret_store;
 #[cfg_attr(coverage, allow(dead_code))]
@@ -156,10 +158,10 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
-    let credential_lifecycle_store = secret_store::credential_lifecycle_store::open(client.context().clone()).await?;
+    let credential_lifecycle_store = commands::credential_lifecycle_store::open(client.context().clone()).await?;
     info!(
-        stream = secret_store::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
-        snapshot_bucket = secret_store::credential_lifecycle_store::CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET,
+        stream = commands::credential_lifecycle_stream::CREDENTIAL_LIFECYCLE_STREAM,
+        snapshot_bucket = commands::credential_lifecycle_store::CREDENTIAL_LIFECYCLE_SNAPSHOT_BUCKET,
         "credential lifecycle event store opened"
     );
     let (runtime_credentials, _credential_lifecycle_projection_refresh_report, runtime_projection_checkpoints) =
@@ -210,7 +212,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         let projection_event_stream = credential_lifecycle_store.events_stream().clone();
         let projection_event_store = credential_lifecycle_store.clone();
         join_set.spawn(async move {
-            runtime_projection::run_checkpointed_refresh_worker(
+            processor::runtime_projection::run_checkpointed_refresh_worker(
                 projection_runtime_credentials,
                 projection_event_stream,
                 projection_event_store,
@@ -281,7 +283,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
             let store = openbao_secret_store_from_env(CREDENTIAL_MANAGEMENT_ADMIN_TOKEN)?;
             let idempotency = credential_management_idempotency::open(client.context().clone()).await?;
             let worker_checkpoints =
-                secret_store::credential_lifecycle_worker::open_checkpoint_store(client.context().clone()).await?;
+                processor::credential_lifecycle_worker::open_checkpoint_store(client.context().clone()).await?;
             let recovery_status_checkpoints = worker_checkpoints.clone();
             let worker_event_stream = credential_lifecycle_store.events_stream().clone();
             let worker_event_store = credential_lifecycle_store.clone();
@@ -289,12 +291,12 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
             let worker_store = store.clone();
             let worker_runtime_credentials = runtime_credentials.clone();
             join_set.spawn(async move {
-                let handler = secret_store::credential_lifecycle_handler::CredentialLifecycleRuntimeHandler::new(
+                let handler = commands::credential_lifecycle_handler::CredentialLifecycleRuntimeHandler::new(
                     worker_handler_event_store,
                     worker_store,
                     worker_runtime_credentials,
                 );
-                secret_store::credential_lifecycle_worker::run(
+                processor::credential_lifecycle_worker::run(
                     worker_event_stream,
                     worker_event_store,
                     handler,
@@ -366,15 +368,16 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
 
 #[cfg(not(coverage))]
 async fn refresh_credential_lifecycle_runtime_projection(
-    event_store: &secret_store::credential_lifecycle_store::CredentialLifecycleEventStore,
+    event_store: &commands::credential_lifecycle_store::CredentialLifecycleEventStore,
 ) -> anyhow::Result<(
-    runtime_projection::RuntimeCredentialRegistry,
-    runtime_projection::RuntimeProjectionRefreshReport,
-    runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
+    processor::runtime_projection::RuntimeCredentialRegistry,
+    processor::runtime_projection::RuntimeProjectionRefreshReport,
+    processor::runtime_projection::RuntimeProjectionKvCheckpointStore<kv::Store>,
 )> {
-    let registry = runtime_projection::RuntimeCredentialRegistry::default();
+    let registry = processor::runtime_projection::RuntimeCredentialRegistry::default();
     let checkpoints =
-        runtime_projection::open_runtime_projection_checkpoint_store(event_store.as_jetstream().clone()).await?;
+        processor::runtime_projection::open_runtime_projection_checkpoint_store(event_store.as_jetstream().clone())
+            .await?;
     let (registry, report) = refresh_credential_lifecycle_runtime_projection_with_checkpoints(
         event_store.events_stream(),
         event_store,
@@ -390,16 +393,16 @@ async fn refresh_credential_lifecycle_runtime_projection_with_checkpoints<EventS
     event_stream: &EventStream,
     event_store: &EventStore,
     checkpoints: &Checkpoints,
-    registry: runtime_projection::RuntimeCredentialRegistry,
+    registry: processor::runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<(
-    runtime_projection::RuntimeCredentialRegistry,
-    runtime_projection::RuntimeProjectionRefreshReport,
+    processor::runtime_projection::RuntimeCredentialRegistry,
+    processor::runtime_projection::RuntimeProjectionRefreshReport,
 )>
 where
     EventStream: JetStreamGetStreamInfo + JetStreamGetRawMessage,
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
-    Checkpoints: runtime_projection::RuntimeProjectionCheckpointStore,
+    Checkpoints: processor::runtime_projection::RuntimeProjectionCheckpointStore,
 {
     let report = registry
         .refresh_from_lifecycle_stream_checkpointed(event_stream, event_store, checkpoints)
@@ -422,7 +425,7 @@ where
 
 #[cfg(not(coverage))]
 fn source_runtime_credentials_from_env(
-    runtime_credentials: &runtime_projection::RuntimeCredentialRegistry,
+    runtime_credentials: &processor::runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
     Option<source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>>,
 > {
@@ -526,9 +529,13 @@ fn source_runtime_credentials_from_env(
 
 #[cfg(not(coverage))]
 fn discord_runtime_credentials_from_env(
-    runtime_credentials: &runtime_projection::RuntimeCredentialRegistry,
+    runtime_credentials: &processor::runtime_projection::RuntimeCredentialRegistry,
 ) -> anyhow::Result<
-    Option<runtime_projection::RuntimeCredentialResolver<secret_store::openbao_secret_store::OpenBaoSecretStore>>,
+    Option<
+        processor::runtime_projection::RuntimeCredentialResolver<
+            secret_store::openbao_secret_store::OpenBaoSecretStore,
+        >,
+    >,
 > {
     if !env_flag_enabled(ENABLE_RUNTIME_DISCORD_CREDENTIALS) {
         return Ok(None);
@@ -674,8 +681,8 @@ mod command_tests {
         let event_store = EmptyCredentialLifecycleEventStore::default();
         let kv = MockJetStreamKvStore::new();
         kv.enqueue_entry_none();
-        let checkpoints = runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
-        let registry = runtime_projection::RuntimeCredentialRegistry::default();
+        let checkpoints = processor::runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
+        let registry = processor::runtime_projection::RuntimeCredentialRegistry::default();
 
         let (_registry, report) = refresh_credential_lifecycle_runtime_projection_with_checkpoints(
             &stream,
