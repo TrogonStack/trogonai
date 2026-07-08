@@ -16,9 +16,23 @@ temporary, duplicated, or incomplete while an idea is being tested.
 
 ## License
 
-By default, experiments are UNLICENSED and proprietary to Straw Hat, LLC unless
-a more specific license file, package manifest, source header, or written notice
-in the relevant child path says otherwise.
+By default, experiments are licensed under the
+[PolyForm Noncommercial License 1.0.0](./LICENSE) unless a more specific
+license file, package manifest, source header, or written notice in the
+relevant child path says otherwise.
+
+You are welcome to clone, run, modify, and test anything here for any
+noncommercial purpose. Commercial use is not permitted; those rights remain
+reserved to Straw Hat, LLC. If you want to use an experiment commercially,
+open an issue and ask.
+
+## Contributions
+
+Contributions are welcome. By submitting a contribution (for example, a pull
+request) to this directory, you agree to license your contribution to
+Straw Hat, LLC under the Apache License 2.0, and you grant Straw Hat, LLC the
+right to relicense and redistribute it, including as part of experiments that
+graduate into the rest of this repository.
 
 Do not assume anything under this directory is a package, workspace member,
 published artifact, supported interface, runnable service, or maintained build
