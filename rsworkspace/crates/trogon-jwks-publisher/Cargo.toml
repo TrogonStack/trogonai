@@ -1,0 +1,31 @@
+[package]
+name = "trogon-jwks-publisher"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+description = "AAuth Agent Provider token issuance (aa-agent+jwt) and well-known JWKS discovery publishing"
+publish = false
+
+[lib]
+name = "trogon_jwks_publisher"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+trogon-identity-types = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tower = { workspace = true, features = ["util"] }
+trogon-aauth-verify = { workspace = true }

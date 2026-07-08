@@ -234,6 +234,16 @@ pub fn ingress_gateway_tier3_refused_response_bytes(
     .body)
 }
 
+/// Serialize an AAuth verification denial (`-32118`, mirrors
+/// `a2a_gateway::aauth::AAUTH_REQUIRED_CODE`) for the correlating inbox.
+pub fn ingress_gateway_aauth_denied_response_bytes(
+    request_headers: &HeaderMap,
+    request_payload_hint: &[u8],
+    message: impl Into<String>,
+) -> Result<bytes::Bytes, WireError> {
+    Ok(ingress_error_wire(request_headers, request_payload_hint, -32_118, message, None)?.body)
+}
+
 /// Serialize an upstream-gateway deadline overrun (-32800 — reserved for `{prefix}.gateway>` deadlines).
 pub fn ingress_gateway_deadline_exceeded_response_bytes(
     request_headers: &HeaderMap,

@@ -21,3 +21,4 @@ future implementation work.
 - [ADR 0014: Command and Query Naming](./0014-command-and-query-naming.md)
 - [ADR 0015: Rust TLS Library](./0015-rust-tls-library.md)
 - [ADR 0016: Protocol Buffers RPC over NATS micro Binding](./0016-protobuf-rpc-over-nats-micro-binding.md)
+- [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)

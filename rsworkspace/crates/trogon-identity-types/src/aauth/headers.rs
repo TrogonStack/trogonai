@@ -17,3 +17,116 @@ pub const NATS_SIG_INPUT: &str = "AAuth-Sig-Input";
 pub const NATS_SIG: &str = "AAuth-Sig";
 pub const NATS_SIG_CREATED: &str = "AAuth-Sig-Created";
 pub const NATS_SIG_NONCE: &str = "AAuth-Sig-Nonce";
+pub const NATS_AUTH_TOKEN: &str = "AAuth-Auth-Token";
+
+/// A single `AAuth-Capabilities` value per "AAuth-Capabilities Request Header".
+/// This specification defines `interaction`, `clarification`, and `payment`;
+/// `Other` preserves any capability value not recognized by this crate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Capability {
+    Interaction,
+    Clarification,
+    Payment,
+    Other(String),
+}
+
+impl Capability {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Capability::Interaction => "interaction",
+            Capability::Clarification => "clarification",
+            Capability::Payment => "payment",
+            Capability::Other(raw) => raw.as_str(),
+        }
+    }
+
+    #[must_use]
+    pub fn parse_token(token: &str) -> Self {
+        match token.trim() {
+            "interaction" => Capability::Interaction,
+            "clarification" => Capability::Clarification,
+            "payment" => Capability::Payment,
+            other => Capability::Other(other.to_string()),
+        }
+    }
+}
+
+/// Parsed `AAuth-Capabilities` request header: an RFC 8941 List of Tokens, e.g.
+/// `AAuth-Capabilities: interaction, clarification, payment`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Capabilities(pub Vec<Capability>);
+
+impl Capabilities {
+    /// Parse the value of an `AAuth-Capabilities` header into a typed list.
+    /// Unrecognized parameters on a capability item are ignored per spec.
+    #[must_use]
+    pub fn parse(raw: &str) -> Self {
+        let items = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|item| {
+                let token = item.split(';').next().unwrap_or(item).trim();
+                Capability::parse_token(token)
+            })
+            .collect();
+        Capabilities(items)
+    }
+
+    /// Render the canonical wire form for the `AAuth-Capabilities` header value.
+    #[must_use]
+    pub fn to_header_value(&self) -> String {
+        self.0.iter().map(Capability::as_str).collect::<Vec<_>>().join(", ")
+    }
+
+    #[must_use]
+    pub fn contains(&self, capability: &Capability) -> bool {
+        self.0.contains(capability)
+    }
+}
+
+/// The `AAuth-Access` response header value: an opaque `token68` per "AAuth-Access
+/// Response Header". The token is opaque to the agent, so this wraps a `String`
+/// rather than defining structure the draft does not specify.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Access(pub String);
+
+/// Errors when parsing an `AAuth-Access` header value.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AccessParseError {
+    #[error("aauth-access: value is empty")]
+    Empty,
+    #[error("aauth-access: value contains whitespace or control characters")]
+    InvalidCharacters,
+}
+
+impl Access {
+    /// Parse an `AAuth-Access` header value. Per "AAuth-Access Response Header",
+    /// recipients MUST reject empty values and values containing embedded
+    /// whitespace or control characters.
+    pub fn parse(raw: &str) -> Result<Self, AccessParseError> {
+        if raw.is_empty() {
+            return Err(AccessParseError::Empty);
+        }
+        if raw.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(AccessParseError::InvalidCharacters);
+        }
+        Ok(Access(raw.to_string()))
+    }
+
+    #[must_use]
+    pub fn to_header_value(&self) -> String {
+        self.0.clone()
+    }
+
+    /// Render the `Authorization: AAuth <token>` header value used to present
+    /// this token back to the resource on subsequent requests.
+    #[must_use]
+    pub fn to_authorization_header_value(&self) -> String {
+        format!("AAuth {}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests;
