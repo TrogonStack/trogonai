@@ -84,7 +84,7 @@ Status values: `implemented` (routed, typed, tested), `unwired` (SDK flag enable
 | Providers | unstable (0.11.7) | unwired | see `providers/list`/`providers/set`/`providers/disable` rows above |
 | MCP-over-ACP message types | unstable (0.13.0) | implemented | `McpServer::Acp` and `McpCapabilities.acp` payload round-trip tested via schema-level and `unstable_mcp_over_acp` SDK flag; the `mcp/connect`, `mcp/message`, `mcp/disconnect` RPC methods are not routed (no runner demand yet, revisit with Phase 4 adoption cadence) |
 | Elicitation enum option descriptions | unstable (1.4.0) | implemented | `EnumOption` descriptions on `StringPropertySchema.one_of` round-trip tested |
-| Protocol v2 | unstable, heavy churn | watch-only | adopt at preview per PLAN.md Phase 4 |
+| Protocol v2 | unstable, heavy churn | watch-only | adopt once upstream marks it preview; the freshness workflow surfaces every release it churns in |
 
 ## Upgrade ritual
 

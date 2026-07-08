@@ -13,7 +13,7 @@ The ACP-over-NATS bridge decodes every message into typed SDK structs and
 re-serializes them (`acp-nats/src/wire.rs`). During the schema 0.11.4 to 1.4.0
 catch-up this bit us: fields the pinned SDK did not model were silently
 stripped in transit, and unknown `session/update` variants failed decode and
-were dropped. PLAN.md Phase 4 asked whether the bridge should instead forward
+were dropped. The catch-up effort (issue #474) asked whether the bridge should instead forward
 payloads losslessly (raw `serde_json::Value` passthrough, typed validation
 only where the bridge reads fields), so future spec additions degrade to
 "forwarded" instead of "dropped".
