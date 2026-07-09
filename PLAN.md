@@ -80,7 +80,10 @@ Candidate change: decode incoming payloads with
 `ClientRequest::parse_message(wire_method, params)` and match once, instead of
 one typed-decode closure per method arm.
 
-Verdict after Item 4 landed: skipped, not a net reduction. The reasons:
+Verdict: skipped, not a net reduction. With Item 4 reverted, this is
+doubly closed: enum decode would additionally require re-labeling methods
+to the SDK's canonical names, which ADR 0022 (rejected) rules out. The
+standalone reasons:
 
 - The per-method arms are already one-liners over shared helpers
   (`handle_jsonrpc_request`, `handle_wire_notification`,
@@ -103,39 +106,26 @@ which would allow generating these arms instead of hand-writing either form.
   per-method, so new spec methods touch trait and subject mapping only.
 - `docs/architecture/acp-conformance.md`: update the upgrade ritual to match.
 
-## Item 4: Standardize the NATS method vocabulary (ADR 0022) [DONE]
+## Item 4: Standardize the NATS method vocabulary (ADR 0022) [REVERTED]
 
-Correction discovered during implementation: the method string is never
-serialized onto the NATS wire. The content-mode codec (`jsonrpc-nats`)
-carries params in the body and the id in a header; the method is derived
-from the subject on receive. The dialects below were internal labels
-(decode context, telemetry, in-memory messages), so this normalization is
-NOT a breaking wire change and peers upgrade independently. ADR 0022
-records this accurately.
+Implemented, then reverted in the same PR. ADR 0022 is recorded as rejected
+with the full reasoning. The short version:
 
-The method vocabulary previously used three dialects:
-
-| Direction | Method label (before) | Canonical ACP (now) |
-| --- | --- | --- |
-| Agent-bound, global | `session.new`, `providers.list` | `session/new`, `providers/list` |
-| Agent-bound, session-scoped | bare `prompt`, `load`, `set_mode` | `session/prompt`, `session/load` |
-| Client-bound | `session/update`, `terminal/create` | already canonical |
-
-Extension methods used three conventions at once: `ext.{name}` (agent-bound
-NATS), `ext/{name}` (client-bound NATS), and the spec's `_{name}` prefix at
-the byte-stream boundary (`ConnectionClient::ext_method`). Now `_{name}`
-everywhere; `ext.` survives only as a subject token.
-
-Decision input (owner, 2026-07-09): breaking changes were pre-approved when
-clearly beneficial; the implementation then established none was needed.
-
-Done: ADR 0022 written; `GlobalAgentMethod::wire_method` /
-`SessionAgentMethod::wire_method` / `ClientMethod::wire_method` return
-canonical names (`session/prompt`, `providers/list`, `_name` for
-extensions, `_session/prompt_response` for the prompt-response extension);
-subject-token parsing untouched; Bridge senders now derive method labels
-from `wire_method()` instead of hardcoded literals; test expectations
-updated across the four crates.
+- The original case was (1) self-describing wire traffic, (2) conformance
+  against `meta.json` without a translation table, (3) enabling enum decode.
+- During implementation we established the method is never serialized onto
+  the NATS wire (content mode: params in body, id in header, method derived
+  from the subject), which killed (1). Item 2's evaluation skipped enum
+  decode, which killed (3). And (2) was illusory: the token-to-name mapping
+  exists either way; the rename just made `wire_method()` disagree with
+  `from_suffix()` where they had been the same string.
+- On the NATS leg the method's identity IS the subject token: one identity
+  serving routing, decode context, telemetry, and ACLs. The rename split
+  that into two vocabularies (and diverged from metrics labels, which kept
+  the token names) for no byte-level or operational benefit.
+- Spec vocabulary remains authoritative where methods actually flow as
+  JSON-RPC: the byte-stream boundaries, which have always used canonical
+  names including the `_` extension prefix.
 
 ## Item 5: Alignment notes recorded, no action now
 
@@ -191,13 +181,12 @@ Store drafts under `.trogonai/upstream-asks/` until approved for filing.
 
 ## Sequencing (as executed)
 
-Items 1, 3, and 4 shipped together in PR #478
-(https://github.com/TrogonStack/trogonai/pull/478), two commits. The plan
-originally split Item 4 into its own PR because it was believed to be a
-breaking wire change; the correction (method labels are never serialized)
-removed that reason. Item 2 was evaluated after Item 4 and skipped. Item 6
-remains open, on hold; PR #478's diff is the evidence for ask 1 when it
-proceeds.
+Items 1 and 3 shipped in PR #478
+(https://github.com/TrogonStack/trogonai/pull/478). Item 4 was implemented
+in the same PR, then reverted within it once its justification was
+re-examined (see the item above and ADR 0022, now rejected). Item 2 was
+evaluated and skipped. Item 6 remains open, on hold; PR #478's boundary
+diff is the evidence for ask 1 when it proceeds.
 
 ## Non-goals
 

@@ -1,6 +1,6 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
-use crate::nats::{GlobalAgentMethod, RequestClient, global};
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{DisableProviderRequest, DisableProviderResponse};
 use tracing::{info, instrument};
@@ -17,9 +17,15 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!("Disable provider request");
 
     let subject = global::ProvidersDisableSubject::new(bridge.config.acp_prefix_ref());
-    let method = GlobalAgentMethod::ProvidersDisable.wire_method();
 
-    let result = jsonrpc_call(bridge.nats(), &subject, &method, &args, bridge.config.operation_timeout).await;
+    let result = jsonrpc_call(
+        bridge.nats(),
+        &subject,
+        "providers.disable",
+        &args,
+        bridge.config.operation_timeout,
+    )
+    .await;
 
     bridge.metrics.record_request(
         "disable_provider",

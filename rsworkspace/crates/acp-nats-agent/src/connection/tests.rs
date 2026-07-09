@@ -105,7 +105,7 @@ async fn dispatch<T: serde::Serialize>(subject: &str, args: &T, reply: Option<&s
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let method = wire_method_for_subject(subject);
-    let encoded = if reply.is_none() && method == "session/cancel" {
+    let encoded = if reply.is_none() && method == "cancel" {
         wire_encode_notification(&method, args)
     } else {
         wire_encode_request(&method, args)
@@ -513,7 +513,7 @@ fn make_js_msg_raw(subject: &str, payload: &[u8], reply: Option<&str>) -> MockJs
 
 fn make_js_msg<T: serde::Serialize>(subject: &str, args: &T, reply: Option<&str>) -> MockJsMessage {
     let method = wire_method_for_subject(subject);
-    let encoded = if method == "session/cancel" {
+    let encoded = if method == "cancel" {
         wire_encode_notification(&method, args)
     } else {
         wire_encode_request(&method, args)
@@ -1093,7 +1093,7 @@ async fn dispatch_js_message_reply_failure_acks() {
 
 fn make_failing_js_msg<T: serde::Serialize>(subject: &str, args: &T) -> MockJsMessage {
     let method = wire_method_for_subject(subject);
-    let encoded = if method == "session/cancel" {
+    let encoded = if method == "cancel" {
         wire_encode_notification(&method, args)
     } else {
         wire_encode_request(&method, args)

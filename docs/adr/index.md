@@ -26,4 +26,4 @@ future implementation work.
 - [ADR 0019: Console Webapp Stack](./0019-console-webapp-stack.md)
 - [ADR 0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits](./0020-acp-sdk-1x-boundary-and-bridge-traits.md)
 - [ADR 0021: Typed Decode over Passthrough Forwarding](./0021-typed-decode-over-passthrough-forwarding.md)
-- [ADR 0022: Canonical ACP Method Vocabulary in the NATS Layer](./0022-canonical-acp-wire-methods-on-nats.md)
+- [ADR 0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)](./0022-canonical-acp-wire-methods-on-nats.md)

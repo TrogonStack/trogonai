@@ -31,7 +31,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     let nats = bridge.nats();
     let subject = global::ExtSubject::new(bridge.config.acp_prefix_ref(), &method_name);
-    let wire_method = format!("_{}", method_name.as_str());
+    let wire_method = format!("ext.{}", method_name.as_str());
 
     let result = jsonrpc_call(nats, &subject, &wire_method, &args, bridge.config.operation_timeout()).await;
 

@@ -1,6 +1,6 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
-use crate::nats::{GlobalAgentMethod, RequestClient, global};
+use crate::nats::{RequestClient, global};
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{ListSessionsRequest, ListSessionsResponse};
 use tracing::{info, instrument};
@@ -17,9 +17,15 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!("List sessions request");
 
     let subject = global::SessionListSubject::new(bridge.config.acp_prefix_ref());
-    let method = GlobalAgentMethod::SessionList.wire_method();
 
-    let result = jsonrpc_call(bridge.nats(), &subject, &method, &args, bridge.config.operation_timeout).await;
+    let result = jsonrpc_call(
+        bridge.nats(),
+        &subject,
+        "session.list",
+        &args,
+        bridge.config.operation_timeout,
+    )
+    .await;
 
     bridge.metrics.record_request(
         "list_sessions",

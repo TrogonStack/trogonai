@@ -23,7 +23,7 @@ fn response_with_prompt_id(
     let mut meta = serde_json::Map::new();
     meta.insert("prompt_id".to_string(), serde_json::json!(prompt_token.0));
     let response = PromptResponse::new(stop_reason).meta(meta);
-    crate::client::test_support::encode_wire_notification("_session/prompt_response", &response)
+    crate::client::test_support::encode_wire_notification("ext/session/prompt_response", &response)
 }
 
 #[tokio::test]
@@ -95,7 +95,7 @@ async fn missing_prompt_id_is_rejected() {
 
     let response = PromptResponse::new(StopReason::EndTurn);
     let (headers, payload) =
-        crate::client::test_support::encode_wire_notification("_session/prompt_response", &response);
+        crate::client::test_support::encode_wire_notification("ext/session/prompt_response", &response);
 
     handle("no-token-session", &headers, &payload, None, &bridge).await;
 
