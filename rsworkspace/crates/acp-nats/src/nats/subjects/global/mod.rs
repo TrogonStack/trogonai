@@ -3,6 +3,9 @@ mod ext;
 mod ext_notify;
 mod initialize;
 mod logout;
+mod providers_disable;
+mod providers_list;
+mod providers_set;
 mod session_list;
 mod session_new;
 
@@ -11,5 +14,8 @@ pub use ext::ExtSubject;
 pub use ext_notify::ExtNotifySubject;
 pub use initialize::InitializeSubject;
 pub use logout::LogoutSubject;
+pub use providers_disable::ProvidersDisableSubject;
+pub use providers_list::ProvidersListSubject;
+pub use providers_set::ProvidersSetSubject;
 pub use session_list::SessionListSubject;
 pub use session_new::SessionNewSubject;

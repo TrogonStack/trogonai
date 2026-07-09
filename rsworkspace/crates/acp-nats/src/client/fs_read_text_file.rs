@@ -1,7 +1,9 @@
 use crate::client::rpc_reply;
+use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode, ReadTextFileRequest, ReadTextFileResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{ReadTextFileRequest, ReadTextFileResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_FS_READ_TEXT_FILE;
@@ -23,7 +25,7 @@ pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
 
 /// Handles read_text_file: decodes wire request params, calls client, and publishes a wire-encoded reply.
 #[instrument(name = ACP_CLIENT_FS_READ_TEXT_FILE, skip(headers, payload, client, nats))]
-pub async fn handle<N: PublishClient + FlushClient, C: Client>(
+pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
@@ -67,7 +69,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     }
 }
 
-async fn forward_to_client<C: Client>(
+async fn forward_to_client<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,

@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use super::Bridge;
+use crate::AgentHandler;
 use crate::agent::test_support::MockJs;
 use crate::config::Config;
-use agent_client_protocol::{
-    Agent, ErrorCode, ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{
+    ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
 };
 use tokio::sync::mpsc;
 use trogon_nats::AdvancedMockNatsClient;
@@ -37,7 +39,13 @@ async fn drain_background_tasks_completes() {
     let (_mock, _js, bridge) = mock_bridge();
     bridge.spawn_background(tokio::spawn(async {}));
     bridge.drain_background_tasks().await;
-    assert!(bridge.background_tasks.borrow().is_empty());
+    assert!(
+        bridge
+            .background_tasks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    );
 }
 
 #[tokio::test]

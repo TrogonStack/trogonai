@@ -1,6 +1,8 @@
+use crate::AgentHandler;
 use crate::agent::test_support::{has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response};
 use crate::error::AGENT_UNAVAILABLE;
-use agent_client_protocol::{Agent, ErrorCode, ListSessionsRequest, ListSessionsResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{ListSessionsRequest, ListSessionsResponse};
 
 #[tokio::test]
 async fn list_sessions_forwards_request_and_returns_response() {

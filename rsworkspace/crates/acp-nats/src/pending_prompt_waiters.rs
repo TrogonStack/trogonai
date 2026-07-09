@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
-use agent_client_protocol::{PromptResponse, SessionId};
+use agent_client_protocol::schema::v1::{PromptResponse, SessionId};
 use tokio::sync::oneshot;
 use trogon_std::time::GetElapsed;
 

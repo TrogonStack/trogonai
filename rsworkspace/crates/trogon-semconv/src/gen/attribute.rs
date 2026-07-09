@@ -261,9 +261,6 @@ pub const METHOD_ID: &str = "method_id";
 /// Mode id being set on an ACP session
 pub const MODE_ID: &str = "mode_id";
 
-/// Model id being set on an ACP session
-pub const MODEL_ID: &str = "model_id";
-
 /// Session id of the newly forked ACP session
 pub const NEW_SESSION_ID: &str = "new_session_id";
 

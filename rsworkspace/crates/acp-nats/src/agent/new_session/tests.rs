@@ -1,8 +1,10 @@
+use crate::AgentHandler;
 use crate::agent::test_support::{
     has_request_metric, has_session_ready_error_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
 };
 use crate::error::AGENT_UNAVAILABLE;
-use agent_client_protocol::{Agent, ErrorCode, NewSessionRequest, NewSessionResponse, SessionId};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{NewSessionRequest, NewSessionResponse, SessionId};
 use std::time::Duration;
 
 #[tokio::test]

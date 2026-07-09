@@ -50,6 +50,30 @@ fn parse_agent_session_list() {
 }
 
 #[test]
+fn parse_agent_providers_list() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.list").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersList)
+    );
+}
+
+#[test]
+fn parse_agent_providers_set() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.set").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersSet)
+    );
+}
+
+#[test]
+fn parse_agent_providers_disable() {
+    assert_eq!(
+        parse_agent_subject("acp.agent.providers.disable").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::ProvidersDisable)
+    );
+}
+
+#[test]
 fn parse_agent_ext() {
     assert_eq!(
         parse_agent_subject("acp.agent.ext.my_tool").unwrap(),
@@ -108,14 +132,6 @@ fn parse_session_agent_set_config_option() {
 }
 
 #[test]
-fn parse_session_agent_set_model() {
-    assert_eq!(
-        parse_agent_subject("acp.session.s1.agent.set_model").unwrap(),
-        session("s1", SessionAgentMethod::SetModel)
-    );
-}
-
-#[test]
 fn parse_session_agent_fork() {
     assert_eq!(
         parse_agent_subject("acp.session.s1.agent.fork").unwrap(),
@@ -136,6 +152,14 @@ fn parse_session_agent_close() {
     assert_eq!(
         parse_agent_subject("acp.session.s1.agent.close").unwrap(),
         session("s1", SessionAgentMethod::Close)
+    );
+}
+
+#[test]
+fn parse_session_agent_delete() {
+    assert_eq!(
+        parse_agent_subject("acp.session.s1.agent.delete").unwrap(),
+        session("s1", SessionAgentMethod::Delete)
     );
 }
 
@@ -249,6 +273,20 @@ fn parse_client_terminal_wait() {
 }
 
 #[test]
+fn parse_client_elicitation_create() {
+    let parsed = parse_client_subject("acp.session.s1.client.elicitation.create").unwrap();
+    assert_eq!(parsed.session_id.as_str(), "s1");
+    assert_eq!(parsed.method, ClientMethod::ElicitationCreate);
+}
+
+#[test]
+fn parse_client_elicitation_complete() {
+    let parsed = parse_client_subject("acp.session.s1.client.elicitation.complete").unwrap();
+    assert_eq!(parsed.session_id.as_str(), "s1");
+    assert_eq!(parsed.method, ClientMethod::ElicitationComplete);
+}
+
+#[test]
 fn parse_client_ext_prompt_response() {
     let parsed = parse_client_subject("acp.session.s1.client.ext.session.prompt_response").unwrap();
     assert_eq!(parsed.session_id.as_str(), "s1");
@@ -323,4 +361,83 @@ fn parse_client_ext_method() {
     let parsed = parse_client_subject("acp.session.s1.client.ext.my_tool").unwrap();
     assert_eq!(parsed.session_id.as_str(), "s1");
     assert_eq!(parsed.method, ClientMethod::Ext("my_tool".to_string()));
+}
+
+#[test]
+fn global_agent_methods_round_trip_through_wire_method() {
+    let methods = [
+        GlobalAgentMethod::Initialize,
+        GlobalAgentMethod::Authenticate,
+        GlobalAgentMethod::Logout,
+        GlobalAgentMethod::SessionNew,
+        GlobalAgentMethod::SessionList,
+        GlobalAgentMethod::ProvidersList,
+        GlobalAgentMethod::ProvidersSet,
+        GlobalAgentMethod::ProvidersDisable,
+    ];
+    for method in methods {
+        let subject = format!("acp.agent.{}", method.wire_method());
+        let parsed = parse_agent_subject(&subject);
+        assert_eq!(parsed, Some(ParsedAgentSubject::Global(method)));
+    }
+}
+
+#[test]
+fn session_agent_methods_round_trip_through_wire_method() {
+    let methods = [
+        SessionAgentMethod::Load,
+        SessionAgentMethod::Prompt,
+        SessionAgentMethod::Cancel,
+        SessionAgentMethod::SetMode,
+        SessionAgentMethod::SetConfigOption,
+        SessionAgentMethod::Fork,
+        SessionAgentMethod::Resume,
+        SessionAgentMethod::Close,
+        SessionAgentMethod::Delete,
+    ];
+    for method in methods {
+        let subject = format!("acp.session.s1.agent.{}", method.wire_method());
+        let parsed = parse_agent_subject(&subject);
+        match parsed {
+            Some(ParsedAgentSubject::Session { session_id, method: m }) => {
+                assert_eq!(session_id.as_str(), "s1");
+                assert_eq!(m, method);
+            }
+            other => panic!("expected session subject for {subject}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn client_methods_round_trip_through_subject_suffix() {
+    let methods = [
+        ClientMethod::FsReadTextFile,
+        ClientMethod::FsWriteTextFile,
+        ClientMethod::SessionRequestPermission,
+        ClientMethod::SessionUpdate,
+        ClientMethod::TerminalCreate,
+        ClientMethod::TerminalKill,
+        ClientMethod::TerminalOutput,
+        ClientMethod::TerminalRelease,
+        ClientMethod::TerminalWaitForExit,
+        ClientMethod::ElicitationCreate,
+        ClientMethod::ElicitationComplete,
+        ClientMethod::ExtSessionPromptResponse,
+    ];
+    for method in methods {
+        let suffix = method.wire_method().replace('/', ".");
+        let parsed = ClientMethod::from_subject_suffix(&suffix);
+        assert_eq!(parsed, Some(method));
+    }
+}
+
+#[test]
+fn client_ext_method_formats_wire_method() {
+    let method = ClientMethod::Ext("custom".to_string());
+    assert_eq!(method.wire_method(), "ext/custom");
+}
+
+#[test]
+fn parse_client_subject_rejects_agent_subjects() {
+    assert!(parse_client_subject("acp.session.s1.agent.prompt").is_none());
 }

@@ -117,10 +117,6 @@ groups:
         type: string
         stability: development
         brief: Session id of the newly forked ACP session.
-      - id: model_id
-        type: string
-        stability: development
-        brief: Model id being set on an ACP session.
       - id: mode_id
         type: string
         stability: development
@@ -250,6 +246,28 @@ groups:
     brief: ACP close_session handling.
     attributes:
       - ref: session_id
+  - id: span.acp.session.delete
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP delete_session handling.
+    attributes:
+      - ref: session_id
+  - id: span.acp.providers.list
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP providers/list handling.
+  - id: span.acp.providers.set
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP providers/set handling.
+  - id: span.acp.providers.disable
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP providers/disable handling.
   - id: span.acp.session.resume
     type: span
     span_kind: internal
@@ -276,14 +294,6 @@ groups:
     brief: ACP cancel handling.
     attributes:
       - ref: session_id
-  - id: span.acp.session.set_model
-    type: span
-    span_kind: internal
-    stability: development
-    brief: ACP set_session_model handling.
-    attributes:
-      - ref: session_id
-      - ref: model_id
   - id: span.acp.session.set_mode
     type: span
     span_kind: internal
@@ -335,6 +345,16 @@ groups:
     span_kind: internal
     stability: development
     brief: ACP client session/update notification.
+  - id: span.acp.client.elicitation.create
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP elicitation/create client forwarding.
+  - id: span.acp.client.elicitation.complete
+    type: span
+    span_kind: internal
+    stability: development
+    brief: ACP elicitation/complete client forwarding.
   - id: span.acp.client.terminal.create
     type: span
     span_kind: internal

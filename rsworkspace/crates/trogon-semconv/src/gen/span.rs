@@ -42,6 +42,12 @@ pub const A2A_SERVER_TASKS_RESUBSCRIBE: &str = "a2a.server.tasks_resubscribe";
 /// ACP authenticate handling
 pub const ACP_AUTHENTICATE: &str = "acp.authenticate";
 
+/// ACP elicitation/complete client forwarding
+pub const ACP_CLIENT_ELICITATION_COMPLETE: &str = "acp.client.elicitation.complete";
+
+/// ACP elicitation/create client forwarding
+pub const ACP_CLIENT_ELICITATION_CREATE: &str = "acp.client.elicitation.create";
+
 /// ACP client extension call
 pub const ACP_CLIENT_EXT: &str = "acp.client.ext";
 
@@ -87,11 +93,23 @@ pub const ACP_INITIALIZE: &str = "acp.initialize";
 /// ACP logout handling
 pub const ACP_LOGOUT: &str = "acp.logout";
 
+/// ACP providers/disable handling
+pub const ACP_PROVIDERS_DISABLE: &str = "acp.providers.disable";
+
+/// ACP providers/list handling
+pub const ACP_PROVIDERS_LIST: &str = "acp.providers.list";
+
+/// ACP providers/set handling
+pub const ACP_PROVIDERS_SET: &str = "acp.providers.set";
+
 /// ACP cancel handling
 pub const ACP_SESSION_CANCEL: &str = "acp.session.cancel";
 
 /// ACP close_session handling
 pub const ACP_SESSION_CLOSE: &str = "acp.session.close";
+
+/// ACP delete_session handling
+pub const ACP_SESSION_DELETE: &str = "acp.session.delete";
 
 /// ACP fork_session handling
 pub const ACP_SESSION_FORK: &str = "acp.session.fork";
@@ -116,9 +134,6 @@ pub const ACP_SESSION_SET_CONFIG_OPTION: &str = "acp.session.set_config_option";
 
 /// ACP set_session_mode handling
 pub const ACP_SESSION_SET_MODE: &str = "acp.session.set_mode";
-
-/// ACP set_session_model handling
-pub const ACP_SESSION_SET_MODEL: &str = "acp.session.set_model";
 
 /// Datadog webhook ingestion
 pub const DATADOG_WEBHOOK: &str = "datadog.webhook";

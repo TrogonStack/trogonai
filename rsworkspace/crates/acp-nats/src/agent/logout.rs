@@ -1,7 +1,8 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
-use agent_client_protocol::{LogoutRequest, LogoutResponse, Result};
+use agent_client_protocol::Result;
+use agent_client_protocol::schema::v1::{LogoutRequest, LogoutResponse};
 use tracing::{info, instrument};
 use trogon_semconv::span::ACP_LOGOUT;
 use trogon_std::time::GetElapsed;

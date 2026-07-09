@@ -24,3 +24,5 @@ future implementation work.
 - [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
 - [ADR 0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
 - [ADR 0019: Console Webapp Stack](./0019-console-webapp-stack.md)
+- [ADR 0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits](./0020-acp-sdk-1x-boundary-and-bridge-traits.md)
+- [ADR 0021: Typed Decode over Passthrough Forwarding](./0021-typed-decode-over-passthrough-forwarding.md)

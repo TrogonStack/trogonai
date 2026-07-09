@@ -59,6 +59,30 @@ fn agent_session_list() {
 }
 
 #[test]
+fn agent_providers_list() {
+    assert_eq!(
+        global::ProvidersListSubject::new(&p("acp")).to_string(),
+        "acp.agent.providers.list"
+    );
+}
+
+#[test]
+fn agent_providers_set() {
+    assert_eq!(
+        global::ProvidersSetSubject::new(&p("acp")).to_string(),
+        "acp.agent.providers.set"
+    );
+}
+
+#[test]
+fn agent_providers_disable() {
+    assert_eq!(
+        global::ProvidersDisableSubject::new(&p("acp")).to_string(),
+        "acp.agent.providers.disable"
+    );
+}
+
+#[test]
 fn agent_ext() {
     assert_eq!(
         global::ExtSubject::new(&p("acp"), &method("my_tool")).to_string(),
@@ -139,14 +163,6 @@ fn session_agent_set_config_option() {
 }
 
 #[test]
-fn session_agent_set_model() {
-    assert_eq!(
-        commands::SetModelSubject::new(&p("acp"), &sid("s1")).to_string(),
-        "acp.session.s1.agent.set_model"
-    );
-}
-
-#[test]
 fn session_agent_fork() {
     assert_eq!(
         commands::ForkSubject::new(&p("acp"), &sid("s1")).to_string(),
@@ -167,6 +183,14 @@ fn session_agent_close() {
     assert_eq!(
         commands::CloseSubject::new(&p("acp"), &sid("s1")).to_string(),
         "acp.session.s1.agent.close"
+    );
+}
+
+#[test]
+fn session_agent_delete() {
+    assert_eq!(
+        commands::DeleteSubject::new(&p("acp"), &sid("s1")).to_string(),
+        "acp.session.s1.agent.delete"
     );
 }
 
@@ -231,6 +255,22 @@ fn session_client_session_update() {
     assert_eq!(
         client_ops::SessionUpdateSubject::new(&p("acp"), &sid("s1")).to_string(),
         "acp.session.s1.client.session.update"
+    );
+}
+
+#[test]
+fn session_client_elicitation_create() {
+    assert_eq!(
+        client_ops::ElicitationCreateSubject::new(&p("acp"), &sid("s1")).to_string(),
+        "acp.session.s1.client.elicitation.create"
+    );
+}
+
+#[test]
+fn session_client_elicitation_complete() {
+    assert_eq!(
+        client_ops::ElicitationCompleteSubject::new(&p("acp"), &sid("s1")).to_string(),
+        "acp.session.s1.client.elicitation.complete"
     );
 }
 
@@ -352,17 +392,20 @@ fn stream_assignments() {
     assert_eq!(commands::PromptSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::CancelSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::CloseSubject::STREAM, Some(AcpStream::Commands));
+    assert_eq!(commands::DeleteSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::ForkSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::ResumeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetModeSubject::STREAM, Some(AcpStream::Commands));
     assert_eq!(commands::SetConfigOptionSubject::STREAM, Some(AcpStream::Commands));
-    assert_eq!(commands::SetModelSubject::STREAM, Some(AcpStream::Commands));
 
     assert_eq!(global::InitializeSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::AuthenticateSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::LogoutSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::SessionNewSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::SessionListSubject::STREAM, None);
+    assert_eq!(global::ProvidersListSubject::STREAM, None);
+    assert_eq!(global::ProvidersSetSubject::STREAM, None);
+    assert_eq!(global::ProvidersDisableSubject::STREAM, None);
     assert_eq!(global::ExtSubject::STREAM, Some(AcpStream::GlobalExt));
     assert_eq!(global::ExtNotifySubject::STREAM, Some(AcpStream::GlobalExt));
 
@@ -379,6 +422,11 @@ fn stream_assignments() {
         Some(AcpStream::ClientOps)
     );
     assert_eq!(client_ops::SessionUpdateSubject::STREAM, Some(AcpStream::ClientOps));
+    assert_eq!(client_ops::ElicitationCreateSubject::STREAM, Some(AcpStream::ClientOps));
+    assert_eq!(
+        client_ops::ElicitationCompleteSubject::STREAM,
+        Some(AcpStream::ClientOps)
+    );
     assert_eq!(client_ops::TerminalCreateSubject::STREAM, Some(AcpStream::ClientOps));
     assert_eq!(client_ops::TerminalKillSubject::STREAM, Some(AcpStream::ClientOps));
     assert_eq!(client_ops::TerminalOutputSubject::STREAM, Some(AcpStream::ClientOps));
@@ -450,11 +498,6 @@ fn session_scoped_agent_subjects_share_layout() {
             .starts_with(&expected)
     );
     assert!(
-        commands::SetModelSubject::new(&prefix, &session_id)
-            .to_string()
-            .starts_with(&expected)
-    );
-    assert!(
         commands::ForkSubject::new(&prefix, &session_id)
             .to_string()
             .starts_with(&expected)
@@ -466,6 +509,11 @@ fn session_scoped_agent_subjects_share_layout() {
     );
     assert!(
         commands::CloseSubject::new(&prefix, &session_id)
+            .to_string()
+            .starts_with(&expected)
+    );
+    assert!(
+        commands::DeleteSubject::new(&prefix, &session_id)
             .to_string()
             .starts_with(&expected)
     );
@@ -494,6 +542,16 @@ fn session_scoped_client_subjects_share_layout() {
     );
     assert!(
         client_ops::SessionUpdateSubject::new(&prefix, &session_id)
+            .to_string()
+            .starts_with(&expected)
+    );
+    assert!(
+        client_ops::ElicitationCreateSubject::new(&prefix, &session_id)
+            .to_string()
+            .starts_with(&expected)
+    );
+    assert!(
+        client_ops::ElicitationCompleteSubject::new(&prefix, &session_id)
             .to_string()
             .starts_with(&expected)
     );
@@ -542,6 +600,10 @@ fn to_subject_produces_correct_nats_subject() {
         "acp.session.s1.agent.close"
     );
     assert_eq!(
+        commands::DeleteSubject::new(&prefix, &sid).to_subject().as_str(),
+        "acp.session.s1.agent.delete"
+    );
+    assert_eq!(
         commands::ForkSubject::new(&prefix, &sid).to_subject().as_str(),
         "acp.session.s1.agent.fork"
     );
@@ -558,10 +620,6 @@ fn to_subject_produces_correct_nats_subject() {
             .to_subject()
             .as_str(),
         "acp.session.s1.agent.set_config_option"
-    );
-    assert_eq!(
-        commands::SetModelSubject::new(&prefix, &sid).to_subject().as_str(),
-        "acp.session.s1.agent.set_model"
     );
     // ExtNotifySubject doesn't impl ToSubject — verify via Display
     assert_eq!(

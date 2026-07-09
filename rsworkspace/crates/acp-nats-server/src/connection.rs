@@ -1,9 +1,11 @@
+use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::{AgentSideConnection, SessionNotification};
+use agent_client_protocol::schema::v1::SessionNotification;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -18,16 +20,6 @@ enum ConnectionShutdownError {
     ClientTask {
         #[source]
         source: tokio::task::JoinError,
-    },
-    #[error("io task spawn error: {source}")]
-    IoTaskSpawn {
-        #[source]
-        source: tokio::task::JoinError,
-    },
-    #[error("io task error: {source}")]
-    IoTask {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
     },
 }
 
@@ -59,7 +51,7 @@ pub async fn handle<N, J>(
 
     let meter = trogon_telemetry::meter("acp-nats-server");
     let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
-    let bridge = Rc::new(Bridge::new(
+    let bridge = Arc::new(Bridge::new(
         nats_client.clone(),
         js_client,
         SystemClock,
@@ -68,76 +60,58 @@ pub async fn handle<N, J>(
         notification_tx,
     ));
 
-    let (connection, io_task) = AgentSideConnection::new(bridge.clone(), outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
-    });
-
-    let connection = Rc::new(connection);
-
-    spawn_notification_forwarder(connection.clone(), notification_rx);
-
     let recv_pump = tokio::task::spawn_local(run_recv_pump(ws_receiver, ws_recv_write));
     let send_pump = tokio::task::spawn_local(run_send_pump(ws_sender, ws_send_read));
 
-    let mut client_task = tokio::task::spawn_local(client::run(nats_client, connection.clone(), bridge.clone()));
+    let handler_connection_id = connection_id.clone();
+    let boundary_result = connect_agent_boundary(bridge.clone(), outgoing, incoming, async move |cx| {
+        let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
+            ConnectionClient::new(cx.clone()),
+            notification_rx,
+        ));
 
-    let mut io_task = tokio::task::spawn_local(io_task);
+        let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
+            nats_client,
+            Rc::new(ConnectionClient::new(cx)),
+            bridge,
+        )));
 
-    info!(%connection_id, "WebSocket connection established, ACP bridge running");
+        info!(connection_id = %handler_connection_id, "WebSocket connection established, ACP bridge running");
 
-    let shutdown_result = tokio::select! {
-        result = &mut client_task => {
-            match result {
-                Ok(()) => {
-                    info!("Client task completed");
-                    Ok(())
-                }
-                Err(e) => {
-                    error!(error = %e, "Client task ended with error");
-                    Err(ConnectionShutdownError::ClientTask { source: e })
-                }
-            }
-        }
-        result = &mut io_task => {
-            let res = result
-                .map_err(|source| ConnectionShutdownError::IoTaskSpawn { source })
-                .and_then(|r| {
-                    r.map_err(|source| ConnectionShutdownError::IoTask {
-                        source: Box::new(source),
-                    })
-                });
-
-            match res {
-                Ok(_) => {
-                    info!("IO task completed (connection closed)");
-                    Ok(())
-                }
-                Err(e) => {
-                    error!(error = %e, "IO task ended with error");
-                    Err(e)
+        let shutdown_result = tokio::select! {
+            result = client_task.handle_mut() => {
+                match result {
+                    Ok(()) => {
+                        info!("Client task completed");
+                        Ok(())
+                    }
+                    Err(source) => {
+                        error!(error = %source, "Client task ended with error");
+                        Err(ConnectionShutdownError::ClientTask { source })
+                    }
                 }
             }
+            _ = shutdown_rx.wait_for(|&v| v) => {
+                info!("Connection shutting down (server shutdown)");
+                Ok(())
+            }
+        };
+
+        if !client_task.is_finished() {
+            client_task.abort_and_wait().await;
         }
-        _ = shutdown_rx.wait_for(|&v| v) => {
-            info!("Connection shutting down (server shutdown)");
-            Ok(())
-        }
-    };
+
+        Ok(shutdown_result)
+    })
+    .await;
 
     recv_pump.abort();
     send_pump.abort();
 
-    if !client_task.is_finished() {
-        client_task.abort();
-        let _ = client_task.await;
-    }
-    if !io_task.is_finished() {
-        io_task.abort();
-        let _ = io_task.await;
-    }
-
-    match shutdown_result {
-        Ok(()) => info!(%connection_id, "WebSocket connection closed cleanly"),
+    match boundary_result {
+        Ok(BoundaryExit::Main(Ok(()))) => info!(%connection_id, "WebSocket connection closed cleanly"),
+        Ok(BoundaryExit::Main(Err(e))) => warn!(%connection_id, error = %e, "WebSocket connection closed with error"),
+        Ok(BoundaryExit::TransportClosed) => info!(%connection_id, "WebSocket connection closed by peer"),
         Err(e) => warn!(%connection_id, error = %e, "WebSocket connection closed with error"),
     }
 }

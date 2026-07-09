@@ -2,6 +2,7 @@ mod authenticate;
 mod bridge;
 mod cancel;
 mod close_session;
+mod delete_session;
 mod ext_method;
 mod ext_notification;
 mod fork_session;
@@ -12,11 +13,13 @@ mod load_session;
 mod logout;
 mod new_session;
 mod prompt;
+mod providers_disable;
+mod providers_list;
+mod providers_set;
 mod resume_session;
 pub(crate) mod rpc_call;
 mod set_session_config_option;
 mod set_session_mode;
-mod set_session_model;
 #[cfg(test)]
 pub(crate) mod test_support;
 

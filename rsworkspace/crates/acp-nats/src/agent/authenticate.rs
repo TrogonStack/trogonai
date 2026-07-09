@@ -1,7 +1,8 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
 use crate::nats::{RequestClient, global};
-use agent_client_protocol::{AuthenticateRequest, AuthenticateResponse, Result};
+use agent_client_protocol::Result;
+use agent_client_protocol::schema::v1::{AuthenticateRequest, AuthenticateResponse};
 use tracing::{info, instrument};
 use trogon_semconv::span::ACP_AUTHENTICATE;
 use trogon_std::time::GetElapsed;

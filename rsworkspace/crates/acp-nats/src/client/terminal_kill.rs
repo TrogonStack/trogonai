@@ -1,7 +1,9 @@
 use crate::client::rpc_reply;
+use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode, KillTerminalRequest, KillTerminalResponse};
+use agent_client_protocol::ErrorCode;
+use agent_client_protocol::schema::v1::{KillTerminalRequest, KillTerminalResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_TERMINAL_KILL;
@@ -29,7 +31,7 @@ pub fn error_code_and_message(e: &TerminalKillError) -> (ErrorCode, String) {
 }
 
 #[instrument(name = ACP_CLIENT_TERMINAL_KILL, skip(headers, payload, client, nats))]
-pub async fn handle<N: PublishClient + FlushClient, C: Client>(
+pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
@@ -66,7 +68,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: Client>(
     }
 }
 
-async fn forward_to_client<C: Client>(
+async fn forward_to_client<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,

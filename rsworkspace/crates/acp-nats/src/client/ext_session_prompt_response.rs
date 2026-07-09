@@ -3,7 +3,7 @@ use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 use crate::pending_prompt_waiters::PromptToken;
 use crate::session_id::AcpSessionId;
 use crate::wire::decode_notification_params;
-use agent_client_protocol::{PromptResponse, SessionId};
+use agent_client_protocol::schema::v1::{PromptResponse, SessionId};
 use async_nats::header::HeaderMap;
 use tracing::{error, instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_EXT_SESSION_PROMPT_RESPONSE;

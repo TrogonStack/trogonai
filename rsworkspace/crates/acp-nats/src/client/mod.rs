@@ -1,3 +1,5 @@
+pub(crate) mod elicitation_complete;
+pub(crate) mod elicitation_create;
 pub(crate) mod ext;
 pub(crate) mod ext_session_prompt_response;
 pub(crate) mod fs_read_text_file;
@@ -15,17 +17,19 @@ pub(crate) mod terminal_wait_for_exit;
 pub(crate) mod test_support;
 
 use crate::agent::Bridge;
+use crate::client_handler::ClientHandler;
 use crate::error::AGENT_UNAVAILABLE;
 use crate::in_flight_slot_guard::InFlightSlotGuard;
 use crate::nats::{ClientMethod, FlushClient, PublishClient, RequestClient, SubscribeClient, parse_client_subject};
 use crate::wire::{encode_agent_error, merge_jsonrpc_headers, response_id_from_request_headers};
-use agent_client_protocol::{Client, ErrorCode};
+use agent_client_protocol::ErrorCode;
 use async_nats::Message;
 use async_nats::header::HeaderMap;
 use bytes::Bytes;
 use futures::StreamExt;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use tracing::{Span, error, info, instrument, warn};
 use trogon_semconv::attribute::SESSION_ID;
 use trogon_semconv::span::DISPATCH_CLIENT_METHOD;
@@ -65,13 +69,13 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 /// a `LocalSet` will panic at runtime when the first message is dispatched.
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client + 'static,
+    Cl: ClientHandler + Sync + 'static,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(
     nats: N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C, J>>,
+    bridge: Arc<Bridge<N, C, J>>,
 ) {
     let wildcard = crate::nats::subscriptions::AllClientSubject::new(bridge.config.acp_prefix_ref());
     info!("Starting client proxy - subscribing to {}", wildcard);
@@ -96,14 +100,14 @@ pub async fn run<
 
 async fn process_message<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client + 'static,
+    Cl: ClientHandler + Sync + 'static,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(
     msg: Message,
     nats: &N,
     client: Rc<Cl>,
-    bridge: Rc<Bridge<N, C, J>>,
+    bridge: Arc<Bridge<N, C, J>>,
     in_flight: &Rc<Cell<usize>>,
     max_concurrent: usize,
 ) {
@@ -164,7 +168,7 @@ where
 #[instrument(name = DISPATCH_CLIENT_METHOD, skip(headers, payload, ctx), fields(subject = %subject, session_id = tracing::field::Empty))]
 async fn dispatch_client_method<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
-    Cl: Client,
+    Cl: ClientHandler + Sync,
     C: trogon_std::time::GetElapsed + 'static,
     J: 'static,
 >(
@@ -212,7 +216,21 @@ async fn dispatch_client_method<
             .await;
         }
         ClientMethod::SessionUpdate => {
-            session_update::handle(headers, &payload, ctx.client, reply.is_some()).await;
+            session_update::handle(headers, &payload, ctx.client, reply.is_some(), &ctx.bridge.metrics).await;
+        }
+        ClientMethod::ElicitationCreate => {
+            elicitation_create::handle(
+                headers,
+                &payload,
+                ctx.client,
+                reply.as_deref(),
+                ctx.nats,
+                parsed.session_id.as_str(),
+            )
+            .await;
+        }
+        ClientMethod::ElicitationComplete => {
+            elicitation_complete::handle(headers, &payload, ctx.client, reply.is_some(), &ctx.bridge.metrics).await;
         }
         ClientMethod::ExtSessionPromptResponse => {
             ext_session_prompt_response::handle(

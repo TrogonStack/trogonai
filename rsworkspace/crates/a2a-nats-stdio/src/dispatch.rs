@@ -38,9 +38,14 @@ fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
     OutboundFrame::Error(OutboundError::new(id, code, message))
 }
 
-fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, OutboundFrame> {
-    serde_json::from_value(params)
-        .map_err(|e| OutboundFrame::Error(OutboundError::new(RpcId::Null, INVALID_PARAMS, e.to_string())))
+fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Box<OutboundFrame>> {
+    serde_json::from_value(params).map_err(|e| {
+        Box::new(OutboundFrame::Error(OutboundError::new(
+            RpcId::Null,
+            INVALID_PARAMS,
+            e.to_string(),
+        )))
+    })
 }
 
 /// `method` is the JSON-RPC method this notification is associated with —
@@ -73,7 +78,7 @@ pub async fn dispatch_request<N, J>(
             let req: SendMessageRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -90,7 +95,7 @@ pub async fn dispatch_request<N, J>(
             let req: SendMessageRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -131,7 +136,7 @@ pub async fn dispatch_request<N, J>(
             let req: GetTaskRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -148,7 +153,7 @@ pub async fn dispatch_request<N, J>(
             let req: ListTasksRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -165,7 +170,7 @@ pub async fn dispatch_request<N, J>(
             let req: CancelTaskRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -192,7 +197,7 @@ pub async fn dispatch_request<N, J>(
             let p: ResubParams = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -244,7 +249,7 @@ pub async fn dispatch_request<N, J>(
             let req: TaskPushNotificationConfig = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -261,7 +266,7 @@ pub async fn dispatch_request<N, J>(
             let req: GetTaskPushNotificationConfigRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -278,7 +283,7 @@ pub async fn dispatch_request<N, J>(
             let req: ListTaskPushNotificationConfigsRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };
@@ -295,7 +300,7 @@ pub async fn dispatch_request<N, J>(
             let req: DeleteTaskPushNotificationConfigRequest = match parse_params(params) {
                 Ok(r) => r,
                 Err(f) => {
-                    let _ = tx.send(make_with_id(f, &id)).await;
+                    let _ = tx.send(make_with_id(*f, &id)).await;
                     return;
                 }
             };

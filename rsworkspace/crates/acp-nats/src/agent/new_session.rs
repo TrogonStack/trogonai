@@ -1,7 +1,8 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
 use crate::nats::{FlushClient, PublishClient, RequestClient, global};
-use agent_client_protocol::{NewSessionRequest, NewSessionResponse, Result};
+use agent_client_protocol::Result;
+use agent_client_protocol::schema::v1::{NewSessionRequest, NewSessionResponse};
 use tracing::{Span, info, instrument};
 use trogon_semconv::attribute::SESSION_ID;
 use trogon_semconv::span::ACP_SESSION_NEW;
