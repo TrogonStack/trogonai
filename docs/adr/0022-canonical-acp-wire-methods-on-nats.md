@@ -24,7 +24,9 @@ Two facts established during implementation removed those motivations:
    receiving side derives the method from the NATS subject. There is no
    method field on the NATS wire to make self-describing.
 2. Enum-based decode on the NATS leg was evaluated and skipped on its own
-   merits (see PLAN.md Item 2), so the rename enabled nothing.
+   merits (the dispatch arms are one-liners over shared helpers, and the
+   provider, prompt-keepalive, and cancel paths cannot come from the SDK
+   enum), so the rename enabled nothing.
 
 ## Decision
 
