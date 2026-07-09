@@ -91,7 +91,7 @@ Status values: `implemented` (routed, typed, tested), `capabilities implemented`
 A version bump of `agent-client-protocol` (or the schema it bundles) is never just a version change. Every bump PR must:
 
 1. Diff the schema changelog between the old and new pinned versions ([changelog](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/CHANGELOG.md)).
-2. For each added or stabilized method: add subject mapping in `acp-nats/src/nats/parsing.rs`, a handler, and tests, or add a matrix row with an opt-out rationale.
+2. For each added or stabilized method: add subject mapping in `acp-nats/src/nats/parsing.rs`, a handler (bridge trait method plus its match arm in the boundary dispatch and NATS dispatch), and tests, or add a matrix row with an opt-out rationale. The byte-stream boundary no longer needs per-method registrations: `connect_agent_boundary` routes through the SDK's `ClientRequest`/`ClientNotification` enums, so a method missing from its match answers `method_not_found` instead of being silently unreachable (see ADR 0020, amendment of 2026-07-09).
 3. For each added field or `session/update` variant: add a round-trip test through the bridge. Typed re-encode means unmapped fields are silently dropped, so a green compile proves nothing about coverage.
 4. For each new unstable flag: enable it per the opt-in policy and wire it.
 5. Update this document (matrix and spec position table) in the same PR.
