@@ -364,47 +364,37 @@ fn parse_client_ext_method() {
 }
 
 #[test]
-fn global_agent_methods_round_trip_through_wire_method() {
-    let methods = [
-        GlobalAgentMethod::Initialize,
-        GlobalAgentMethod::Authenticate,
-        GlobalAgentMethod::Logout,
-        GlobalAgentMethod::SessionNew,
-        GlobalAgentMethod::SessionList,
-        GlobalAgentMethod::ProvidersList,
-        GlobalAgentMethod::ProvidersSet,
-        GlobalAgentMethod::ProvidersDisable,
+fn global_agent_methods_wire_method_uses_canonical_acp_names() {
+    let cases = [
+        (GlobalAgentMethod::Initialize, "initialize"),
+        (GlobalAgentMethod::Authenticate, "authenticate"),
+        (GlobalAgentMethod::Logout, "logout"),
+        (GlobalAgentMethod::SessionNew, "session/new"),
+        (GlobalAgentMethod::SessionList, "session/list"),
+        (GlobalAgentMethod::ProvidersList, "providers/list"),
+        (GlobalAgentMethod::ProvidersSet, "providers/set"),
+        (GlobalAgentMethod::ProvidersDisable, "providers/disable"),
     ];
-    for method in methods {
-        let subject = format!("acp.agent.{}", method.wire_method());
-        let parsed = parse_agent_subject(&subject);
-        assert_eq!(parsed, Some(ParsedAgentSubject::Global(method)));
+    for (method, expected) in cases {
+        assert_eq!(method.wire_method(), expected);
     }
 }
 
 #[test]
-fn session_agent_methods_round_trip_through_wire_method() {
-    let methods = [
-        SessionAgentMethod::Load,
-        SessionAgentMethod::Prompt,
-        SessionAgentMethod::Cancel,
-        SessionAgentMethod::SetMode,
-        SessionAgentMethod::SetConfigOption,
-        SessionAgentMethod::Fork,
-        SessionAgentMethod::Resume,
-        SessionAgentMethod::Close,
-        SessionAgentMethod::Delete,
+fn session_agent_methods_wire_method_uses_canonical_acp_names() {
+    let cases = [
+        (SessionAgentMethod::Load, "session/load"),
+        (SessionAgentMethod::Prompt, "session/prompt"),
+        (SessionAgentMethod::Cancel, "session/cancel"),
+        (SessionAgentMethod::SetMode, "session/set_mode"),
+        (SessionAgentMethod::SetConfigOption, "session/set_config_option"),
+        (SessionAgentMethod::Fork, "session/fork"),
+        (SessionAgentMethod::Resume, "session/resume"),
+        (SessionAgentMethod::Close, "session/close"),
+        (SessionAgentMethod::Delete, "session/delete"),
     ];
-    for method in methods {
-        let subject = format!("acp.session.s1.agent.{}", method.wire_method());
-        let parsed = parse_agent_subject(&subject);
-        match parsed {
-            Some(ParsedAgentSubject::Session { session_id, method: m }) => {
-                assert_eq!(session_id.as_str(), "s1");
-                assert_eq!(m, method);
-            }
-            other => panic!("expected session subject for {subject}, got {other:?}"),
-        }
+    for (method, expected) in cases {
+        assert_eq!(method.wire_method(), expected);
     }
 }
 
@@ -422,7 +412,6 @@ fn client_methods_round_trip_through_subject_suffix() {
         ClientMethod::TerminalWaitForExit,
         ClientMethod::ElicitationCreate,
         ClientMethod::ElicitationComplete,
-        ClientMethod::ExtSessionPromptResponse,
     ];
     for method in methods {
         let suffix = method.wire_method().replace('/', ".");
@@ -432,9 +421,27 @@ fn client_methods_round_trip_through_subject_suffix() {
 }
 
 #[test]
+fn ext_session_prompt_response_wire_method_uses_canonical_acp_name() {
+    assert_eq!(
+        ClientMethod::ExtSessionPromptResponse.wire_method(),
+        "_session/prompt_response"
+    );
+    assert_eq!(
+        ClientMethod::from_subject_suffix("ext.session.prompt_response"),
+        Some(ClientMethod::ExtSessionPromptResponse)
+    );
+}
+
+#[test]
 fn client_ext_method_formats_wire_method() {
     let method = ClientMethod::Ext("custom".to_string());
-    assert_eq!(method.wire_method(), "ext/custom");
+    assert_eq!(method.wire_method(), "_custom");
+}
+
+#[test]
+fn global_agent_ext_method_formats_wire_method() {
+    let method = GlobalAgentMethod::Ext(ExtMethodName::new("custom").unwrap());
+    assert_eq!(method.wire_method(), "_custom");
 }
 
 #[test]

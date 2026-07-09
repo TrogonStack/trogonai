@@ -34,12 +34,12 @@ impl GlobalAgentMethod {
             Self::Initialize => "initialize".to_string(),
             Self::Authenticate => "authenticate".to_string(),
             Self::Logout => "logout".to_string(),
-            Self::SessionNew => "session.new".to_string(),
-            Self::SessionList => "session.list".to_string(),
-            Self::ProvidersList => "providers.list".to_string(),
-            Self::ProvidersSet => "providers.set".to_string(),
-            Self::ProvidersDisable => "providers.disable".to_string(),
-            Self::Ext(name) => format!("ext.{}", name.as_str()),
+            Self::SessionNew => "session/new".to_string(),
+            Self::SessionList => "session/list".to_string(),
+            Self::ProvidersList => "providers/list".to_string(),
+            Self::ProvidersSet => "providers/set".to_string(),
+            Self::ProvidersDisable => "providers/disable".to_string(),
+            Self::Ext(name) => format!("_{}", name.as_str()),
         }
     }
 
@@ -64,15 +64,15 @@ impl GlobalAgentMethod {
 impl SessionAgentMethod {
     pub fn wire_method(&self) -> &'static str {
         match self {
-            Self::Load => "load",
-            Self::Prompt => "prompt",
-            Self::Cancel => "cancel",
-            Self::SetMode => "set_mode",
-            Self::SetConfigOption => "set_config_option",
-            Self::Fork => "fork",
-            Self::Resume => "resume",
-            Self::Close => "close",
-            Self::Delete => "delete",
+            Self::Load => "session/load",
+            Self::Prompt => "session/prompt",
+            Self::Cancel => "session/cancel",
+            Self::SetMode => "session/set_mode",
+            Self::SetConfigOption => "session/set_config_option",
+            Self::Fork => "session/fork",
+            Self::Resume => "session/resume",
+            Self::Close => "session/close",
+            Self::Delete => "session/delete",
         }
     }
 
@@ -157,10 +157,10 @@ impl ClientMethod {
             Self::TerminalOutput => "terminal/output".to_string(),
             Self::TerminalRelease => "terminal/release".to_string(),
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
-            Self::ExtSessionPromptResponse => "ext/session/prompt_response".to_string(),
+            Self::ExtSessionPromptResponse => "_session/prompt_response".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => format!("ext/{name}"),
+            Self::Ext(name) => format!("_{name}"),
         }
     }
 

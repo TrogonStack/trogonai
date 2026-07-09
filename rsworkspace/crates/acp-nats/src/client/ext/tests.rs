@@ -84,7 +84,7 @@ fn empty_headers() -> HeaderMap {
 fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let raw = RawValue::from_string(params_json.to_string()).unwrap();
     crate::client::test_support::encode_wire_request(
-        &format!("ext/{method}"),
+        &format!("_{method}"),
         RequestId::Number(1),
         &Arc::<RawValue>::from(raw),
     )
@@ -92,7 +92,7 @@ fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>
 
 fn make_ext_wire_notification(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let value: serde_json::Value = serde_json::from_str(params_json).unwrap();
-    crate::client::test_support::encode_wire_notification(&format!("ext/{method}"), &value)
+    crate::client::test_support::encode_wire_notification(&format!("_{method}"), &value)
 }
 
 // --- request/response tests ---
@@ -259,7 +259,7 @@ fn ext_error_source() {
 async fn forward_request_invalid_payload_returns_error() {
     let client = MockClient::new();
 
-    let result = forward_request(&empty_headers(), b"{}", &client, "my_method", "ext/my_method").await;
+    let result = forward_request(&empty_headers(), b"{}", &client, "my_method", "_my_method").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), ExtError::MalformedJson(_)));
 }

@@ -1,6 +1,6 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
-use crate::nats::{RequestClient, global};
+use crate::nats::{GlobalAgentMethod, RequestClient, global};
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{SetProviderRequest, SetProviderResponse};
 use tracing::{info, instrument};
@@ -17,15 +17,9 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     info!("Set provider request");
 
     let subject = global::ProvidersSetSubject::new(bridge.config.acp_prefix_ref());
+    let method = GlobalAgentMethod::ProvidersSet.wire_method();
 
-    let result = jsonrpc_call(
-        bridge.nats(),
-        &subject,
-        "providers.set",
-        &args,
-        bridge.config.operation_timeout,
-    )
-    .await;
+    let result = jsonrpc_call(bridge.nats(), &subject, &method, &args, bridge.config.operation_timeout).await;
 
     bridge.metrics.record_request(
         "set_provider",

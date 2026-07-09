@@ -1,6 +1,6 @@
 use super::Bridge;
 use super::rpc_call::jsonrpc_call;
-use crate::nats::{FlushClient, PublishClient, RequestClient, global};
+use crate::nats::{FlushClient, GlobalAgentMethod, PublishClient, RequestClient, global};
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{NewSessionRequest, NewSessionResponse};
 use tracing::{Span, info, instrument};
@@ -22,15 +22,10 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     info!(cwd = ?args.cwd, mcp_servers = args.mcp_servers.len(), "New session request");
 
     let subject = global::SessionNewSubject::new(bridge.config.acp_prefix_ref());
+    let method = GlobalAgentMethod::SessionNew.wire_method();
 
-    let result: Result<NewSessionResponse> = jsonrpc_call(
-        bridge.nats(),
-        &subject,
-        "session.new",
-        &args,
-        bridge.config.operation_timeout,
-    )
-    .await;
+    let result: Result<NewSessionResponse> =
+        jsonrpc_call(bridge.nats(), &subject, &method, &args, bridge.config.operation_timeout).await;
 
     if let Ok(ref response) = result {
         Span::current().record(SESSION_ID, response.session_id.to_string().as_str());
