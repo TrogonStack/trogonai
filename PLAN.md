@@ -115,15 +115,16 @@ records this accurately.
 
 The method vocabulary previously used three dialects:
 
-| Direction | Wire method today | Canonical ACP |
+| Direction | Method label (before) | Canonical ACP (now) |
 | --- | --- | --- |
 | Agent-bound, global | `session.new`, `providers.list` | `session/new`, `providers/list` |
 | Agent-bound, session-scoped | bare `prompt`, `load`, `set_mode` | `session/prompt`, `session/load` |
 | Client-bound | `session/update`, `terminal/create` | already canonical |
 
-Extension methods use three conventions at once: `ext.{name}` (agent-bound
-NATS), `ext/{name}` (client-bound NATS), and upstream's `_{name}` prefix at
-the byte-stream boundary (`ConnectionClient::ext_method`).
+Extension methods used three conventions at once: `ext.{name}` (agent-bound
+NATS), `ext/{name}` (client-bound NATS), and the spec's `_{name}` prefix at
+the byte-stream boundary (`ConnectionClient::ext_method`). Now `_{name}`
+everywhere; `ext.` survives only as a subject token.
 
 Decision input (owner, 2026-07-09): breaking changes were pre-approved when
 clearly beneficial; the implementation then established none was needed.
@@ -188,15 +189,15 @@ rows unblocked):
 
 Store drafts under `.trogonai/upstream-asks/` until approved for filing.
 
-## Sequencing
+## Sequencing (as executed)
 
-1. Item 1, with its regression tests, plus Item 3 (docs) in the same PR.
-2. Item 4 in its own PR (independent of Item 1; the boundary collapse does
-   not touch wire strings).
-3. Item 2 evaluation after Item 4 lands, since canonical envelope names are
-   its precondition.
-4. Item 6 any time; it gets stronger after Item 1 lands because the diff
-   itself becomes evidence for ask 1.
+Items 1, 3, and 4 shipped together in PR #478
+(https://github.com/TrogonStack/trogonai/pull/478), two commits. The plan
+originally split Item 4 into its own PR because it was believed to be a
+breaking wire change; the correction (method labels are never serialized)
+removed that reason. Item 2 was evaluated after Item 4 and skipped. Item 6
+remains open, on hold; PR #478's diff is the evidence for ask 1 when it
+proceeds.
 
 ## Non-goals
 
