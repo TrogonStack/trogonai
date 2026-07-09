@@ -58,6 +58,13 @@ implementation. Outbound calls from the bridge to the peer go through the
 connection handle (`ConnectionTo<...>`). Adapters contain no logic beyond
 delegation, per the zero-cost passthrough rule in `rsworkspace/crates/AGENTS.md`.
 
+> Amended 2026-07-09: the inbound adapter is now a single
+> `on_receive_dispatch` handler typed over the SDK's
+> `ClientRequest`/`ClientNotification` enums, whose method table the SDK
+> already maintains, instead of one registration per method. Delegation
+> semantics are unchanged; the per-method surface lives only in the bridge
+> trait and one match expression.
+
 The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
 `acp-nats-stdio`, so they live in one place: the `boundary` module of
 `acp-nats`. That module is the single SDK-connection-aware part of the crate;
@@ -69,7 +76,9 @@ the NATS routing core remains free of connection machinery.
   the conformance matrix (`docs/architecture/acp-conformance.md`) tracks it.
 - New spec methods require touching trait, adapter, and subject mapping. The
   upgrade ritual in the conformance doc makes that explicit instead of
-  accidental.
+  accidental. (Amended 2026-07-09: the adapter cost is one match arm in the
+  boundary dispatch rather than a shim function plus a registration; the
+  ritual itself is unchanged.)
 - The SDK's own request cancellation, session helpers, and future transport
   work apply at the boundaries without constraining the NATS leg.
 - We keep full control of JetStream durability semantics, backpressure, and
