@@ -11,6 +11,11 @@ conclusion here differs from an accepted record in the
 The [research prompt](./RESEARCH_PROMPT.md) is preserved so the shared scope
 and evidence rules behind each product dossier remain reproducible.
 
+## Method
+
+The [research prompt](./RESEARCH_PROMPT.md) is preserved so the shared scope
+and evidence rules behind each product dossier remain reproducible.
+
 ## Product dossiers
 
 - [ADK + A2A](./products/adk-a2a.md)
