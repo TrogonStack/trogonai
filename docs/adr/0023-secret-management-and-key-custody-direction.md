@@ -161,6 +161,35 @@ service mints short-lived, narrowly scoped OpenBao credentials per request
 internally, rather than holding one standing broad token. That internal
 choice carries most of the design's security value.
 
+Minting requires the service to first authenticate itself, so the bootstrap
+path is part of this decision rather than an implementation detail:
+
+- **Bootstrap identity comes from the deployment platform, not from
+  configuration.** The service logs in through an OpenBao auth method bound
+  to an identity the deployment attests: service-account JWT auth where the
+  orchestrator provides one, AppRole or TLS certificate auth as the
+  self-hosted baseline. No standing OpenBao token lives in a config file or
+  environment variable; the ADR 0007 rule applies to the secrets service
+  itself.
+- **The bootstrap policy is minting-only.** Login yields a short-TTL token
+  whose ACL permits creating the per-request child credentials under the
+  platform's own mounts, renewing itself, and nothing else: no system
+  administration, no seal or audit configuration, no direct secret reads
+  outside the derived path prefixes.
+- **Expiry is the rotation trigger.** The bootstrap token carries a short
+  TTL and a bounded max TTL, so routine rotation is re-login. Redeployment
+  rotates it implicitly, and suspected compromise is handled by revoking the
+  auth role's issued tokens, which severs every instance at once.
+- **Bootstrap failure fails closed.** An instance that cannot authenticate,
+  at startup or when renewal lapses, does not report ready, does not join
+  the resolve queue group, and retries with backoff. There is no degraded
+  mode that serves values past the cache bounds of Decision 6.
+- **Break-glass is OpenBao's own ceremony, out of band.** Self-hosted
+  recovery is the documented OpenBao unseal and root-token-generation
+  procedure (quorum-held key shares, root token revoked after use), executed
+  by operators directly against OpenBao. The platform never automates or
+  exposes a root-credential path.
+
 ### 4. OpenBao provides primitives, not a schema: the service owns the data model
 
 OpenBao imposes no application schema. Its entire structure is secret engine
@@ -179,10 +208,10 @@ Consequences of that fact:
   path. This is the same lesson GitLab's `path_builder` encodes: name paths
   by immutable IDs so renames never move data.
 - **Reuse OpenBao mechanics instead of duplicating them.** The KV v2 version
-  counter is the credential version; per-version metadata (`destroyed`,
-  `deletion_time`, `current_version`) derives credential status rather than
-  the platform tracking it in parallel; custom metadata carries only
-  non-secret reconciliation breadcrumbs.
+  counter is the credential version; credential status derives from the
+  key-level `current_version` pointer plus the per-version `destroyed` and
+  `deletion_time` fields rather than the platform tracking it in parallel;
+  custom metadata carries only non-secret reconciliation breadcrumbs.
 - **The write model is already validated.** A gateway-embedded prototype
   built it end to end: an event-sourced credential aggregate on JetStream
   whose events and snapshots carry refs, fingerprints, and reason enums but
@@ -217,8 +246,15 @@ callers.
   not happen. There is no plaintext fallback, and no secret in a config file
   ever again once a consumer is migrated.
 - **Bounded caches only**, with event-driven invalidation from the rotation
-  events as the primary mechanism and TTL as backstop. Consumers hold values
-  for the duration of an in-flight operation, not as ambient state.
+  events as the primary mechanism and TTL as backstop. Invalidation is
+  fan-out, not work-sharing: resolve traffic load-balances across the queue
+  group, but rotation and revocation events must reach every secrets-service
+  instance, each replica reading the JetStream metadata stream through its
+  own consumer, because queue-group delivery would evict one cache and leave
+  the others serving a revoked credential. The cache TTL is therefore the
+  maximum stale window after a missed event, and it is bounded in minutes,
+  not hours. Consumers hold values for the duration of an in-flight
+  operation, not as ambient state.
 - **Dual audit, built once.** The service records the business context
   (caller, tenant, vault, ref, purpose, outcome) with a correlation ID
   threaded into the OpenBao request, so the provider's own audit log joins
@@ -267,8 +303,10 @@ callers.
 - Adoption is gated on demonstrated proofs, not enthusiasm: HA failover under
   live traffic, cold restore and unseal from documented backups, denial of
   cross-tenant and cross-purpose access, rotation with old ciphertext still
-  readable, correct behavior when audit sinks fail, and acceptable latency on
-  the resolve path.
+  readable, fail-closed startup when the service cannot authenticate to
+  OpenBao, a rotation event observed to evict every replica's cache, correct
+  behavior when audit sinks fail, and acceptable latency on the resolve
+  path.
 
 ## References
 
