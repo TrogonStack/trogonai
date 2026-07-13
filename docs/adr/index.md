@@ -27,3 +27,4 @@ future implementation work.
 - [ADR 0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits](./0020-acp-sdk-1x-boundary-and-bridge-traits.md)
 - [ADR 0021: Typed Decode over Passthrough Forwarding](./0021-typed-decode-over-passthrough-forwarding.md)
 - [ADR 0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)](./0022-canonical-acp-wire-methods-on-nats.md)
+- [ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
