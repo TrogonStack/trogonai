@@ -103,7 +103,8 @@ revision, the active pointer rolls back, the agent is archived (for
 example: AgentProvisioned, RevisionActivated, RevisionRolledBack,
 AgentArchived). Invariants this stream enforces:
 
-- Revision numbers are minted linearly at activation and nowhere else.
+- Provisioning mints revision 1 as the initial active revision. Later revision
+  numbers are minted linearly at activation and nowhere else.
 - Nothing activates on an archived agent, and nothing activates twice.
 - Rollback targets only previously activated revisions.
 - The activation event references the proposal it lands (id and content
@@ -115,8 +116,8 @@ to terminal state: opened, then judged or withdrawn (for example:
 ProposalOpened, ProposalVerdictRecorded, ProposalWithdrawn). Naming intent:
 name the entity for what it is, a proposal, never for what it may become, a
 revision. Most proposals are expected to die unjudged or rejected, and a
-revision number exists only when the registry stream mints one at
-activation. Invariants this stream enforces:
+proposal receives a revision number only when the registry stream mints one
+at activation. Invariants this stream enforces:
 
 - The proposer is not the approver; both facts are local to the stream.
 - At most one verdict; a withdrawn proposal takes no verdict, and a judged
@@ -228,7 +229,6 @@ identities.
 - Concurrent curators do not contend: proposals open freely and only
   activation serializes, which matches the intent that most proposals die
   without ever touching the agent record.
-- Revision numbers do not exist at proposal time. Anything referencing an
-  unactivated change references a proposal id, and the number appears only
-  when the agent stream mints it at activation.
-
+- A proposal does not receive a revision number when opened. Anything
+  referencing the unactivated change uses the proposal id, and the revision
+  number appears only when the agent stream mints it at activation.
