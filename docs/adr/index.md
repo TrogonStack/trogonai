@@ -29,3 +29,4 @@ future implementation work.
 - [ADR#0021: Typed Decode over Passthrough Forwarding](./0021-typed-decode-over-passthrough-forwarding.md)
 - [ADR#0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)](./0022-canonical-acp-wire-methods-on-nats.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0024: Agent Platform Stream Topology](./0024-agent-platform-stream-topology.md)
