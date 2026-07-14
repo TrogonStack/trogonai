@@ -42,20 +42,20 @@ The findings from that study that this decision rests on:
 - **The record and the change-in-flight are different resources
   everywhere we looked.** The pull request is the canonical shape: a
   repository's history holds merges, while proposals and reviews live on
-  the PR, a separate resource with its own lifecycle. Our first cut
-  collapsed that distinction.
+  the PR, a separate resource with its own lifecycle. A single-stream
+  design collapses that distinction.
 
 The decision path, in order: the study produced a working definition (an
 agent is a named, versioned declaration a runtime instantiates into pinned
 sessions) and an evolution loop built on staged, verified revisions.
-Prototyping that loop surfaced two layering rules, recorded in the decision
+Designing that loop surfaced two layering rules, recorded in the decision
 record: deciders know principal identity but never principal kind
 (authentication owns that ontology; ADR 0017), and wire schemas avoid
-booleans because their false default is fail-open. Reviewing the prototype
+booleans because their false default is fail-open. Reviewing that draft
 raised the question this ADR answers: why do a proposal and its verdict
 live in the registry record's stream?
 
-The obvious first topology, and the one the prototype used, puts six
+The first candidate topology puts six
 commands and six events in one Agent stream: AgentProvisioned,
 RevisionStaged, RevisionVerdictRecorded, RevisionActivated,
 RevisionRolledBack, AgentArchived. Reviewing it found a coupling:
@@ -150,7 +150,7 @@ Registry stream for `agent-pr-reviewer`:
 
 ```text
 1  AgentProvisioned    { agent: "agent-pr-reviewer", revision: 1,
-                         charter: { ... }, owner: "owner@tenant-acme" }
+                         charter: { ... }, owner: "principal-owner" }
 2  RevisionActivated   { revision: 2, proposal: "prop-7f3a",
                          digest: "sha256:11..." }
 ```
@@ -160,8 +160,8 @@ Proposal stream for `prop-b804`, withdrawn by its author:
 ```text
 1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
                          "learned-layer", digest: "sha256:0a...",
-                         author: "curator@tenant-acme", evidence: [ ... ] }
-2  ProposalWithdrawn   { by: "curator@tenant-acme" }
+                         author: "principal-curator", evidence: [ ... ] }
+2  ProposalWithdrawn   { by: "principal-curator" }
 ```
 
 Proposal stream for `prop-9c21`, judged and rejected:
@@ -169,9 +169,9 @@ Proposal stream for `prop-9c21`, judged and rejected:
 ```text
 1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
                          "learned-layer", digest: "sha256:f4...",
-                         author: "curator@tenant-acme", evidence: [ ... ] }
+                         author: "principal-curator", evidence: [ ... ] }
 2  ProposalVerdictRecorded { verdict: "rejected",
-                             verifier: "verifier@tenant-acme",
+                             verifier: "principal-verifier",
                              reasons: [ ... ] }
 ```
 
@@ -181,10 +181,10 @@ becomes revision 2:
 ```text
 1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
                          "learned-layer", digest: "sha256:11...",
-                         author: "curator@tenant-acme",
+                         author: "principal-curator",
                          supersedes: "prop-b804", evidence: [ ... ] }
 2  ProposalVerdictRecorded { verdict: "approved",
-                             verifier: "verifier@tenant-acme" }
+                             verifier: "principal-verifier" }
 ```
 
 What the example shows:
