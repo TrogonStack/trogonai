@@ -1,7 +1,7 @@
 ---
 number: "0023"
 slug: secret-management-and-key-custody-direction
-status: draft
+status: accepted
 date: 2026-07-11
 ---
 
