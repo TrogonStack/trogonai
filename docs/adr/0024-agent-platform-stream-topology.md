@@ -120,9 +120,9 @@ AgentArchived). Invariants this stream enforces:
 - The activation command carries the exact approved proposal, pinned base
   revision and digest, and candidate reference and digest. The registry
   rejects a base that is no longer current. The activation event preserves
-  the proposal id and candidate digest. The dispatcher proves approval
-  upstream; a recorded verdict is immutable, so passing it as data carries
-  no race.
+  the proposal id, candidate reference, and candidate digest. The dispatcher
+  proves approval upstream; a recorded verdict is immutable, so passing it as
+  data carries no race.
 
 **A proposal stream per proposal**, holding one change-in-flight from birth
 to terminal state: opened, then judged or withdrawn (for example:
@@ -168,6 +168,7 @@ Registry stream for `agent-pr-reviewer`:
                          digest: "sha256:01...", owner: "principal-owner" }
 2  RevisionActivated   { revision: 2, previous: 1,
                          proposal: "prop-7f3a",
+                         candidate: "artifact-prop-7f3a",
                          digest: "sha256:11..." }
 ```
 
