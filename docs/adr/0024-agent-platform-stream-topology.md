@@ -18,10 +18,11 @@ never approves its own change), passing proposals activate, and rollback is
 one pointer move. The design comes from a study of how the industry's agent products define,
 version, and evolve agents. The full corpus ships alongside this ADR: one
 dossier per product, the cross-product synthesis, and the running decision
-record, under `docs/research/agent-platform/`. Three merged
-straw-hat-team ADRs settled adjacent questions: hierarchy and placement
-(4761776210), the bare `parent` field (6310044131), and annotations
-(5177934677).
+record, under `docs/research/agent-platform/`. Three merged straw-hat-team
+ADRs settled adjacent questions:
+[hierarchy and placement (ADR 4761776210)](https://straw-hat-team.github.io/adr/adrs/4761776210/README),
+[the bare `parent` field (ADR 6310044131)](https://straw-hat-team.github.io/adr/adrs/6310044131/README), and
+[annotations (ADR 5177934677)](https://straw-hat-team.github.io/adr/adrs/5177934677/README).
 
 The findings from that study that this decision rests on:
 
