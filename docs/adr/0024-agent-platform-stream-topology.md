@@ -10,16 +10,18 @@ date: 2026-07-13
 ## Context
 
 The agent platform manages self-evolving agents: an agent is a named,
-versioned declaration (a charter plus a learned layer) that a runtime
-instantiates into sessions pinned to a specific revision. The evolution loop
-is the product: sessions produce outcomes, curators distill outcomes into
-proposed revisions, fresh-context verifiers judge proposals (the proposer
-never approves its own change), passing proposals activate, and rollback is
-one pointer move. The design comes from a study of how the industry's agent products define,
-version, and evolve agents. The full corpus ships alongside this ADR: one
-dossier per product, the cross-product synthesis, and the running decision
-record, under `docs/research/agent-platform/`. Three merged straw-hat-team
-ADRs settled adjacent questions:
+versioned behavior declaration, with each version captured as one complete
+immutable revision. A change is classified as charter-class or learned-layer.
+A runtime instantiates the agent into sessions pinned to a specific revision.
+The evolution loop is the product: sessions produce outcomes, curators distill
+outcomes into behavior-change proposals, fresh-context verifiers judge
+proposals (the proposer never approves its own change), approved proposals
+activate into revisions, and rollback is one pointer move. The design comes
+from a study of how the industry's agent products define, version, and evolve
+agents. The full corpus ships alongside this ADR: one dossier per product,
+the cross-product synthesis, and the running decision record, under
+`docs/research/agent-platform/`. Three merged straw-hat-team ADRs settled
+adjacent questions:
 [hierarchy and placement (ADR 4761776210)](https://straw-hat-team.github.io/adr/adrs/4761776210/README),
 [the bare `parent` field (ADR 6310044131)](https://straw-hat-team.github.io/adr/adrs/6310044131/README), and
 [annotations (ADR 5177934677)](https://straw-hat-team.github.io/adr/adrs/5177934677/README).
@@ -27,17 +29,17 @@ ADRs settled adjacent questions:
 The findings from that study that this decision rests on:
 
 - **Revisions are immutable, numbered artifacts, and activation is a
-  separate step.** Mature platforms mint a numbered revision on every
-  change, stage it inactive, and reject concurrent writes optimistically.
-  Nobody edits a live definition in place.
+  separate step.** Mature platforms keep activated definitions as numbered
+  artifacts, separate candidate review from activation, and reject
+  concurrent writes optimistically. Nobody edits a live definition in place.
 - **The proposer never approves its own change.** Production experience
   across the field: reviewers with fresh context outperform reviewers who
   share the author's context, so verification is a separate actor judging
-  a staged change.
+  a candidate change.
 - **Proposal volume is high by design.** Self-improving agents run
-  background curation that continuously proposes memory and skill changes;
-  a platform multiplies that across every agent, every night, and most
-  candidates are supposed to be rejected.
+  background curation that continuously proposes instruction, skill, and
+  dependency changes; a platform multiplies that across every agent, every
+  night, and most candidates are supposed to be rejected.
 - **Sessions pin the revision they started on.** Only new sessions pick up
   an activation, and rollback is a pointer move.
 - **The record and the change-in-flight are different resources
@@ -48,7 +50,8 @@ The findings from that study that this decision rests on:
 
 The decision path, in order: the study produced a working definition (an
 agent is a named, versioned declaration a runtime instantiates into pinned
-sessions) and an evolution loop built on staged, verified revisions.
+sessions) and an evolution loop built on proposals, verification, and
+activation.
 Designing that loop surfaced two layering rules, recorded in the decision
 record: deciders know principal identity but never principal kind
 (authentication owns that ontology; ADR 0017), and wire schemas avoid
@@ -93,6 +96,11 @@ enforces, and the naming intent. Concrete message, package, and field names
 below are illustrative; the wire contracts own the final spelling, and
 renames do not reopen this decision.
 
+Here, stream means one logical ordered event history. This ADR does not
+choose physical JetStream resources, subject partitioning, retention, or
+projection checkpointing. Those deployment choices require a separate
+decision before infrastructure provisioning.
+
 **The placement rule:** a fact belongs in a stream when its order relative
 to that stream's other events is load-bearing for an invariant the stream
 must enforce. A fact whose latest value is all that matters lives aside and
@@ -107,12 +115,16 @@ AgentArchived). Invariants this stream enforces:
 - Provisioning mints revision 1 as the initial active revision. Later revision
   numbers are minted linearly at activation and nowhere else.
 - Nothing activates on an archived agent, and nothing activates twice.
-- Rollback targets only previously activated revisions.
-- The activation event references the proposal it lands (id and content
-  digest). The dispatcher proves approval upstream; a recorded verdict is
-  immutable, so passing it as data carries no race.
+- Rollback targets only revisions that were previously active, including
+  revision 1 made active by provisioning.
+- The activation command carries the exact approved proposal, pinned base
+  revision and digest, and candidate reference and digest. The registry
+  rejects a base that is no longer current. The activation event preserves
+  the proposal id and candidate digest. The dispatcher proves approval
+  upstream; a recorded verdict is immutable, so passing it as data carries
+  no race.
 
-**A workflow stream per proposal**, holding one change-in-flight from birth
+**A proposal stream per proposal**, holding one change-in-flight from birth
 to terminal state: opened, then judged or withdrawn (for example:
 ProposalOpened, ProposalVerdictRecorded, ProposalWithdrawn). Naming intent:
 name the entity for what it is, a proposal, never for what it may become, a
@@ -131,8 +143,9 @@ at activation. Invariants this stream enforces:
   proposal references what it replaces, and the author withdraws the old
   one. One stream never closes another.
 - The opening event carries whatever the judgment and activation gates need
-  as data: the change class (learned-layer versus charter), the content
-  digest, evidence, the author. Proposals are identified by their own id,
+  as data: the pinned base revision and digest, immutable candidate reference
+  and digest, typed difference, derived change class (learned-layer versus
+  charter), evidence, and author. Proposals are identified by their own id,
   never by a claimed revision number.
 
 **A fact is recorded once, in the stream whose invariants need its order.**
@@ -151,16 +164,21 @@ Registry stream for `agent-pr-reviewer`:
 
 ```text
 1  AgentProvisioned    { agent: "agent-pr-reviewer", revision: 1,
-                         charter: { ... }, owner: "principal-owner" }
-2  RevisionActivated   { revision: 2, proposal: "prop-7f3a",
+                         artifact: "artifact-revision-1",
+                         digest: "sha256:01...", owner: "principal-owner" }
+2  RevisionActivated   { revision: 2, previous: 1,
+                         proposal: "prop-7f3a",
                          digest: "sha256:11..." }
 ```
 
 Proposal stream for `prop-b804`, withdrawn by its author:
 
 ```text
-1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
+1  ProposalOpened      { agent: "agent-pr-reviewer",
+                         base: "rev-1@sha256:01...",
+                         candidate: "artifact-prop-b804", changeClass:
                          "learned-layer", digest: "sha256:0a...",
+                         difference: [ ... ],
                          author: "principal-curator", evidence: [ ... ] }
 2  ProposalWithdrawn   { by: "principal-curator" }
 ```
@@ -168,8 +186,11 @@ Proposal stream for `prop-b804`, withdrawn by its author:
 Proposal stream for `prop-9c21`, judged and rejected:
 
 ```text
-1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
+1  ProposalOpened      { agent: "agent-pr-reviewer",
+                         base: "rev-1@sha256:01...",
+                         candidate: "artifact-prop-9c21", changeClass:
                          "learned-layer", digest: "sha256:f4...",
+                         difference: [ ... ],
                          author: "principal-curator", evidence: [ ... ] }
 2  ProposalVerdictRecorded { verdict: "rejected",
                              verifier: "principal-verifier",
@@ -180,8 +201,11 @@ Proposal stream for `prop-7f3a`, which supersedes the withdrawn one and
 becomes revision 2:
 
 ```text
-1  ProposalOpened      { agent: "agent-pr-reviewer", changeClass:
+1  ProposalOpened      { agent: "agent-pr-reviewer",
+                         base: "rev-1@sha256:01...",
+                         candidate: "artifact-prop-7f3a", changeClass:
                          "learned-layer", digest: "sha256:11...",
+                         difference: [ ... ],
                          author: "principal-curator",
                          supersedes: "prop-b804", evidence: [ ... ] }
 2  ProposalVerdictRecorded { verdict: "approved",
@@ -192,6 +216,8 @@ What the example shows:
 
 - Revision 2 exists nowhere until the registry stream mints it; every
   proposal is identified by its own id before that moment.
+- Every proposal pins revision 1 as its base. After one proposal activates,
+  another proposal on that base must be rebased and verified again.
 - Two of the three proposals never touch the registry stream. Its replay is
   two events, however many candidates died along the way.
 - `supersedes` is metadata on the new proposal; the closing of `prop-b804`
@@ -216,7 +242,8 @@ boundaries that this topology preserves.
 authentication context (aauth, ADR 0017) enforced at command dispatch.
 Charter-class activation requiring a human and the human-only policy
 mutations remain dispatch preconditions; deciders treat principals as opaque
-identities.
+identities. Rollback authorization is also a dispatch concern outside this
+topology decision.
 
 ## Consequences
 
@@ -233,7 +260,8 @@ identities.
   stream-enforced, can never land it.
 - Concurrent curators do not contend: proposals open freely and only
   activation serializes, which matches the intent that most proposals die
-  without ever touching the agent record.
+  without ever touching the agent record. Once one proposal activates, other
+  proposals pinned to its former base must be rebased and verified again.
 - A proposal does not receive a revision number when opened. Anything
   referencing the unactivated change uses the proposal id, and the revision
   number appears only when the agent stream mints it at activation.
