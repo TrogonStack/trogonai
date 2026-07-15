@@ -159,9 +159,12 @@ ToolDefinition
   input_schema
 
 SessionContract
+  contract_ref
+  contract_digest
   session_id
   agent_id
   pinned_revision -> AgentRevision
+  hierarchy_context_ref
   actual_runtime + actual_model
   variable_values
   resolved_work_contract? -> versioned WorkContract
@@ -191,6 +194,12 @@ Memory
   project_conventions
   domain_models
 ```
+
+`Agent` owns no selectable label map. `BehaviorBundle.selectable_labels`
+owns every selector key, including `family`, because changing one can alter
+routing, evaluation binding, and comparison groups. An Agent projection may
+expose the active revision's labels, and a Session resolves labels from its
+pinned revision, but neither projection is an independent writable copy.
 
 The immediate agent-lifecycle contract is `Agent` + `BehaviorBundle` +
 `AgentRevision` + `Proposal`. The remaining records are separate resources
@@ -255,6 +264,461 @@ authorized action =
 Live authorization is never frozen into the SessionContract or placed in
 model input.
 
+#### Worked example: one proposal becomes revision 2
+
+The following values use the logical names above. They are not proposed
+protobuf field names. The example shows the complete records and references
+needed to explain one activation and one later Session.
+
+| Record | Concrete binding |
+| --- | --- |
+| Proposal `prop-7f3a` | candidate `bundle-pr-reviewer-v2` |
+| AgentRevision 2 | bundle `bundle-pr-reviewer-v2` |
+| Session `session-review-481` | pinned to AgentRevision 2 |
+
+<details>
+<summary>Complete logical example data</summary>
+
+```yaml
+agent:
+  agent_id: agent-pr-reviewer
+  tenant_id: tenant-example
+  name: pr-reviewer
+  accountable_owner: principal-platform-team
+  runtime_constraint: runtime-default-v1
+  active_revision:
+    agent_id: agent-pr-reviewer
+    revision_number: 2
+  lifecycle_state: active
+  annotations:
+    display_name: Pull Request Reviewer
+
+behavior_bundles:
+  - bundle_ref: bundle-pr-reviewer-v1
+    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+    content:
+      runtime_constraint_commitment:
+        ref: runtime-default-v1
+        digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      description: Reviews pull requests for correctness and maintainability.
+      model_default:
+        model_id: model-reviewer-v1
+        deterministic_parameters:
+          temperature: 0.2
+          max_output_tokens: 4096
+      instructions:
+        - Report correctness defects with file and line evidence.
+        - Separate blocking findings from suggestions.
+      turn_wrappers:
+        - wrapper-repository-context-v1
+      variables_schema:
+        review_depth:
+          type: string
+          allowed_values: [standard, strict]
+          required: true
+        output_language:
+          type: string
+          required: false
+      exact_skill_pins:
+        - skill_id: skill-code-review
+          version: 3
+          content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      required_tool_declarations:
+        - selector:
+            name: repository-read
+      optional_tool_declarations:
+        - selector:
+            name: ci-status
+      required_delegate_declarations: []
+      optional_delegate_declarations:
+        - selector:
+            labels:
+              family: security-review
+      selectable_labels:
+        family: code-review
+        language: any
+
+  - bundle_ref: bundle-pr-reviewer-v2
+    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    content:
+      runtime_constraint_commitment:
+        ref: runtime-default-v1
+        digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      description: Reviews pull requests for correctness and maintainability.
+      model_default:
+        model_id: model-reviewer-v1
+        deterministic_parameters:
+          temperature: 0.2
+          max_output_tokens: 4096
+      instructions:
+        - Report correctness defects with file and line evidence.
+        - Treat missing regression coverage as blocking when behavior changes.
+        - Separate blocking findings from suggestions.
+      turn_wrappers:
+        - wrapper-repository-context-v1
+      variables_schema:
+        review_depth:
+          type: string
+          allowed_values: [standard, strict]
+          required: true
+        output_language:
+          type: string
+          required: false
+      exact_skill_pins:
+        - skill_id: skill-code-review
+          version: 4
+          content_digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
+      required_tool_declarations:
+        - selector:
+            name: repository-read
+      optional_tool_declarations:
+        - selector:
+            name: ci-status
+      required_delegate_declarations: []
+      optional_delegate_declarations:
+        - selector:
+            labels:
+              family: security-review
+      selectable_labels:
+        family: code-review
+        language: any
+
+agent_revisions:
+  - agent_id: agent-pr-reviewer
+    revision_number: 1
+    bundle_ref: bundle-pr-reviewer-v1
+    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+    source:
+      kind: provisioning
+
+  - agent_id: agent-pr-reviewer
+    revision_number: 2
+    bundle_ref: bundle-pr-reviewer-v2
+    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    source:
+      kind: proposal
+      proposal_id: prop-7f3a
+
+proposal:
+  proposal_id: prop-7f3a
+  agent_id: agent-pr-reviewer
+  base_revision:
+    agent_id: agent-pr-reviewer
+    revision_number: 1
+    bundle_ref: bundle-pr-reviewer-v1
+    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+  candidate_bundle_ref: bundle-pr-reviewer-v2
+  candidate_bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  canonical_typed_difference:
+    - field: instructions
+      operation: replace
+      before_digest: "sha256:1212121212121212121212121212121212121212121212121212121212121212"
+      after_digest: "sha256:1313131313131313131313131313131313131313131313131313131313131313"
+    - field: exact_skill_pins.skill-code-review
+      operation: replace
+      before_version: 3
+      before_content_digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      after_version: 4
+      after_content_digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
+  derived_change_class: learned-layer
+  author: principal-curator
+  evidence:
+    - outcome_ref: outcome-review-missed-test-42
+      outcome_digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  terminal:
+    verdict:
+      decision: approved
+      verifier: principal-verifier
+      rationale: Candidate catches the missed regression without new authority.
+      evaluation_results:
+        - result_ref: evaluation-result-108
+          result_digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  supersedes: prop-b804
+
+work_contract:
+  versioned_ref: work-pull-request-review-v2
+  content_digest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  input_schema:
+    repository:
+      type: string
+      required: true
+    pull_request_number:
+      type: uint64
+      required: true
+  result_schema:
+    findings:
+      type: list
+      item_type: review-finding
+      required: true
+
+tool_definitions:
+  - versioned_ref: tool-repository-read-v4
+    content_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    input_schema:
+      path: {type: string, required: true}
+      start_line: {type: uint64, required: false}
+      end_line: {type: uint64, required: false}
+  - versioned_ref: tool-ci-status-v2
+    content_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    input_schema:
+      check_name: {type: string, required: true}
+
+memories:
+  - memory_id: memory-platform-project
+    parent: project-platform
+    snapshot_ref: memory-platform-project-snapshot-18
+    snapshot_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    episodic_memory: []
+    user_preferences:
+      review_tone: concise
+    project_conventions:
+      - Behavior changes require regression coverage.
+      - Findings cite repository evidence.
+    domain_models:
+      repository_layout: rust-workspace
+
+  - memory_id: memory-payments-project
+    parent: project-payments
+    snapshot_ref: memory-payments-project-snapshot-7
+    snapshot_digest: "sha256:2323232323232323232323232323232323232323232323232323232323232323"
+    episodic_memory: []
+    user_preferences: {}
+    project_conventions:
+      - Payment incident details stay inside the payments project.
+    domain_models:
+      data_classification: restricted
+
+session_contract:
+  contract_ref: session-contract-review-481-v1
+  contract_digest: "sha256:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+  session_id: session-review-481
+  agent_id: agent-pr-reviewer
+  pinned_revision:
+    agent_id: agent-pr-reviewer
+    revision_number: 2
+    bundle_ref: bundle-pr-reviewer-v2
+    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  hierarchy_context_ref: hierarchy-context-project-platform
+  actual_runtime: runtime-default-v1
+  actual_model:
+    model_id: model-reviewer-v1
+    deterministic_parameters:
+      temperature: 0.2
+      max_output_tokens: 4096
+  variable_values:
+    review_depth: strict
+    output_language: en
+  resolved_work_contract:
+    versioned_ref: work-pull-request-review-v2
+    content_digest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  work_item_ref: work-item-pr-481
+  work_input:
+    snapshot_ref: work-input-pr-481-v1
+    digest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    values:
+      repository: example/repository
+      pull_request_number: 481
+  session_overrides: {}
+  memory_selection_or_snapshot:
+    memory_id: memory-platform-project
+    snapshot_ref: memory-platform-project-snapshot-18
+    snapshot_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    authorization_evaluation_ref: authorization-evaluation-memory-880
+  workspace_context:
+    snapshot_ref: workspace-pr-481
+    snapshot_digest: "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+  resolved_tool_definitions:
+    - versioned_ref: tool-repository-read-v4
+      content_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    - versioned_ref: tool-ci-status-v2
+      content_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+  context_assembly_specification:
+    versioned_ref: context-assembly-v3
+    content_digest: "sha256:0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+
+generic_session_contract:
+  contract_ref: session-contract-chat-12-v1
+  contract_digest: "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+  session_id: session-chat-12
+  agent_id: agent-pr-reviewer
+  pinned_revision:
+    agent_id: agent-pr-reviewer
+    revision_number: 2
+    bundle_ref: bundle-pr-reviewer-v2
+    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  hierarchy_context_ref: hierarchy-context-project-platform
+  actual_runtime: runtime-default-v1
+  actual_model:
+    model_id: model-reviewer-v1
+    deterministic_parameters:
+      temperature: 0.2
+      max_output_tokens: 4096
+  variable_values:
+    review_depth: standard
+  resolved_work_contract: null
+  work_item_ref: null
+  work_input: null
+  session_overrides: {}
+  memory_selection_or_snapshot: null
+  workspace_context: null
+  resolved_tool_definitions:
+    - versioned_ref: tool-repository-read-v4
+      content_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  context_assembly_specification:
+    versioned_ref: context-assembly-v3
+    content_digest: "sha256:0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+
+session_ledger:
+  session_id: session-review-481
+  transcript_ref: transcript-session-review-481
+  transcript_slices:
+    - slice_ref: transcript-session-review-481-through-1
+      through_sequence: 1
+      slice_digest: "sha256:0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+  context_projections:
+    - projection_ref: context-projection-session-review-481-v3
+      projection_version: 3
+      projection_digest: "sha256:abababababababababababababababababababababababababababababababab"
+  model_calls:
+    - model_call_id: model-call-1
+      resolved_input_ref: model-input-session-review-481-call-1
+      input_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      immutable_refs:
+        - kind: behavior_bundle
+          ref: bundle-pr-reviewer-v2
+          digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        - kind: session_contract
+          ref: session-contract-review-481-v1
+          digest: "sha256:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
+        - kind: work_contract
+          ref: work-pull-request-review-v2
+          digest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        - kind: work_input
+          ref: work-input-pr-481-v1
+          digest: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        - kind: memory_snapshot
+          ref: memory-platform-project-snapshot-18
+          digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        - kind: workspace_snapshot
+          ref: workspace-pr-481
+          digest: "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+        - kind: context_projection
+          ref: context-projection-session-review-481-v3
+          digest: "sha256:abababababababababababababababababababababababababababababababab"
+        - kind: transcript_slice
+          ref: transcript-session-review-481-through-1
+          digest: "sha256:0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d"
+        - kind: tool_definition
+          ref: tool-repository-read-v4
+          digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+        - kind: tool_definition
+          ref: tool-ci-status-v2
+          digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        - kind: volatile_facts
+          ref: volatile-facts-session-review-481-call-1
+          digest: "sha256:0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"
+        - kind: on_demand_skill_body
+          ref: skill-code-review-v4-body
+          digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
+        - kind: context_assembly_specification
+          ref: context-assembly-v3
+          digest: "sha256:0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e"
+      assembly_digest: "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      projection_version: 3
+  tool_activity:
+    - tool_call_id: tool-call-1
+      tool_definition_ref: tool-repository-read-v4
+      authorization_evaluation_ref: authorization-evaluation-901
+      credential_binding_ref: credential-binding-repository-read
+      status: executed
+      result_ref: tool-result-1
+      result_digest: "sha256:8181818181818181818181818181818181818181818181818181818181818181"
+    - tool_call_id: tool-call-2
+      tool_definition_ref: tool-repository-read-v4
+      authorization_evaluation_ref: authorization-evaluation-902
+      status: rejected
+      failure_code: authorization-denied
+  delegation_activity:
+    - delegation_id: delegation-1
+      selector:
+        labels:
+          family: security-review
+      resolved_agent_id: agent-security-reviewer
+      resolved_revision_number: 5
+      resolved_revision_digest: "sha256:9090909090909090909090909090909090909090909090909090909090909090"
+      authorization_evaluation_ref: authorization-evaluation-delegation-903
+  outcome_refs:
+    - outcome_ref: outcome-session-review-481
+      outcome_digest: "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+
+external_authorization_evaluations:
+  - evaluation_ref: authorization-evaluation-memory-880
+    action: memory.select
+    subject_context_ref: hierarchy-context-project-platform
+    resource_ref: memory-platform-project-snapshot-18
+    resource_parent: project-platform
+    evaluated_policy_refs: [policy-memory-inheritance-v3]
+    decision: allowed
+  - evaluation_ref: authorization-evaluation-memory-881
+    action: memory.select
+    subject_context_ref: hierarchy-context-project-platform
+    resource_ref: memory-payments-project-snapshot-7
+    resource_parent: project-payments
+    evaluated_policy_refs: [policy-memory-inheritance-v3]
+    decision: denied
+    denial_reason: outside-hierarchy-and-policy-context
+  - evaluation_ref: authorization-evaluation-901
+    action: tool.call
+    resource_ref: tool-repository-read-v4
+    evaluated_policy_refs: [policy-agent-tools-v3]
+    evaluated_grant_refs: [grant-repository-read-v7]
+    credential_binding_ref: credential-binding-repository-read
+    decision: allowed
+  - evaluation_ref: authorization-evaluation-902
+    action: tool.call
+    resource_ref: tool-repository-read-v4
+    evaluated_policy_refs: [policy-agent-tools-v3]
+    evaluated_grant_refs: [grant-repository-read-v8-revoked]
+    decision: denied
+    denial_reason: grant-revoked
+  - evaluation_ref: authorization-evaluation-delegation-903
+    action: agent.delegate
+    resource_ref: agent-security-reviewer-revision-5
+    evaluated_policy_refs: [policy-agent-delegation-v2]
+    decision: allowed
+```
+
+</details>
+
+The equal `bundle_ref` and `bundle_digest` values are the load-bearing part of
+the example: Proposal `prop-7f3a` was verified against exactly the bytes that
+AgentRevision 2 later references. Activation added the number and provenance;
+it did not rebuild the candidate.
+
+The SessionContract contains no grant, secret, budget, rubric, or schedule.
+The tool activity records which external authorization and credential facts
+were evaluated, but those facts remain owned and evaluated live outside the
+Session.
+
+The Session's hierarchy context permits the platform-project Memory and
+rejects the payments-project Memory. Only the permitted snapshot enters the
+SessionContract. The generic Session shows that WorkContract, work item, and
+work input may all be absent.
+
+The two repository-read attempts use the same AgentRevision and
+SessionContract. The first runs under an allowed grant evaluation; the second
+is rejected after revocation. No Agent data changes between them.
+
+After this Session:
+
+| Change | Result |
+| --- | --- |
+| Write a new project convention to Memory | Memory changes; no revision 3 |
+| Revoke repository-read authorization | Next tool call is denied; no revision 3 |
+| Publish WorkContract v3 | Work contract changes; no revision 3 |
+| Publish skill-code-review v5 | Skill changes; no revision 3 until the pin changes |
+| Propose different instructions or a new skill pin | New bundle; activation may mint revision 3 |
+
 #### Boundary rationale
 
 The Agent registry owns stable identity and lifecycle. Owner transfer is a
@@ -307,10 +771,11 @@ selectors unless explicitly pinned. ToolDefinition versions resolve at
 Session start, delegate selectors resolve when delegation occurs, and the
 ledger records the concrete delegated Agent and revision.
 
-Routing a new Session uses the Agent's active revision labels. Policy and
-evaluation for an existing Session use its pinned revision labels, even after
-activation changes the active labels. Verification records the concrete tool
-versions, effective toolset, and delegate revisions it exercised.
+Routing a new Session uses `selectable_labels` from the active revision's
+BehaviorBundle. Policy and evaluation for an existing Session use labels from
+its pinned revision's BehaviorBundle, even after activation changes the
+active labels. Verification records the concrete tool versions, effective
+toolset, and delegate revisions it exercised.
 
 Recorded capabilities do not become entitlements. Policy remains live at
 every protected action and is evaluated against the Session's pinned behavior
