@@ -19,12 +19,13 @@ unwrap_used = "deny"
 
 [dependencies]
 thiserror = { workspace = true }
-async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "server_2_12"] }
 bytes = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["macros", "time"] }
+tokio-util = { workspace = true }
 trogon-decider-runtime = { version = "0.1.0", path = "../trogon-decider-runtime" }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats" }
 trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }

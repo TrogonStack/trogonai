@@ -73,6 +73,9 @@ pub mod event;
 pub mod execution;
 /// Metadata header value objects carried alongside event payloads.
 pub mod headers;
+/// In-memory test double for stream and snapshot storage contracts.
+#[cfg(feature = "test-support")]
+pub mod memory;
 /// Snapshot read/write contracts and payload codec traits.
 pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
@@ -89,6 +92,8 @@ pub use execution::{
     TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
+#[cfg(feature = "test-support")]
+pub use memory::{InMemoryStore, StreamAppendError};
 pub use snapshot::{
     InvalidSnapshotTypeName, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
     SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotTypeName, SnapshotWrite,
