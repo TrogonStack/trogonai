@@ -6,7 +6,7 @@ import { z } from "zod";
 const AdrFrontmatter = z.object({
   number: z.string().regex(/^\d{4}$/),
   slug: z.string().min(1),
-  status: z.enum(["draft", "accepted", "rejected", "superseded", "deprecated"]),
+  status: z.enum(["draft", "proposed", "accepted", "rejected", "superseded", "deprecated"]),
   date: z.coerce.date(),
 });
 
