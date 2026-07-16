@@ -1,4 +1,6 @@
-use trogon_decider::{Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType};
+use trogon_decider::{
+    Decider, DecisionFailure, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
+};
 
 pub trait CommandEnvelopeView {
     fn command_type(&self) -> &str;
@@ -10,12 +12,17 @@ pub trait AnyEnvelopeView {
     fn event_payload(&self) -> &[u8];
 }
 
-/// Wire projection of a domain error: the `code`/`message` strings the WIT `domain-error`
+/// Wire projection of a domain error: the `code`/`message`/`details` the WIT `domain-error`
 /// record carries. Produced from a typed [`BridgeError`] at the boundary, never built from a
 /// stringified source mid-pipeline.
+///
+/// `details` carries the error's `#[source]` chain below `message` as ordered `("cause.N",
+/// text)` pairs, so causes `message`'s single `Display` line would otherwise erase crossing the
+/// WIT boundary remain available in structured form.
 pub struct DomainErrorParts {
     pub code: String,
     pub message: String,
+    pub details: Vec<(String, String)>,
 }
 
 pub trait DecideErrorView {
@@ -46,10 +53,6 @@ pub enum BridgeError {
         #[source]
         source: Box<dyn std::error::Error>,
     },
-    #[error("Act decisions are not supported in WASM v1")]
-    UnsupportedAct,
-    #[error("unsupported decision variant")]
-    UnsupportedDecision,
     #[error("failed to encode event: {0}")]
     EventEncode(#[source] Box<dyn std::error::Error>),
     #[error("failed to resolve event type: {0}")]
@@ -63,7 +66,6 @@ impl BridgeError {
             Self::EventDecode(_) => "decode-failed",
             Self::Evolve(_) => "evolve-failed",
             Self::Rejected { code, .. } => code,
-            Self::UnsupportedAct | Self::UnsupportedDecision => "unsupported-decision",
             Self::EventEncode(_) | Self::EventTypeResolve(_) => "encode-failed",
         }
     }
@@ -75,11 +77,28 @@ impl BridgeError {
 
 impl From<BridgeError> for DomainErrorParts {
     fn from(error: BridgeError) -> Self {
+        use std::error::Error as _;
+
+        let details = causal_chain(error.source());
         Self {
             code: error.code().to_string(),
             message: error.to_string(),
+            details,
         }
     }
+}
+
+/// Flattens a `#[source]` chain into ordered `("cause.N", text)` pairs, starting one level
+/// below the error whose `Display` already produced [`DomainErrorParts::message`].
+fn causal_chain(mut source: Option<&(dyn std::error::Error + 'static)>) -> Vec<(String, String)> {
+    let mut details = Vec::new();
+    let mut depth = 0usize;
+    while let Some(error) = source {
+        details.push((format!("cause.{depth}"), error.to_string()));
+        source = error.source();
+        depth += 1;
+    }
+    details
 }
 
 /// Project a [`BridgeError`] into a caller-facing error built from [`DomainErrorParts`].
@@ -146,32 +165,46 @@ where
     C::evolve(state, &event).map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
 }
 
+/// Project a [`DecisionFailure`] into a [`BridgeError`], mirroring the native runtime's
+/// handling of the same failure type (see `trogon-decider-runtime`'s `append_decision` and
+/// `trogon_decider::testing`'s `decide_events`).
+fn map_decision_failure<C>(failure: DecisionFailure<C::DecideError, C::EvolveError>) -> BridgeError
+where
+    C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static>,
+{
+    match failure {
+        DecisionFailure::Decide(source) => {
+            let code = C::decide_error_code(&source).to_string();
+            BridgeError::Rejected {
+                code,
+                source: Box::new(source),
+            }
+        }
+        DecisionFailure::Evolve(source) => BridgeError::Evolve(Box::new(source)),
+    }
+}
+
+/// Decides and evolves a command through the same [`evaluate_decision`] path the native
+/// runtime uses, so a [`Decision::Act`](trogon_decider::Decision::Act) plan's steps observe
+/// exactly the state they would observe natively. Only the resulting event batch is encoded
+/// here; the caller's `evolve` export folds those events back into session state, matching how
+/// the native runtime persists them.
 #[allow(
     clippy::disallowed_methods,
     reason = "decider guest bridge dispatch path; the disallowed_methods rule targets test code calling decide/evolve directly"
 )]
 pub fn decide_command<C, D, A>(command: &C, state: &C::State) -> Result<Vec<A>, D>
 where
-    C: Decider<DecideError: std::error::Error + 'static>,
+    C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static, State: Clone>,
     C::Event: EventEncode + EventType,
     A: From<AnyEnvelopeParts>,
     D: DecideErrorView,
 {
-    let decision = C::decide(state, command).map_err(|source| {
-        let code = C::decide_error_code(&source).to_string();
-        into_decide_error(BridgeError::Rejected {
-            code,
-            source: Box::new(source),
-        })
-    })?;
-
-    let events = match decision {
-        Decision::Events(batch) => batch.into_vec(),
-        Decision::Act(_) => return Err(into_decide_error(BridgeError::UnsupportedAct)),
-        _ => return Err(into_decide_error(BridgeError::UnsupportedDecision)),
-    };
+    let (_, events) = evaluate_decision::<C>(state.clone(), command)
+        .map_err(|failure| into_decide_error(map_decision_failure::<C>(failure)))?;
 
     events
+        .into_vec()
         .into_iter()
         .map(encode_event_envelope::<C::Event, A, D>)
         .collect()
@@ -207,3 +240,6 @@ pub enum WritePreconditionTag {
     StreamExists,
     NoStream,
 }
+
+#[cfg(test)]
+mod tests;

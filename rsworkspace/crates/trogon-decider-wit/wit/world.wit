@@ -1,9 +1,15 @@
-package trogon:decider@0.1.0;
+// 0.2.0: `domain-error` gained `details`, changing the record's ABI layout. Guest and host
+// bindings must be regenerated from the same WIT version; this is not wire-compatible with 0.1.0.
+package trogon:decider@0.2.0;
 
 interface handler {
   record any-envelope { %type: string, payload: list<u8> }
   record command-envelope { %type: string, payload: list<u8> }
-  record domain-error { code: string, message: string }
+  record domain-error {
+    code: string,
+    message: string,
+    details: list<tuple<string, string>>,
+  }
 
   variant write-precondition { any, stream-exists, no-stream }
   record command-spec {

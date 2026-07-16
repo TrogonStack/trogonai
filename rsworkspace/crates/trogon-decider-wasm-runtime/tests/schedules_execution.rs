@@ -327,3 +327,29 @@ fn an_exhausted_fuel_budget_fails_the_load_probe() {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default().with_fuel_per_call(1)).expect("engine builds");
     assert!(WasmDeciderModule::load(engine, &schedules_wasm()).is_err());
 }
+
+#[tokio::test]
+async fn the_pooling_allocator_engine_executes_the_fixture_end_to_end() {
+    let engine = WasmDeciderEngine::new(
+        WasmEngineConfig::default()
+            .with_max_concurrent_sessions(2)
+            .with_max_instances_per_session(3)
+            .with_max_tables_per_session(2)
+            .with_max_memories_per_session(1),
+    )
+    .expect("pooling-allocator engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_wasm()).expect("module loads under the pooling allocator");
+    let event_store = InMemoryEventStore::default();
+
+    let create_result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds under the pooling allocator");
+    assert_eq!(create_result.stream_position, position(1));
+
+    let pause_result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .execute()
+        .await
+        .expect("pause succeeds under the pooling allocator");
+    assert_eq!(pause_result.stream_position, position(2));
+}

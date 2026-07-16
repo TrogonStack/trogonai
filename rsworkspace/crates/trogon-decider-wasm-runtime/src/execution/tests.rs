@@ -2,6 +2,8 @@ use trogon_std::NowV7;
 use uuid::Uuid;
 
 use super::*;
+use crate::WasmEngineConfig;
+use crate::test_fixture::schedules_bytes;
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -116,11 +118,69 @@ fn replay_fuel_saturates_instead_of_overflowing() {
 }
 
 #[test]
+fn replay_epoch_ticks_scales_linearly_with_event_count() {
+    assert_eq!(replay_epoch_ticks(10, 1), 10);
+    assert_eq!(replay_epoch_ticks(10, 250), 2_500);
+}
+
+#[test]
+fn replay_epoch_ticks_saturates_instead_of_overflowing() {
+    assert_eq!(replay_epoch_ticks(u64::MAX, 2), u64::MAX);
+    assert_eq!(replay_epoch_ticks(u64::MAX, usize::MAX), u64::MAX);
+}
+
+#[test]
+fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+
+    let engine = module.engine();
+    let mut store = engine.new_store();
+    let bindings = instantiate::<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(
+        &mut store,
+        module.decider_pre(),
+        engine,
+    )
+    .expect("instantiate succeeds");
+
+    // Arm the deadline directly and call the raw wit binding rather than the
+    // `call_stream_id` wrapper above: the wrapper re-arms the deadline from
+    // `engine.config().epoch_ticks_per_call()` immediately before its guest
+    // call, which would silently clobber the zero-tick deadline this test
+    // needs to force a trap.
+    engine
+        .arm_guest_call(&mut store, engine.config().fuel_per_call(), 0)
+        .expect("arming a zero-tick deadline succeeds");
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    let wasmtime_error =
+        host::call_stream_id(&bindings, &mut store, &command).expect_err("a zero-tick deadline is already elapsed");
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime_error, WasmCommandError::Trap);
+
+    assert!(matches!(error, WasmCommandError::DeadlineExceeded(_)), "{error}");
+}
+
+#[test]
+fn map_trap_distinguishes_epoch_deadline_from_other_traps() {
+    let deadline_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime::Error::from(wasmtime::Trap::Interrupt), WasmCommandError::Trap);
+    assert!(matches!(deadline_error, WasmCommandError::DeadlineExceeded(_)));
+
+    let other_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime::Error::from(wasmtime::Trap::OutOfFuel), WasmCommandError::Trap);
+    assert!(matches!(other_error, WasmCommandError::Trap(_)));
+}
+
+#[test]
 fn rejected_decide_errors_stay_rejections() {
     let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
         map_decide_error(DecideError::Rejected(host::DomainError {
             code: "already-exists".to_string(),
             message: "schedule already exists".to_string(),
+            details: Vec::new(),
         }));
 
     let WasmCommandError::Rejected(detail) = error else {
@@ -135,6 +195,7 @@ fn faulted_decide_errors_stay_faults() {
         map_decide_error(DecideError::Faulted(host::DomainError {
             code: "decode-failed".to_string(),
             message: "payload did not decode".to_string(),
+            details: Vec::new(),
         }));
 
     let WasmCommandError::Faulted(detail) = error else {

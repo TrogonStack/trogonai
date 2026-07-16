@@ -126,8 +126,12 @@ fn probe_descriptor(
     decider_pre: &DeciderPre<crate::engine::GuestState>,
 ) -> Result<ModuleDescriptor, LoadWasmDeciderError> {
     let mut store = engine.new_store();
-    store
-        .set_fuel(engine.config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            &mut store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(|source| LoadWasmDeciderError::Instantiate { source })?;
     let bindings = decider_pre
         .instantiate(&mut store)

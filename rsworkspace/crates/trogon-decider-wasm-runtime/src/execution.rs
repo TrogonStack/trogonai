@@ -19,6 +19,17 @@
 //! own events. This execution evolves the session with the decided events
 //! before calling `snapshot`, so a session resumed from that snapshot ends up
 //! in the same state as a full replay from the beginning of the stream.
+//!
+//! # Guest calls run off the async executor
+//!
+//! Every guest export call is fuel-metered and wall-clock bounded (see
+//! [`crate::WasmDeciderEngine::arm_guest_call`]), but a synchronous guest call
+//! still occupies whatever thread calls it for up to that budget. Running it
+//! inline on the async executor would stall every other task that executor
+//! thread is responsible for. Both [`WithoutSnapshotStore`] and
+//! [`WithSnapshotStore`] executions instead move each contiguous run of guest
+//! calls onto a blocking thread pool via [`spawn_guest`], resuming the async
+//! task only for real I/O (`StreamRead`, `StreamAppend`, `SnapshotRead`).
 
 use thiserror::Error;
 use trogon_decider_runtime::{
@@ -30,7 +41,7 @@ use trogon_decider_wit::host::{self, AnyEnvelope, CommandEnvelope, DecideError};
 use trogon_std::NowV7;
 use wasmtime::Store;
 
-use crate::{DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderModule, WasmSnapshotId};
+use crate::{DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
 
 /// Result of a successful WASM command execution.
 #[derive(Debug, Clone)]
@@ -59,9 +70,18 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     /// A guest call trapped (fuel exhaustion, memory limit, or ABI failure).
     ///
     /// Distinct from [`Self::Faulted`]: a trap is a host-level wasmtime
-    /// failure, not a domain error the guest chose to report.
+    /// failure, not a domain error the guest chose to report. Distinct from
+    /// [`Self::DeadlineExceeded`]: this variant is every other trap cause.
     #[error("guest call trapped")]
     Trap(#[source] wasmtime::Error),
+    /// A guest call exceeded its wall-clock epoch deadline.
+    ///
+    /// Wasmtime's epoch-based interruption raised this instead of the guest
+    /// exhausting its fuel budget first, meaning the guest was still running
+    /// but too slowly. Distinguished from [`Self::Trap`] so callers can tell
+    /// a hung guest apart from every other host-level trap.
+    #[error("guest call exceeded its wall-clock deadline")]
+    DeadlineExceeded(#[source] wasmtime::Error),
     /// The module could not be instantiated for this command.
     #[error("failed to instantiate wasm component")]
     Instantiate(#[source] wasmtime::Error),
@@ -80,6 +100,9 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
     #[error("{0}")]
     ReadAfterOverflow(#[source] ReadAfterOverflow),
+    /// The blocking task running guest calls panicked or was cancelled.
+    #[error("guest execution task failed")]
+    Blocking(#[source] tokio::task::JoinError),
 }
 
 /// Marker type used before a snapshot store is attached to an execution.
@@ -199,12 +222,18 @@ where
         WasmExecutionResult,
         WasmCommandError<std::convert::Infallible, <E as StreamRead<str>>::Error, <E as StreamAppend<str>>::Error>,
     > {
-        let engine = self.module.engine();
-        let mut store = engine.new_store();
-        let bindings = instantiate(&mut store, self.module)?;
-        let stream_id = call_stream_id(&mut store, &bindings, engine, self.command)?;
-        let write_precondition = command_write_precondition(self.module, &self.command.type_);
+        let engine = self.module.engine().clone();
+        let decider_pre = self.module.decider_pre().clone();
+        let command = self.command.clone();
+        let (mut store, bindings, stream_id) = spawn_guest(move || {
+            let mut store = engine.new_store();
+            let bindings = instantiate(&mut store, &decider_pre, &engine)?;
+            let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
+            Ok((store, bindings, stream_id))
+        })
+        .await?;
 
+        let write_precondition = command_write_precondition(self.module, &self.command.type_);
         let (replayed_envelopes, current_position) = if is_no_stream(write_precondition) {
             (Vec::new(), None)
         } else {
@@ -221,12 +250,19 @@ where
             (to_any_envelopes(stream_read.events), current_position)
         };
 
-        let session = create_session(&mut store, &bindings, engine, None)?;
-        replay_events(&mut store, &bindings, engine, session, &replayed_envelopes)?;
-        let decided_envelopes = decide(&mut store, &bindings, engine, session, self.command)?;
-        // No snapshot observes this session, so the decided events are not
-        // folded back into it; folding here would only burn guest fuel.
-        host::drop_session(&bindings, &mut store, session).map_err(WasmCommandError::Trap)?;
+        let engine = self.module.engine().clone();
+        let command = self.command.clone();
+        let decided_envelopes = spawn_guest(move || {
+            let session = create_session(&mut store, &bindings, &engine, None)?;
+            replay_events(&mut store, &bindings, &engine, session, &replayed_envelopes)?;
+            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command)?;
+            // No snapshot observes this session, so the decided events are not
+            // folded back into it; folding here would only burn guest fuel.
+            host::drop_session(&bindings, &mut store, session)
+                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            Ok(decided_envelopes)
+        })
+        .await?;
 
         let precondition = resolve_write_precondition(write_precondition, self.write_precondition, current_position);
         let events = encode_events(decided_envelopes.clone(), &self.headers, &self.event_id_generator);
@@ -274,12 +310,18 @@ where
             <E as StreamAppend<str>>::Error,
         >,
     > {
-        let engine = self.module.engine();
-        let mut store = engine.new_store();
-        let bindings = instantiate(&mut store, self.module)?;
-        let stream_id = call_stream_id(&mut store, &bindings, engine, self.command)?;
-        let write_precondition = command_write_precondition(self.module, &self.command.type_);
+        let engine = self.module.engine().clone();
+        let decider_pre = self.module.decider_pre().clone();
+        let command = self.command.clone();
+        let (mut store, bindings, stream_id) = spawn_guest(move || {
+            let mut store = engine.new_store();
+            let bindings = instantiate(&mut store, &decider_pre, &engine)?;
+            let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
+            Ok((store, bindings, stream_id))
+        })
+        .await?;
 
+        let write_precondition = command_write_precondition(self.module, &self.command.type_);
         let (replayed_envelopes, current_position, _snapshot_position, snapshot_bytes) =
             if is_no_stream(write_precondition) {
                 (Vec::new(), None, None, None)
@@ -287,16 +329,28 @@ where
                 self.load_replay_context(&stream_id).await?
             };
 
-        let session = create_session(&mut store, &bindings, engine, snapshot_bytes.as_deref())?;
-        replay_events(&mut store, &bindings, engine, session, &replayed_envelopes)?;
-        let decided_envelopes = decide(&mut store, &bindings, engine, session, self.command)?;
-        fold_decided_events(&mut store, &bindings, engine, session, &decided_envelopes)?;
+        let engine = self.module.engine().clone();
+        let command = self.command.clone();
+        let (decided_envelopes, new_snapshot_bytes) = spawn_guest(move || {
+            let session = create_session(&mut store, &bindings, &engine, snapshot_bytes.as_deref())?;
+            replay_events(&mut store, &bindings, &engine, session, &replayed_envelopes)?;
+            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command)?;
+            fold_decided_events(&mut store, &bindings, &engine, session, &decided_envelopes)?;
 
-        store
-            .set_fuel(engine.config().fuel_per_call())
-            .map_err(WasmCommandError::Trap)?;
-        let new_snapshot_bytes = host::snapshot(&bindings, &mut store, session).map_err(WasmCommandError::Trap)?;
-        host::drop_session(&bindings, &mut store, session).map_err(WasmCommandError::Trap)?;
+            engine
+                .arm_guest_call(
+                    &mut store,
+                    engine.config().fuel_per_call(),
+                    engine.config().epoch_ticks_per_call(),
+                )
+                .map_err(WasmCommandError::Trap)?;
+            let new_snapshot_bytes = host::snapshot(&bindings, &mut store, session)
+                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            host::drop_session(&bindings, &mut store, session)
+                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            Ok((decided_envelopes, new_snapshot_bytes))
+        })
+        .await?;
 
         let precondition = resolve_write_precondition(write_precondition, self.write_precondition, current_position);
         let events = encode_events(decided_envelopes.clone(), &self.headers, &self.event_id_generator);
@@ -376,60 +430,114 @@ where
     }
 }
 
+/// Runs a synchronous, guest-touching closure on a blocking thread pool so it
+/// never occupies the async executor for the duration of its fuel and epoch
+/// budget. See the module-level doc comment for why this is necessary.
+async fn spawn_guest<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    task: impl FnOnce() -> Result<T, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>
+    + Send
+    + 'static,
+) -> Result<T, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>
+where
+    T: Send + 'static,
+    ReadSnapshotError: Send + 'static,
+    ReadStreamError: Send + 'static,
+    AppendStreamError: Send + 'static,
+{
+    match tokio::task::spawn_blocking(task).await {
+        Ok(result) => result,
+        Err(join_error) => Err(WasmCommandError::Blocking(join_error)),
+    }
+}
+
+fn is_epoch_deadline_exceeded(error: &wasmtime::Error) -> bool {
+    matches!(error.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::Interrupt))
+}
+
+/// Classifies a wasmtime call failure, surfacing an epoch-deadline interrupt
+/// as [`WasmCommandError::DeadlineExceeded`] and delegating every other
+/// failure to `fallback`.
+fn map_trap<ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    error: wasmtime::Error,
+    fallback: impl FnOnce(wasmtime::Error) -> WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>,
+) -> WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError> {
+    if is_epoch_deadline_exceeded(&error) {
+        WasmCommandError::DeadlineExceeded(error)
+    } else {
+        fallback(error)
+    }
+}
+
 fn instantiate<ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<crate::engine::GuestState>,
-    module: &WasmDeciderModule,
+    decider_pre: &host::DeciderPre<crate::engine::GuestState>,
+    engine: &WasmDeciderEngine,
 ) -> Result<host::Decider, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    store
-        .set_fuel(module.engine().config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(WasmCommandError::Trap)?;
-    module
-        .decider_pre()
+    decider_pre
         .instantiate(store)
-        .map_err(WasmCommandError::Instantiate)
+        .map_err(|error| map_trap(error, WasmCommandError::Instantiate))
 }
 
 fn call_stream_id<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<T>,
     bindings: &host::Decider,
-    engine: &crate::WasmDeciderEngine,
+    engine: &WasmDeciderEngine,
     command: &CommandEnvelope,
 ) -> Result<String, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    store
-        .set_fuel(engine.config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(WasmCommandError::Trap)?;
     host::call_stream_id(bindings, store, command)
-        .map_err(WasmCommandError::Trap)?
+        .map_err(|error| map_trap(error, WasmCommandError::Trap))?
         .map_err(|error| WasmCommandError::StreamId(error.into()))
 }
 
 fn create_session<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<T>,
     bindings: &host::Decider,
-    engine: &crate::WasmDeciderEngine,
+    engine: &WasmDeciderEngine,
     snapshot: Option<&[u8]>,
 ) -> Result<host::Session, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    store
-        .set_fuel(engine.config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(WasmCommandError::Trap)?;
-    host::create_session(bindings, store, snapshot).map_err(WasmCommandError::Trap)
+    host::create_session(bindings, store, snapshot).map_err(|error| map_trap(error, WasmCommandError::Trap))
 }
 
 fn replay_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<T>,
     bindings: &host::Decider,
-    engine: &crate::WasmDeciderEngine,
+    engine: &WasmDeciderEngine,
     session: host::Session,
     events: &[AnyEnvelope],
 ) -> Result<(), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
     if events.is_empty() {
         return Ok(());
     }
-    store
-        .set_fuel(replay_fuel(engine.config().fuel_per_call(), events.len()))
+    engine
+        .arm_guest_call(
+            store,
+            replay_fuel(engine.config().fuel_per_call(), events.len()),
+            replay_epoch_ticks(engine.config().epoch_ticks_per_call(), events.len()),
+        )
         .map_err(WasmCommandError::Trap)?;
     host::evolve(bindings, store, session, events)
-        .map_err(WasmCommandError::Trap)?
+        .map_err(|error| map_trap(error, WasmCommandError::Trap))?
         .map_err(|error| WasmCommandError::Evolve(error.into()))
 }
 
@@ -445,18 +553,31 @@ fn replay_fuel(fuel_per_call: u64, event_count: usize) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+/// Epoch tick budget for one batched replay `evolve` call, scaled the same
+/// way as [`replay_fuel`] so a long replay gets a proportionally larger
+/// wall-clock allowance instead of tripping the single-call deadline.
+fn replay_epoch_ticks(epoch_ticks_per_call: u64, event_count: usize) -> u64 {
+    u64::try_from(event_count)
+        .map(|count| epoch_ticks_per_call.saturating_mul(count))
+        .unwrap_or(u64::MAX)
+}
+
 fn decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<T>,
     bindings: &host::Decider,
-    engine: &crate::WasmDeciderEngine,
+    engine: &WasmDeciderEngine,
     session: host::Session,
     command: &CommandEnvelope,
 ) -> Result<Vec<AnyEnvelope>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    store
-        .set_fuel(engine.config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(WasmCommandError::Trap)?;
     host::decide(bindings, store, session, command)
-        .map_err(WasmCommandError::Trap)?
+        .map_err(|error| map_trap(error, WasmCommandError::Trap))?
         .map_err(map_decide_error)
 }
 
@@ -475,7 +596,7 @@ fn map_decide_error<ReadSnapshotError, ReadStreamError, AppendStreamError>(
 fn fold_decided_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<T>,
     bindings: &host::Decider,
-    engine: &crate::WasmDeciderEngine,
+    engine: &WasmDeciderEngine,
     session: host::Session,
     decided_envelopes: &[AnyEnvelope],
 ) -> Result<(), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {

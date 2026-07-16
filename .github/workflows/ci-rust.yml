@@ -115,8 +115,7 @@ jobs:
           tool: cargo-llvm-cov,nextest
 
       - name: Build decider components for sim fixtures
-        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
-        working-directory: rsworkspace
+        run: mise run artifacts:wasm-components
 
       - name: Run documentation tests
         run: cargo test --doc
@@ -187,13 +186,12 @@ jobs:
           workspaces: rsworkspace -> target
           save-if: always
 
-      - name: Build schedules decider component
-        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
-        working-directory: rsworkspace
+      - name: Build decider components
+        run: mise run artifacts:wasm-components
 
       - name: Assert zero imports and validate
         run: |
-          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
+          for WASM in rsworkspace/dist/decider/*.wasm; do
             wasm-tools component wit "$WASM" | tee /tmp/wit.txt
             if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
               echo "component declares imports: $WASM"
@@ -208,7 +206,15 @@ jobs:
           cargo test -p trogon-decider-sim --test schedules --features test-support
           cargo test -p trogon-decider-guest-macros --test compile_fail
           cargo build -p trogon-decider-test --release
-          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml
+          for WASM in dist/decider/*.wasm; do
+            alias=$(basename "$WASM" .wasm)
+            yaml="cli/trogon-decider-test/${alias}.yaml"
+            if [ -f "$yaml" ]; then
+              ./target/release/decider-test "$WASM" "$yaml"
+            else
+              echo "no decider-test fixture for $alias ($yaml not found); skipping"
+            fi
+          done
 
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime
