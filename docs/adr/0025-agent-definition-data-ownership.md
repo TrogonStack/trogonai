@@ -151,11 +151,13 @@ Proposal
 
 WorkContract
   versioned_ref
+  content_digest
   input_schema
   result_schema
 
 ToolDefinition
   versioned_ref
+  content_digest
   input_schema
 
 SessionContract
@@ -189,6 +191,8 @@ SessionLedger
 Memory
   memory_id
   parent -> Hierarchy
+  snapshot_ref
+  snapshot_digest
   episodic_memory
   user_preferences
   project_conventions
@@ -388,16 +392,13 @@ agent_revisions:
     revision_number: 1
     bundle_ref: bundle-pr-reviewer-v1
     bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
-    source:
-      kind: provisioning
+    source: provisioning
 
   - agent_id: agent-pr-reviewer
     revision_number: 2
     bundle_ref: bundle-pr-reviewer-v2
     bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-    source:
-      kind: proposal
-      proposal_id: prop-7f3a
+    source: prop-7f3a
 
 proposal:
   proposal_id: prop-7f3a
@@ -430,9 +431,10 @@ proposal:
       decision: approved
       verifier: principal-verifier
       rationale: Candidate catches the missed regression without new authority.
-      evaluation_results:
-        - result_ref: evaluation-result-108
-          result_digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      evaluation_result_refs:
+        - evaluation-result-108
+      evaluation_result_digests:
+        - "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   supersedes: prop-b804
 
 work_contract:
