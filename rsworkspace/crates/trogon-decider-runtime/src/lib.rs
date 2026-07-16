@@ -82,9 +82,11 @@ pub use event::{Event, EventId, EventIdentity, StreamEvent};
 #[cfg(any(test, feature = "test-support"))]
 pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
-    CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, DecideSnapshot, ExecutionResult,
-    FrequencySnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotPolicy, SnapshotTaskScheduler,
-    Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, DecideSnapshot,
+    DiscardAndReplaySnapshotFailure, DrainableSnapshotTaskScheduler, ExecutionResult, FailOnSnapshotFailure,
+    FrequencySnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotFailure, SnapshotFailureContext,
+    SnapshotFailureDecision, SnapshotFailurePolicy, SnapshotPolicy, SnapshotTaskScheduler, Snapshots,
+    TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 pub use snapshot::{

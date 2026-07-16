@@ -24,7 +24,15 @@ use crate::{
 use trogon_decider::{DecisionFailure, evaluate_decision};
 use trogon_std::{NowV7, UuidV7Generator};
 
-use std::{borrow::Borrow, future::Future, num::NonZeroU64};
+use std::{
+    borrow::Borrow,
+    future::Future,
+    num::NonZeroU64,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
 type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
@@ -46,8 +54,24 @@ pub trait SnapshotTaskScheduler {
     fn schedule<F>(&self, task: F)
     where
         F: Future<Output = ()> + Send + 'static;
+
+    /// Waits for every snapshot write this scheduler has accepted to finish.
+    ///
+    /// The default implementation resolves immediately. Schedulers that defer
+    /// writes to work they do not track have nothing to wait for; schedulers
+    /// that do track outstanding writes, such as
+    /// [`DrainableSnapshotTaskScheduler`], override this to await them.
+    fn drain(&self) -> impl Future<Output = ()> + Send {
+        std::future::ready(())
+    }
 }
 
+/// Schedules snapshot writes on the ambient Tokio runtime without tracking them.
+///
+/// This scheduler is fire-and-forget: [`Self::drain`] uses the trait default
+/// and resolves immediately, even while writes are still in flight. Hosts that
+/// need to await outstanding snapshot writes before teardown should use
+/// [`DrainableSnapshotTaskScheduler`] instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokioSnapshotTaskScheduler;
 
@@ -62,6 +86,65 @@ impl SnapshotTaskScheduler for TokioSnapshotTaskScheduler {
         };
 
         drop(handle.spawn(task));
+    }
+}
+
+#[derive(Debug, Default)]
+struct SnapshotTaskTracker {
+    in_flight: AtomicUsize,
+    idle: tokio::sync::Notify,
+}
+
+/// Schedules snapshot writes on the ambient Tokio runtime and tracks them so
+/// hosts can await outstanding writes before teardown.
+///
+/// Every scheduled task increments an in-flight counter and decrements it on
+/// completion. [`Self::drain`] waits until that counter reaches zero. Clone
+/// this scheduler to share the same in-flight tracking between the executions
+/// that schedule writes and the host that drains them; cloning is cheap, it
+/// only bumps a reference count.
+#[derive(Debug, Clone, Default)]
+pub struct DrainableSnapshotTaskScheduler {
+    tasks: Arc<SnapshotTaskTracker>,
+}
+
+impl DrainableSnapshotTaskScheduler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl SnapshotTaskScheduler for DrainableSnapshotTaskScheduler {
+    fn schedule<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::error!("Tokio snapshot task scheduler requires an active Tokio runtime");
+            return;
+        };
+
+        let tasks = Arc::clone(&self.tasks);
+        tasks.in_flight.fetch_add(1, Ordering::SeqCst);
+        drop(handle.spawn(async move {
+            task.await;
+            if tasks.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
+                tasks.idle.notify_waiters();
+            }
+        }));
+    }
+
+    fn drain(&self) -> impl Future<Output = ()> + Send {
+        let tasks = Arc::clone(&self.tasks);
+        async move {
+            loop {
+                let idle = tasks.idle.notified();
+                if tasks.in_flight.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+                idle.await;
+            }
+        }
     }
 }
 
@@ -267,6 +350,81 @@ impl std::fmt::Display for SnapshotAheadOfStream {
     }
 }
 
+/// A recoverable snapshot failure, kept distinct from [`CommandError`] so a
+/// [`SnapshotFailurePolicy`] can inspect the failed operation before deciding
+/// whether the command should fail or recover.
+#[derive(Debug)]
+pub enum SnapshotFailure<'a, ReadSnapshotError> {
+    /// The loaded snapshot claims a position newer than the stream can prove.
+    AheadOfStream(SnapshotAheadOfStream),
+    /// Reading the snapshot failed, which also covers a snapshot payload that
+    /// failed to decode, since the read adapter folds decode failures into
+    /// its own error type.
+    ReadFailed(&'a ReadSnapshotError),
+}
+
+/// Context passed to a [`SnapshotFailurePolicy`] when a snapshot failure occurs.
+#[derive(Debug)]
+pub struct SnapshotFailureContext<'a, C: Decider, ReadSnapshotError> {
+    /// The command that triggered the failing execution.
+    pub command: &'a C,
+    /// The failure the policy must decide how to handle.
+    pub failure: SnapshotFailure<'a, ReadSnapshotError>,
+}
+
+/// The outcome a [`SnapshotFailurePolicy`] chooses for a [`SnapshotFailure`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotFailureDecision {
+    /// Fail the command with the concrete [`CommandError`] for this failure.
+    Fail,
+    /// Discard the bad snapshot and replay the command from the beginning of
+    /// the stream, as if no snapshot had ever been taken.
+    DiscardAndReplay,
+}
+
+/// Chooses how a [`CommandExecution`] reacts to a snapshot it cannot trust.
+///
+/// This mirrors [`SnapshotPolicy`]: it lets callers plug in per-command or
+/// per-store logic instead of hard-coding one reaction for every decider.
+/// [`FailOnSnapshotFailure`] keeps today's behavior of failing the command;
+/// [`DiscardAndReplaySnapshotFailure`] discards the bad snapshot and replays
+/// from the beginning of the stream. Custom implementations can choose
+/// per [`SnapshotFailure`] kind.
+pub trait SnapshotFailurePolicy<C: Decider, ReadSnapshotError> {
+    fn decide_snapshot_failure(
+        &self,
+        context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision;
+}
+
+/// Fails the command on any snapshot failure. This is the default policy and
+/// matches the runtime's behavior before [`SnapshotFailurePolicy`] existed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FailOnSnapshotFailure;
+
+impl<C: Decider, ReadSnapshotError> SnapshotFailurePolicy<C, ReadSnapshotError> for FailOnSnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::Fail
+    }
+}
+
+/// Discards a bad snapshot and replays the command from the beginning of the
+/// stream instead of failing it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiscardAndReplaySnapshotFailure;
+
+impl<C: Decider, ReadSnapshotError> SnapshotFailurePolicy<C, ReadSnapshotError> for DiscardAndReplaySnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::DiscardAndReplay
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum ReplayStreamError<EvolveError, DecodeError> {
     #[error("{0}")]
@@ -358,31 +516,43 @@ pub struct WithoutSnapshots;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshotTaskScheduler;
 
-pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler> {
+pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler, F = FailOnSnapshotFailure> {
     snapshot_store: &'a S,
     policy: P,
     schedule_snapshot_task: Spawn,
+    failure_policy: F,
 }
 
-impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler> {
+impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler, FailOnSnapshotFailure> {
     pub fn new(snapshot_store: &'a S, policy: P) -> Self {
         Self {
             snapshot_store,
             policy,
             schedule_snapshot_task: WithoutSnapshotTaskScheduler,
+            failure_policy: FailOnSnapshotFailure,
         }
     }
 }
 
-impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
+impl<'a, S, P, Spawn, F> Snapshots<'a, S, P, Spawn, F> {
     fn schedule_snapshot_tasks_with<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
-    ) -> Snapshots<'a, S, P, NextSpawn> {
+    ) -> Snapshots<'a, S, P, NextSpawn, F> {
         Snapshots {
             snapshot_store: self.snapshot_store,
             policy: self.policy,
             schedule_snapshot_task,
+            failure_policy: self.failure_policy,
+        }
+    }
+
+    fn with_snapshot_failure_policy<NextF>(self, failure_policy: NextF) -> Snapshots<'a, S, P, Spawn, NextF> {
+        Snapshots {
+            snapshot_store: self.snapshot_store,
+            policy: self.policy,
+            schedule_snapshot_task: self.schedule_snapshot_task,
+            failure_policy,
         }
     }
 }
@@ -394,19 +564,25 @@ where
     type Store;
     type Policy;
     type SnapshotTaskScheduler;
+    type FailurePolicy;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler>;
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy>;
 }
 
-impl<'a, C, S, P, Spawn> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn>
+impl<'a, C, S, P, Spawn, F> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn, F>
 where
     C: Decider,
 {
     type Store = S;
     type Policy = P;
     type SnapshotTaskScheduler = Spawn;
+    type FailurePolicy = F;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy> {
         self
     }
 }
@@ -419,8 +595,11 @@ where
     type Store = S;
     type Policy = C::SnapshotPolicy;
     type SnapshotTaskScheduler = WithoutSnapshotTaskScheduler;
+    type FailurePolicy = FailOnSnapshotFailure;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy> {
         C::snapshots(self)
     }
 }
@@ -467,6 +646,7 @@ where
             <I as IntoSnapshots<'a, C>>::Store,
             <I as IntoSnapshots<'a, C>>::Policy,
             <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
+            <I as IntoSnapshots<'a, C>>::FailurePolicy,
         >,
         G,
     >
@@ -572,16 +752,35 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     }
 }
 
-impl<'a, E, S, C, P, Spawn, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>, G> {
+impl<'a, E, S, C, P, Spawn, F, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn, F>, G> {
     pub fn with_task_runtime<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>, G> {
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn, F>, G> {
         CommandExecution {
             event_store: self.event_store,
             command: self.command,
             write_precondition: self.write_precondition,
             snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
+        }
+    }
+
+    /// Sets how this execution reacts to a snapshot it cannot trust.
+    ///
+    /// Defaults to [`FailOnSnapshotFailure`], which fails the command exactly
+    /// as before this policy existed. Use [`DiscardAndReplaySnapshotFailure`]
+    /// or a custom [`SnapshotFailurePolicy`] to recover instead.
+    pub fn with_snapshot_failure_policy<NextF>(
+        self,
+        failure_policy: NextF,
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn, NextF>, G> {
+        CommandExecution {
+            event_store: self.event_store,
+            command: self.command,
+            write_precondition: self.write_precondition,
+            snapshots: self.snapshots.with_snapshot_failure_policy(failure_policy),
             headers: self.headers,
             event_id_generator: self.event_id_generator,
         }
@@ -631,7 +830,7 @@ where
     }
 }
 
-impl<E, S, C, P, Spawn, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>, G>
+impl<E, S, C, P, Spawn, F, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn, F>, G>
 where
     C: Decider,
     C::State: Clone + Send + 'static,
@@ -642,6 +841,7 @@ where
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
     P: SnapshotPolicy<C>,
     Spawn: SnapshotTaskScheduler + Send + Sync,
+    F: SnapshotFailurePolicy<C, CommandReadSnapshotError<S, C>>,
     G: NowV7,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
@@ -674,17 +874,39 @@ where
             });
         }
 
-        let snapshot = self
+        let mut discarded_bad_snapshot = false;
+        let (mut snapshot_position, mut state) = match self
             .snapshots
             .snapshot_store
             .read_snapshot(ReadSnapshotRequest { snapshot_id: stream_id })
             .await
-            .map_err(CommandError::ReadSnapshot)?;
-        let snapshot = snapshot.snapshot;
-        let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
-        let state = snapshot
-            .map(|snapshot| snapshot.payload)
-            .unwrap_or_else(C::initial_state);
+        {
+            Ok(response) => {
+                let snapshot = response.snapshot;
+                let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
+                let state = snapshot
+                    .map(|snapshot| snapshot.payload)
+                    .unwrap_or_else(C::initial_state);
+                (snapshot_position, state)
+            }
+            Err(error) => {
+                let decision = self
+                    .snapshots
+                    .failure_policy
+                    .decide_snapshot_failure(SnapshotFailureContext {
+                        command: self.command,
+                        failure: SnapshotFailure::ReadFailed(&error),
+                    });
+                match decision {
+                    SnapshotFailureDecision::Fail => return Err(CommandError::ReadSnapshot(error)),
+                    SnapshotFailureDecision::DiscardAndReplay => {
+                        discarded_bad_snapshot = true;
+                        (None, C::initial_state())
+                    }
+                }
+            }
+        };
+
         let from = match snapshot_position {
             Some(position) => ReadFrom::after(position).map_err(CommandError::ReadAfterOverflow)?,
             None => ReadFrom::Beginning,
@@ -694,29 +916,71 @@ where
             .read_stream(ReadStreamRequest { stream_id, from })
             .await
             .map_err(CommandError::ReadStream)?;
-        let current_position = stream_read.current_position;
+        let mut current_position = stream_read.current_position;
+        let mut stream_events = stream_read.events;
 
-        if let Some(snapshot_position) = snapshot_position {
-            ensure_snapshot_not_ahead(snapshot_position, current_position)
-                .map_err(CommandError::SnapshotAheadOfStream)?;
+        if let Some(position) = snapshot_position
+            && let Err(ahead_of_stream) = ensure_snapshot_not_ahead(position, current_position)
+        {
+            let decision = self
+                .snapshots
+                .failure_policy
+                .decide_snapshot_failure(SnapshotFailureContext {
+                    command: self.command,
+                    failure: SnapshotFailure::AheadOfStream(ahead_of_stream),
+                });
+            match decision {
+                SnapshotFailureDecision::Fail => return Err(CommandError::SnapshotAheadOfStream(ahead_of_stream)),
+                SnapshotFailureDecision::DiscardAndReplay => {
+                    discarded_bad_snapshot = true;
+                    snapshot_position = None;
+                    state = C::initial_state();
+
+                    let replay = self
+                        .event_store
+                        .read_stream(ReadStreamRequest {
+                            stream_id,
+                            from: ReadFrom::Beginning,
+                        })
+                        .await
+                        .map_err(CommandError::ReadStream)?;
+                    current_position = replay.current_position;
+                    stream_events = replay.events;
+                }
+            }
         }
 
-        let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
+        let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let replayed_event_count = stream_read.events.len() as u64;
+        let replayed_event_count = stream_events.len() as u64;
 
-        maybe_take_snapshot(
-            &self.snapshots,
-            stream_id,
-            DecideSnapshot {
-                command: self.command,
-                stream_position: append_outcome.stream_position,
-                snapshot_position,
-                state: &state,
-                events: &events,
-                replayed_event_count,
-            },
-        );
+        if discarded_bad_snapshot {
+            // The discarded snapshot is still sitting in the store at this
+            // stream id. The normal policy might choose to skip a snapshot
+            // this time, which would leave that stale or undecodable payload
+            // in place for the next execution to trip over again. Writing
+            // unconditionally here overwrites it with a snapshot the recovered
+            // execution can trust.
+            schedule_snapshot_write(
+                &self.snapshots.schedule_snapshot_task,
+                self.snapshots.snapshot_store,
+                stream_id,
+                Snapshot::new(append_outcome.stream_position, state.clone()),
+            );
+        } else {
+            maybe_take_snapshot(
+                &self.snapshots,
+                stream_id,
+                DecideSnapshot {
+                    command: self.command,
+                    stream_position: append_outcome.stream_position,
+                    snapshot_position,
+                    state: &state,
+                    events: &events,
+                    replayed_event_count,
+                },
+            );
+        }
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -753,8 +1017,8 @@ fn ensure_snapshot_not_ahead(
     }
 }
 
-fn maybe_take_snapshot<S, C, P, Spawn>(
-    snapshots: &Snapshots<'_, S, P, Spawn>,
+fn maybe_take_snapshot<S, C, P, Spawn, F>(
+    snapshots: &Snapshots<'_, S, P, Spawn, F>,
     stream_id: &C::StreamId,
     context: DecideSnapshot<'_, C>,
 ) where
