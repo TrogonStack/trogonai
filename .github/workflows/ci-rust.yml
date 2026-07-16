@@ -65,16 +65,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Test repo Rust policy lints
-        run: |
-          dylint_toolchain="$(python - <<'PY'
-          import tomllib
-
-          with open("rust-toolchain.toml", "rb") as toolchain_file:
-              print(tomllib.load(toolchain_file)["toolchain"]["channel"])
-          PY
-          )"
-          rustup run "$dylint_toolchain" cargo test
-        working-directory: rsworkspace/dylints/trogon_lints
+        run: mise run github-actions:dylint-tests
 
       - name: Run repo Rust policy lints
         run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
@@ -190,31 +181,10 @@ jobs:
         run: mise run artifacts:wasm-components
 
       - name: Assert zero imports and validate
-        run: |
-          for WASM in rsworkspace/dist/decider/*.wasm; do
-            wasm-tools component wit "$WASM" | tee /tmp/wit.txt
-            if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
-              echo "component declares imports: $WASM"
-              exit 1
-            fi
-            wasm-tools validate "$WASM"
-          done
+        run: mise run github-actions:wasm-validate
 
       - name: Run decider-test suites
-        run: |
-          cd rsworkspace
-          cargo test -p trogon-decider-sim --test schedules --features test-support
-          cargo test -p trogon-decider-guest-macros --test compile_fail
-          cargo build -p trogon-decider-test --release
-          for WASM in dist/decider/*.wasm; do
-            alias=$(basename "$WASM" .wasm)
-            yaml="cli/trogon-decider-test/${alias}.yaml"
-            if [ -f "$yaml" ]; then
-              ./target/release/decider-test "$WASM" "$yaml"
-            else
-              echo "no decider-test fixture for $alias ($yaml not found); skipping"
-            fi
-          done
+        run: mise run github-actions:decider-test-suites
 
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime

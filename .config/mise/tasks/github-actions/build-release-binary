@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Build the acp-nats-stdio release binary for TARGET, via cross when USE_CROSS=true"
+set -euo pipefail
+
+: "${USE_CROSS:?USE_CROSS is required}"
+: "${TARGET:?TARGET is required}"
+
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+cd "$ROOT/rsworkspace"
+
+if [[ "$USE_CROSS" == "true" ]]; then
+    cross build --release --target "$TARGET" -p acp-nats-stdio
+else
+    cargo build --release --target "$TARGET" -p acp-nats-stdio
+fi

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Run wasm decider conformance: sim schedules suite, macro compile-fail tests, and every decider-test YAML fixture"
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+cd "$ROOT/rsworkspace"
+
+cargo test -p trogon-decider-sim --test schedules --features test-support
+cargo test -p trogon-decider-guest-macros --test compile_fail
+cargo build -p trogon-decider-test --release
+
+shopt -s nullglob
+for wasm in dist/decider/*.wasm; do
+    alias="$(basename "$wasm" .wasm)"
+    yaml="cli/trogon-decider-test/${alias}.yaml"
+    if [[ -f "$yaml" ]]; then
+        ./target/release/decider-test "$wasm" "$yaml"
+    else
+        echo "no decider-test fixture for $alias ($yaml not found); skipping"
+    fi
+done
