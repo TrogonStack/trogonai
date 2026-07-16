@@ -76,13 +76,9 @@ pub enum BridgeError {
     /// `Decider::evolve` failed while folding a decoded event into state.
     #[error("failed to evolve state: {0}")]
     Evolve(#[source] Box<dyn std::error::Error>),
-    /// A business-rule rejection raised by `decide`, carrying the decider's own
-    /// `decide_error_code`.
+    /// A business-rule rejection raised by `decide`.
     #[error("{source}")]
     Rejected {
-        /// The decider's own stable rejection code for this business error, used verbatim as
-        /// [`BridgeError::code`].
-        code: String,
         /// The original error returned by `decide`.
         #[source]
         source: Box<dyn std::error::Error>,
@@ -101,7 +97,7 @@ impl BridgeError {
             Self::UnknownCommandType { .. } | Self::CommandDecode(_) | Self::CommandConvert(_) => "invalid-command",
             Self::EventDecode(_) => "decode-failed",
             Self::Evolve(_) => "evolve-failed",
-            Self::Rejected { code, .. } => code,
+            Self::Rejected { .. } => "rejected",
             Self::EventEncode(_) | Self::EventTypeResolve(_) => "encode-failed",
         }
     }
@@ -221,13 +217,9 @@ where
     C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static>,
 {
     match failure {
-        DecisionFailure::Decide(source) => {
-            let code = C::decide_error_code(&source).to_string();
-            BridgeError::Rejected {
-                code,
-                source: Box::new(source),
-            }
-        }
+        DecisionFailure::Decide(source) => BridgeError::Rejected {
+            source: Box::new(source),
+        },
         DecisionFailure::Evolve(source) => BridgeError::Evolve(Box::new(source)),
     }
 }

@@ -28,7 +28,6 @@ pub trait Decider: Sized {
     fn initial_state() -> Self::State;
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
-    fn decide_error_code(error: &Self::DecideError) -> &str { "rejected" }
 }
 ```
 

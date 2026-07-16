@@ -114,13 +114,6 @@ impl Decider for OpenAndFund {
             })
             .into()
     }
-
-    fn decide_error_code(error: &FixtureDecideError) -> &str {
-        match error {
-            FixtureDecideError::AlreadyOpen => "already-open",
-            FixtureDecideError::NotOpen => "not-open",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,13 +236,13 @@ fn act_rejection_matches_native_evaluation() {
     let bridge_error =
         decide_command::<OpenAndFund, WireError, WireEvent>(&command, &state).expect_err("first step should reject");
     assert_eq!(bridge_error.kind, WireErrorKind::Rejected);
-    assert_eq!(bridge_error.code, "already-open");
+    assert_eq!(bridge_error.code, "rejected");
 
     let native_failure =
         evaluate_decision::<OpenAndFund>(state, &command).expect_err("first step should reject natively");
     match native_failure {
         trogon_decider::DecisionFailure::Decide(error) => {
-            assert_eq!(OpenAndFund::decide_error_code(&error), "already-open");
+            assert_eq!(error, FixtureDecideError::AlreadyOpen);
         }
         trogon_decider::DecisionFailure::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
     }

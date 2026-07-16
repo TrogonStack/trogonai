@@ -26,15 +26,14 @@ pub trait Decider: Sized {
     fn initial_state() -> Self::State;
     fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
-    fn decide_error_code(error: &Self::DecideError) -> &str { "rejected" }
 }
 ```
 
 `initial_state` seeds state with no events applied. `evolve` folds one stored event into
 state and is the only place state changes. `decide` evaluates a command against the current
-state and returns a `Decision`, never mutating anything itself. `decide_error_code`
-classifies a rejection into a stable, machine-readable code; it defaults to `"rejected"` and
-is the value the WASM bridge surfaces as the WIT `domain-error`'s `code` field.
+state and returns a `Decision`, never mutating anything itself. When a rejection crosses the
+WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
+`domain-error` and carries the typed error's causal chain in its `details` pairs.
 
 `WRITE_PRECONDITION` (`crates/trogon-decider/src/write_precondition.rs`) is the optional
 concurrency guard applied when the decided events are appended:

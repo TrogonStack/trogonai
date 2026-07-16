@@ -357,14 +357,13 @@ where
 
 /// A completed error expectation.
 ///
-/// The value records the stream id, prior history, decision error, and stable wire
-/// code (from [`Decider::decide_error_code`]) of one completed [`TestCase`].
+/// The value records the stream id, prior history, and decision error of one
+/// completed [`TestCase`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThenError<Event, Error> {
     stream_id: String,
     given: History<Event>,
     error: Error,
-    code: String,
 }
 
 #[doc(hidden)]
@@ -394,87 +393,6 @@ impl<Event, Error> ThenError<Event, Error> {
     /// Error returned by the command under test.
     pub fn error(&self) -> &Error {
         &self.error
-    }
-
-    /// Stable wire code for [`error`](Self::error), from [`Decider::decide_error_code`].
-    pub fn code(&self) -> &str {
-        &self.code
-    }
-
-    /// Asserts the decision error's stable wire code from [`Decider::decide_error_code`].
-    ///
-    /// [`TestCase::then_error`] already pins the exact `DecideError` variant; this
-    /// combinator additionally pins the string code the WASM bridge surfaces for that
-    /// variant, so a code rename (without a matching variant rename) fails the test.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use trogon_decider::{Decider, Decision};
-    /// # use trogon_decider::testing::TestCase;
-    /// #
-    /// # #[derive(Debug, Clone, PartialEq, Eq)]
-    /// # enum AccountState {
-    /// #     Missing,
-    /// #     Open,
-    /// # }
-    /// #
-    /// # #[derive(Debug, Clone, PartialEq, Eq)]
-    /// # enum AccountEvent {
-    /// #     Opened,
-    /// # }
-    /// #
-    /// # #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-    /// # enum AccountError {
-    /// #     #[error("{self:?}")]
-    /// #     AlreadyOpen,
-    /// # }
-    /// #
-    /// # #[derive(Debug, Clone, PartialEq, Eq)]
-    /// # struct OpenAccount {
-    /// #     account_id: &'static str,
-    /// # }
-    /// #
-    /// # impl Decider for OpenAccount {
-    /// #     type StreamId = str;
-    /// #     type State = AccountState;
-    /// #     type Event = AccountEvent;
-    /// #     type DecideError = AccountError;
-    /// #     type EvolveError = AccountError;
-    /// #
-    /// #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
-    /// #     fn initial_state() -> Self::State { AccountState::Missing }
-    /// #     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-    /// #         match event {
-    /// #             AccountEvent::Opened => Ok(AccountState::Open),
-    /// #         }
-    /// #     }
-    /// #     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
-    /// #         match state {
-    /// #             AccountState::Missing => Ok(Decision::event(AccountEvent::Opened)),
-    /// #             AccountState::Open => Err(AccountError::AlreadyOpen),
-    /// #         }
-    /// #     }
-    /// #     fn decide_error_code(error: &Self::DecideError) -> &str {
-    /// #         match error {
-    /// #             AccountError::AlreadyOpen => "already-open",
-    /// #         }
-    /// #     }
-    /// # }
-    /// #
-    /// TestCase::<OpenAccount>::new()
-    ///     .given([AccountEvent::Opened])
-    ///     .when(OpenAccount { account_id: "account-1" })
-    ///     .then_error(AccountError::AlreadyOpen)
-    ///     .then_error_code("already-open");
-    /// ```
-    pub fn then_error_code(self, expected: &str) -> Self {
-        assert_eq!(
-            self.code, expected,
-            "then_error_code(...) expected decide_error_code {expected:?}, but got {:?}",
-            self.code,
-        );
-        self
     }
 }
 
@@ -756,13 +674,10 @@ where
             ),
         }
 
-        let code = C::decide_error_code(&expected_error).to_string();
-
         ThenError {
             stream_id: command.stream_id().to_string(),
             given: history,
             error: expected_error,
-            code,
         }
     }
 }

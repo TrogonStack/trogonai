@@ -164,14 +164,6 @@ impl Decider for TestCommand {
                 .into(),
         }
     }
-
-    fn decide_error_code(error: &Self::DecideError) -> &str {
-        match error {
-            TestCommandError::AlreadyRegistered { .. } => "already-registered",
-            TestCommandError::JobNotFound { .. } => "job-not-found",
-            TestCommandError::AlreadyDisabled { .. } => "already-disabled",
-        }
-    }
 }
 
 #[test]
@@ -565,31 +557,6 @@ fn then_state_mismatch_panics() {
             id: "alpha".to_string(),
         }])
         .then_state(TestState::Missing);
-}
-
-#[test]
-fn then_error_code_exposes_and_pins_the_wire_code() {
-    let error = TestCase::<TestCommand>::new()
-        .given_no_history()
-        .when(TestCommand::remove("alpha"))
-        .then_error(TestCommandError::JobNotFound {
-            id: "alpha".to_string(),
-        })
-        .then_error_code("job-not-found");
-
-    assert_eq!(error.code(), "job-not-found");
-}
-
-#[test]
-#[should_panic(expected = "then_error_code(...) expected decide_error_code")]
-fn then_error_code_mismatch_panics() {
-    TestCase::<TestCommand>::new()
-        .given_no_history()
-        .when(TestCommand::remove("alpha"))
-        .then_error(TestCommandError::JobNotFound {
-            id: "alpha".to_string(),
-        })
-        .then_error_code("wrong-code");
 }
 
 #[test]
