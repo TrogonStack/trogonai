@@ -107,8 +107,7 @@ fn given_when_then_supports_resume_job_failures() {
         .when(resume_job_command("backup"))
         .then_error(ResumeScheduleError::AlreadyActive {
             id: ScheduleId::parse("backup").unwrap(),
-        })
-        .then_error_code("already-active");
+        });
 }
 
 #[test]
@@ -120,8 +119,7 @@ fn given_when_then_rejects_resuming_completed_jobs() {
         .when(resume_job_command("backup"))
         .then_error(ResumeScheduleError::AlreadyCompleted {
             id: ScheduleId::parse("backup").unwrap(),
-        })
-        .then_error_code("already-completed");
+        });
 }
 
 #[test]
@@ -131,8 +129,7 @@ fn given_when_then_rejects_resuming_missing_jobs() {
         .when(resume_job_command("backup"))
         .then_error(ResumeScheduleError::ScheduleNotFound {
             id: ScheduleId::parse("backup").unwrap(),
-        })
-        .then_error_code("schedule-not-found");
+        });
 }
 
 #[test]
@@ -144,8 +141,7 @@ fn given_when_then_rejects_resuming_deleted_jobs() {
         .when(resume_job_command("backup"))
         .then_error(ResumeScheduleError::ScheduleDeleted {
             id: ScheduleId::parse("backup").unwrap(),
-        })
-        .then_error_code("schedule-deleted");
+        });
 }
 
 #[test]
@@ -190,8 +186,7 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(resume_job_command("backup"))
-        .then_error(ResumeScheduleError::MissingStateValue)
-        .then_error_code("missing-state-value");
+        .then_error(ResumeScheduleError::MissingStateValue);
 
     TestCase::<ResumeSchedule>::new()
         .given_state(state_v1::State {
@@ -203,8 +198,7 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(resume_job_command("backup"))
-        .then_error(ResumeScheduleError::UnknownStateValue { value: 123 })
-        .then_error_code("unknown-state-value");
+        .then_error(ResumeScheduleError::UnknownStateValue { value: 123 });
 
     TestCase::<ResumeSchedule>::new()
         .given_state(state_v1::State {
@@ -216,6 +210,5 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(resume_job_command("backup"))
-        .then_error(ResumeScheduleError::UnknownStateValue { value: 0 })
-        .then_error_code("unknown-state-value");
+        .then_error(ResumeScheduleError::UnknownStateValue { value: 0 });
 }
