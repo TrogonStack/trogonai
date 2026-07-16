@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-13
 ---
 
-# ADR 0024: Agent Platform Stream Topology
+# ADR#0024: Agent Platform Stream Topology
 
 ## Context
 
@@ -55,7 +55,7 @@ activation.
 Designing that loop surfaced two layering rules, recorded in the decision
 record: deciders know principal identity but never principal kind
 (authentication owns that ontology;
-[ADR 0017](./0017-aauth-agent-authentication.md)), and wire schemas avoid
+[ADR#0017](./0017-aauth-agent-authentication.md)), and wire schemas avoid
 booleans because their false default is fail-open. Reviewing that draft
 raised the question this ADR answers: why do a proposal and its verdict
 live in the registry record's stream?
@@ -236,12 +236,12 @@ their own streams. The judged never owns the yardstick: rubrics and bindings
 never enter the agent or proposal streams; only the verdict result lands on
 the proposal it judges.
 
-[ADR 0025](./0025-agent-definition-data-ownership.md) defines the complete
+[ADR#0025](./0025-agent-definition-data-ownership.md) defines the complete
 AgentRevision, Session, Memory, contract, and external-plane ownership
 boundaries that this topology preserves.
 
 **App-level gates, unchanged:** principal kind (human versus machine) is
-authentication context (aauth, [ADR 0017](./0017-aauth-agent-authentication.md))
+authentication context (aauth, [ADR#0017](./0017-aauth-agent-authentication.md))
 enforced at command dispatch.
 Charter-class activation requiring a human and the human-only policy
 mutations remain dispatch preconditions; deciders treat principals as opaque

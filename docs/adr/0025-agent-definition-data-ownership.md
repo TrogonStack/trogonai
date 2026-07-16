@@ -5,18 +5,18 @@ status: draft
 date: 2026-07-13
 ---
 
-# ADR 0025: Agent Definition Data Ownership
+# ADR#0025: Agent Definition Data Ownership
 
 ## Context
 
-[ADR 0024](./0024-agent-platform-stream-topology.md) separates the agent
+[ADR#0024](./0024-agent-platform-stream-topology.md) separates the agent
 registry record from the proposal workflow. Activation mints an immutable
 revision, sessions pin a revision, and rejected or withdrawn proposals never
 enter the registry history. That topology deliberately does not answer the
 next question: what data is part of the agent, what data is part of an
 activated revision, and what merely influences one execution?
 
-[ADR 0024](./0024-agent-platform-stream-topology.md) and this decision form
+[ADR#0024](./0024-agent-platform-stream-topology.md) and this decision form
 one prerequisite architecture boundary for the agent lifecycle
 implementation. Neither decision is sufficient without the other.
 
@@ -752,7 +752,7 @@ AgentRevision. A stale Proposal must be rebased, differenced, digested, and
 verified again.
 
 Using the illustrative names from
-[ADR 0024](./0024-agent-platform-stream-topology.md), the lifecycle contracts
+[ADR#0024](./0024-agent-platform-stream-topology.md), the lifecycle contracts
 preserve the model:
 
 - AgentProvisioned records Agent facts and the complete immutable reference
@@ -893,7 +893,7 @@ The following data never enters a BehaviorBundle:
 
 - grants, access shares, credential bindings, secret references, and secret
   material, consistent with
-  [ADR 0023](./0023-secret-management-and-key-custody-direction.md);
+  [ADR#0023](./0023-secret-management-and-key-custody-direction.md);
 - budget, token, turn, concurrency, and delegation ceilings;
 - rubrics, evaluation bindings, verdict policy, and outcome scores;
 - schedules, triggers, channel bindings, delivery destinations, and routing
@@ -908,7 +908,7 @@ A BehaviorBundle declares what it needs. External planes decide what it may
 use, what work it receives, how it is judged, and what happened. Changes on
 those planes do not mint agent revisions. If observed evidence justifies a
 behavior change, a curator turns that evidence into a Proposal through the
-[ADR 0024](./0024-agent-platform-stream-topology.md) workflow.
+[ADR#0024](./0024-agent-platform-stream-topology.md) workflow.
 
 Definitions pin; authorization never pins. Grants and revocations are
 evaluated live at each protected action. Credential rotation remains a live
