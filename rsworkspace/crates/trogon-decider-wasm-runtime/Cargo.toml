@@ -11,11 +11,13 @@ publish = false
 workspace = true
 
 [dependencies]
+opentelemetry = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
+trogon-semconv = { workspace = true }
 trogon-std = { workspace = true, features = ["uuid"] }
 wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "pooling-allocator", "runtime", "cranelift"] }
 

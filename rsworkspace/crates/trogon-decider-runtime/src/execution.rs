@@ -22,17 +22,80 @@ use crate::{
     StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
+use trogon_semconv::{attribute, metric, span};
 use trogon_std::{NowV7, UuidV7Generator};
+
+use opentelemetry::metrics::Counter;
+use opentelemetry::{KeyValue, global};
+use tracing::Instrument;
 
 use std::{
     borrow::Borrow,
     future::Future,
     num::NonZeroU64,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicUsize, Ordering},
     },
 };
+
+const METER_NAME: &str = "trogon-decider-runtime";
+
+/// Counters recorded for command execution's replay, snapshot read, and
+/// snapshot write phases.
+struct ExecutionMetrics {
+    replay_events: Counter<u64>,
+    snapshot_reads: Counter<u64>,
+    snapshot_writes: Counter<u64>,
+}
+
+impl ExecutionMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            replay_events: metric::build_decider_replay_events(&meter),
+            snapshot_reads: metric::build_decider_snapshot_reads(&meter),
+            snapshot_writes: metric::build_decider_snapshot_writes(&meter),
+        }
+    }
+}
+
+static METRICS: OnceLock<ExecutionMetrics> = OnceLock::new();
+
+fn metrics() -> &'static ExecutionMetrics {
+    METRICS.get_or_init(ExecutionMetrics::new)
+}
+
+fn write_precondition_attribute(precondition: StreamWritePrecondition) -> attribute::WritePrecondition {
+    match precondition {
+        StreamWritePrecondition::Any => attribute::WritePrecondition::Any,
+        StreamWritePrecondition::StreamExists => attribute::WritePrecondition::StreamExists,
+        StreamWritePrecondition::NoStream => attribute::WritePrecondition::NoStream,
+        StreamWritePrecondition::At(_) => attribute::WritePrecondition::At,
+    }
+}
+
+fn execute_command_write_precondition<C: Decider>(
+    configured: Option<StreamWritePrecondition>,
+) -> Option<StreamWritePrecondition> {
+    C::WRITE_PRECONDITION.map(StreamWritePrecondition::from).or(configured)
+}
+
+fn decision_outcome_for_error<D, EV, RS, RD, A, ET, EE, DE>(
+    error: &CommandError<D, EV, RS, RD, A, ET, EE, DE>,
+) -> attribute::DecisionOutcome {
+    match error {
+        CommandError::Decide(_) => attribute::DecisionOutcome::Rejected,
+        _ => attribute::DecisionOutcome::Faulted,
+    }
+}
+
+fn record_snapshot_read_outcome(span: &tracing::Span, outcome: attribute::SnapshotOutcome) {
+    span.record(attribute::SNAPSHOT_OUTCOME, outcome.as_str());
+    metrics()
+        .snapshot_reads
+        .add(1, &[KeyValue::new(attribute::SNAPSHOT_OUTCOME, outcome.as_str())]);
+}
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
 type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
@@ -799,7 +862,32 @@ where
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
     pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
+        let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
+        let span = tracing::info_span!(
+            span::DECIDER_EXECUTE_COMMAND,
+            stream_id = tracing::field::Empty,
+            write_precondition = tracing::field::Empty,
+            decision_outcome = tracing::field::Empty,
+        );
+        if let Some(write_precondition) = write_precondition {
+            span.record(
+                attribute::WRITE_PRECONDITION,
+                write_precondition_attribute(write_precondition).as_str(),
+            );
+        }
+
+        let result = self.execute_inner().instrument(span.clone()).await;
+        let decision_outcome = match &result {
+            Ok(_) => attribute::DecisionOutcome::Decided,
+            Err(error) => decision_outcome_for_error(error),
+        };
+        span.record(attribute::DECISION_OUTCOME, decision_outcome.as_str());
+        result
+    }
+
+    async fn execute_inner(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
+        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
         if has_no_stream_write_precondition::<C>() {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -819,6 +907,7 @@ where
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
+        metrics().replay_events.add(stream_read.events.len() as u64, &[]);
         let state = evolve_state_from_stream_events::<C>(C::initial_state(), &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
 
@@ -850,7 +939,32 @@ where
     C::State: SnapshotType,
 {
     pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
+        let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
+        let span = tracing::info_span!(
+            span::DECIDER_EXECUTE_COMMAND,
+            stream_id = tracing::field::Empty,
+            write_precondition = tracing::field::Empty,
+            decision_outcome = tracing::field::Empty,
+        );
+        if let Some(write_precondition) = write_precondition {
+            span.record(
+                attribute::WRITE_PRECONDITION,
+                write_precondition_attribute(write_precondition).as_str(),
+            );
+        }
+
+        let result = self.execute_inner().instrument(span.clone()).await;
+        let decision_outcome = match &result {
+            Ok(_) => attribute::DecisionOutcome::Decided,
+            Err(error) => decision_outcome_for_error(error),
+        };
+        span.record(attribute::DECISION_OUTCOME, decision_outcome.as_str());
+        result
+    }
+
+    async fn execute_inner(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
+        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
         if has_no_stream_write_precondition::<C>() {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -874,20 +988,33 @@ where
             });
         }
 
+        let stream_id_display = stream_id.as_ref().to_string();
+        let read_snapshot_span = tracing::info_span!(
+            span::DECIDER_READ_SNAPSHOT,
+            stream_id = %stream_id_display,
+            snapshot_outcome = tracing::field::Empty,
+        );
+
         let mut discarded_bad_snapshot = false;
-        let (mut snapshot_position, mut state) = match self
+        let (mut snapshot_position, mut state, mut snapshot_outcome) = match self
             .snapshots
             .snapshot_store
             .read_snapshot(ReadSnapshotRequest { snapshot_id: stream_id })
+            .instrument(read_snapshot_span.clone())
             .await
         {
             Ok(response) => {
                 let snapshot = response.snapshot;
                 let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
+                let outcome = if snapshot_position.is_some() {
+                    attribute::SnapshotOutcome::Hit
+                } else {
+                    attribute::SnapshotOutcome::Miss
+                };
                 let state = snapshot
                     .map(|snapshot| snapshot.payload)
                     .unwrap_or_else(C::initial_state);
-                (snapshot_position, state)
+                (snapshot_position, state, outcome)
             }
             Err(error) => {
                 let decision = self
@@ -898,10 +1025,17 @@ where
                         failure: SnapshotFailure::ReadFailed(&error),
                     });
                 match decision {
-                    SnapshotFailureDecision::Fail => return Err(CommandError::ReadSnapshot(error)),
+                    SnapshotFailureDecision::Fail => {
+                        record_snapshot_read_outcome(&read_snapshot_span, attribute::SnapshotOutcome::Failed);
+                        return Err(CommandError::ReadSnapshot(error));
+                    }
                     SnapshotFailureDecision::DiscardAndReplay => {
                         discarded_bad_snapshot = true;
-                        (None, C::initial_state())
+                        (
+                            None,
+                            C::initial_state(),
+                            attribute::SnapshotOutcome::DiscardedReadFailure,
+                        )
                     }
                 }
             }
@@ -930,11 +1064,15 @@ where
                     failure: SnapshotFailure::AheadOfStream(ahead_of_stream),
                 });
             match decision {
-                SnapshotFailureDecision::Fail => return Err(CommandError::SnapshotAheadOfStream(ahead_of_stream)),
+                SnapshotFailureDecision::Fail => {
+                    record_snapshot_read_outcome(&read_snapshot_span, attribute::SnapshotOutcome::Failed);
+                    return Err(CommandError::SnapshotAheadOfStream(ahead_of_stream));
+                }
                 SnapshotFailureDecision::DiscardAndReplay => {
                     discarded_bad_snapshot = true;
                     snapshot_position = None;
                     state = C::initial_state();
+                    snapshot_outcome = attribute::SnapshotOutcome::DiscardedAheadOfStream;
 
                     let replay = self
                         .event_store
@@ -950,9 +1088,12 @@ where
             }
         }
 
+        record_snapshot_read_outcome(&read_snapshot_span, snapshot_outcome);
+
         let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
         let replayed_event_count = stream_events.len() as u64;
+        metrics().replay_events.add(replayed_event_count, &[]);
 
         if discarded_bad_snapshot {
             // The discarded snapshot is still sitting in the store at this
@@ -1063,13 +1204,24 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     let stream_id = stream_id.to_owned();
 
     schedule_snapshot_task.schedule(async move {
-        if let Err(source) = snapshot_store
+        let span = tracing::info_span!(
+            span::DECIDER_WRITE_SNAPSHOT,
+            stream_id = %stream_id_for_log,
+            snapshot_write_success = tracing::field::Empty,
+        );
+        let result = snapshot_store
             .write_snapshot(WriteSnapshotRequest {
                 snapshot_id: stream_id.borrow(),
                 snapshot,
             })
-            .await
-        {
+            .instrument(span.clone())
+            .await;
+        let success = result.is_ok();
+        span.record(attribute::SNAPSHOT_WRITE_SUCCESS, success);
+        metrics()
+            .snapshot_writes
+            .add(1, &[KeyValue::new(attribute::SNAPSHOT_WRITE_SUCCESS, success)]);
+        if let Err(source) = result {
             tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
         }
     });

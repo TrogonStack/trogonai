@@ -8,6 +8,9 @@
 use async_nats::jetstream::kv;
 use bytes::Bytes;
 use futures::StreamExt;
+use opentelemetry::global;
+use opentelemetry::metrics::Counter;
+use std::sync::OnceLock;
 use std::{borrow::Cow, collections::BTreeMap, convert::Infallible};
 use trogon_decider_runtime::StreamPosition;
 use trogon_decider_runtime::snapshot::{
@@ -18,6 +21,55 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry,
     JetStreamKvGet, JetStreamKvKeys,
 };
+use trogon_semconv::metric;
+
+const METER_NAME: &str = "trogon-decider-nats";
+
+struct SnapshotStoreMetrics {
+    kv_read_failures: Counter<u64>,
+    kv_write_failures: Counter<u64>,
+}
+
+impl SnapshotStoreMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            kv_read_failures: metric::build_decider_snapshot_kv_read_failures(&meter),
+            kv_write_failures: metric::build_decider_snapshot_kv_write_failures(&meter),
+        }
+    }
+}
+
+static METRICS: OnceLock<SnapshotStoreMetrics> = OnceLock::new();
+
+fn metrics() -> &'static SnapshotStoreMetrics {
+    METRICS.get_or_init(SnapshotStoreMetrics::new)
+}
+
+fn record_kv_failure(error: &SnapshotKvError) {
+    match error {
+        SnapshotKvError::ListSnapshotKeys { .. }
+        | SnapshotKvError::ReadSnapshotKey { .. }
+        | SnapshotKvError::ReadSnapshotValue { .. }
+        | SnapshotKvError::ReadSnapshotEntry { .. }
+        | SnapshotKvError::ReadCheckpointEntry { .. }
+        | SnapshotKvError::ReadEntryForUpdate { .. }
+        | SnapshotKvError::ReadEntryForSnapshotUpdate { .. }
+        | SnapshotKvError::ReadEntryForDelete { .. } => {
+            metrics().kv_read_failures.add(1, &[]);
+        }
+        SnapshotKvError::AdvanceCheckpoint { .. }
+        | SnapshotKvError::CreateCheckpoint { .. }
+        | SnapshotKvError::UpdateEntry { .. }
+        | SnapshotKvError::CreateEntry { .. }
+        | SnapshotKvError::UpdateSnapshotEntry { .. }
+        | SnapshotKvError::CreateSnapshotEntry { .. }
+        | SnapshotKvError::DeleteEntry { .. } => {
+            metrics().kv_write_failures.add(1, &[]);
+        }
+        SnapshotKvError::DecodeCheckpoint { .. } => {}
+    }
+}
 
 /// Bound covering all KV bucket operations used by snapshot helpers.
 pub trait SnapshotKvBucket:
@@ -246,6 +298,7 @@ impl<T> SnapshotChange<T> {
 
 impl<PayloadError, SnapshotTypeError> From<SnapshotKvError> for SnapshotStoreError<PayloadError, SnapshotTypeError> {
     fn from(source: SnapshotKvError) -> Self {
+        record_kv_failure(&source);
         Self::Kv(source)
     }
 }

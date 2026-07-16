@@ -10,16 +10,44 @@
 //! retried here by recreating the consumer from the last successfully
 //! processed sequence, bounded by [`ReplayRetryPolicy`].
 
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{DeliverPolicy, ReplayPolicy, StreamErrorKind};
 use async_nats::jetstream::stream::ConsumerErrorKind;
 use futures::StreamExt;
+use opentelemetry::global;
+use opentelemetry::metrics::{Counter, Histogram};
+use tracing::Instrument;
 use trogon_decider_runtime::StreamEvent;
+use trogon_semconv::{metric, span};
 
 use super::{ReadStreamError, StreamMessage, StreamStoreError, record_stream_message};
+
+const METER_NAME: &str = "trogon-decider-nats";
+
+struct ReplayMetrics {
+    replay_duration: Histogram<f64>,
+    replay_retries: Counter<u64>,
+}
+
+impl ReplayMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            replay_duration: metric::build_decider_replay_duration(&meter),
+            replay_retries: metric::build_decider_replay_retries(&meter),
+        }
+    }
+}
+
+static METRICS: OnceLock<ReplayMetrics> = OnceLock::new();
+
+fn metrics() -> &'static ReplayMetrics {
+    METRICS.get_or_init(ReplayMetrics::new)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ReplayRetryPolicy {
@@ -150,44 +178,59 @@ pub(super) async fn replay_ordered_range(
     retry_policy: ReplayRetryPolicy,
     mut stream_id: impl FnMut(&StreamMessage) -> String,
 ) -> Result<Vec<StreamEvent>, StreamStoreError> {
-    if is_empty_replay_range(from_sequence, to_sequence) {
-        return Ok(Vec::new());
-    }
+    let span = tracing::info_span!(
+        span::DECIDER_REPLAY_STREAM,
+        otel.kind = "client",
+        stream_id = filter_subject.unwrap_or_default(),
+    );
+    let start = Instant::now();
 
-    let mut events = Vec::new();
-    let mut next_sequence = from_sequence;
-    let mut attempts_used = 0u32;
-
-    loop {
-        let Err(error) = replay_attempt(
-            stream,
-            filter_subject,
-            next_sequence,
-            to_sequence,
-            &mut stream_id,
-            &mut events,
-        )
-        .await
-        else {
-            return Ok(events);
-        };
-
-        next_sequence = events
-            .last()
-            .map_or(from_sequence, |event| event.stream_position.as_u64().saturating_add(1));
-
-        if !is_transient_replay_error(&error) {
-            return Err(error);
+    let result = async move {
+        if is_empty_replay_range(from_sequence, to_sequence) {
+            return Ok(Vec::new());
         }
 
-        match retry_policy.decide(attempts_used) {
-            RetryDecision::Retry { delay } => {
-                attempts_used = attempts_used.saturating_add(1);
-                tokio::time::sleep(delay).await;
+        let mut events = Vec::new();
+        let mut next_sequence = from_sequence;
+        let mut attempts_used = 0u32;
+
+        loop {
+            let Err(error) = replay_attempt(
+                stream,
+                filter_subject,
+                next_sequence,
+                to_sequence,
+                &mut stream_id,
+                &mut events,
+            )
+            .await
+            else {
+                return Ok(events);
+            };
+
+            next_sequence = events
+                .last()
+                .map_or(from_sequence, |event| event.stream_position.as_u64().saturating_add(1));
+
+            if !is_transient_replay_error(&error) {
+                return Err(error);
             }
-            RetryDecision::GiveUp => return Err(error),
+
+            match retry_policy.decide(attempts_used) {
+                RetryDecision::Retry { delay } => {
+                    attempts_used = attempts_used.saturating_add(1);
+                    metrics().replay_retries.add(1, &[]);
+                    tokio::time::sleep(delay).await;
+                }
+                RetryDecision::GiveUp => return Err(error),
+            }
         }
     }
+    .instrument(span)
+    .await;
+
+    metrics().replay_duration.record(start.elapsed().as_secs_f64(), &[]);
+    result
 }
 
 #[cfg(test)]

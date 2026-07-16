@@ -31,6 +31,11 @@
 //! calls onto a blocking thread pool via [`spawn_guest`], resuming the async
 //! task only for real I/O (`StreamRead`, `StreamAppend`, `SnapshotRead`).
 
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::{KeyValue, global};
 use thiserror::Error;
 use trogon_decider_runtime::{
     AppendStreamRequest, Event, EventId, Headers, ReadAfterOverflow, ReadFrom, ReadSnapshotRequest, ReadStreamRequest,
@@ -38,10 +43,99 @@ use trogon_decider_runtime::{
     StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
 };
 use trogon_decider_wit::host::{self, AnyEnvelope, CommandEnvelope, DecideError};
+use trogon_semconv::{attribute, metric, span};
 use trogon_std::NowV7;
 use wasmtime::Store;
 
 use crate::{DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
+
+const METER_NAME: &str = "trogon-decider-wasm-runtime";
+
+struct WasmExecutionMetrics {
+    execution_duration: Histogram<f64>,
+    fuel_consumed: Histogram<u64>,
+    traps: Counter<u64>,
+}
+
+impl WasmExecutionMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            execution_duration: metric::build_decider_wasm_execution_duration(&meter),
+            fuel_consumed: metric::build_decider_wasm_fuel_consumed(&meter),
+            traps: metric::build_decider_wasm_traps(&meter),
+        }
+    }
+}
+
+static METRICS: OnceLock<WasmExecutionMetrics> = OnceLock::new();
+
+fn metrics() -> &'static WasmExecutionMetrics {
+    METRICS.get_or_init(WasmExecutionMetrics::new)
+}
+
+/// Module, version, and command type shared by every guest phase span and
+/// metric recorded for one command execution.
+#[derive(Debug, Clone)]
+struct GuestPhaseContext {
+    module_name: String,
+    module_version: String,
+    command_type: String,
+}
+
+impl GuestPhaseContext {
+    fn new(module: &WasmDeciderModule, command: &CommandEnvelope) -> Self {
+        Self {
+            module_name: module.name().to_string(),
+            module_version: module.version().to_string(),
+            command_type: command.type_.clone(),
+        }
+    }
+}
+
+fn phase_attributes(context: &GuestPhaseContext, phase: attribute::GuestPhase) -> [KeyValue; 4] {
+    [
+        KeyValue::new(attribute::MODULE_NAME, context.module_name.clone()),
+        KeyValue::new(attribute::MODULE_VERSION, context.module_version.clone()),
+        KeyValue::new(attribute::COMMAND_TYPE, context.command_type.clone()),
+        KeyValue::new(attribute::GUEST_PHASE, phase.as_str()),
+    ]
+}
+
+fn record_phase_metrics(
+    context: &GuestPhaseContext,
+    phase: attribute::GuestPhase,
+    duration: Duration,
+    fuel_consumed: u64,
+) {
+    let attributes = phase_attributes(context, phase);
+    metrics().execution_duration.record(duration.as_secs_f64(), &attributes);
+    metrics().fuel_consumed.record(fuel_consumed, &attributes);
+}
+
+fn record_phase_trap(
+    context: &GuestPhaseContext,
+    phase: attribute::GuestPhase,
+    classification: attribute::TrapClassification,
+) {
+    let mut attributes = phase_attributes(context, phase).to_vec();
+    attributes.push(KeyValue::new(attribute::TRAP_CLASSIFICATION, classification.as_str()));
+    metrics().traps.add(1, &attributes);
+}
+
+fn phase_fuel_consumed<T>(store: &Store<T>, fuel_budget: u64) -> u64 {
+    store
+        .get_fuel()
+        .map_or(fuel_budget, |remaining| fuel_budget.saturating_sub(remaining))
+}
+
+fn trap_classification(error: &wasmtime::Error) -> attribute::TrapClassification {
+    if is_epoch_deadline_exceeded(error) {
+        attribute::TrapClassification::DeadlineExceeded
+    } else {
+        attribute::TrapClassification::Trap
+    }
+}
 
 /// Result of a successful WASM command execution.
 #[derive(Debug, Clone)]
@@ -225,9 +319,10 @@ where
         let engine = self.module.engine().clone();
         let decider_pre = self.module.decider_pre().clone();
         let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
         let (mut store, bindings, stream_id) = spawn_guest(move || {
             let mut store = engine.new_store();
-            let bindings = instantiate(&mut store, &decider_pre, &engine)?;
+            let bindings = instantiate(&mut store, &decider_pre, &engine, &phase_context)?;
             let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
             Ok((store, bindings, stream_id))
         })
@@ -252,10 +347,18 @@ where
 
         let engine = self.module.engine().clone();
         let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
         let decided_envelopes = spawn_guest(move || {
-            let session = create_session(&mut store, &bindings, &engine, None)?;
-            replay_events(&mut store, &bindings, &engine, session, &replayed_envelopes)?;
-            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command)?;
+            let session = create_session(&mut store, &bindings, &engine, None, &phase_context)?;
+            replay_events(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &replayed_envelopes,
+                &phase_context,
+            )?;
+            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
             // No snapshot observes this session, so the decided events are not
             // folded back into it; folding here would only burn guest fuel.
             host::drop_session(&bindings, &mut store, session)
@@ -313,9 +416,10 @@ where
         let engine = self.module.engine().clone();
         let decider_pre = self.module.decider_pre().clone();
         let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
         let (mut store, bindings, stream_id) = spawn_guest(move || {
             let mut store = engine.new_store();
-            let bindings = instantiate(&mut store, &decider_pre, &engine)?;
+            let bindings = instantiate(&mut store, &decider_pre, &engine, &phase_context)?;
             let stream_id = call_stream_id(&mut store, &bindings, &engine, &command)?;
             Ok((store, bindings, stream_id))
         })
@@ -331,21 +435,33 @@ where
 
         let engine = self.module.engine().clone();
         let command = self.command.clone();
+        let phase_context = GuestPhaseContext::new(self.module, self.command);
         let (decided_envelopes, new_snapshot_bytes) = spawn_guest(move || {
-            let session = create_session(&mut store, &bindings, &engine, snapshot_bytes.as_deref())?;
-            replay_events(&mut store, &bindings, &engine, session, &replayed_envelopes)?;
-            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command)?;
-            fold_decided_events(&mut store, &bindings, &engine, session, &decided_envelopes)?;
-
-            engine
-                .arm_guest_call(
-                    &mut store,
-                    engine.config().fuel_per_call(),
-                    engine.config().epoch_ticks_per_call(),
-                )
-                .map_err(WasmCommandError::Trap)?;
-            let new_snapshot_bytes = host::snapshot(&bindings, &mut store, session)
-                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            let session = create_session(
+                &mut store,
+                &bindings,
+                &engine,
+                snapshot_bytes.as_deref(),
+                &phase_context,
+            )?;
+            replay_events(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &replayed_envelopes,
+                &phase_context,
+            )?;
+            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
+            fold_decided_events(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &decided_envelopes,
+                &phase_context,
+            )?;
+            let new_snapshot_bytes = take_snapshot(&mut store, &bindings, &engine, session, &phase_context)?;
             host::drop_session(&bindings, &mut store, session)
                 .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
             Ok((decided_envelopes, new_snapshot_bytes))
@@ -472,17 +588,33 @@ fn instantiate<ReadSnapshotError, ReadStreamError, AppendStreamError>(
     store: &mut Store<crate::engine::GuestState>,
     decider_pre: &host::DeciderPre<crate::engine::GuestState>,
     engine: &WasmDeciderEngine,
+    context: &GuestPhaseContext,
 ) -> Result<host::Decider, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    engine
-        .arm_guest_call(
-            store,
-            engine.config().fuel_per_call(),
-            engine.config().epoch_ticks_per_call(),
-        )
-        .map_err(WasmCommandError::Trap)?;
-    decider_pre
-        .instantiate(store)
-        .map_err(|error| map_trap(error, WasmCommandError::Instantiate))
+    let span = tracing::info_span!(
+        span::DECIDER_WASM_INSTANTIATE,
+        module_name = %context.module_name,
+        module_version = %context.module_version,
+        command_type = %context.command_type,
+        guest_phase = attribute::GuestPhase::Instantiate.as_str(),
+        trap_classification = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let fuel_budget = engine.config().fuel_per_call();
+        engine
+            .arm_guest_call(store, fuel_budget, engine.config().epoch_ticks_per_call())
+            .map_err(WasmCommandError::Trap)?;
+        let start = Instant::now();
+        let result = decider_pre.instantiate(&mut *store);
+        let duration = start.elapsed();
+        let fuel_consumed = phase_fuel_consumed(store, fuel_budget);
+        record_phase_metrics(context, attribute::GuestPhase::Instantiate, duration, fuel_consumed);
+        result.map_err(|error| {
+            let classification = trap_classification(&error);
+            span.record(attribute::TRAP_CLASSIFICATION, classification.as_str());
+            record_phase_trap(context, attribute::GuestPhase::Instantiate, classification);
+            map_trap(error, WasmCommandError::Instantiate)
+        })
+    })
 }
 
 fn call_stream_id<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
@@ -508,15 +640,33 @@ fn create_session<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     bindings: &host::Decider,
     engine: &WasmDeciderEngine,
     snapshot: Option<&[u8]>,
+    context: &GuestPhaseContext,
 ) -> Result<host::Session, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    engine
-        .arm_guest_call(
-            store,
-            engine.config().fuel_per_call(),
-            engine.config().epoch_ticks_per_call(),
-        )
-        .map_err(WasmCommandError::Trap)?;
-    host::create_session(bindings, store, snapshot).map_err(|error| map_trap(error, WasmCommandError::Trap))
+    let span = tracing::info_span!(
+        span::DECIDER_WASM_INSTANTIATE,
+        module_name = %context.module_name,
+        module_version = %context.module_version,
+        command_type = %context.command_type,
+        guest_phase = attribute::GuestPhase::Instantiate.as_str(),
+        trap_classification = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let fuel_budget = engine.config().fuel_per_call();
+        engine
+            .arm_guest_call(store, fuel_budget, engine.config().epoch_ticks_per_call())
+            .map_err(WasmCommandError::Trap)?;
+        let start = Instant::now();
+        let result = host::create_session(bindings, store, snapshot);
+        let duration = start.elapsed();
+        let fuel_consumed = phase_fuel_consumed(store, fuel_budget);
+        record_phase_metrics(context, attribute::GuestPhase::Instantiate, duration, fuel_consumed);
+        result.map_err(|error| {
+            let classification = trap_classification(&error);
+            span.record(attribute::TRAP_CLASSIFICATION, classification.as_str());
+            record_phase_trap(context, attribute::GuestPhase::Instantiate, classification);
+            map_trap(error, WasmCommandError::Trap)
+        })
+    })
 }
 
 fn replay_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
@@ -525,20 +675,43 @@ fn replay_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     engine: &WasmDeciderEngine,
     session: host::Session,
     events: &[AnyEnvelope],
+    context: &GuestPhaseContext,
 ) -> Result<(), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
     if events.is_empty() {
         return Ok(());
     }
-    engine
-        .arm_guest_call(
-            store,
-            replay_fuel(engine.config().fuel_per_call(), events.len()),
-            replay_epoch_ticks(engine.config().epoch_ticks_per_call(), events.len()),
-        )
-        .map_err(WasmCommandError::Trap)?;
-    host::evolve(bindings, store, session, events)
-        .map_err(|error| map_trap(error, WasmCommandError::Trap))?
-        .map_err(|error| WasmCommandError::Evolve(error.into()))
+    let span = tracing::info_span!(
+        span::DECIDER_WASM_REPLAY,
+        module_name = %context.module_name,
+        module_version = %context.module_version,
+        command_type = %context.command_type,
+        guest_phase = attribute::GuestPhase::Replay.as_str(),
+        trap_classification = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let fuel_budget = replay_fuel(engine.config().fuel_per_call(), events.len());
+        engine
+            .arm_guest_call(
+                store,
+                fuel_budget,
+                replay_epoch_ticks(engine.config().epoch_ticks_per_call(), events.len()),
+            )
+            .map_err(WasmCommandError::Trap)?;
+        let start = Instant::now();
+        let result = host::evolve(bindings, store, session, events);
+        let duration = start.elapsed();
+        let fuel_consumed = phase_fuel_consumed(store, fuel_budget);
+        record_phase_metrics(context, attribute::GuestPhase::Replay, duration, fuel_consumed);
+        match result {
+            Ok(inner) => inner.map_err(|error| WasmCommandError::Evolve(error.into())),
+            Err(error) => {
+                let classification = trap_classification(&error);
+                span.record(attribute::TRAP_CLASSIFICATION, classification.as_str());
+                record_phase_trap(context, attribute::GuestPhase::Replay, classification);
+                Err(map_trap(error, WasmCommandError::Trap))
+            }
+        }
+    })
 }
 
 /// Fuel budget for one batched replay `evolve` call.
@@ -568,17 +741,45 @@ fn decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     engine: &WasmDeciderEngine,
     session: host::Session,
     command: &CommandEnvelope,
+    context: &GuestPhaseContext,
 ) -> Result<Vec<AnyEnvelope>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    engine
-        .arm_guest_call(
-            store,
-            engine.config().fuel_per_call(),
-            engine.config().epoch_ticks_per_call(),
-        )
-        .map_err(WasmCommandError::Trap)?;
-    host::decide(bindings, store, session, command)
-        .map_err(|error| map_trap(error, WasmCommandError::Trap))?
-        .map_err(map_decide_error)
+    let span = tracing::info_span!(
+        span::DECIDER_WASM_DECIDE,
+        module_name = %context.module_name,
+        module_version = %context.module_version,
+        command_type = %context.command_type,
+        guest_phase = attribute::GuestPhase::Decide.as_str(),
+        decision_outcome = tracing::field::Empty,
+        trap_classification = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let fuel_budget = engine.config().fuel_per_call();
+        engine
+            .arm_guest_call(store, fuel_budget, engine.config().epoch_ticks_per_call())
+            .map_err(WasmCommandError::Trap)?;
+        let start = Instant::now();
+        let result = host::decide(bindings, store, session, command);
+        let duration = start.elapsed();
+        let fuel_consumed = phase_fuel_consumed(store, fuel_budget);
+        record_phase_metrics(context, attribute::GuestPhase::Decide, duration, fuel_consumed);
+        match result {
+            Ok(inner) => {
+                let decision_outcome = match &inner {
+                    Ok(_) => attribute::DecisionOutcome::Decided,
+                    Err(DecideError::Rejected(_)) => attribute::DecisionOutcome::Rejected,
+                    Err(DecideError::Faulted(_)) => attribute::DecisionOutcome::Faulted,
+                };
+                span.record(attribute::DECISION_OUTCOME, decision_outcome.as_str());
+                inner.map_err(map_decide_error)
+            }
+            Err(error) => {
+                let classification = trap_classification(&error);
+                span.record(attribute::TRAP_CLASSIFICATION, classification.as_str());
+                record_phase_trap(context, attribute::GuestPhase::Decide, classification);
+                Err(map_trap(error, WasmCommandError::Trap))
+            }
+        }
+    })
 }
 
 fn map_decide_error<ReadSnapshotError, ReadStreamError, AppendStreamError>(
@@ -599,8 +800,47 @@ fn fold_decided_events<T, ReadSnapshotError, ReadStreamError, AppendStreamError>
     engine: &WasmDeciderEngine,
     session: host::Session,
     decided_envelopes: &[AnyEnvelope],
+    context: &GuestPhaseContext,
 ) -> Result<(), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
-    replay_events(store, bindings, engine, session, decided_envelopes)
+    replay_events(store, bindings, engine, session, decided_envelopes, context)
+}
+
+/// Captures a snapshot of the guest session's current state.
+///
+/// Must run after [`fold_decided_events`] folds this command's own decided
+/// events back into the session; see the module-level doc comment.
+fn take_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+    context: &GuestPhaseContext,
+) -> Result<Option<Vec<u8>>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
+    let span = tracing::info_span!(
+        span::DECIDER_WASM_SNAPSHOT,
+        module_name = %context.module_name,
+        module_version = %context.module_version,
+        command_type = %context.command_type,
+        guest_phase = attribute::GuestPhase::Snapshot.as_str(),
+        trap_classification = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let fuel_budget = engine.config().fuel_per_call();
+        engine
+            .arm_guest_call(store, fuel_budget, engine.config().epoch_ticks_per_call())
+            .map_err(WasmCommandError::Trap)?;
+        let start = Instant::now();
+        let result = host::snapshot(bindings, store, session);
+        let duration = start.elapsed();
+        let fuel_consumed = phase_fuel_consumed(store, fuel_budget);
+        record_phase_metrics(context, attribute::GuestPhase::Snapshot, duration, fuel_consumed);
+        result.map_err(|error| {
+            let classification = trap_classification(&error);
+            span.record(attribute::TRAP_CLASSIFICATION, classification.as_str());
+            record_phase_trap(context, attribute::GuestPhase::Snapshot, classification);
+            map_trap(error, WasmCommandError::Trap)
+        })
+    })
 }
 
 fn to_any_envelopes(stream_events: Vec<trogon_decider_runtime::StreamEvent>) -> Vec<AnyEnvelope> {

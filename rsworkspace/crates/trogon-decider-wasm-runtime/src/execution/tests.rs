@@ -136,10 +136,16 @@ fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
 
     let engine = module.engine();
     let mut store = engine.new_store();
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    let context = GuestPhaseContext::new(&module, &command);
     let bindings = instantiate::<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(
         &mut store,
         module.decider_pre(),
         engine,
+        &context,
     )
     .expect("instantiate succeeds");
 
@@ -151,10 +157,6 @@ fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
     engine
         .arm_guest_call(&mut store, engine.config().fuel_per_call(), 0)
         .expect("arming a zero-tick deadline succeeds");
-    let command = CommandEnvelope {
-        type_: "test.v1.DoesNotMatter".to_string(),
-        payload: Vec::new(),
-    };
     let wasmtime_error =
         host::call_stream_id(&bindings, &mut store, &command).expect_err("a zero-tick deadline is already elapsed");
     let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
