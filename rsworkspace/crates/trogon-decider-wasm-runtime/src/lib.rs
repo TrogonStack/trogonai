@@ -41,6 +41,17 @@
 //! folds module identity into the snapshot id: see [`WasmSnapshotId`]. A
 //! module version bump changes the id every snapshot lookup uses, so an old
 //! snapshot is simply not found and execution falls back to a full replay.
+//!
+//! # Runtime rollout
+//!
+//! [`DeciderRegistry`] is immutable once built: swapping in a new module
+//! version means building and installing a whole new registry. Callers that
+//! need to change routes while commands are in flight, without dropping
+//! executions already dispatched against the old routes, should build a
+//! [`DeciderRegistryHandle`] instead (via [`DeciderRegistryBuilder::build_handle`]
+//! or [`DeciderRegistryHandle::from`]). See its type-level docs for the
+//! atomicity guarantee the handle provides and for what a version swap means
+//! for a stream's snapshots.
 
 mod command_spec;
 mod command_type;
@@ -54,6 +65,8 @@ mod opaque_snapshot;
 mod registry;
 mod snapshot_id;
 
+#[cfg(test)]
+mod test_doubles;
 #[cfg(test)]
 mod test_fixture;
 
@@ -72,5 +85,8 @@ pub use module::{InvalidDescriptorError, LoadWasmDeciderError, WasmDeciderModule
 pub use module_name::{ModuleName, ModuleNameError};
 pub use module_version::{ModuleVersion, ModuleVersionError};
 pub use opaque_snapshot::OpaqueSnapshotPayload;
-pub use registry::{DeciderRegistry, DeciderRegistryBuilder, RegisterModuleError, UnknownCommandTypeError};
+pub use registry::{
+    ActivatedRoute, DeciderRegistry, DeciderRegistryBuilder, DeciderRegistryHandle, RegisterModuleError, RetiredRoute,
+    RouteInfo, UnknownCommandTypeError,
+};
 pub use snapshot_id::WasmSnapshotId;

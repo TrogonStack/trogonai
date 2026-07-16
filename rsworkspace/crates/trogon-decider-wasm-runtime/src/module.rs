@@ -57,6 +57,7 @@ pub enum InvalidDescriptorError {
 /// [`DeciderPre`] for cheap per-command instantiation, and probes the
 /// guest's `descriptor()` export once so routing and validation do not need
 /// to spin up a guest session.
+#[derive(Clone)]
 pub struct WasmDeciderModule {
     engine: WasmDeciderEngine,
     decider_pre: DeciderPre<crate::engine::GuestState>,
@@ -118,6 +119,20 @@ impl WasmDeciderModule {
 
     pub(crate) fn decider_pre(&self) -> &DeciderPre<crate::engine::GuestState> {
         &self.decider_pre
+    }
+}
+
+#[cfg(test)]
+impl WasmDeciderModule {
+    /// Returns a copy of this module reporting a different declared version.
+    ///
+    /// The only compiled fixture available to this crate's tests always
+    /// reports one fixed identity, so registry and rollout tests that need a
+    /// second, distinct module version synthesize one from the same compiled
+    /// bytes rather than building a second fixture.
+    pub(crate) fn with_version(mut self, version: ModuleVersion) -> Self {
+        self.version = version;
+        self
     }
 }
 
