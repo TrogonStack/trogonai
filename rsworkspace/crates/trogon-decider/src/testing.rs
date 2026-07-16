@@ -231,17 +231,19 @@ impl<Event> Default for History<Event> {
 
 /// A completed event expectation.
 ///
-/// The value records the stream id, prior history, and events emitted by one
-/// completed [`TestCase`]. Feed [`history`](Self::history) into the next case when a
-/// test needs to model multiple commands against the same stream.
+/// The value records the stream id, prior history, events emitted by one completed
+/// [`TestCase`], and the state produced by replaying those events. Feed
+/// [`history`](Self::history) into the next case when a test needs to model multiple
+/// commands against the same stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThenEvents<Event> {
+pub struct ThenEvents<Event, State> {
     stream_id: String,
     given: History<Event>,
     then: Events<Event>,
+    resulting_state: State,
 }
 
-impl<Event> ThenEvents<Event> {
+impl<Event, State> ThenEvents<Event, State> {
     /// Stream id resolved from the command used in the test case.
     pub fn stream_id(&self) -> &str {
         &self.stream_id
@@ -256,9 +258,19 @@ impl<Event> ThenEvents<Event> {
     pub fn then_events(&self) -> &[Event] {
         self.then.as_slice()
     }
+
+    /// State produced by replaying [`then_events`](Self::then_events) on top of the
+    /// state the command decided against.
+    ///
+    /// This is the post-decision state: `decide` followed by `evolve` over every
+    /// emitted event. Use [`then_state`](Self::then_state) to assert it inline, or
+    /// this accessor to inspect it directly.
+    pub fn resulting_state(&self) -> &State {
+        &self.resulting_state
+    }
 }
 
-impl<Event> ThenEvents<Event>
+impl<Event, State> ThenEvents<Event, State>
 where
     Event: Clone,
 {
@@ -270,15 +282,89 @@ where
     }
 }
 
+impl<Event, State> ThenEvents<Event, State>
+where
+    State: PartialEq + Debug,
+{
+    /// Asserts the state produced after this command's events are replayed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use trogon_decider::{Decider, Decision};
+    /// # use trogon_decider::testing::TestCase;
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountState {
+    /// #     Missing,
+    /// #     Open,
+    /// # }
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountEvent {
+    /// #     Opened,
+    /// # }
+    /// #
+    /// # #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountError {
+    /// #     #[error("{self:?}")]
+    /// #     AlreadyOpen,
+    /// # }
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # struct OpenAccount {
+    /// #     account_id: &'static str,
+    /// # }
+    /// #
+    /// # impl Decider for OpenAccount {
+    /// #     type StreamId = str;
+    /// #     type State = AccountState;
+    /// #     type Event = AccountEvent;
+    /// #     type DecideError = AccountError;
+    /// #     type EvolveError = AccountError;
+    /// #
+    /// #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
+    /// #     fn initial_state() -> Self::State { AccountState::Missing }
+    /// #     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+    /// #         match event {
+    /// #             AccountEvent::Opened => Ok(AccountState::Open),
+    /// #         }
+    /// #     }
+    /// #     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+    /// #         match state {
+    /// #             AccountState::Missing => Ok(Decision::event(AccountEvent::Opened)),
+    /// #             AccountState::Open => Err(AccountError::AlreadyOpen),
+    /// #         }
+    /// #     }
+    /// # }
+    /// #
+    /// let opened = TestCase::<OpenAccount>::new()
+    ///     .given_no_history()
+    ///     .when(OpenAccount { account_id: "account-1" })
+    ///     .then([AccountEvent::Opened])
+    ///     .then_state(AccountState::Open);
+    ///
+    /// assert_eq!(opened.resulting_state(), &AccountState::Open);
+    /// ```
+    pub fn then_state(self, expected: State) -> Self {
+        assert_eq!(
+            self.resulting_state, expected,
+            "then_state(...) resulting state did not match expectation"
+        );
+        self
+    }
+}
+
 /// A completed error expectation.
 ///
-/// The value records the stream id, prior history, and decision error from one
-/// completed [`TestCase`].
+/// The value records the stream id, prior history, decision error, and stable wire
+/// code (from [`Decider::decide_error_code`]) of one completed [`TestCase`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThenError<Event, Error> {
     stream_id: String,
     given: History<Event>,
     error: Error,
+    code: String,
 }
 
 #[doc(hidden)]
@@ -290,7 +376,7 @@ pub enum DecisionEvaluationFailure<DecideError, EvolveError> {
 
 #[doc(hidden)]
 pub type DecisionEvaluation<C> = Result<
-    Events<<C as Decider>::Event>,
+    (Events<<C as Decider>::Event>, <C as Decider>::State),
     DecisionEvaluationFailure<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
 >;
 
@@ -308,6 +394,87 @@ impl<Event, Error> ThenError<Event, Error> {
     /// Error returned by the command under test.
     pub fn error(&self) -> &Error {
         &self.error
+    }
+
+    /// Stable wire code for [`error`](Self::error), from [`Decider::decide_error_code`].
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Asserts the decision error's stable wire code from [`Decider::decide_error_code`].
+    ///
+    /// [`TestCase::then_error`] already pins the exact `DecideError` variant; this
+    /// combinator additionally pins the string code the WASM bridge surfaces for that
+    /// variant, so a code rename (without a matching variant rename) fails the test.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use trogon_decider::{Decider, Decision};
+    /// # use trogon_decider::testing::TestCase;
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountState {
+    /// #     Missing,
+    /// #     Open,
+    /// # }
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountEvent {
+    /// #     Opened,
+    /// # }
+    /// #
+    /// # #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+    /// # enum AccountError {
+    /// #     #[error("{self:?}")]
+    /// #     AlreadyOpen,
+    /// # }
+    /// #
+    /// # #[derive(Debug, Clone, PartialEq, Eq)]
+    /// # struct OpenAccount {
+    /// #     account_id: &'static str,
+    /// # }
+    /// #
+    /// # impl Decider for OpenAccount {
+    /// #     type StreamId = str;
+    /// #     type State = AccountState;
+    /// #     type Event = AccountEvent;
+    /// #     type DecideError = AccountError;
+    /// #     type EvolveError = AccountError;
+    /// #
+    /// #     fn stream_id(&self) -> &Self::StreamId { self.account_id }
+    /// #     fn initial_state() -> Self::State { AccountState::Missing }
+    /// #     fn evolve(_state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+    /// #         match event {
+    /// #             AccountEvent::Opened => Ok(AccountState::Open),
+    /// #         }
+    /// #     }
+    /// #     fn decide(state: &Self::State, _command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+    /// #         match state {
+    /// #             AccountState::Missing => Ok(Decision::event(AccountEvent::Opened)),
+    /// #             AccountState::Open => Err(AccountError::AlreadyOpen),
+    /// #         }
+    /// #     }
+    /// #     fn decide_error_code(error: &Self::DecideError) -> &str {
+    /// #         match error {
+    /// #             AccountError::AlreadyOpen => "already-open",
+    /// #         }
+    /// #     }
+    /// # }
+    /// #
+    /// TestCase::<OpenAccount>::new()
+    ///     .given([AccountEvent::Opened])
+    ///     .when(OpenAccount { account_id: "account-1" })
+    ///     .then_error(AccountError::AlreadyOpen)
+    ///     .then_error_code("already-open");
+    /// ```
+    pub fn then_error_code(self, expected: &str) -> Self {
+        assert_eq!(
+            self.code, expected,
+            "then_error_code(...) expected decide_error_code {expected:?}, but got {:?}",
+            self.code,
+        );
+        self
     }
 }
 
@@ -582,17 +749,20 @@ where
                 "then_error(...) expected a decide error, but emitted events could not be evolved:\nexpected error = {:?}\nactual evolve error = {:?}",
                 expected_error, error,
             ),
-            Ok(events) => panic!(
+            Ok((events, _state)) => panic!(
                 "then_error(...) expected an error, but decide(...) emitted events:\nexpected error = {:?}\nactual events = {:?}",
                 expected_error,
                 events.as_slice(),
             ),
         }
 
+        let code = C::decide_error_code(&expected_error).to_string();
+
         ThenError {
             stream_id: command.stream_id().to_string(),
             given: history,
             error: expected_error,
+            code,
         }
     }
 }
@@ -626,7 +796,7 @@ where
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
-    type Output = ThenEvents<C::Event>;
+    type Output = ThenEvents<C::Event, C::State>;
 
     fn assert_matches(self, given: History<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert_events_match::<C>(
@@ -646,7 +816,7 @@ where
     C::EvolveError: Debug,
     C::StreamId: std::fmt::Display,
 {
-    type Output = ThenEvents<C::Event>;
+    type Output = ThenEvents<C::Event, C::State>;
 
     fn assert_matches(self, given: History<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert!(
@@ -666,7 +836,7 @@ where
     C::StreamId: std::fmt::Display,
     E: Into<C::Event>,
 {
-    type Output = ThenEvents<C::Event>;
+    type Output = ThenEvents<C::Event, C::State>;
 
     fn assert_matches(self, given: History<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output {
         assert!(
@@ -687,7 +857,7 @@ fn assert_events_match<C>(
     given: History<C::Event>,
     command: &C,
     actual: DecisionEvaluation<C>,
-) -> ThenEvents<C::Event>
+) -> ThenEvents<C::Event, C::State>
 where
     C: Decider,
     C::Event: Clone + PartialEq + Debug,
@@ -696,7 +866,7 @@ where
     C::StreamId: std::fmt::Display,
 {
     match actual {
-        Ok(events) => {
+        Ok((events, resulting_state)) => {
             assert_eq!(
                 events.as_slice(),
                 expected.as_slice(),
@@ -706,6 +876,7 @@ where
                 stream_id: command.stream_id().to_string(),
                 given,
                 then: events,
+                resulting_state,
             }
         }
         Err(DecisionEvaluationFailure::Decide(error)) => panic!(
@@ -723,11 +894,11 @@ fn decide_events<C>(state: C::State, command: &C) -> DecisionEvaluation<C>
 where
     C: Decider,
 {
-    let (_, events) = evaluate_decision(state, command).map_err(|failure| match failure {
+    let (state, events) = evaluate_decision(state, command).map_err(|failure| match failure {
         DecisionFailure::Decide(error) => DecisionEvaluationFailure::Decide(error),
         DecisionFailure::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
     })?;
-    Ok(events)
+    Ok((events, state))
 }
 
 fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual: &State) {
@@ -736,7 +907,10 @@ fn assert_expected_state<State>(expected: Option<StateAssertion<State>>, actual:
     }
 }
 
+mod codec;
 mod private;
+
+pub use codec::assert_round_trips;
 
 #[cfg(test)]
 mod tests;

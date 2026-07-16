@@ -94,7 +94,8 @@ fn given_when_then_supports_create_schedule_failures() {
         .when(create_schedule("backup"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("already-exists");
 }
 
 #[test]
@@ -105,7 +106,8 @@ fn replaying_lifecycle_events_rejects_existing_schedule_ids() {
         .when(create_schedule("backup"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("already-exists");
 
     TestCase::<CreateSchedule>::new()
         .given([added("backup")])
@@ -114,7 +116,8 @@ fn replaying_lifecycle_events_rejects_existing_schedule_ids() {
         .when(create_schedule("backup"))
         .then_error(CreateScheduleDecideError::AlreadyExists {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("already-exists");
 }
 
 #[test]
@@ -125,7 +128,8 @@ fn rejects_adding_deleted_schedule_ids() {
         .when(create_schedule("backup"))
         .then_error(CreateScheduleDecideError::ScheduleDeleted {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("schedule-deleted");
 }
 
 #[test]
@@ -184,7 +188,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(create_schedule("backup"))
-        .then_error(CreateScheduleDecideError::MissingStateValue);
+        .then_error(CreateScheduleDecideError::MissingStateValue)
+        .then_error_code("missing-state-value");
 
     TestCase::<CreateSchedule>::new()
         .given_state(state_v1::State {
@@ -196,7 +201,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(create_schedule("backup"))
-        .then_error(CreateScheduleDecideError::UnknownStateValue { value: 123 });
+        .then_error(CreateScheduleDecideError::UnknownStateValue { value: 123 })
+        .then_error_code("unknown-state-value");
 
     TestCase::<CreateSchedule>::new()
         .given_state(state_v1::State {
@@ -208,5 +214,6 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(create_schedule("backup"))
-        .then_error(CreateScheduleDecideError::UnknownStateValue { value: 0 });
+        .then_error(CreateScheduleDecideError::UnknownStateValue { value: 0 })
+        .then_error_code("unknown-state-value");
 }

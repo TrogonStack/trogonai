@@ -92,7 +92,8 @@ fn given_when_then_rejects_removing_missing_jobs() {
         .when(remove_job_command("backup"))
         .then_error(RemoveScheduleError::ScheduleNotFound {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("schedule-not-found");
 }
 
 #[test]
@@ -103,7 +104,8 @@ fn given_when_then_rejects_removing_deleted_job() {
         .when(remove_job_command("backup"))
         .then_error(RemoveScheduleError::ScheduleDeleted {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("schedule-deleted");
 }
 
 #[test]
@@ -140,7 +142,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(remove_job_command("backup"))
-        .then_error(RemoveScheduleError::MissingStateValue);
+        .then_error(RemoveScheduleError::MissingStateValue)
+        .then_error_code("missing-state-value");
 
     TestCase::<RemoveSchedule>::new()
         .given_state(state_v1::State {
@@ -152,7 +155,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(remove_job_command("backup"))
-        .then_error(RemoveScheduleError::UnknownStateValue { value: 123 });
+        .then_error(RemoveScheduleError::UnknownStateValue { value: 123 })
+        .then_error_code("unknown-state-value");
 
     TestCase::<RemoveSchedule>::new()
         .given_state(state_v1::State {
@@ -164,7 +168,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(remove_job_command("backup"))
-        .then_error(RemoveScheduleError::UnknownStateValue { value: 0 });
+        .then_error(RemoveScheduleError::UnknownStateValue { value: 0 })
+        .then_error_code("unknown-state-value");
 }
 
 #[test]

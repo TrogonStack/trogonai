@@ -97,6 +97,16 @@ impl Decider for CreateSchedule {
             }
         }
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            CreateScheduleDecideError::AlreadyExists { .. } => "already-exists",
+            CreateScheduleDecideError::ScheduleDeleted { .. } => "schedule-deleted",
+            CreateScheduleDecideError::DurationConversion { .. } => "duration-conversion",
+            CreateScheduleDecideError::MissingStateValue => "missing-state-value",
+            CreateScheduleDecideError::UnknownStateValue { .. } => "unknown-state-value",
+        }
+    }
 }
 
 #[cfg(test)]

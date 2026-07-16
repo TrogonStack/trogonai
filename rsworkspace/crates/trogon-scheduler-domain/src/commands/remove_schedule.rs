@@ -72,6 +72,15 @@ impl Decider for RemoveSchedule {
             state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(RemoveScheduleError::UnknownStateValue { value: 0 }),
         }
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            RemoveScheduleError::ScheduleNotFound { .. } => "schedule-not-found",
+            RemoveScheduleError::ScheduleDeleted { .. } => "schedule-deleted",
+            RemoveScheduleError::MissingStateValue => "missing-state-value",
+            RemoveScheduleError::UnknownStateValue { .. } => "unknown-state-value",
+        }
+    }
 }
 
 #[cfg(test)]

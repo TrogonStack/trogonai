@@ -75,6 +75,16 @@ impl Decider for PauseSchedule {
             state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(PauseScheduleError::UnknownStateValue { value: 0 }),
         }
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            PauseScheduleError::ScheduleNotFound { .. } => "schedule-not-found",
+            PauseScheduleError::ScheduleDeleted { .. } => "schedule-deleted",
+            PauseScheduleError::AlreadyPaused { .. } => "already-paused",
+            PauseScheduleError::MissingStateValue => "missing-state-value",
+            PauseScheduleError::UnknownStateValue { .. } => "unknown-state-value",
+        }
+    }
 }
 
 #[cfg(test)]

@@ -164,6 +164,14 @@ impl Decider for TestCommand {
                 .into(),
         }
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            TestCommandError::AlreadyRegistered { .. } => "already-registered",
+            TestCommandError::JobNotFound { .. } => "job-not-found",
+            TestCommandError::AlreadyDisabled { .. } => "already-disabled",
+        }
+    }
 }
 
 #[test]
@@ -532,6 +540,56 @@ fn error_mismatch_shows_expected_vs_actual() {
     assert!(message.contains("then_error(...) expected an error"));
     assert!(message.contains("JobNotFound"));
     assert!(message.contains("Registered"));
+}
+
+#[test]
+fn then_state_exposes_and_pins_the_resulting_state() {
+    let registered = TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::register("alpha"))
+        .then([TestEvent::Registered {
+            id: "alpha".to_string(),
+        }])
+        .then_state(TestState::Present { enabled: true });
+
+    assert_eq!(registered.resulting_state(), &TestState::Present { enabled: true });
+}
+
+#[test]
+#[should_panic(expected = "then_state(...) resulting state did not match expectation")]
+fn then_state_mismatch_panics() {
+    TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::register("alpha"))
+        .then([TestEvent::Registered {
+            id: "alpha".to_string(),
+        }])
+        .then_state(TestState::Missing);
+}
+
+#[test]
+fn then_error_code_exposes_and_pins_the_wire_code() {
+    let error = TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::remove("alpha"))
+        .then_error(TestCommandError::JobNotFound {
+            id: "alpha".to_string(),
+        })
+        .then_error_code("job-not-found");
+
+    assert_eq!(error.code(), "job-not-found");
+}
+
+#[test]
+#[should_panic(expected = "then_error_code(...) expected decide_error_code")]
+fn then_error_code_mismatch_panics() {
+    TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::remove("alpha"))
+        .then_error(TestCommandError::JobNotFound {
+            id: "alpha".to_string(),
+        })
+        .then_error_code("wrong-code");
 }
 
 #[test]

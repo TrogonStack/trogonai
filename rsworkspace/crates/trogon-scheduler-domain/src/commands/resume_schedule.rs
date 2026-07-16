@@ -82,6 +82,17 @@ impl Decider for ResumeSchedule {
             state_v1::StateValue::STATE_VALUE_UNSPECIFIED => Err(ResumeScheduleError::UnknownStateValue { value: 0 }),
         }
     }
+
+    fn decide_error_code(error: &Self::DecideError) -> &str {
+        match error {
+            ResumeScheduleError::ScheduleNotFound { .. } => "schedule-not-found",
+            ResumeScheduleError::ScheduleDeleted { .. } => "schedule-deleted",
+            ResumeScheduleError::AlreadyActive { .. } => "already-active",
+            ResumeScheduleError::AlreadyCompleted { .. } => "already-completed",
+            ResumeScheduleError::MissingStateValue => "missing-state-value",
+            ResumeScheduleError::UnknownStateValue { .. } => "unknown-state-value",
+        }
+    }
 }
 
 #[cfg(test)]

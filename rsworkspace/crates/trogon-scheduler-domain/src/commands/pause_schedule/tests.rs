@@ -87,7 +87,8 @@ fn given_when_then_supports_pause_job_failures() {
         .when(pause_job_command("backup"))
         .then_error(PauseScheduleError::AlreadyPaused {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("already-paused");
 }
 
 #[test]
@@ -97,7 +98,8 @@ fn given_when_then_rejects_pausing_missing_jobs() {
         .when(pause_job_command("backup"))
         .then_error(PauseScheduleError::ScheduleNotFound {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("schedule-not-found");
 }
 
 #[test]
@@ -109,7 +111,8 @@ fn given_when_then_rejects_pausing_deleted_jobs() {
         .when(pause_job_command("backup"))
         .then_error(PauseScheduleError::ScheduleDeleted {
             id: ScheduleId::parse("backup").unwrap(),
-        });
+        })
+        .then_error_code("schedule-deleted");
 }
 
 #[test]
@@ -150,7 +153,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(pause_job_command("backup"))
-        .then_error(PauseScheduleError::MissingStateValue);
+        .then_error(PauseScheduleError::MissingStateValue)
+        .then_error_code("missing-state-value");
 
     TestCase::<PauseSchedule>::new()
         .given_state(state_v1::State {
@@ -162,7 +166,8 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(pause_job_command("backup"))
-        .then_error(PauseScheduleError::UnknownStateValue { value: 123 });
+        .then_error(PauseScheduleError::UnknownStateValue { value: 123 })
+        .then_error_code("unknown-state-value");
 
     TestCase::<PauseSchedule>::new()
         .given_state(state_v1::State {
@@ -174,5 +179,6 @@ fn decide_rejects_invalid_state_values() {
             pending_occurrence_at: MessageField::default(),
         })
         .when(pause_job_command("backup"))
-        .then_error(PauseScheduleError::UnknownStateValue { value: 0 });
+        .then_error(PauseScheduleError::UnknownStateValue { value: 0 })
+        .then_error_code("unknown-state-value");
 }
