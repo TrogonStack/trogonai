@@ -1,7 +1,7 @@
 ---
 number: "0026"
 slug: command-authorization-principal
-status: proposed
+status: draft
 date: 2026-07-15
 ---
 

@@ -1,7 +1,7 @@
 ---
 number: "0028"
 slug: decider-admission-control-and-backpressure
-status: proposed
+status: draft
 date: 2026-07-15
 ---
 

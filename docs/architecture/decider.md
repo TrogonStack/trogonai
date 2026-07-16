@@ -429,7 +429,7 @@ Accepted and reflected in the platform as built:
 - [ADR 0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
   the `Trogon-Origin-Stream-Sequence` header described under Headers above.
 
-Proposed, **not yet implemented**; do not treat these as current behavior:
+Draft, **not yet implemented**; do not treat these as current behavior:
 
 - [ADR 0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md)
 - [ADR 0027: Decider Multi-Tenancy Primitive](../adr/0027-decider-multi-tenancy-primitive.md)

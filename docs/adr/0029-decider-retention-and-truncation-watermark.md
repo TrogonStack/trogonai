@@ -1,7 +1,7 @@
 ---
 number: "0029"
 slug: decider-retention-and-truncation-watermark
-status: proposed
+status: draft
 date: 2026-07-15
 ---
 

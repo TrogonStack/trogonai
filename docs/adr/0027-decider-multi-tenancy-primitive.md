@@ -1,7 +1,7 @@
 ---
 number: "0027"
 slug: decider-multi-tenancy-primitive
-status: proposed
+status: draft
 date: 2026-07-15
 ---
 
