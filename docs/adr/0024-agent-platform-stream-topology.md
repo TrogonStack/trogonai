@@ -54,7 +54,8 @@ sessions) and an evolution loop built on proposals, verification, and
 activation.
 Designing that loop surfaced two layering rules, recorded in the decision
 record: deciders know principal identity but never principal kind
-(authentication owns that ontology; ADR 0017), and wire schemas avoid
+(authentication owns that ontology;
+[ADR 0017](./0017-aauth-agent-authentication.md)), and wire schemas avoid
 booleans because their false default is fail-open. Reviewing that draft
 raised the question this ADR answers: why do a proposal and its verdict
 live in the registry record's stream?
@@ -240,7 +241,8 @@ AgentRevision, Session, Memory, contract, and external-plane ownership
 boundaries that this topology preserves.
 
 **App-level gates, unchanged:** principal kind (human versus machine) is
-authentication context (aauth, ADR 0017) enforced at command dispatch.
+authentication context (aauth, [ADR 0017](./0017-aauth-agent-authentication.md))
+enforced at command dispatch.
 Charter-class activation requiring a human and the human-only policy
 mutations remain dispatch preconditions; deciders treat principals as opaque
 identities. Rollback authorization is also a dispatch concern outside this
