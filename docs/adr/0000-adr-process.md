@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-16
 ---
 
-# ADR 0000: Architecture Decision Record Process
+# ADR#0000: Architecture Decision Record Process
 
 ## Context
 
@@ -78,7 +78,7 @@ These are the deliberate deltas from the upstream process:
 
 Each ADR is a Markdown file named `NNNN-slug.md` under `docs/adr/`, with
 frontmatter carrying `number`, `slug`, `status`, and `date`, followed by a
-`# ADR NNNN: Title` heading. The filename must match `number` and `slug`, and the
+`# ADR#NNNN: Title` heading. The filename must match `number` and `slug`, and the
 `status` must be one of the values above; both are checked by the docs build. A
 new ADR is added to the list in `docs/adr/index.md`.
 

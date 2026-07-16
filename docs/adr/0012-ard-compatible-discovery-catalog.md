@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-28
 ---
 
-# ADR 0012: ARD-Compatible Discovery Catalog
+# ADR#0012: ARD-Compatible Discovery Catalog
 
 ## Context
 
@@ -25,9 +25,9 @@ The current ARD snapshot uses:
   and `POST /explore` are optional
 
 Trogon already uses NATS as its internal backbone under
-[ADR 0003](./0003-ai-protocol-transport-taxonomy.md). ACP, MCP, and A2A remain
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md). ACP, MCP, and A2A remain
 the execution protocols reached through their own protocol and transport
-packages under [ADR 0004](./0004-protocol-and-transport-layering.md).
+packages under [ADR#0004](./0004-protocol-and-transport-layering.md).
 
 The design question is whether ARD should become part of the internal routing
 model, or whether it should be treated as an external discovery compatibility
@@ -44,8 +44,8 @@ calls, or replace ACP, MCP, A2A, or the NATS backbone.
 NATS remains the internal backbone for first-party routing, events, queueing,
 durable catalog updates, indexing work, and storage adapters. ARD HTTP and JSON
 are accepted as an external compatibility exception under
-[ADR 0003](./0003-ai-protocol-transport-taxonomy.md) and
-[ADR 0009](./0009-protocol-buffers-wire-contracts.md) because ARD itself defines
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md) and
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md) because ARD itself defines
 the public interoperability surface.
 
 Use this package shape as the implementation grows:
@@ -119,7 +119,7 @@ packages.
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
-- [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)

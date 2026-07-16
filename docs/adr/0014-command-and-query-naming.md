@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-30
 ---
 
-# ADR 0014: Command and Query Naming
+# ADR#0014: Command and Query Naming
 
 ## Context
 
@@ -52,5 +52,5 @@ Do not name a command or query by the bare verb (`get`, `list`, `create`,
 
 ## References
 
-- [ADR 0006: Helpers Naming](./0006-helpers-naming.md)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0006: Helpers Naming](./0006-helpers-naming.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)

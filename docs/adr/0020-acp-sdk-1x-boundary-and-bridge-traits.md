@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-07
 ---
 
-# ADR 0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits
+# ADR#0020: ACP SDK 1.x Boundary and Bridge-Owned Callback Traits
 
 ## Context
 
@@ -18,7 +18,7 @@ stabilized as 1.x. Two changes force a decision here:
    `ConnectionTo<Role>::send_request(...)`. Our crates used those traits as the
    internal contract everywhere: runners implement `Agent`, the server-side
    `Bridge` implements `Agent`, and `NatsClientProxy` implements `Client`
-   ([ADR 0004](./0004-protocol-and-transport-layering.md) describes this
+   ([ADR#0004](./0004-protocol-and-transport-layering.md) describes this
    layering).
 2. The SDK now ships official transports (`ByteStreams`, and HTTP/WebSocket in
    `agent-client-protocol-http`). Our ACP-over-NATS transport is hand-rolled,
@@ -33,8 +33,9 @@ The SDK transports model point-to-point byte streams between exactly two
 peers. The NATS leg is not that: it is subject-routed (per-session subjects,
 global subjects, wildcard subscriptions), durable where required (JetStream
 COMMANDS stream with keepalive acks), and multi-peer. Flattening it into a
-`ByteStreams` pair would discard the routing model that ADR 0003 and ADR 0004
-establish. The SDK builder connections are used only at true byte-stream
+`ByteStreams` pair would discard the routing model that
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md) and
+[ADR#0004](./0004-protocol-and-transport-layering.md) establish. The SDK builder connections are used only at true byte-stream
 boundaries: the WebSocket duplex in `acp-nats-server` and stdio in
 `acp-nats-stdio`.
 
@@ -47,7 +48,8 @@ compatibility is unchanged). The names avoid colliding with the 1.x SDK's own
 `AcpAgent` subprocess helper. Runners implement `AgentHandler`; the
 server-side `Bridge` implements `AgentHandler` by forwarding over NATS;
 `NatsClientProxy` implements `ClientHandler`. This was
-already the intended shape in ADR 0004 (an "ACP agent SDK" exposing agent
+already the intended shape in
+[ADR#0004](./0004-protocol-and-transport-layering.md) (an "ACP agent SDK" exposing agent
 callback traits); the SDK redesign makes it mandatory rather than optional.
 
 ### 3. SDK builder callbacks adapt boundaries to the bridge traits

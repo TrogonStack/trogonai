@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-07
 ---
 
-# ADR 0021: Typed Decode over Passthrough Forwarding
+# ADR#0021: Typed Decode over Passthrough Forwarding
 
 ## Context
 

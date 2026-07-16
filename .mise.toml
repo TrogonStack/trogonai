@@ -65,7 +65,7 @@ description = "Ensure the wasm32-unknown-unknown Rust target is installed"
 run = "rustup target add wasm32-unknown-unknown"
 
 [tasks."rust:tls-policy"]
-description = "Enforce ADR 0015: fail if native-tls/OpenSSL enter the Rust dependency graph"
+description = "Enforce ADR#0015: fail if native-tls/OpenSSL enter the Rust dependency graph"
 dir = "rsworkspace"
 run = "cargo deny check bans"
 

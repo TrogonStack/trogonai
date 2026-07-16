@@ -5,12 +5,12 @@ status: accepted
 date: 2026-07-07
 ---
 
-# ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding
+# ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding
 
 ## Context
 
 The A2A gateway is the ingress boundary for agent-to-agent traffic on the mesh
-([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)). Before any authorization
+([ADR#0003](./0003-ai-protocol-transport-taxonomy.md)). Before any authorization
 policy runs (declarative, SpiceDB, CEL, or redaction), the gateway has to answer
 a prior question: which agent is making this call, and can it prove it?
 
@@ -46,14 +46,15 @@ required by servers that need body integrity. Verification failures produce a
 needs.
 
 Our transport is NATS, not HTTP
-([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)). NATS has no method, no
+([ADR#0003](./0003-ai-protocol-transport-taxonomy.md)). NATS has no method, no
 authority, no path, and no `Signature-Key` header -- subjects and headers are
 the only structural surface available, and NATS header values already exclude
 CR/LF but otherwise place little constraint on the signing input. Adopting
 AAuth verbatim gives us the token model, the claim sets, and the verification
 rules; it does not tell us how to carry a signed request over NATS. That
-binding has to be defined the way ADR 0011 and ADR 0016 defined JSON-RPC and
-protobuf bindings for the same backbone, rather than invented ad hoc at each
+binding has to be defined the way [ADR#0011](./0011-jsonrpc-over-nats-binding.md)
+and [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) defined JSON-RPC
+and protobuf bindings for the same backbone, rather than invented ad hoc at each
 call site.
 
 ## Decision
@@ -144,7 +145,7 @@ When the gateway denies a request under AAuth (PoP failure, auth-token
 verification failure, or agent/auth-token binding mismatch), the reply is a
 JSON-RPC error with code `-32118`
 (`a2a_gateway::aauth::AAUTH_REQUIRED_CODE`) per the JSON-RPC-over-NATS binding
-in [ADR 0011](./0011-jsonrpc-over-nats-binding.md) -- the code rides in the
+in [ADR#0011](./0011-jsonrpc-over-nats-binding.md) -- the code rides in the
 `Jsonrpc-Error-Code` header, discriminating the reply as an error the same way
 every other JSON-RPC error on the mesh does. Alongside it, the deny reply
 carries an `AAuth-Requirement` header on the reply message, in the same role
@@ -203,7 +204,9 @@ silently-ignored default.
   agent-to-resource calls to work.
 - The NATS PoP binding is a shared, header-driven mechanism
   (`trogon-aauth-verify::nats_pop`) rather than a per-call-site scheme, the
-  same posture ADR 0011 and ADR 0016 take for their bindings. `@subject` and
+  same posture [ADR#0011](./0011-jsonrpc-over-nats-binding.md) and
+  [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) take for their
+  bindings. `@subject` and
   `@reply` stand in for the HTTP derived components the draft covers; there is
   no request line to borrow from.
 - `Content-Digest` is required, not optional, on every AAuth-signed NATS
@@ -251,7 +254,7 @@ silently-ignored default.
 - [draft-hardt-oauth-aauth-protocol](https://raw.githubusercontent.com/dickhardt/AAuth/refs/heads/main/draft-hardt-oauth-aauth-protocol.md)
   (pinned at commit `90089f80eaccccbd22e32e06946e2aa08f7d67fe`)
 - [RFC 9421: HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421)
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
-- [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
-- [ADR 0016: Protocol Buffers RPC over NATS micro Binding](./0016-protobuf-rpc-over-nats-micro-binding.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
+- [ADR#0016: Protocol Buffers RPC over NATS micro Binding](./0016-protobuf-rpc-over-nats-micro-binding.md)

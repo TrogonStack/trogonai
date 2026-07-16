@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0003: AI Protocol Transport Taxonomy
+# ADR#0003: AI Protocol Transport Taxonomy
 
 ## Context
 

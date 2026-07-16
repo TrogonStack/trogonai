@@ -114,7 +114,7 @@ async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
 /// Registers a single typed dispatch handler over the SDK's
 /// [`ClientRequest`]/[`ClientNotification`] enums, whose method table already
 /// covers every routed method, and delegates each variant to the
-/// [`AgentHandler`] implementation, matching ADR 0020's "SDK builder
+/// [`AgentHandler`] implementation, matching ADR#0020's "SDK builder
 /// callbacks adapt boundaries to bridge traits" decision. Methods the bridge
 /// does not route answer `method_not_found`; responses to the bridge's own
 /// outbound requests pass through to their waiting callers. Shared by

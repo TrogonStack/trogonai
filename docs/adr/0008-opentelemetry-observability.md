@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0008: OpenTelemetry Observability
+# ADR#0008: OpenTelemetry Observability
 
 ## Context
 
@@ -14,8 +14,8 @@ services, apps, CLIs, SDKs, and workspace automation. Without one default, logs,
 metrics, and traces can drift into vendor-specific libraries, incompatible
 attribute names, and uncorrelated runtime views.
 
-[ADR 0001](./0001-workspace-runtime-taxonomy.md) already treats OpenTelemetry service identity as part of a service
-boundary. [ADR 0002](./0002-rust-crate-boundaries.md) names shared observability setup as the responsibility of a
+[ADR#0001](./0001-workspace-runtime-taxonomy.md) already treats OpenTelemetry service identity as part of a service
+boundary. [ADR#0002](./0002-rust-crate-boundaries.md) names shared observability setup as the responsibility of a
 dedicated reusable package such as `trogon-telemetry`.
 
 OpenTelemetry is the standard observability vocabulary that covers traces,
@@ -96,8 +96,8 @@ package, service, or deployment boundary that owns it.
 
 ## References
 
-- [ADR 0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
 - [OpenTelemetry Signals](https://opentelemetry.io/docs/concepts/signals/)
 - [OpenTelemetry Logs](https://opentelemetry.io/docs/concepts/signals/logs/)
 - [OpenTelemetry Metrics](https://opentelemetry.io/docs/concepts/signals/metrics/)

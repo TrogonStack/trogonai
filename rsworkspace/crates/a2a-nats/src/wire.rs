@@ -1,4 +1,4 @@
-//! JSON-RPC content-mode wire helpers for A2A over NATS (ADR 0011).
+//! JSON-RPC content-mode wire helpers for A2A over NATS (ADR#0011).
 //!
 //! Per-message signing is **not** implemented in this crate. Signed A2A paths must
 //! remain blocked until a signing scheme exists that covers `Jsonrpc-Id` and

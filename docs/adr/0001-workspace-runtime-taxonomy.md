@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0001: Workspace Runtime Taxonomy
+# ADR#0001: Workspace Runtime Taxonomy
 
 ## Context
 
