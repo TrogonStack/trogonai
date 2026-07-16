@@ -1,7 +1,5 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod codec;
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -9,10 +7,9 @@ use std::process;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use serde::Deserialize;
-use trogon_decider_sim::{SimHost, SimScenario};
-
-use crate::codec::{any_type_url, json_any_to_command, json_any_to_envelope, normalize_type_url};
+use trogon_decider_sim::{SimHost, SimInstance};
+use trogon_decider_test::codec::{any_type_url, normalize_type_url};
+use trogon_decider_test::{Scenario, Suite, Then};
 
 #[derive(Parser)]
 #[command(
@@ -44,100 +41,6 @@ enum OutputFormat {
     Tap,
 }
 
-#[derive(Debug, Deserialize)]
-struct Suite {
-    suite: String,
-    /// Type URLs (bare or `type.googleapis.com/`-prefixed) of every event the
-    /// decider under test can produce, asserted by the suite author. Compared
-    /// against every event actually referenced across all scenarios' `given`
-    /// and `then.events` entries for the strict coverage check, since neither
-    /// the WIT descriptor nor the proto type registry can distinguish "events
-    /// this decider emits" from unrelated message and helper types.
-    #[serde(default)]
-    events: Vec<String>,
-    scenarios: Vec<Scenario>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Scenario {
-    name: String,
-    #[serde(default)]
-    given: Vec<serde_json::Value>,
-    #[serde(default)]
-    when: Option<serde_json::Value>,
-    #[serde(default)]
-    then: Option<Then>,
-    /// An ordered `when`/`then` sequence run against a single open session,
-    /// each step's emitted events folded in before the next step's command is
-    /// decided. Mutually exclusive with the single `when`/`then` shape.
-    #[serde(default)]
-    steps: Option<Vec<Step>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Step {
-    when: serde_json::Value,
-    then: Then,
-}
-
-impl Scenario {
-    /// Returns this scenario's ordered when/then steps, normalizing the
-    /// legacy single `when`/`then` shape into a one-element step list.
-    ///
-    /// Exactly one of `steps` (nonempty) or `when`+`then` must be present;
-    /// any other combination is a malformed scenario.
-    fn steps(&self) -> Result<Vec<(&serde_json::Value, &Then)>> {
-        match (self.steps.as_ref(), self.when.as_ref(), self.then.as_ref()) {
-            (Some(steps), None, None) => {
-                if steps.is_empty() {
-                    bail!("scenario '{}' has an empty steps list", self.name);
-                }
-                Ok(steps.iter().map(|step| (&step.when, &step.then)).collect())
-            }
-            (None, Some(when), Some(then)) => Ok(vec![(when, then)]),
-            _ => bail!(
-                "scenario '{}' must have exactly one of: a nonempty steps list, or both when and then",
-                self.name
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-#[allow(dead_code)]
-enum Then {
-    Events { events: Vec<serde_json::Value> },
-    Error { error: ErrorExpectation },
-    Rejected { rejected: bool },
-}
-
-/// `then.error` accepts either a bare string or the documented `{ code, message }`
-/// object; both are matched against the domain error's code or message.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ErrorExpectation {
-    Structured {
-        #[serde(default)]
-        code: Option<String>,
-        #[serde(default)]
-        message: Option<String>,
-    },
-    Plain(String),
-}
-
-impl ErrorExpectation {
-    fn expected(&self) -> Result<String> {
-        match self {
-            Self::Plain(value) => Ok(value.clone()),
-            Self::Structured { code, message } => code
-                .clone()
-                .or_else(|| message.clone())
-                .context("then.error requires a code or message"),
-        }
-    }
-}
-
 fn main() {
     if let Err(error) = run() {
         eprintln!("error: {error:#}");
@@ -149,9 +52,8 @@ fn run() -> Result<()> {
     let args = Args::parse();
     let output_format = parse_output_format(&args.format)?;
     let wasm_bytes = fs::read(&args.wasm).with_context(|| format!("read {}", args.wasm.display()))?;
-    let suite: Suite = serde_yaml::from_str(
-        &fs::read_to_string(&args.suite).with_context(|| format!("read {}", args.suite.display()))?,
-    )?;
+    let suite =
+        Suite::from_yaml(&fs::read_to_string(&args.suite).with_context(|| format!("read {}", args.suite.display()))?)?;
 
     let host = SimHost::load(&wasm_bytes)?;
     let declared_commands = host
@@ -187,7 +89,7 @@ fn run() -> Result<()> {
             }
         }
 
-        match run_scenario(&mut instance, &scenario.given, &steps) {
+        match run_scenario(&mut instance, scenario) {
             Ok(()) => {
                 if matches!(output_format, OutputFormat::Tap) {
                     println!("ok {} - {}", suite.suite, scenario.name);
@@ -237,34 +139,9 @@ fn report_coverage_gaps(
     gaps.len()
 }
 
-fn run_scenario(
-    instance: &mut trogon_decider_sim::SimInstance<()>,
-    given: &[serde_json::Value],
-    steps: &[(&serde_json::Value, &Then)],
-) -> Result<()> {
-    let given = given.iter().map(json_any_to_envelope).collect::<Result<Vec<_>>>()?;
-    let mut sim = SimScenario::new().given(given);
-
-    for (when, then) in steps.iter().copied() {
-        let command = json_any_to_command(when)?;
-        sim = sim.when(command);
-        sim = match then {
-            Then::Events { events } => {
-                let expected = events.iter().map(json_any_to_envelope).collect::<Result<Vec<_>>>()?;
-                sim.then_events(expected)
-            }
-            Then::Rejected { rejected } => {
-                if *rejected {
-                    sim.then_rejected()
-                } else {
-                    sim.then_accepted()
-                }
-            }
-            Then::Error { error } => sim.then_error(error.expected()?),
-        };
-    }
-
-    sim.run(instance).map_err(anyhow::Error::new)
+fn run_scenario(instance: &mut SimInstance<()>, scenario: &Scenario) -> Result<()> {
+    let ir = scenario.to_ir()?;
+    ir.to_sim_scenario().run(instance).map_err(anyhow::Error::new)
 }
 
 fn parse_output_format(raw: &str) -> Result<OutputFormat> {

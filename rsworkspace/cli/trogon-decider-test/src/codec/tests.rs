@@ -26,7 +26,7 @@ fn create_schedule_value() -> serde_json::Value {
 fn json_any_to_command_encodes_via_registry() {
     let command = json_any_to_command(&create_schedule_value()).expect("encode command");
     assert_eq!(
-        command.type_,
+        command.type_url,
         "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule"
     );
 
@@ -48,7 +48,7 @@ fn json_any_to_envelope_uses_bare_full_name() {
         "schedule_id": "backup",
     });
     let envelope = json_any_to_envelope(&value).expect("encode envelope");
-    assert_eq!(envelope.type_, "trogonai.scheduler.schedules.v1.SchedulePaused");
+    assert_eq!(envelope.type_url, "trogonai.scheduler.schedules.v1.SchedulePaused");
 
     let decoded = schedules_v1::SchedulePaused::decode_from_slice(&envelope.payload).expect("decode envelope");
     assert_eq!(decoded.schedule_id, "backup");

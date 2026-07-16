@@ -9,12 +9,15 @@ publish = false
 workspace = true
 
 [features]
-test-support = []
+test-support = ["dep:buffa", "dep:trogon-decider", "dep:trogon-decider-guest-sdk"]
 
 [dependencies]
+buffa = { workspace = true, optional = true }
 tempfile = "3"
 thiserror = { workspace = true }
 tracing = { workspace = true }
+trogon-decider = { workspace = true, optional = true }
+trogon-decider-guest-sdk = { workspace = true, optional = true }
 trogon-decider-wasm-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-std = { workspace = true }
@@ -25,11 +28,18 @@ wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow"
 [dev-dependencies]
 buffa = { workspace = true }
 buffa-types = { workspace = true }
+trogon-decider-test = { path = "../../cli/trogon-decider-test" }
 trogon-decider-wit = { workspace = true, features = ["host"] }
+trogon-scheduler-domain = { path = "../trogon-scheduler-domain" }
 wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
 wat = "1"
 
 [[test]]
 name = "schedules"
 path = "tests/schedules.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "parity"
+path = "tests/parity.rs"
 required-features = ["test-support"]

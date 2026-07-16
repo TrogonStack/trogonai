@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use buffa::type_registry::TypeRegistry;
-use trogon_decider_wit::host::{self, CommandEnvelope};
+use trogon_decider_sim::WireEnvelope;
 
 fn registry() -> &'static TypeRegistry {
     static REGISTRY: OnceLock<TypeRegistry> = OnceLock::new();
@@ -58,18 +58,18 @@ fn json_any_to_wire(value: &serde_json::Value) -> Result<(String, Vec<u8>)> {
 
 /// Decodes a scenario `when` value into the command envelope the guest
 /// expects, tagged with the type's full `type.googleapis.com/` URL.
-pub fn json_any_to_command(value: &serde_json::Value) -> Result<CommandEnvelope> {
-    let (type_, payload) = json_any_to_wire(value)?;
-    Ok(CommandEnvelope { type_, payload })
+pub fn json_any_to_command(value: &serde_json::Value) -> Result<WireEnvelope> {
+    let (type_url, payload) = json_any_to_wire(value)?;
+    Ok(WireEnvelope::new(type_url, payload))
 }
 
 /// Decodes a scenario `given`/`then.events` value into the event envelope
 /// the guest expects, tagged with the type's bare protobuf full name (what
 /// the guest itself emits, unlike the URL-prefixed command envelope type).
-pub fn json_any_to_envelope(value: &serde_json::Value) -> Result<host::AnyEnvelope> {
+pub fn json_any_to_envelope(value: &serde_json::Value) -> Result<WireEnvelope> {
     let (type_url, payload) = json_any_to_wire(value)?;
-    let type_ = type_url.trim_start_matches("type.googleapis.com/").to_string();
-    Ok(host::AnyEnvelope { type_, payload })
+    let type_url = type_url.trim_start_matches("type.googleapis.com/").to_string();
+    Ok(WireEnvelope::new(type_url, payload))
 }
 
 #[cfg(test)]
