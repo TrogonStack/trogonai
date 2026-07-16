@@ -782,8 +782,10 @@ where
     C: Decider,
     C::StreamId: std::fmt::Display,
 {
+    /// Value produced once the expectation has been asserted against a decision.
     type Output;
 
+    /// Asserts `actual` matches this expectation, panicking with a diagnostic otherwise.
     fn assert_matches(self, given: History<C::Event>, command: &C, actual: DecisionEvaluation<C>) -> Self::Output;
 }
 

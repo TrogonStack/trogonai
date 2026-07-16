@@ -6,7 +6,9 @@ contract, so it can be compiled to a WASM component and executed by
 same `trogon:decider` world).
 
 This guide covers the `Decider` trait, the `export_decider!` macro, the WIT contract it targets,
-building a component, and the two ways to test one.
+building a component, and the two ways to test one. For the end-to-end picture, including how
+this crate's WIT contract and engine budgets fit into the rest of the platform, see
+[Decider Platform](../../../docs/architecture/decider.md).
 
 ## The `Decider` trait
 

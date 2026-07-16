@@ -6,24 +6,34 @@ use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::import_check::{ImportCheckError, assert_zero_imports};
 
+/// Failure loading, instantiating, or arming a [`SimHost`]'s wasm component.
 #[derive(Debug, Error)]
 pub enum SimError {
+    /// The compiled component declares an import, so it cannot be treated as a production-shaped
+    /// zero-import decider.
     #[error(transparent)]
     Import(#[from] ImportCheckError),
+    /// The wasmtime engine could not be configured with the requested resource budget.
     #[error("failed to configure wasmtime engine")]
     Engine(#[from] WasmEngineError),
+    /// The component bytes failed to compile.
     #[error("failed to compile wasm component")]
     Compile {
+        /// The underlying wasmtime compilation error.
         #[source]
         source: wasmtime::Error,
     },
+    /// The compiled component failed to instantiate against the linker.
     #[error("failed to instantiate wasm component")]
     Instantiate {
+        /// The underlying wasmtime instantiation error.
         #[source]
         source: wasmtime::Error,
     },
+    /// The store's fuel or epoch deadline could not be armed before a guest call.
     #[error("failed to arm guest call resource budget")]
     Arm {
+        /// The underlying wasmtime error setting fuel or epoch deadline.
         #[source]
         source: wasmtime::Error,
     },
@@ -65,6 +75,8 @@ impl SimHost {
         self.engine.config()
     }
 
+    /// Creates a new guest store for `host_state`, arms its resource budget, and instantiates the
+    /// component's `Decider` bindings into it.
     pub fn instantiate<T: 'static>(&self, host_state: T) -> Result<SimInstance<T>, SimError> {
         let config = self.engine.config();
         let linker = Linker::new(self.engine.engine());
@@ -117,6 +129,8 @@ pub(crate) fn arm_guest_call<T>(store: &mut Store<T>, config: &WasmEngineConfig)
     Ok(())
 }
 
+/// A single instantiated guest component paired with its store and resource budget, ready to
+/// open sessions and issue guest calls against.
 pub struct SimInstance<T: 'static> {
     pub(crate) store: Store<SimGuestState<T>>,
     pub(crate) bindings: Decider,
@@ -124,11 +138,13 @@ pub struct SimInstance<T: 'static> {
 }
 
 impl<T: 'static> SimInstance<T> {
+    /// Arms the guest call budget and returns the component's declared module descriptor.
     pub fn descriptor(&mut self) -> Result<host::ModuleDescriptor, wasmtime::Error> {
         arm_guest_call(&mut self.store, &self.config)?;
         host::call_descriptor(&self.bindings, &mut self.store)
     }
 
+    /// Arms the guest call budget and resolves the stream id `command` targets.
     pub fn stream_id(
         &mut self,
         command: &host::CommandEnvelope,
@@ -137,6 +153,8 @@ impl<T: 'static> SimInstance<T> {
         host::call_stream_id(&self.bindings, &mut self.store, command)
     }
 
+    /// Arms the guest call budget and opens a new guest session, optionally seeded from a prior
+    /// `snapshot`.
     pub fn open_session(
         &mut self,
         snapshot: Option<&[u8]>,

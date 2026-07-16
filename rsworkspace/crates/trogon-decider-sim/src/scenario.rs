@@ -7,63 +7,140 @@ use crate::host::SimInstance;
 /// or the domain error's code/message) instead of flattening it into a string.
 #[derive(Debug, thiserror::Error)]
 pub enum ScenarioError {
+    /// `.run(...)` was called without ever setting a command via `.when(...)`.
     #[error("scenario missing .when(...)")]
     MissingWhen,
+    /// A step's command was set via `.when(...)` but no `.then_*(...)` expectation followed it.
     #[error("scenario missing .then_events(...) or .then_rejected()")]
     MissingExpectation,
+    /// Opening the guest session before the first step failed.
     #[error("failed to open session")]
     OpenSession {
+        /// The underlying wasmtime error.
         #[source]
         source: wasmtime::Error,
     },
+    /// Folding `given` or a step's forwarded events via `evolve` failed at the host-call level.
     #[error("failed to call evolve")]
     EvolveCall {
+        /// The underlying wasmtime error.
         #[source]
         source: wasmtime::Error,
     },
+    /// Deciding a step's command failed at the host-call level.
     #[error("failed to call decide")]
     DecideCall {
+        /// The underlying wasmtime error.
         #[source]
         source: wasmtime::Error,
     },
+    /// Folding `given` or a step's forwarded events was rejected by the decider's domain logic.
     #[error("evolve failed: {code}: {message}")]
-    Evolve { code: String, message: String },
+    Evolve {
+        /// The domain error's stable code.
+        code: String,
+        /// The domain error's human-readable message.
+        message: String,
+    },
+    /// `.then_error(...)` expected a specific error but the command was rejected with a
+    /// different code or message.
     #[error("expected error '{expected}', got rejection: {code}: {message}")]
     ErrorGotRejection {
+        /// The error code or message `.then_error(...)` expected.
         expected: String,
+        /// The rejection's actual code.
         code: String,
+        /// The rejection's actual message.
         message: String,
     },
+    /// `.then_error(...)` expected a specific error but the command faulted with a different
+    /// code or message.
     #[error("expected error '{expected}', got fault: {code}: {message}")]
     ErrorGotFault {
+        /// The error code or message `.then_error(...)` expected.
         expected: String,
+        /// The fault's actual code.
         code: String,
+        /// The fault's actual message.
         message: String,
     },
+    /// `.then_error(...)` expected the command to error but it was accepted instead.
     #[error("expected error '{expected}', got {count} event(s)")]
-    ErrorGotEvents { expected: String, count: usize },
+    ErrorGotEvents {
+        /// The error code or message `.then_error(...)` expected.
+        expected: String,
+        /// The number of events the command was accepted with instead.
+        count: usize,
+    },
+    /// `.then_rejected()` expected the command to be rejected but it was accepted instead.
     #[error("expected rejection, got {count} event(s)")]
-    RejectionGotEvents { count: usize },
+    RejectionGotEvents {
+        /// The number of events the command was accepted with instead.
+        count: usize,
+    },
+    /// `.then_rejected()` expected a rejection but the command faulted instead.
     #[error("expected rejection, got fault: {code}: {message}")]
-    RejectionGotFault { code: String, message: String },
+    RejectionGotFault {
+        /// The fault's actual code.
+        code: String,
+        /// The fault's actual message.
+        message: String,
+    },
+    /// `.then_accepted()` expected the command to be accepted but it was rejected instead.
     #[error("expected acceptance, got rejection: {code}: {message}")]
-    AcceptanceGotRejection { code: String, message: String },
+    AcceptanceGotRejection {
+        /// The rejection's actual code.
+        code: String,
+        /// The rejection's actual message.
+        message: String,
+    },
+    /// `.then_accepted()` expected the command to be accepted but it faulted instead.
     #[error("expected acceptance, got fault: {code}: {message}")]
-    AcceptanceGotFault { code: String, message: String },
+    AcceptanceGotFault {
+        /// The fault's actual code.
+        code: String,
+        /// The fault's actual message.
+        message: String,
+    },
+    /// `.then_events(...)` expected specific events but the command was rejected instead.
     #[error("rejected: {code}: {message}")]
-    EventsGotRejection { code: String, message: String },
+    EventsGotRejection {
+        /// The rejection's actual code.
+        code: String,
+        /// The rejection's actual message.
+        message: String,
+    },
+    /// `.then_events(...)` expected specific events but the command faulted instead.
     #[error("faulted: {code}: {message}")]
-    EventsGotFault { code: String, message: String },
+    EventsGotFault {
+        /// The fault's actual code.
+        code: String,
+        /// The fault's actual message.
+        message: String,
+    },
+    /// `.then_events(...)` expected a different number of events than the command produced.
     #[error("expected {expected} event(s), got {actual}")]
-    EventCountMismatch { expected: usize, actual: usize },
+    EventCountMismatch {
+        /// The number of events `.then_events(...)` expected.
+        expected: usize,
+        /// The number of events the command actually produced.
+        actual: usize,
+    },
+    /// `.then_events(...)` expected a specific event at `index` but the command produced a
+    /// different type or payload there.
     #[error(
         "event {index} mismatch: got type={got_type} payload={got_payload:?}, want type={want_type} payload={want_payload:?}"
     )]
     EventMismatch {
+        /// The zero-based index of the mismatched event.
         index: usize,
+        /// The type URL of the event actually produced.
         got_type: String,
+        /// The payload of the event actually produced.
         got_payload: Vec<u8>,
+        /// The type URL `.then_events(...)` expected at this index.
         want_type: String,
+        /// The payload `.then_events(...)` expected at this index.
         want_payload: Vec<u8>,
     },
     /// A step in a multi-step scenario failed. `index` is the zero-based
@@ -74,7 +151,9 @@ pub enum ScenarioError {
     /// from a scenario built with a single `.when(...)`/`.then_*(...)` pair.
     #[error("step {index}: {source}")]
     Step {
+        /// The zero-based index of the failing step.
         index: usize,
+        /// The failing step's own error.
         #[source]
         source: Box<ScenarioError>,
     },
@@ -133,6 +212,7 @@ pub struct SimScenario {
 }
 
 impl SimScenario {
+    /// Creates an empty scenario with no seeded history and no steps.
     pub fn new() -> Self {
         Self {
             given: Vec::new(),
@@ -161,11 +241,15 @@ impl SimScenario {
         self
     }
 
+    /// Sets the current step's expectation to a specific ordered list of events, completing the
+    /// step once paired with a preceding `.when(...)`.
     pub fn then_events(mut self, events: impl IntoIterator<Item = host::AnyEnvelope>) -> Self {
         self.current.expectation = Some(Expectation::Events(events.into_iter().collect()));
         self
     }
 
+    /// Sets the current step's expectation to a rejection, without asserting its code or
+    /// message.
     pub fn then_rejected(mut self) -> Self {
         self.current.expectation = Some(Expectation::Rejected);
         self
@@ -185,6 +269,9 @@ impl SimScenario {
         self
     }
 
+    /// Runs the scenario's ordered steps against `instance`'s guest session, asserting each
+    /// step's expectation in turn and folding its accepted events into the session before the
+    /// next step.
     pub fn run<T>(mut self, instance: &mut SimInstance<T>) -> Result<(), ScenarioError> {
         self.current.flush_into(&mut self.steps);
         if self.current.when.is_some() {

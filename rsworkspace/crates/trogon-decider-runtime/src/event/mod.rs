@@ -20,6 +20,8 @@ pub use event_identity::EventIdentity;
 pub use stream_event::StreamEvent;
 pub use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 
+/// A stored event envelope: a decoded event's stable type name, encoded
+/// payload bytes, identity, and out-of-band headers.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
     /// Unique identity assigned to this event occurrence.

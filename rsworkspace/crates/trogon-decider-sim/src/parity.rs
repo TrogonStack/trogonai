@@ -18,6 +18,7 @@ pub enum ParityError {
     Native {
         /// The scenario's name.
         scenario: String,
+        /// The native runner's underlying failure.
         #[source]
         source: NativeRunError,
     },
@@ -26,6 +27,7 @@ pub enum ParityError {
     Wasm {
         /// The scenario's name.
         scenario: String,
+        /// The wasm runner's underlying failure.
         #[source]
         source: Box<ScenarioError>,
     },

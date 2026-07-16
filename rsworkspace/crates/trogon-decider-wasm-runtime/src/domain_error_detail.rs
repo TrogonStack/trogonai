@@ -9,8 +9,11 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct DomainErrorDetail {
+    /// Stable, machine-readable rejection code the guest reported.
     pub code: String,
+    /// Human-readable description of the failure.
     pub message: String,
+    /// Ordered key/value pairs carrying the error's source chain, most specific cause last.
     pub details: Vec<(String, String)>,
 }
 

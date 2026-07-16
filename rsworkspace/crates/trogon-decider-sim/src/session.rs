@@ -13,11 +13,15 @@ pub struct SimSession<'a, T: 'static> {
 }
 
 impl<T: 'static> SimSession<'_, T> {
+    /// Arms the guest call budget and folds `events` into this session's decider state via the
+    /// guest's `evolve` export.
     pub fn evolve(&mut self, events: &[host::AnyEnvelope]) -> Result<Result<(), host::DomainError>, wasmtime::Error> {
         arm_guest_call(self.store, &self.config)?;
         host::evolve(self.bindings, self.store, self.session, events)
     }
 
+    /// Arms the guest call budget and decides `command` against this session's current state via
+    /// the guest's `decide` export.
     pub fn decide(
         &mut self,
         command: &host::CommandEnvelope,
@@ -26,6 +30,8 @@ impl<T: 'static> SimSession<'_, T> {
         host::decide(self.bindings, self.store, self.session, command)
     }
 
+    /// Arms the guest call budget and returns this session's current state snapshot, if the
+    /// decider supports snapshotting.
     pub fn snapshot(&mut self) -> Result<Option<Vec<u8>>, wasmtime::Error> {
         arm_guest_call(self.store, &self.config)?;
         host::snapshot(self.bindings, self.store, self.session)

@@ -10,6 +10,7 @@ repository = "https://github.com/TrogonStack/trogonai"
 test-support = []
 
 [lints.rust]
+missing_docs = "warn"
 warnings = "deny"
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
 

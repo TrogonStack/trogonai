@@ -35,6 +35,7 @@ export default async () => {
           text: "Architecture",
           items: [
             { text: "ACP Conformance", link: "/architecture/acp-conformance" },
+            { text: "Decider", link: "/architecture/decider" },
             { text: "Event Metadata", link: "/architecture/event-metadata" },
           ],
         },

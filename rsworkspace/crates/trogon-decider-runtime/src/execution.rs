@@ -114,6 +114,7 @@ type CommandWithSnapshotsResult<E, S, C> =
 /// scheduler keeps that future concrete instead of forcing every runtime adapter
 /// through a boxed `dyn Future`.
 pub trait SnapshotTaskScheduler {
+    /// Schedules `task` to run, without blocking the caller on its completion.
     fn schedule<F>(&self, task: F)
     where
         F: Future<Output = ()> + Send + 'static;
@@ -172,6 +173,7 @@ pub struct DrainableSnapshotTaskScheduler {
 }
 
 impl DrainableSnapshotTaskScheduler {
+    /// Creates a scheduler with no in-flight snapshot writes.
     pub fn new() -> Self {
         Self::default()
     }
@@ -235,12 +237,16 @@ impl SnapshotTaskScheduler for ImmediateSnapshotTaskScheduler {
     }
 }
 
+/// Outcome of consulting a [`SnapshotPolicy`] after a successful command execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotDecision {
+    /// Do not take a snapshot for this execution.
     Skip,
+    /// Take a snapshot for this execution.
     Take,
 }
 
+/// Context passed to a [`SnapshotPolicy`] so it can decide whether to snapshot.
 #[derive(Debug, Clone, Copy)]
 pub struct DecideSnapshot<'a, C: Decider> {
     /// The command that produced the execution result.
@@ -254,29 +260,40 @@ pub struct DecideSnapshot<'a, C: Decider> {
     ///
     /// `None` means execution started without a snapshot.
     pub snapshot_position: Option<StreamPosition>,
+    /// State after replaying history and applying the newly decided events.
     pub state: &'a C::State,
+    /// Events decided by this execution, already appended to the stream.
     pub events: &'a Events<C::Event>,
     /// Number of persisted stream events read after the snapshot position.
     pub replayed_event_count: u64,
 }
 
+/// Decides whether a command execution should take a snapshot after it appends events.
 pub trait SnapshotPolicy<C: Decider> {
+    /// Decides whether to take a snapshot for the given execution context.
     fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision;
 }
 
+/// Associates a [`Decider`] with the [`SnapshotPolicy`] its command executions
+/// should use, so callers can build a configured [`Snapshots`] without
+/// repeating the policy at every call site.
 pub trait CommandSnapshotPolicy: Decider
 where
     Self::State: SnapshotType,
 {
+    /// The snapshot policy this decider's command executions use.
     type SnapshotPolicy: SnapshotPolicy<Self>;
 
+    /// The snapshot policy instance this decider's command executions use.
     const SNAPSHOT_POLICY: Self::SnapshotPolicy;
 
+    /// Builds the [`Snapshots`] configuration for this decider from a snapshot store.
     fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
         Snapshots::new(snapshot_store, Self::SNAPSHOT_POLICY)
     }
 }
 
+/// A [`SnapshotPolicy`] that never takes a snapshot.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoSnapshot;
 
@@ -286,16 +303,20 @@ impl<C: Decider> SnapshotPolicy<C> for NoSnapshot {
     }
 }
 
+/// A [`SnapshotPolicy`] that takes a snapshot once at least `frequency` events
+/// have been read or appended since the last snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrequencySnapshot {
     frequency: NonZeroU64,
 }
 
 impl FrequencySnapshot {
+    /// Creates a policy that snapshots every `frequency` events.
     pub const fn new(frequency: NonZeroU64) -> Self {
         Self { frequency }
     }
 
+    /// Returns the configured snapshot frequency.
     pub const fn frequency(self) -> NonZeroU64 {
         self.frequency
     }
@@ -311,6 +332,7 @@ impl<C: Decider> SnapshotPolicy<C> for FrequencySnapshot {
     }
 }
 
+/// Successful outcome of one command execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionResult<State, Event> {
     /// The stream high-watermark after the command append completed.
@@ -390,9 +412,15 @@ pub enum CommandError<
     ReadAfterOverflow(#[source] ReadAfterOverflow),
 }
 
+/// Error detail for a loaded snapshot whose recorded position the stream
+/// cannot prove happened, for example after the stream was truncated or
+/// replaced without clearing its snapshots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotAheadOfStream {
+    /// Position recorded on the loaded snapshot.
     pub snapshot_position: StreamPosition,
+    /// Stream high-watermark observed when the snapshot was checked, or
+    /// `None` if the stream has no current position.
     pub stream_position: Option<StreamPosition>,
 }
 
@@ -454,6 +482,7 @@ pub enum SnapshotFailureDecision {
 /// from the beginning of the stream. Custom implementations can choose
 /// per [`SnapshotFailure`] kind.
 pub trait SnapshotFailurePolicy<C: Decider, ReadSnapshotError> {
+    /// Decides how the command execution should react to the given snapshot failure.
     fn decide_snapshot_failure(
         &self,
         context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
@@ -573,12 +602,18 @@ impl<
     }
 }
 
+/// Marks a [`CommandExecution`] that has not been configured with a
+/// snapshot store, so it always replays from the beginning of the stream.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshots;
 
+/// Marks a [`Snapshots`] configuration that has not been given a
+/// [`SnapshotTaskScheduler`], so snapshot writes are not scheduled at all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshotTaskScheduler;
 
+/// Snapshot store, policy, task scheduler, and failure policy configured for
+/// a [`CommandExecution`].
 pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler, F = FailOnSnapshotFailure> {
     snapshot_store: &'a S,
     policy: P,
@@ -587,6 +622,8 @@ pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler, F = FailOnS
 }
 
 impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler, FailOnSnapshotFailure> {
+    /// Configures a snapshot store and policy with no task scheduler and the
+    /// default [`FailOnSnapshotFailure`] failure policy.
     pub fn new(snapshot_store: &'a S, policy: P) -> Self {
         Self {
             snapshot_store,
@@ -620,15 +657,25 @@ impl<'a, S, P, Spawn, F> Snapshots<'a, S, P, Spawn, F> {
     }
 }
 
+/// Converts a value into a [`Snapshots`] configuration for a [`Decider`].
+///
+/// Implemented for a plain snapshot store reference (using the decider's
+/// [`CommandSnapshotPolicy`]) and for an already-built [`Snapshots`], so
+/// [`CommandExecution::with_snapshot`] can accept either.
 pub trait IntoSnapshots<'a, C>: Sized
 where
     C: Decider,
 {
+    /// The resulting configuration's snapshot store type.
     type Store;
+    /// The resulting configuration's snapshot policy type.
     type Policy;
+    /// The resulting configuration's snapshot task scheduler type.
     type SnapshotTaskScheduler;
+    /// The resulting configuration's snapshot failure policy type.
     type FailurePolicy;
 
+    /// Builds the [`Snapshots`] configuration.
     fn into_snapshots(
         self,
     ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy>;
@@ -667,6 +714,14 @@ where
     }
 }
 
+/// Runtime boundary that applies one [`Decider`] command to one stream: reads
+/// the stream (and optionally a snapshot), replays state, decides the next
+/// events, and appends them with the configured write precondition.
+///
+/// Build one with [`CommandExecution::new`] and configure it with the
+/// builder methods before calling `execute`, which is available when `S` is
+/// [`WithoutSnapshots`] or a [`Snapshots`] configuration whose store and
+/// policy satisfy the trait bounds that method requires.
 pub struct CommandExecution<'a, E, C, S, G> {
     event_store: &'a E,
     command: &'a C,
@@ -680,6 +735,9 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots, UuidV7Generator>
 where
     C: Decider,
 {
+    /// Starts building an execution for `command` against `event_store`, with
+    /// no snapshot store, no explicit write precondition, no headers, and the
+    /// default UUIDv7 event id generator.
     pub fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
             event_store,
@@ -696,6 +754,9 @@ impl<'a, E, C, G> CommandExecution<'a, E, C, WithoutSnapshots, G>
 where
     C: Decider,
 {
+    /// Configures this execution to read and write snapshots, accepting
+    /// either a bare snapshot store (using the decider's
+    /// [`CommandSnapshotPolicy`]) or an explicitly built [`Snapshots`].
     #[allow(clippy::type_complexity)]
     pub fn with_snapshot<I>(
         self,
@@ -728,6 +789,10 @@ where
 }
 
 impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
+    /// Overrides the stream write precondition used for the append.
+    ///
+    /// Ignored when the decider declares its own [`WritePrecondition`] via
+    /// `C::WRITE_PRECONDITION`; that always takes precedence over this value.
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamWritePrecondition>>,
@@ -736,11 +801,14 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         self
     }
 
+    /// Sets metadata headers attached to every event this execution appends.
     pub fn with_headers(mut self, headers: Headers) -> Self {
         self.headers = headers;
         self
     }
 
+    /// Replaces the generator used to assign ids to newly decided events that
+    /// don't already carry one.
     pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, S, NextG>
     where
         NextG: NowV7,
@@ -816,6 +884,7 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
 }
 
 impl<'a, E, S, C, P, Spawn, F, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn, F>, G> {
+    /// Replaces the scheduler used to run snapshot write tasks.
     pub fn with_task_runtime<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
@@ -861,6 +930,8 @@ where
     CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
+    /// Replays the stream from the beginning, decides the command, and
+    /// appends the resulting events. No snapshot is read or written.
     pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
         let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
         let span = tracing::info_span!(
@@ -938,6 +1009,11 @@ where
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
     C::State: SnapshotType,
 {
+    /// Loads a snapshot if one exists, replays only the stream events after
+    /// it, decides the command, appends the resulting events, and schedules a
+    /// new snapshot write if the configured [`SnapshotPolicy`] decides to
+    /// take one. A snapshot the [`SnapshotFailurePolicy`] cannot trust is
+    /// discarded and replayed from the beginning of the stream instead.
     pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
         let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
         let span = tracing::info_span!(

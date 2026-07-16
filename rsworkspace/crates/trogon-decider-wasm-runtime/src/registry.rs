@@ -11,8 +11,11 @@ use crate::{CommandType, ModuleName, ModuleVersion, WasmDeciderModule};
     "command type '{command_type}' is already routed to module '{existing_module}'; module '{new_module}' cannot also claim it"
 )]
 pub struct RegisterModuleError {
+    /// The command type both modules claim.
     pub command_type: CommandType,
+    /// The module that already owns `command_type`.
     pub existing_module: ModuleName,
+    /// The module whose registration was rejected.
     pub new_module: ModuleName,
 }
 
@@ -20,20 +23,25 @@ pub struct RegisterModuleError {
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("no wasm decider module is registered for command type '{command_type}'")]
 pub struct UnknownCommandTypeError {
+    /// The command type with no registered route.
     pub command_type: CommandType,
 }
 
 /// One command type's current route: the identity of the module handling it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RouteInfo {
+    /// The routed command type.
     pub command_type: CommandType,
+    /// Name of the module handling `command_type`.
     pub module_name: ModuleName,
+    /// Version of the module handling `command_type`.
     pub module_version: ModuleVersion,
 }
 
 /// One command type's outcome from a [`DeciderRegistryHandle::activate`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivatedRoute {
+    /// The command type that was (re)routed.
     pub command_type: CommandType,
     /// The module that owned this route immediately before the swap, if any.
     pub previous_module: Option<(ModuleName, ModuleVersion)>,
@@ -42,8 +50,11 @@ pub struct ActivatedRoute {
 /// The route removed by a [`DeciderRegistryHandle::retire`] call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetiredRoute {
+    /// The command type whose route was removed.
     pub command_type: CommandType,
+    /// Name of the module that had owned `command_type`.
     pub module_name: ModuleName,
+    /// Version of the module that had owned `command_type`.
     pub module_version: ModuleVersion,
 }
 

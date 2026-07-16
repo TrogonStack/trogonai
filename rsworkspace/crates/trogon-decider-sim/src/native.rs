@@ -159,6 +159,7 @@ pub enum NativeRunError {
     Given {
         /// The zero-based index of the failing `given` event.
         index: usize,
+        /// The domain error the failing evolve produced.
         #[source]
         source: NativeDomainError,
     },
@@ -167,6 +168,7 @@ pub enum NativeRunError {
     Fold {
         /// The zero-based index of the step whose emitted events failed to fold.
         index: usize,
+        /// The domain error the failing evolve produced.
         #[source]
         source: NativeDomainError,
     },

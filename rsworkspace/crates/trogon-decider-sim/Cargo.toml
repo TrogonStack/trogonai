@@ -5,8 +5,16 @@ edition = "2024"
 license = "Apache-2.0"
 publish = false
 
-[lints]
-workspace = true
+[lints.rust]
+missing_docs = "warn"
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [features]
 test-support = ["dep:buffa", "dep:trogon-decider", "dep:trogon-decider-guest-sdk"]

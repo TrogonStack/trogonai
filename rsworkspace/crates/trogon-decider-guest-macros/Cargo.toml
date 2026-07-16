@@ -8,8 +8,16 @@ publish = false
 [lib]
 proc-macro = true
 
-[lints]
-workspace = true
+[lints.rust]
+missing_docs = "warn"
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [dependencies]
 proc-macro2 = "1.0.106"

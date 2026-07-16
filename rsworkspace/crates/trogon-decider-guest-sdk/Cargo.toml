@@ -9,8 +9,16 @@ publish = false
 default = []
 test-support = []
 
-[lints]
-workspace = true
+[lints.rust]
+missing_docs = "warn"
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [dependencies]
 buffa = { workspace = true }
