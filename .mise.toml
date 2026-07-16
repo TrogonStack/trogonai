@@ -69,29 +69,6 @@ description = "Enforce ADR 0015: fail if native-tls/OpenSSL enter the Rust depen
 dir = "rsworkspace"
 run = "cargo deny check bans"
 
-[tasks."artifacts:wasm-components"]
-description = "Build every rsworkspace/wasm-components/* decider to dist/decider/<name>.wasm"
-# `proto:schedules-descriptor-set` only feeds the schedules component's own dist artifact
-# (copied below when present); it is not required by, and does not block, other components.
-depends = ["proto:schedules-descriptor-set", "rust:wasm-target"]
-run = '''
-cd rsworkspace
-mkdir -p dist/decider
-for manifest in wasm-components/*/Cargo.toml; do
-  crate_dir=$(dirname "$manifest")
-  crate=$(basename "$crate_dir")
-  crate_file=${crate//-/_}
-  alias=${crate#trogon-}
-  alias=${alias%-decider}
-  cargo component build -p "$crate" --target wasm32-unknown-unknown --release
-  cp "target/wasm32-unknown-unknown/release/${crate_file}.wasm" "dist/decider/${alias}.wasm"
-  binpb="target/wasm32-unknown-unknown/release/${crate_file}.binpb"
-  if [ -f "$binpb" ]; then
-    cp "$binpb" "dist/decider/${alias}.binpb"
-  fi
-done
-'''
-
 [tasks."artifacts:decider-test"]
 description = "Build every wasm-components/* decider + the decider-test CLI"
 depends = ["artifacts:wasm-components"]
