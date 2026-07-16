@@ -173,8 +173,8 @@ SessionContract
   work_item_ref?
   work_input? = immutable_ref_or_snapshot + digest
   session_overrides
-  memory_selection_or_snapshot -> Memory
-  workspace_context
+  memory_selection_or_snapshot? -> Memory
+  workspace_context?
   resolved_tool_definitions -> ToolDefinition[]
   context_assembly_specification
 
