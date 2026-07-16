@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 buffa = { workspace = true }
-buffa-types = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

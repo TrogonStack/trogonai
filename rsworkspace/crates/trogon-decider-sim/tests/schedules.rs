@@ -4,10 +4,14 @@
 use buffa::Message as _;
 use buffa::MessageField;
 use buffa::MessageName as _;
-use trogon_decider_sim::{ScenarioError, SimFixture, SimHost, SimScenario, assert_zero_imports};
+use trogon_decider_sim::{
+    ScenarioError, SimError, SimFixture, SimHost, SimScenario, WasmEngineConfig, assert_zero_imports,
+};
 use trogon_decider_wit::host::{self, CommandEnvelope};
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
-use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, v1};
+use trogonai_proto::scheduler::schedules::{
+    CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, v1,
+};
 
 fn schedules_wasm() -> Vec<u8> {
     SimFixture::schedules().bytes().to_vec()
@@ -108,6 +112,36 @@ fn pause_command(id: &str) -> CommandEnvelope {
     }
 }
 
+fn resume_command(id: &str) -> CommandEnvelope {
+    CommandEnvelope {
+        type_: RESUME_SCHEDULE_TYPE_URL.to_string(),
+        payload: v1::ResumeSchedule {
+            schedule_id: id.to_string(),
+        }
+        .encode_to_vec(),
+    }
+}
+
+fn schedule_paused_event(id: &str) -> host::AnyEnvelope {
+    host::AnyEnvelope {
+        type_: v1::SchedulePaused::FULL_NAME.to_string(),
+        payload: v1::SchedulePaused {
+            schedule_id: id.to_string(),
+        }
+        .encode_to_vec(),
+    }
+}
+
+fn schedule_resumed_event(id: &str) -> host::AnyEnvelope {
+    host::AnyEnvelope {
+        type_: v1::ScheduleResumed::FULL_NAME.to_string(),
+        payload: v1::ScheduleResumed {
+            schedule_id: id.to_string(),
+        }
+        .encode_to_vec(),
+    }
+}
+
 fn unknown_command() -> CommandEnvelope {
     CommandEnvelope {
         type_: "type.googleapis.com/trogonai.scheduler.schedules.v1.DoesNotExist".to_string(),
@@ -142,6 +176,34 @@ fn stream_id_returns_schedule_id() {
 
     let stream = instance.stream_id(&create_command("backup")).unwrap().unwrap();
     assert_eq!(stream, "backup");
+}
+
+#[test]
+fn sim_host_applies_the_production_engine_config_by_default() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    assert_eq!(host.config(), WasmEngineConfig::default());
+}
+
+#[test]
+fn a_runaway_decider_traps_on_fuel_exhaustion_like_production_would() {
+    let config = WasmEngineConfig::default().with_fuel_per_call(1);
+    let host = SimHost::load_with_config(&schedules_wasm(), config).unwrap();
+
+    // Every guest call is armed with this same starved fuel budget (mirroring
+    // production's `arm_guest_call`), so either instantiation or the first
+    // guest export call must trap with `OutOfFuel`, not run unbounded.
+    let trap = match host.instantiate(()) {
+        Err(SimError::Instantiate { source }) => source,
+        Err(other) => panic!("expected SimError::Instantiate on fuel exhaustion, got {other}"),
+        Ok(mut instance) => match instance.descriptor() {
+            Err(source) => source,
+            Ok(descriptor) => panic!("expected a fuel-exhaustion trap, but the guest call succeeded: {descriptor:?}"),
+        },
+    };
+    assert!(
+        matches!(trap.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::OutOfFuel)),
+        "expected an OutOfFuel trap, got {trap}"
+    );
 }
 
 #[test]
@@ -446,6 +508,49 @@ fn evolve_skips_events_outside_this_deciders_set() {
         .then_events([schedule_created_event("backup")])
         .run(&mut instance)
         .unwrap();
+}
+
+#[test]
+fn multi_step_scenario_feeds_events_forward_within_one_session() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // Each step's `then_events` output is folded into the same open session
+    // before the next step's command is decided, so resume only succeeds
+    // because it observes the pause this scenario decided one step earlier.
+    SimScenario::new()
+        .when(create_command("backup"))
+        .then_events([schedule_created_event("backup")])
+        .when(pause_command("backup"))
+        .then_events([schedule_paused_event("backup")])
+        .when(resume_command("backup"))
+        .then_events([schedule_resumed_event("backup")])
+        .run(&mut instance)
+        .unwrap();
+}
+
+#[test]
+fn multi_step_scenario_reports_which_step_failed() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(create_command("backup"))
+        .then_events([schedule_created_event("backup")])
+        .when(pause_command("backup"))
+        .then_rejected()
+        .run(&mut instance)
+        .unwrap_err();
+    match &error {
+        ScenarioError::Step { index, source } => {
+            assert_eq!(*index, 1);
+            assert!(matches!(
+                source.as_ref(),
+                ScenarioError::RejectionGotEvents { count: 1 }
+            ));
+        }
+        other => panic!("expected ScenarioError::Step, got {other}"),
+    }
 }
 
 #[test]

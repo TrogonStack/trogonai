@@ -14,6 +14,8 @@ test-support = []
 [dependencies]
 tempfile = "3"
 thiserror = { workspace = true }
+tracing = { workspace = true }
+trogon-decider-wasm-runtime = { workspace = true }
 trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-std = { workspace = true }
 trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }

@@ -16,3 +16,4 @@ pub use host::{SimError, SimHost, SimInstance};
 pub use import_check::{ImportCheckError, assert_zero_imports};
 pub use scenario::{ScenarioError, SimScenario};
 pub use session::SimSession;
+pub use trogon_decider_wasm_runtime::{WasmEngineConfig, WasmEngineError};
