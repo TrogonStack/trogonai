@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-29
 ---
 
-# ADR 0013: Origin Stream Sequence Header
+# ADR#0013: Origin Stream Sequence Header
 
 ## Context
 
@@ -95,7 +95,7 @@ diagnostics, or repair.
 
 ## References
 
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
-- [ADR 0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
 - [NATS JetStream Headers](https://docs.nats.io/nats-concepts/jetstream/headers)
 - [NATS JetStream Source and Mirror Streams](https://docs.nats.io/nats-concepts/jetstream/source_and_mirror)

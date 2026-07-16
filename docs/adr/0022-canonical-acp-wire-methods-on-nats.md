@@ -5,7 +5,7 @@ status: rejected
 date: 2026-07-09
 ---
 
-# ADR 0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)
+# ADR#0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)
 
 ## Context
 
@@ -42,8 +42,9 @@ The ACP spec's vocabulary governs the layers where methods actually flow as
 JSON-RPC on a wire: the byte-stream boundaries (WebSocket, HTTP, stdio),
 which have always used canonical names, including the `_{name}` extension
 prefix in `ConnectionClient`. The NATS embedding (subject grammar, token
-vocabulary, durability, ACL granularity) is governed by ADR 0003/0004 and
-optimizes for NATS, not for spec spelling.
+vocabulary, durability, ACL granularity) is governed by
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md)/[ADR#0004](./0004-protocol-and-transport-layering.md)
+and optimizes for NATS, not for spec spelling.
 
 ## Consequences
 

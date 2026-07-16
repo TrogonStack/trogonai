@@ -46,8 +46,8 @@ Think in terms of information flow:
   codes, or protobuf fields stable when required, but convert to richer domain
   types inside the owning package.
 - Respect local architecture. In Rust, keep value objects inside the owning
-  crate unless ADR 0002 justifies a package boundary. For wire and persistence
-  contracts, follow ADR 0009.
+  crate unless [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md) justifies a package boundary. For wire and persistence
+  contracts, follow [ADR#0009](../../../docs/adr/0009-protocol-buffers-wire-contracts.md).
 
 ## Key Examples
 

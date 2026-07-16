@@ -11,7 +11,7 @@ use agent_client_protocol::{Client, ConnectionTo, Error, Result, UntypedMessage}
 
 /// Adapts a connection handle to the bridge-owned [`ClientHandler`] trait.
 ///
-/// See ADR 0020: this is the SDK-connection-aware boundary shared by
+/// See ADR#0020: this is the SDK-connection-aware boundary shared by
 /// `acp-nats-server` and `acp-nats-stdio`. Every method is a zero-cost
 /// passthrough to the connection's outbound request/notification calls.
 #[derive(Clone)]

@@ -3,7 +3,7 @@ name = "jsonrpc-nats"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "JSON-RPC 2.0 over NATS content-mode codec (ADR 0011)"
+description = "JSON-RPC 2.0 over NATS content-mode codec (ADR#0011)"
 
 [lints]
 workspace = true

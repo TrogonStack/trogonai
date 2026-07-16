@@ -1,4 +1,4 @@
-//! JSON-RPC 2.0 over NATS content-mode codec (ADR 0011).
+//! JSON-RPC 2.0 over NATS content-mode codec (ADR#0011).
 //!
 //! Control and correlation fields project to NATS headers; payload stays in the
 //! body. Success versus error is decided by the presence of `Jsonrpc-Error-Code`.

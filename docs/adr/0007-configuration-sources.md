@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0007: Configuration Sources
+# ADR#0007: Configuration Sources
 
 ## Context
 

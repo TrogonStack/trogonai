@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0005: Polyglot Workspace Layout
+# ADR#0005: Polyglot Workspace Layout
 
 ## Context
 
@@ -15,7 +15,7 @@ expected. Go or Python may be added later.
 
 The workspace layout should feel consistent across ecosystems without erasing
 important language-specific conventions. In particular, Rust should keep its
-Cargo-specific crate rules from [ADR 0002](./0002-rust-crate-boundaries.md).
+Cargo-specific crate rules from [ADR#0002](./0002-rust-crate-boundaries.md).
 
 ## Decision
 
@@ -84,7 +84,7 @@ rsworkspace/
   xtask/        Rust workspace automation, if a dedicated automation crate exists
 ```
 
-Rust reusable packages use `crates/`, not `packages/`. [ADR 0002](./0002-rust-crate-boundaries.md) remains the
+Rust reusable packages use `crates/`, not `packages/`. [ADR#0002](./0002-rust-crate-boundaries.md) remains the
 source of truth for Rust crate naming, crate granularity, feature flags,
 transport adapter packages, SDK names, and procedural macro packages.
 
@@ -261,7 +261,7 @@ Use protocol/client/SDK packages instead.
 
 The monorepo gets consistent concepts across languages:
 
-- Rust uses `crates/` because Cargo and [ADR 0002](./0002-rust-crate-boundaries.md) are Rust-specific.
+- Rust uses `crates/` because Cargo and [ADR#0002](./0002-rust-crate-boundaries.md) are Rust-specific.
 - TypeScript, Go, and Python use `packages/` for reusable libraries.
 - `apps/`, `services/`, `cli/`, `sdks/`, and `examples/` mean the same thing in
   every language workspace.
@@ -271,7 +271,7 @@ The monorepo gets consistent concepts across languages:
 
 ## References
 
-- [ADR 0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
