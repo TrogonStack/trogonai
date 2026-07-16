@@ -5,6 +5,7 @@ future implementation work.
 
 ## Records
 
+- [ADR 0000: Architecture Decision Record Process](./0000-adr-process.md)
 - [ADR 0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
 - [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
 - [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
