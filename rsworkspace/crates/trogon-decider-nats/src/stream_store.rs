@@ -12,7 +12,7 @@ use async_nats::{
         context::PublishErrorKind,
         message::PublishMessage,
         publish::PublishAck,
-        stream::{InfoError, LastRawMessageError, RawMessageError},
+        stream::{InfoError, LastRawMessageError},
     },
     subject::ToSubject,
 };
@@ -21,10 +21,10 @@ use std::{fmt, future::IntoFuture};
 use trogon_decider_runtime::{
     Event, EventId, FromEntriesError, Headers, InvalidStreamPosition, StreamEvent, StreamPosition,
 };
-use trogon_nats::jetstream::{
-    JetStreamGetRawMessage, JetStreamGetStreamInfo, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-};
+use trogon_nats::jetstream::{JetStreamLastRawMessageBySubject, JetStreamPublishMessage};
 use trogon_std::{NowV7, UuidV7Generator};
+
+mod replay;
 
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
 
@@ -118,11 +118,6 @@ pub enum ReadStreamError {
         #[source]
         source: LastRawMessageError,
     },
-    #[error("failed to read stream message: {source}")]
-    ReadStreamMessage {
-        #[source]
-        source: RawMessageError,
-    },
     #[error("failed to convert stream message timestamp into recorded event time: {subject}")]
     InvalidMessageTimestamp { subject: String },
     #[error("failed to read stream message event id: {source}")]
@@ -144,6 +139,28 @@ pub enum ReadStreamError {
     },
     #[error("failed to read stream message event envelope: stream message is missing {header_name} header")]
     MissingMessageHeader { header_name: &'static str },
+    #[error("failed to create replay consumer: {source}")]
+    CreateReplayConsumer {
+        #[source]
+        source: async_nats::jetstream::stream::ConsumerError,
+    },
+    #[error("failed to open replay message stream: {source}")]
+    OpenReplayMessageStream {
+        #[source]
+        source: async_nats::jetstream::consumer::StreamError,
+    },
+    #[error("failed to read replay message: {source}")]
+    ReadReplayMessage {
+        #[source]
+        source: async_nats::jetstream::consumer::pull::OrderedError,
+    },
+    #[error("failed to read replay message delivery metadata: {source}")]
+    ReadReplayMessageInfo {
+        #[source]
+        source: async_nats::Error,
+    },
+    #[error("replay message stream ended before reaching sequence {to_sequence}")]
+    ReplayEndedBeforeTarget { to_sequence: u64 },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -324,10 +341,10 @@ fn build_publish_message(
 }
 
 /// Reads all events from the JetStream stream starting at a stream sequence.
-pub async fn read_stream<S>(stream: &S, from_sequence: u64) -> Result<Vec<StreamEvent>, StreamStoreError>
-where
-    S: JetStreamGetStreamInfo + JetStreamGetRawMessage,
-{
+pub async fn read_stream(
+    stream: &jetstream::stream::Stream,
+    from_sequence: u64,
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     let info = stream
         .get_info()
         .await
@@ -336,23 +353,21 @@ where
 }
 
 #[cfg(any(test, not(coverage)))]
-pub(crate) async fn read_subject_stream<S>(
-    stream: &S,
+pub(crate) async fn read_subject_stream(
+    stream: &jetstream::stream::Stream,
     stream_id: &str,
     subject: &str,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError>
-where
-    S: JetStreamGetRawMessage,
-{
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
     let stream_id = stream_id.to_string();
-    read_message_range(
+    replay::replay_ordered_range(
         stream,
+        Some(subject),
         from_sequence,
         to_sequence,
-        |message| message.subject.as_str() == subject,
-        |_| stream_id.clone(),
+        replay::ReplayRetryPolicy::default(),
+        move |_| stream_id.clone(),
     )
     .await
 }
@@ -386,69 +401,20 @@ where
 }
 
 /// Reads events from an inclusive JetStream stream sequence range.
-pub async fn read_stream_range<S>(
-    stream: &S,
+pub async fn read_stream_range(
+    stream: &jetstream::stream::Stream,
     from_sequence: u64,
     to_sequence: u64,
-) -> Result<Vec<StreamEvent>, StreamStoreError>
-where
-    S: JetStreamGetRawMessage,
-{
-    read_message_range(
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
+    replay::replay_ordered_range(
         stream,
+        None,
         from_sequence,
         to_sequence,
-        |_| true,
+        replay::ReplayRetryPolicy::default(),
         |message| message.subject.to_string(),
     )
     .await
-}
-
-async fn read_message_range<S>(
-    stream: &S,
-    from_sequence: u64,
-    to_sequence: u64,
-    mut include: impl FnMut(&StreamMessage) -> bool,
-    mut stream_id: impl FnMut(&StreamMessage) -> String,
-) -> Result<Vec<StreamEvent>, StreamStoreError>
-where
-    S: JetStreamGetRawMessage,
-{
-    if from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence {
-        return Ok(Vec::new());
-    }
-
-    let mut events = Vec::new();
-    for sequence in from_sequence..=to_sequence {
-        let Some(message) = read_raw_message(stream, sequence).await? else {
-            continue;
-        };
-        if !include(&message) {
-            continue;
-        }
-        let stream_id = stream_id(&message);
-        events.push(record_stream_message(message, stream_id)?);
-    }
-
-    Ok(events)
-}
-
-async fn read_raw_message<S>(stream: &S, sequence: u64) -> Result<Option<StreamMessage>, StreamStoreError>
-where
-    S: JetStreamGetRawMessage,
-{
-    match stream.get_raw_message(sequence).await {
-        Ok(message) => Ok(Some(message)),
-        Err(source)
-            if matches!(
-                source.kind(),
-                async_nats::jetstream::stream::RawMessageErrorKind::NoMessageFound
-            ) =>
-        {
-            Ok(None)
-        }
-        Err(source) => Err(ReadStreamError::ReadStreamMessage { source }.into()),
-    }
 }
 
 /// Converts a raw JetStream message into a decider stream event.

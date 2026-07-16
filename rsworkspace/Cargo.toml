@@ -137,6 +137,7 @@ reqwest = { version = "=0.12.28", default-features = false, features = ["json", 
 rrule = "=0.14.0"
 sha2 = "=0.11.0"
 wiremock = "=0.6.5"
+testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
 time = "=0.3.53"
