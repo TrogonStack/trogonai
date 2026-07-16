@@ -2,7 +2,7 @@
 #MISE description="Assert every built decider component declares zero imports and passes wasm validation"
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT"
 
 shopt -s nullglob

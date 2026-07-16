@@ -2,7 +2,7 @@
 #MISE description="Run wasm decider conformance: sim schedules suite, macro compile-fail tests, and every decider-test YAML fixture"
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace"
 
 cargo test -p trogon-decider-sim --test schedules --features test-support

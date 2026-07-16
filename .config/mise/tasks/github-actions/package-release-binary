@@ -6,7 +6,7 @@ set -euo pipefail
 : "${TARGET:?TARGET is required}"
 : "${GITHUB_ENV:?GITHUB_ENV is required}"
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT"
 
 staging="acp-nats-stdio-${VERSION}-${TARGET}"

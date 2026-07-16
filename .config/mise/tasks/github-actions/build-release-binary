@@ -5,7 +5,7 @@ set -euo pipefail
 : "${USE_CROSS:?USE_CROSS is required}"
 : "${TARGET:?TARGET is required}"
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace"
 
 if [[ "$USE_CROSS" == "true" ]]; then

@@ -2,7 +2,7 @@
 #MISE description="Run the repo Rust policy lint crate's own tests on its pinned dylint toolchain"
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace/dylints/trogon_lints"
 
 dylint_toolchain="$(python - <<'PY'
