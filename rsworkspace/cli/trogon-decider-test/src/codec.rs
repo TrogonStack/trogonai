@@ -16,6 +16,7 @@
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use buffa::type_registry::TypeRegistry;
 use trogon_decider_sim::WireEnvelope;
 
@@ -48,8 +49,6 @@ pub fn normalize_type_url(type_url: &str) -> String {
 /// proto JSON requires for `bytes` fields, so suite authors can keep payloads
 /// human-readable instead of hand-encoding them.
 fn expand_utf8_wrappers(value: &mut serde_json::Value) {
-    use base64::Engine as _;
-
     match value {
         serde_json::Value::Object(map) => {
             if map.len() == 1

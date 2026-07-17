@@ -1,3 +1,5 @@
+use std::error::Error as _;
+
 use trogon_decider::{
     Decider, DecisionFailure, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
 };
@@ -109,8 +111,6 @@ impl BridgeError {
 
 impl From<BridgeError> for DomainErrorParts {
     fn from(error: BridgeError) -> Self {
-        use std::error::Error as _;
-
         let details = causal_chain(error.source());
         Self {
             code: error.code().to_string(),

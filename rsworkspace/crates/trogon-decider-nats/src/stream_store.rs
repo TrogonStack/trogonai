@@ -352,7 +352,6 @@ pub async fn read_stream(
     read_stream_range(stream, from_sequence, info.state.last_sequence).await
 }
 
-#[cfg(any(test, not(coverage)))]
 pub(crate) async fn read_subject_stream(
     stream: &jetstream::stream::Stream,
     stream_id: &str,
