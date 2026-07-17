@@ -1,3 +1,6 @@
+use buffa::Message as _;
+use trogonai_proto::scheduler::schedules::v1 as schedules_v1;
+
 use super::*;
 
 #[test]
@@ -8,30 +11,73 @@ fn normalize_adds_prefix() {
     );
 }
 
-fn error_message<T>(result: Result<T>) -> String {
-    match result {
-        Ok(_) => String::new(),
-        Err(error) => error.to_string(),
-    }
+fn create_schedule_value() -> serde_json::Value {
+    serde_json::json!({
+        "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule",
+        "schedule_id": "backup",
+        "status": { "scheduled": {} },
+        "schedule": { "every": { "every": "30s" } },
+        "delivery": { "nats_message": { "subject": "agent.run" } },
+        "message": { "content": { "content_type": "application/json", "data": "e30=" } },
+    })
 }
 
 #[test]
-fn every_rejects_out_of_range_nanos() {
-    let value = serde_json::json!({ "every": { "seconds": 1, "nanos": 1_000_000_000_i64 } });
-    let error = error_message(parse_schedule(Some(&value)));
-    assert!(error.contains("nanos"), "unexpected error: {error:?}");
+fn json_any_to_command_encodes_via_registry() {
+    let command = json_any_to_command(&create_schedule_value()).expect("encode command");
+    assert_eq!(
+        command.type_url,
+        "type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule"
+    );
+
+    let decoded = schedules_v1::CreateSchedule::decode_from_slice(&command.payload).expect("decode command");
+    assert_eq!(decoded.schedule_id, "backup");
+
+    let round_tripped_text =
+        trogonai_proto::decode_event_to_json("trogonai.scheduler.schedules.v1.CreateSchedule", &command.payload)
+            .expect("registered type")
+            .expect("decode to json");
+    let round_tripped: serde_json::Value = serde_json::from_str(&round_tripped_text).expect("valid json");
+    assert_eq!(round_tripped["delivery"]["natsMessage"]["subject"], "agent.run");
 }
 
 #[test]
-fn delivery_rejects_unsupported_ttl() {
-    let value = serde_json::json!({ "subject": "agent.run", "ttl": "60s" });
-    let error = error_message(parse_delivery(Some(&value)));
-    assert!(error.contains("ttl"), "unexpected error: {error:?}");
+fn json_any_to_envelope_uses_bare_full_name() {
+    let value = serde_json::json!({
+        "@type": "trogonai.scheduler.schedules.v1.SchedulePaused",
+        "schedule_id": "backup",
+    });
+    let envelope = json_any_to_envelope(&value).expect("encode envelope");
+    assert_eq!(envelope.type_url, "trogonai.scheduler.schedules.v1.SchedulePaused");
+
+    let decoded = schedules_v1::SchedulePaused::decode_from_slice(&envelope.payload).expect("decode envelope");
+    assert_eq!(decoded.schedule_id, "backup");
 }
 
 #[test]
-fn message_rejects_unsupported_headers() {
-    let value = serde_json::json!({ "headers": [], "content": { "data": "{}" } });
-    let error = error_message(parse_message(Some(&value)));
-    assert!(error.contains("headers"), "unexpected error: {error:?}");
+fn utf8_wrapper_encodes_identically_to_base64() {
+    let mut wrapped = create_schedule_value();
+    wrapped["message"]["content"]["data"] = serde_json::json!({ "utf8": "{}" });
+
+    let from_wrapper = json_any_to_command(&wrapped).expect("encode wrapped command");
+    let from_base64 = json_any_to_command(&create_schedule_value()).expect("encode base64 command");
+    assert_eq!(from_wrapper.payload, from_base64.payload);
+
+    let decoded = schedules_v1::CreateSchedule::decode_from_slice(&from_wrapper.payload).expect("decode command");
+    let content = decoded.message.expect("message").content.expect("content");
+    assert_eq!(content.data, b"{}");
+}
+
+#[test]
+fn missing_type_is_an_error() {
+    let value = serde_json::json!({ "schedule_id": "backup" });
+    let error = json_any_to_command(&value).unwrap_err().to_string();
+    assert!(error.contains("@type"), "unexpected error: {error}");
+}
+
+#[test]
+fn unregistered_type_is_an_error() {
+    let value = serde_json::json!({ "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.NoSuchType" });
+    let error = json_any_to_command(&value).unwrap_err().to_string();
+    assert!(error.contains("unregistered"), "unexpected error: {error}");
 }

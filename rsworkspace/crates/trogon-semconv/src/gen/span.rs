@@ -138,6 +138,33 @@ pub const ACP_SESSION_SET_MODE: &str = "acp.session.set_mode";
 /// Datadog webhook ingestion
 pub const DATADOG_WEBHOOK: &str = "datadog.webhook";
 
+/// Appending decided events to a JetStream-backed stream
+pub const DECIDER_APPEND_STREAM: &str = "decider.append_stream";
+
+/// Execution of a single decider command, from snapshot and stream read through decide and append
+pub const DECIDER_EXECUTE_COMMAND: &str = "decider.execute_command";
+
+/// Reading a decider snapshot before replaying a command
+pub const DECIDER_READ_SNAPSHOT: &str = "decider.read_snapshot";
+
+/// Replaying events from an ordered, subject-filtered JetStream consumer
+pub const DECIDER_REPLAY_STREAM: &str = "decider.replay_stream";
+
+/// Calling a WASM decider guest's decide export
+pub const DECIDER_WASM_DECIDE: &str = "decider.wasm.decide";
+
+/// Instantiating a WASM decider guest component for a command
+pub const DECIDER_WASM_INSTANTIATE: &str = "decider.wasm.instantiate";
+
+/// Replaying prior events into a WASM decider guest session
+pub const DECIDER_WASM_REPLAY: &str = "decider.wasm.replay";
+
+/// Reading or writing a WASM decider guest session's snapshot
+pub const DECIDER_WASM_SNAPSHOT: &str = "decider.wasm.snapshot";
+
+/// Writing a decider snapshot after a command decision
+pub const DECIDER_WRITE_SNAPSHOT: &str = "decider.write_snapshot";
+
 /// ACP client method dispatch. Span name is `dispatch_client_method` (no namespace) today
 pub const DISPATCH_CLIENT_METHOD: &str = "dispatch_client_method";
 

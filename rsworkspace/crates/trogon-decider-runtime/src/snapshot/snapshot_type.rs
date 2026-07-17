@@ -97,9 +97,14 @@ pub enum InvalidSnapshotTypeName {
     ContainsControlCharacter,
 }
 
+/// Associates a decider state type with the stable [`SnapshotTypeName`] its
+/// snapshots are tagged with, so a decoder can reject a snapshot payload
+/// encoded for a different state type.
 pub trait SnapshotType {
+    /// Error returned when the type name cannot be resolved or constructed.
     type Error: std::error::Error + Send + Sync + 'static;
 
+    /// Returns the stable type name for this state's snapshots.
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error>;
 }
 

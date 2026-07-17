@@ -22,9 +22,80 @@ use crate::{
     StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
+use trogon_semconv::{attribute, metric, span};
 use trogon_std::{NowV7, UuidV7Generator};
 
-use std::{borrow::Borrow, future::Future, num::NonZeroU64};
+use opentelemetry::metrics::Counter;
+use opentelemetry::{KeyValue, global};
+use tracing::Instrument;
+
+use std::{
+    borrow::Borrow,
+    future::Future,
+    num::NonZeroU64,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+
+const METER_NAME: &str = "trogon-decider-runtime";
+
+/// Counters recorded for command execution's replay, snapshot read, and
+/// snapshot write phases.
+struct ExecutionMetrics {
+    replay_events: Counter<u64>,
+    snapshot_reads: Counter<u64>,
+    snapshot_writes: Counter<u64>,
+}
+
+impl ExecutionMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            replay_events: metric::build_decider_replay_events(&meter),
+            snapshot_reads: metric::build_decider_snapshot_reads(&meter),
+            snapshot_writes: metric::build_decider_snapshot_writes(&meter),
+        }
+    }
+}
+
+static METRICS: OnceLock<ExecutionMetrics> = OnceLock::new();
+
+fn metrics() -> &'static ExecutionMetrics {
+    METRICS.get_or_init(ExecutionMetrics::new)
+}
+
+fn write_precondition_attribute(precondition: StreamWritePrecondition) -> attribute::WritePrecondition {
+    match precondition {
+        StreamWritePrecondition::Any => attribute::WritePrecondition::Any,
+        StreamWritePrecondition::StreamExists => attribute::WritePrecondition::StreamExists,
+        StreamWritePrecondition::NoStream => attribute::WritePrecondition::NoStream,
+        StreamWritePrecondition::At(_) => attribute::WritePrecondition::At,
+    }
+}
+
+fn execute_command_write_precondition<C: Decider>(
+    configured: Option<StreamWritePrecondition>,
+) -> Option<StreamWritePrecondition> {
+    C::WRITE_PRECONDITION.map(StreamWritePrecondition::from).or(configured)
+}
+
+fn decision_outcome_for_error<D, EV, RS, RD, A, ET, EE, DE>(
+    error: &CommandError<D, EV, RS, RD, A, ET, EE, DE>,
+) -> attribute::DecisionOutcome {
+    match error {
+        CommandError::Decide(_) => attribute::DecisionOutcome::Rejected,
+        _ => attribute::DecisionOutcome::Faulted,
+    }
+}
+
+fn record_snapshot_read_outcome(span: &tracing::Span, outcome: attribute::SnapshotOutcome) {
+    span.record(attribute::SNAPSHOT_OUTCOME, outcome.as_str());
+    metrics()
+        .snapshot_reads
+        .add(1, &[KeyValue::new(attribute::SNAPSHOT_OUTCOME, outcome.as_str())]);
+}
 type CommandEventTypeError<C> = <<C as Decider>::Event as EventType>::Error;
 type CommandEventPayloadEncodeError<C> = <<C as Decider>::Event as EventEncode>::Error;
 type CommandEventDecodeError<C> = <<C as Decider>::Event as EventDecode>::Error;
@@ -43,11 +114,28 @@ type CommandWithSnapshotsResult<E, S, C> =
 /// scheduler keeps that future concrete instead of forcing every runtime adapter
 /// through a boxed `dyn Future`.
 pub trait SnapshotTaskScheduler {
+    /// Schedules `task` to run, without blocking the caller on its completion.
     fn schedule<F>(&self, task: F)
     where
         F: Future<Output = ()> + Send + 'static;
+
+    /// Waits for every snapshot write this scheduler has accepted to finish.
+    ///
+    /// The default implementation resolves immediately. Schedulers that defer
+    /// writes to work they do not track have nothing to wait for; schedulers
+    /// that do track outstanding writes, such as
+    /// [`DrainableSnapshotTaskScheduler`], override this to await them.
+    fn drain(&self) -> impl Future<Output = ()> + Send {
+        std::future::ready(())
+    }
 }
 
+/// Schedules snapshot writes on the ambient Tokio runtime without tracking them.
+///
+/// This scheduler is fire-and-forget: [`Self::drain`] uses the trait default
+/// and resolves immediately, even while writes are still in flight. Hosts that
+/// need to await outstanding snapshot writes before teardown should use
+/// [`DrainableSnapshotTaskScheduler`] instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TokioSnapshotTaskScheduler;
 
@@ -62,6 +150,66 @@ impl SnapshotTaskScheduler for TokioSnapshotTaskScheduler {
         };
 
         drop(handle.spawn(task));
+    }
+}
+
+#[derive(Debug, Default)]
+struct SnapshotTaskTracker {
+    in_flight: AtomicUsize,
+    idle: tokio::sync::Notify,
+}
+
+/// Schedules snapshot writes on the ambient Tokio runtime and tracks them so
+/// hosts can await outstanding writes before teardown.
+///
+/// Every scheduled task increments an in-flight counter and decrements it on
+/// completion. [`Self::drain`] waits until that counter reaches zero. Clone
+/// this scheduler to share the same in-flight tracking between the executions
+/// that schedule writes and the host that drains them; cloning is cheap, it
+/// only bumps a reference count.
+#[derive(Debug, Clone, Default)]
+pub struct DrainableSnapshotTaskScheduler {
+    tasks: Arc<SnapshotTaskTracker>,
+}
+
+impl DrainableSnapshotTaskScheduler {
+    /// Creates a scheduler with no in-flight snapshot writes.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl SnapshotTaskScheduler for DrainableSnapshotTaskScheduler {
+    fn schedule<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::error!("Tokio snapshot task scheduler requires an active Tokio runtime");
+            return;
+        };
+
+        let tasks = Arc::clone(&self.tasks);
+        tasks.in_flight.fetch_add(1, Ordering::SeqCst);
+        drop(handle.spawn(async move {
+            task.await;
+            if tasks.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
+                tasks.idle.notify_waiters();
+            }
+        }));
+    }
+
+    fn drain(&self) -> impl Future<Output = ()> + Send {
+        let tasks = Arc::clone(&self.tasks);
+        async move {
+            loop {
+                let idle = tasks.idle.notified();
+                if tasks.in_flight.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+                idle.await;
+            }
+        }
     }
 }
 
@@ -89,12 +237,16 @@ impl SnapshotTaskScheduler for ImmediateSnapshotTaskScheduler {
     }
 }
 
+/// Outcome of consulting a [`SnapshotPolicy`] after a successful command execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotDecision {
+    /// Do not take a snapshot for this execution.
     Skip,
+    /// Take a snapshot for this execution.
     Take,
 }
 
+/// Context passed to a [`SnapshotPolicy`] so it can decide whether to snapshot.
 #[derive(Debug, Clone, Copy)]
 pub struct DecideSnapshot<'a, C: Decider> {
     /// The command that produced the execution result.
@@ -108,29 +260,40 @@ pub struct DecideSnapshot<'a, C: Decider> {
     ///
     /// `None` means execution started without a snapshot.
     pub snapshot_position: Option<StreamPosition>,
+    /// State after replaying history and applying the newly decided events.
     pub state: &'a C::State,
+    /// Events decided by this execution, already appended to the stream.
     pub events: &'a Events<C::Event>,
     /// Number of persisted stream events read after the snapshot position.
     pub replayed_event_count: u64,
 }
 
+/// Decides whether a command execution should take a snapshot after it appends events.
 pub trait SnapshotPolicy<C: Decider> {
+    /// Decides whether to take a snapshot for the given execution context.
     fn decide_snapshot(&self, context: DecideSnapshot<'_, C>) -> SnapshotDecision;
 }
 
+/// Associates a [`Decider`] with the [`SnapshotPolicy`] its command executions
+/// should use, so callers can build a configured [`Snapshots`] without
+/// repeating the policy at every call site.
 pub trait CommandSnapshotPolicy: Decider
 where
     Self::State: SnapshotType,
 {
+    /// The snapshot policy this decider's command executions use.
     type SnapshotPolicy: SnapshotPolicy<Self>;
 
+    /// The snapshot policy instance this decider's command executions use.
     const SNAPSHOT_POLICY: Self::SnapshotPolicy;
 
+    /// Builds the [`Snapshots`] configuration for this decider from a snapshot store.
     fn snapshots<'a, S>(snapshot_store: &'a S) -> Snapshots<'a, S, Self::SnapshotPolicy> {
         Snapshots::new(snapshot_store, Self::SNAPSHOT_POLICY)
     }
 }
 
+/// A [`SnapshotPolicy`] that never takes a snapshot.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoSnapshot;
 
@@ -140,16 +303,20 @@ impl<C: Decider> SnapshotPolicy<C> for NoSnapshot {
     }
 }
 
+/// A [`SnapshotPolicy`] that takes a snapshot once at least `frequency` events
+/// have been read or appended since the last snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrequencySnapshot {
     frequency: NonZeroU64,
 }
 
 impl FrequencySnapshot {
+    /// Creates a policy that snapshots every `frequency` events.
     pub const fn new(frequency: NonZeroU64) -> Self {
         Self { frequency }
     }
 
+    /// Returns the configured snapshot frequency.
     pub const fn frequency(self) -> NonZeroU64 {
         self.frequency
     }
@@ -165,6 +332,7 @@ impl<C: Decider> SnapshotPolicy<C> for FrequencySnapshot {
     }
 }
 
+/// Successful outcome of one command execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionResult<State, Event> {
     /// The stream high-watermark after the command append completed.
@@ -244,9 +412,15 @@ pub enum CommandError<
     ReadAfterOverflow(#[source] ReadAfterOverflow),
 }
 
+/// Error detail for a loaded snapshot whose recorded position the stream
+/// cannot prove happened, for example after the stream was truncated or
+/// replaced without clearing its snapshots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SnapshotAheadOfStream {
+    /// Position recorded on the loaded snapshot.
     pub snapshot_position: StreamPosition,
+    /// Stream high-watermark observed when the snapshot was checked, or
+    /// `None` if the stream has no current position.
     pub stream_position: Option<StreamPosition>,
 }
 
@@ -264,6 +438,82 @@ impl std::fmt::Display for SnapshotAheadOfStream {
                 self.snapshot_position
             ),
         }
+    }
+}
+
+/// A recoverable snapshot failure, kept distinct from [`CommandError`] so a
+/// [`SnapshotFailurePolicy`] can inspect the failed operation before deciding
+/// whether the command should fail or recover.
+#[derive(Debug)]
+pub enum SnapshotFailure<'a, ReadSnapshotError> {
+    /// The loaded snapshot claims a position newer than the stream can prove.
+    AheadOfStream(SnapshotAheadOfStream),
+    /// Reading the snapshot failed, which also covers a snapshot payload that
+    /// failed to decode, since the read adapter folds decode failures into
+    /// its own error type.
+    ReadFailed(&'a ReadSnapshotError),
+}
+
+/// Context passed to a [`SnapshotFailurePolicy`] when a snapshot failure occurs.
+#[derive(Debug)]
+pub struct SnapshotFailureContext<'a, C: Decider, ReadSnapshotError> {
+    /// The command that triggered the failing execution.
+    pub command: &'a C,
+    /// The failure the policy must decide how to handle.
+    pub failure: SnapshotFailure<'a, ReadSnapshotError>,
+}
+
+/// The outcome a [`SnapshotFailurePolicy`] chooses for a [`SnapshotFailure`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotFailureDecision {
+    /// Fail the command with the concrete [`CommandError`] for this failure.
+    Fail,
+    /// Discard the bad snapshot and replay the command from the beginning of
+    /// the stream, as if no snapshot had ever been taken.
+    DiscardAndReplay,
+}
+
+/// Chooses how a [`CommandExecution`] reacts to a snapshot it cannot trust.
+///
+/// This mirrors [`SnapshotPolicy`]: it lets callers plug in per-command or
+/// per-store logic instead of hard-coding one reaction for every decider.
+/// [`FailOnSnapshotFailure`] keeps today's behavior of failing the command;
+/// [`DiscardAndReplaySnapshotFailure`] discards the bad snapshot and replays
+/// from the beginning of the stream. Custom implementations can choose
+/// per [`SnapshotFailure`] kind.
+pub trait SnapshotFailurePolicy<C: Decider, ReadSnapshotError> {
+    /// Decides how the command execution should react to the given snapshot failure.
+    fn decide_snapshot_failure(
+        &self,
+        context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision;
+}
+
+/// Fails the command on any snapshot failure. This is the default policy and
+/// matches the runtime's behavior before [`SnapshotFailurePolicy`] existed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FailOnSnapshotFailure;
+
+impl<C: Decider, ReadSnapshotError> SnapshotFailurePolicy<C, ReadSnapshotError> for FailOnSnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::Fail
+    }
+}
+
+/// Discards a bad snapshot and replays the command from the beginning of the
+/// stream instead of failing it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiscardAndReplaySnapshotFailure;
+
+impl<C: Decider, ReadSnapshotError> SnapshotFailurePolicy<C, ReadSnapshotError> for DiscardAndReplaySnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: SnapshotFailureContext<'_, C, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::DiscardAndReplay
     }
 }
 
@@ -352,61 +602,97 @@ impl<
     }
 }
 
+/// Marks a [`CommandExecution`] that has not been configured with a
+/// snapshot store, so it always replays from the beginning of the stream.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshots;
 
+/// Marks a [`Snapshots`] configuration that has not been given a
+/// [`SnapshotTaskScheduler`], so snapshot writes are not scheduled at all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshotTaskScheduler;
 
-pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler> {
+/// Snapshot store, policy, task scheduler, and failure policy configured for
+/// a [`CommandExecution`].
+pub struct Snapshots<'a, S, P, Spawn = WithoutSnapshotTaskScheduler, F = FailOnSnapshotFailure> {
     snapshot_store: &'a S,
     policy: P,
     schedule_snapshot_task: Spawn,
+    failure_policy: F,
 }
 
-impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler> {
+impl<'a, S, P> Snapshots<'a, S, P, WithoutSnapshotTaskScheduler, FailOnSnapshotFailure> {
+    /// Configures a snapshot store and policy with no task scheduler and the
+    /// default [`FailOnSnapshotFailure`] failure policy.
     pub fn new(snapshot_store: &'a S, policy: P) -> Self {
         Self {
             snapshot_store,
             policy,
             schedule_snapshot_task: WithoutSnapshotTaskScheduler,
+            failure_policy: FailOnSnapshotFailure,
         }
     }
 }
 
-impl<'a, S, P, Spawn> Snapshots<'a, S, P, Spawn> {
+impl<'a, S, P, Spawn, F> Snapshots<'a, S, P, Spawn, F> {
     fn schedule_snapshot_tasks_with<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
-    ) -> Snapshots<'a, S, P, NextSpawn> {
+    ) -> Snapshots<'a, S, P, NextSpawn, F> {
         Snapshots {
             snapshot_store: self.snapshot_store,
             policy: self.policy,
             schedule_snapshot_task,
+            failure_policy: self.failure_policy,
+        }
+    }
+
+    fn with_snapshot_failure_policy<NextF>(self, failure_policy: NextF) -> Snapshots<'a, S, P, Spawn, NextF> {
+        Snapshots {
+            snapshot_store: self.snapshot_store,
+            policy: self.policy,
+            schedule_snapshot_task: self.schedule_snapshot_task,
+            failure_policy,
         }
     }
 }
 
+/// Converts a value into a [`Snapshots`] configuration for a [`Decider`].
+///
+/// Implemented for a plain snapshot store reference (using the decider's
+/// [`CommandSnapshotPolicy`]) and for an already-built [`Snapshots`], so
+/// [`CommandExecution::with_snapshot`] can accept either.
 pub trait IntoSnapshots<'a, C>: Sized
 where
     C: Decider,
 {
+    /// The resulting configuration's snapshot store type.
     type Store;
+    /// The resulting configuration's snapshot policy type.
     type Policy;
+    /// The resulting configuration's snapshot task scheduler type.
     type SnapshotTaskScheduler;
+    /// The resulting configuration's snapshot failure policy type.
+    type FailurePolicy;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler>;
+    /// Builds the [`Snapshots`] configuration.
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy>;
 }
 
-impl<'a, C, S, P, Spawn> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn>
+impl<'a, C, S, P, Spawn, F> IntoSnapshots<'a, C> for Snapshots<'a, S, P, Spawn, F>
 where
     C: Decider,
 {
     type Store = S;
     type Policy = P;
     type SnapshotTaskScheduler = Spawn;
+    type FailurePolicy = F;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy> {
         self
     }
 }
@@ -419,12 +705,23 @@ where
     type Store = S;
     type Policy = C::SnapshotPolicy;
     type SnapshotTaskScheduler = WithoutSnapshotTaskScheduler;
+    type FailurePolicy = FailOnSnapshotFailure;
 
-    fn into_snapshots(self) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler> {
+    fn into_snapshots(
+        self,
+    ) -> Snapshots<'a, Self::Store, Self::Policy, Self::SnapshotTaskScheduler, Self::FailurePolicy> {
         C::snapshots(self)
     }
 }
 
+/// Runtime boundary that applies one [`Decider`] command to one stream: reads
+/// the stream (and optionally a snapshot), replays state, decides the next
+/// events, and appends them with the configured write precondition.
+///
+/// Build one with [`CommandExecution::new`] and configure it with the
+/// builder methods before calling `execute`, which is available when `S` is
+/// [`WithoutSnapshots`] or a [`Snapshots`] configuration whose store and
+/// policy satisfy the trait bounds that method requires.
 pub struct CommandExecution<'a, E, C, S, G> {
     event_store: &'a E,
     command: &'a C,
@@ -438,6 +735,9 @@ impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots, UuidV7Generator>
 where
     C: Decider,
 {
+    /// Starts building an execution for `command` against `event_store`, with
+    /// no snapshot store, no explicit write precondition, no headers, and the
+    /// default UUIDv7 event id generator.
     pub fn new(event_store: &'a E, command: &'a C) -> Self {
         Self {
             event_store,
@@ -454,6 +754,9 @@ impl<'a, E, C, G> CommandExecution<'a, E, C, WithoutSnapshots, G>
 where
     C: Decider,
 {
+    /// Configures this execution to read and write snapshots, accepting
+    /// either a bare snapshot store (using the decider's
+    /// [`CommandSnapshotPolicy`]) or an explicitly built [`Snapshots`].
     #[allow(clippy::type_complexity)]
     pub fn with_snapshot<I>(
         self,
@@ -467,6 +770,7 @@ where
             <I as IntoSnapshots<'a, C>>::Store,
             <I as IntoSnapshots<'a, C>>::Policy,
             <I as IntoSnapshots<'a, C>>::SnapshotTaskScheduler,
+            <I as IntoSnapshots<'a, C>>::FailurePolicy,
         >,
         G,
     >
@@ -485,6 +789,10 @@ where
 }
 
 impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
+    /// Overrides the stream write precondition used for the append.
+    ///
+    /// Ignored when the decider declares its own [`WritePrecondition`] via
+    /// `C::WRITE_PRECONDITION`; that always takes precedence over this value.
     pub fn with_write_precondition<W>(mut self, write_precondition: W) -> Self
     where
         W: Into<Option<StreamWritePrecondition>>,
@@ -493,11 +801,14 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         self
     }
 
+    /// Sets metadata headers attached to every event this execution appends.
     pub fn with_headers(mut self, headers: Headers) -> Self {
         self.headers = headers;
         self
     }
 
+    /// Replaces the generator used to assign ids to newly decided events that
+    /// don't already carry one.
     pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, S, NextG>
     where
         NextG: NowV7,
@@ -572,16 +883,36 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     }
 }
 
-impl<'a, E, S, C, P, Spawn, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn>, G> {
+impl<'a, E, S, C, P, Spawn, F, G> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn, F>, G> {
+    /// Replaces the scheduler used to run snapshot write tasks.
     pub fn with_task_runtime<NextSpawn>(
         self,
         schedule_snapshot_task: NextSpawn,
-    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn>, G> {
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, NextSpawn, F>, G> {
         CommandExecution {
             event_store: self.event_store,
             command: self.command,
             write_precondition: self.write_precondition,
             snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
+        }
+    }
+
+    /// Sets how this execution reacts to a snapshot it cannot trust.
+    ///
+    /// Defaults to [`FailOnSnapshotFailure`], which fails the command exactly
+    /// as before this policy existed. Use [`DiscardAndReplaySnapshotFailure`]
+    /// or a custom [`SnapshotFailurePolicy`] to recover instead.
+    pub fn with_snapshot_failure_policy<NextF>(
+        self,
+        failure_policy: NextF,
+    ) -> CommandExecution<'a, E, C, Snapshots<'a, S, P, Spawn, NextF>, G> {
+        CommandExecution {
+            event_store: self.event_store,
+            command: self.command,
+            write_precondition: self.write_precondition,
+            snapshots: self.snapshots.with_snapshot_failure_policy(failure_policy),
             headers: self.headers,
             event_id_generator: self.event_id_generator,
         }
@@ -599,8 +930,35 @@ where
     CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
 {
+    /// Replays the stream from the beginning, decides the command, and
+    /// appends the resulting events. No snapshot is read or written.
     pub async fn execute(self) -> CommandWithoutSnapshotsResult<E, C> {
+        let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
+        let span = tracing::info_span!(
+            span::DECIDER_EXECUTE_COMMAND,
+            stream_id = tracing::field::Empty,
+            write_precondition = tracing::field::Empty,
+            decision_outcome = tracing::field::Empty,
+        );
+        if let Some(write_precondition) = write_precondition {
+            span.record(
+                attribute::WRITE_PRECONDITION,
+                write_precondition_attribute(write_precondition).as_str(),
+            );
+        }
+
+        let result = self.execute_inner().instrument(span.clone()).await;
+        let decision_outcome = match &result {
+            Ok(_) => attribute::DecisionOutcome::Decided,
+            Err(error) => decision_outcome_for_error(error),
+        };
+        span.record(attribute::DECISION_OUTCOME, decision_outcome.as_str());
+        result
+    }
+
+    async fn execute_inner(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
+        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
         if has_no_stream_write_precondition::<C>() {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -620,6 +978,7 @@ where
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
+        metrics().replay_events.add(stream_read.events.len() as u64, &[]);
         let state = evolve_state_from_stream_events::<C>(C::initial_state(), &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
 
@@ -631,7 +990,7 @@ where
     }
 }
 
-impl<E, S, C, P, Spawn, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn>, G>
+impl<E, S, C, P, Spawn, F, G> CommandExecution<'_, E, C, Snapshots<'_, S, P, Spawn, F>, G>
 where
     C: Decider,
     C::State: Clone + Send + 'static,
@@ -642,6 +1001,7 @@ where
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
     P: SnapshotPolicy<C>,
     Spawn: SnapshotTaskScheduler + Send + Sync,
+    F: SnapshotFailurePolicy<C, CommandReadSnapshotError<S, C>>,
     G: NowV7,
     CommandWriteSnapshotError<S, C>: std::fmt::Display + Send + 'static,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
@@ -649,8 +1009,38 @@ where
     CommandEventDecodeError<C>: std::error::Error + Send + Sync + 'static,
     C::State: SnapshotType,
 {
+    /// Loads a snapshot if one exists, replays only the stream events after
+    /// it, decides the command, appends the resulting events, and schedules a
+    /// new snapshot write if the configured [`SnapshotPolicy`] decides to
+    /// take one. A snapshot the [`SnapshotFailurePolicy`] cannot trust is
+    /// discarded and replayed from the beginning of the stream instead.
     pub async fn execute(self) -> CommandWithSnapshotsResult<E, S, C> {
+        let write_precondition = execute_command_write_precondition::<C>(self.write_precondition);
+        let span = tracing::info_span!(
+            span::DECIDER_EXECUTE_COMMAND,
+            stream_id = tracing::field::Empty,
+            write_precondition = tracing::field::Empty,
+            decision_outcome = tracing::field::Empty,
+        );
+        if let Some(write_precondition) = write_precondition {
+            span.record(
+                attribute::WRITE_PRECONDITION,
+                write_precondition_attribute(write_precondition).as_str(),
+            );
+        }
+
+        let result = self.execute_inner().instrument(span.clone()).await;
+        let decision_outcome = match &result {
+            Ok(_) => attribute::DecisionOutcome::Decided,
+            Err(error) => decision_outcome_for_error(error),
+        };
+        span.record(attribute::DECISION_OUTCOME, decision_outcome.as_str());
+        result
+    }
+
+    async fn execute_inner(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
+        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
         if has_no_stream_write_precondition::<C>() {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -674,17 +1064,59 @@ where
             });
         }
 
-        let snapshot = self
+        let stream_id_display = stream_id.as_ref().to_string();
+        let read_snapshot_span = tracing::info_span!(
+            span::DECIDER_READ_SNAPSHOT,
+            stream_id = %stream_id_display,
+            snapshot_outcome = tracing::field::Empty,
+        );
+
+        let mut discarded_bad_snapshot = false;
+        let (mut snapshot_position, mut state, mut snapshot_outcome) = match self
             .snapshots
             .snapshot_store
             .read_snapshot(ReadSnapshotRequest { snapshot_id: stream_id })
+            .instrument(read_snapshot_span.clone())
             .await
-            .map_err(CommandError::ReadSnapshot)?;
-        let snapshot = snapshot.snapshot;
-        let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
-        let state = snapshot
-            .map(|snapshot| snapshot.payload)
-            .unwrap_or_else(C::initial_state);
+        {
+            Ok(response) => {
+                let snapshot = response.snapshot;
+                let snapshot_position = snapshot.as_ref().map(|snapshot| snapshot.position);
+                let outcome = if snapshot_position.is_some() {
+                    attribute::SnapshotOutcome::Hit
+                } else {
+                    attribute::SnapshotOutcome::Miss
+                };
+                let state = snapshot
+                    .map(|snapshot| snapshot.payload)
+                    .unwrap_or_else(C::initial_state);
+                (snapshot_position, state, outcome)
+            }
+            Err(error) => {
+                let decision = self
+                    .snapshots
+                    .failure_policy
+                    .decide_snapshot_failure(SnapshotFailureContext {
+                        command: self.command,
+                        failure: SnapshotFailure::ReadFailed(&error),
+                    });
+                match decision {
+                    SnapshotFailureDecision::Fail => {
+                        record_snapshot_read_outcome(&read_snapshot_span, attribute::SnapshotOutcome::Failed);
+                        return Err(CommandError::ReadSnapshot(error));
+                    }
+                    SnapshotFailureDecision::DiscardAndReplay => {
+                        discarded_bad_snapshot = true;
+                        (
+                            None,
+                            C::initial_state(),
+                            attribute::SnapshotOutcome::DiscardedReadFailure,
+                        )
+                    }
+                }
+            }
+        };
+
         let from = match snapshot_position {
             Some(position) => ReadFrom::after(position).map_err(CommandError::ReadAfterOverflow)?,
             None => ReadFrom::Beginning,
@@ -694,29 +1126,78 @@ where
             .read_stream(ReadStreamRequest { stream_id, from })
             .await
             .map_err(CommandError::ReadStream)?;
-        let current_position = stream_read.current_position;
+        let mut current_position = stream_read.current_position;
+        let mut stream_events = stream_read.events;
 
-        if let Some(snapshot_position) = snapshot_position {
-            ensure_snapshot_not_ahead(snapshot_position, current_position)
-                .map_err(CommandError::SnapshotAheadOfStream)?;
+        if let Some(position) = snapshot_position
+            && let Err(ahead_of_stream) = ensure_snapshot_not_ahead(position, current_position)
+        {
+            let decision = self
+                .snapshots
+                .failure_policy
+                .decide_snapshot_failure(SnapshotFailureContext {
+                    command: self.command,
+                    failure: SnapshotFailure::AheadOfStream(ahead_of_stream),
+                });
+            match decision {
+                SnapshotFailureDecision::Fail => {
+                    record_snapshot_read_outcome(&read_snapshot_span, attribute::SnapshotOutcome::Failed);
+                    return Err(CommandError::SnapshotAheadOfStream(ahead_of_stream));
+                }
+                SnapshotFailureDecision::DiscardAndReplay => {
+                    discarded_bad_snapshot = true;
+                    snapshot_position = None;
+                    state = C::initial_state();
+                    snapshot_outcome = attribute::SnapshotOutcome::DiscardedAheadOfStream;
+
+                    let replay = self
+                        .event_store
+                        .read_stream(ReadStreamRequest {
+                            stream_id,
+                            from: ReadFrom::Beginning,
+                        })
+                        .await
+                        .map_err(CommandError::ReadStream)?;
+                    current_position = replay.current_position;
+                    stream_events = replay.events;
+                }
+            }
         }
 
-        let state = evolve_state_from_stream_events::<C>(state, &stream_read.events)?;
-        let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let replayed_event_count = stream_read.events.len() as u64;
+        record_snapshot_read_outcome(&read_snapshot_span, snapshot_outcome);
 
-        maybe_take_snapshot(
-            &self.snapshots,
-            stream_id,
-            DecideSnapshot {
-                command: self.command,
-                stream_position: append_outcome.stream_position,
-                snapshot_position,
-                state: &state,
-                events: &events,
-                replayed_event_count,
-            },
-        );
+        let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
+        let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
+        let replayed_event_count = stream_events.len() as u64;
+        metrics().replay_events.add(replayed_event_count, &[]);
+
+        if discarded_bad_snapshot {
+            // The discarded snapshot is still sitting in the store at this
+            // stream id. The normal policy might choose to skip a snapshot
+            // this time, which would leave that stale or undecodable payload
+            // in place for the next execution to trip over again. Writing
+            // unconditionally here overwrites it with a snapshot the recovered
+            // execution can trust.
+            schedule_snapshot_write(
+                &self.snapshots.schedule_snapshot_task,
+                self.snapshots.snapshot_store,
+                stream_id,
+                Snapshot::new(append_outcome.stream_position, state.clone()),
+            );
+        } else {
+            maybe_take_snapshot(
+                &self.snapshots,
+                stream_id,
+                DecideSnapshot {
+                    command: self.command,
+                    stream_position: append_outcome.stream_position,
+                    snapshot_position,
+                    state: &state,
+                    events: &events,
+                    replayed_event_count,
+                },
+            );
+        }
 
         Ok(ExecutionResult {
             stream_position: append_outcome.stream_position,
@@ -753,8 +1234,8 @@ fn ensure_snapshot_not_ahead(
     }
 }
 
-fn maybe_take_snapshot<S, C, P, Spawn>(
-    snapshots: &Snapshots<'_, S, P, Spawn>,
+fn maybe_take_snapshot<S, C, P, Spawn, F>(
+    snapshots: &Snapshots<'_, S, P, Spawn, F>,
     stream_id: &C::StreamId,
     context: DecideSnapshot<'_, C>,
 ) where
@@ -799,13 +1280,24 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     let stream_id = stream_id.to_owned();
 
     schedule_snapshot_task.schedule(async move {
-        if let Err(source) = snapshot_store
+        let span = tracing::info_span!(
+            span::DECIDER_WRITE_SNAPSHOT,
+            stream_id = %stream_id_for_log,
+            snapshot_write_success = tracing::field::Empty,
+        );
+        let result = snapshot_store
             .write_snapshot(WriteSnapshotRequest {
                 snapshot_id: stream_id.borrow(),
                 snapshot,
             })
-            .await
-        {
+            .instrument(span.clone())
+            .await;
+        let success = result.is_ok();
+        span.record(attribute::SNAPSHOT_WRITE_SUCCESS, success);
+        metrics()
+            .snapshot_writes
+            .add(1, &[KeyValue::new(attribute::SNAPSHOT_WRITE_SUCCESS, success)]);
+        if let Err(source) = result {
             tracing::warn!(stream_id = %stream_id_for_log, error = %source, "failed to write snapshot");
         }
     });

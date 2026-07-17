@@ -535,6 +535,31 @@ fn error_mismatch_shows_expected_vs_actual() {
 }
 
 #[test]
+fn then_state_exposes_and_pins_the_resulting_state() {
+    let registered = TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::register("alpha"))
+        .then([TestEvent::Registered {
+            id: "alpha".to_string(),
+        }])
+        .then_state(TestState::Present { enabled: true });
+
+    assert_eq!(registered.resulting_state(), &TestState::Present { enabled: true });
+}
+
+#[test]
+#[should_panic(expected = "then_state(...) resulting state did not match expectation")]
+fn then_state_mismatch_panics() {
+    TestCase::<TestCommand>::new()
+        .given_no_history()
+        .when(TestCommand::register("alpha"))
+        .then([TestEvent::Registered {
+            id: "alpha".to_string(),
+        }])
+        .then_state(TestState::Missing);
+}
+
+#[test]
 fn panic_message_returns_empty_for_unknown_payload() {
     let panic = catch_unwind(AssertUnwindSafe(|| std::panic::panic_any(123_u8))).unwrap_err();
 

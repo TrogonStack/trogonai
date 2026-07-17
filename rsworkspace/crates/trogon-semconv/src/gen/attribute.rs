@@ -165,11 +165,41 @@ pub const ACTION: &str = "action";
 /// Authentication mode used for the NATS connection
 pub const AUTH: &str = "auth";
 
+/// Command type identifier for the decider command being processed
+pub const COMMAND_TYPE: &str = "command_type";
+
 /// Config option id being set on an ACP session
 pub const CONFIG_ID: &str = "config_id";
 
 /// Working directory for a new ACP session
 pub const CWD: &str = "cwd";
+
+/// Outcome of a command execution attempt
+pub const DECISION_OUTCOME: &str = "decision_outcome";
+
+/// Allowed values for the `decision_outcome` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DecisionOutcome {
+    /// The command was decided and its events appended
+    Decided,
+    /// The command was rejected by domain decision logic
+    Rejected,
+    /// Command execution faulted on an infrastructure or guest execution failure
+    Faulted,
+}
+
+impl DecisionOutcome {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Decided => "decided",
+            Self::Rejected => "rejected",
+            Self::Faulted => "faulted",
+        }
+    }
+}
 
 /// GitHub webhook delivery identifier
 pub const DELIVERY: &str = "delivery";
@@ -185,6 +215,36 @@ pub const EVENT_TYPE: &str = "event_type";
 
 /// Extension method name on the acp.client.ext span
 pub const EXT_METHOD: &str = "ext_method";
+
+/// Phase of WASM guest command execution
+pub const GUEST_PHASE: &str = "guest_phase";
+
+/// Allowed values for the `guest_phase` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GuestPhase {
+    /// Instantiating the WASM guest component
+    Instantiate,
+    /// Replaying prior events into the guest session
+    Replay,
+    /// Calling the guest's decide export
+    Decide,
+    /// Reading or writing the guest session's snapshot
+    Snapshot,
+}
+
+impl GuestPhase {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Instantiate => "instantiate",
+            Self::Replay => "replay",
+            Self::Decide => "decide",
+            Self::Snapshot => "snapshot",
+        }
+    }
+}
 
 /// MCP servers configured for a new ACP session
 pub const MCP_SERVERS: &str = "mcp_servers";
@@ -260,6 +320,12 @@ pub const METHOD_ID: &str = "method_id";
 
 /// Mode id being set on an ACP session
 pub const MODE_ID: &str = "mode_id";
+
+/// Name of the WASM decider module handling the command
+pub const MODULE_NAME: &str = "module_name";
+
+/// Version of the WASM decider module handling the command
+pub const MODULE_VERSION: &str = "module_version";
 
 /// Session id of the newly forked ACP session
 pub const NEW_SESSION_ID: &str = "new_session_id";
@@ -438,6 +504,42 @@ pub const SERVERS: &str = "servers";
 /// ACP session identifier; set on many session-scoped spans
 pub const SESSION_ID: &str = "session_id";
 
+/// Outcome of the snapshot read at the start of command execution
+pub const SNAPSHOT_OUTCOME: &str = "snapshot_outcome";
+
+/// Allowed values for the `snapshot_outcome` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SnapshotOutcome {
+    /// A snapshot was found and used as the replay starting point
+    Hit,
+    /// No snapshot existed; state was rebuilt from the initial state
+    Miss,
+    /// A snapshot read failure was discarded and replay restarted from the initial state
+    DiscardedReadFailure,
+    /// A snapshot ahead of the stream's current position was discarded
+    DiscardedAheadOfStream,
+    /// A snapshot problem was detected and the command failed instead of discarding the snapshot
+    Failed,
+}
+
+impl SnapshotOutcome {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Hit => "hit",
+            Self::Miss => "miss",
+            Self::DiscardedReadFailure => "discarded_read_failure",
+            Self::DiscardedAheadOfStream => "discarded_ahead_of_stream",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Whether a decider snapshot write succeeded
+pub const SNAPSHOT_WRITE_SUCCESS: &str = "snapshot_write_success";
+
 /// Identifier of the event stream the schedule record belongs to
 pub const STREAM_ID: &str = "stream_id";
 
@@ -456,6 +558,30 @@ pub const SUCCESS: &str = "success";
 /// Connection timeout in seconds
 pub const TIMEOUT_SECS: &str = "timeout_secs";
 
+/// Classification of a WASM guest call trap
+pub const TRAP_CLASSIFICATION: &str = "trap_classification";
+
+/// Allowed values for the `trap_classification` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TrapClassification {
+    /// The guest call exceeded its wall-clock epoch deadline
+    DeadlineExceeded,
+    /// The guest call trapped for a reason other than the epoch deadline, e.g. fuel exhaustion, a memory limit, or an ABI failure
+    Trap,
+}
+
+impl TrapClassification {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::DeadlineExceeded => "deadline_exceeded",
+            Self::Trap => "trap",
+        }
+    }
+}
+
 /// Telegram update identifier
 pub const UPDATE_ID: &str = "update_id";
 
@@ -467,6 +593,36 @@ pub const WEBHOOK_ID: &str = "webhook_id";
 
 /// GitLab webhook UUID
 pub const WEBHOOK_UUID: &str = "webhook_uuid";
+
+/// Optimistic concurrency precondition applied to a stream append
+pub const WRITE_PRECONDITION: &str = "write_precondition";
+
+/// Allowed values for the `write_precondition` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WritePrecondition {
+    /// Append regardless of the stream's current position
+    Any,
+    /// Append only if the stream already has at least one event
+    StreamExists,
+    /// Append only if the stream has no events
+    NoStream,
+    /// Append only if the stream is still at the observed position
+    At,
+}
+
+impl WritePrecondition {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::StreamExists => "stream_exists",
+            Self::NoStream => "no_stream",
+            Self::At => "at",
+        }
+    }
+}
 
 /// Standard OTel server.address. Emitted by http.server.request
 pub const SERVER_ADDRESS: &str = "server.address";

@@ -69,14 +69,9 @@ description = "Enforce ADR#0015: fail if native-tls/OpenSSL enter the Rust depen
 dir = "rsworkspace"
 run = "cargo deny check bans"
 
-[tasks."artifacts:schedules-wasm"]
-description = "Build schedules decider WASM artifact to dist/decider/"
-depends = ["proto:schedules-descriptor-set", "rust:wasm-target"]
-run = "cd rsworkspace && cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release && mkdir -p dist/decider && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm dist/decider/schedules.wasm && cp target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb dist/decider/schedules.binpb"
-
 [tasks."artifacts:decider-test"]
-description = "Build schedules decider WASM + decider-test CLI"
-depends = ["artifacts:schedules-wasm"]
+description = "Build every wasm-components/* decider + the decider-test CLI"
+depends = ["artifacts:wasm-components"]
 run = "cd rsworkspace && cargo build -p trogon-decider-test --release"
 
 [tasks."rsc"]

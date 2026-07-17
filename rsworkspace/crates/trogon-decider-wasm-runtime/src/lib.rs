@@ -41,6 +41,29 @@
 //! folds module identity into the snapshot id: see [`WasmSnapshotId`]. A
 //! module version bump changes the id every snapshot lookup uses, so an old
 //! snapshot is simply not found and execution falls back to a full replay.
+//!
+//! # Snapshot failure recovery
+//!
+//! A snapshot the host cannot trust, either because reading it failed or
+//! because it claims a position past the stream's own history, is by default
+//! a hard error, mirroring [`trogon_decider_runtime::execution::CommandExecution`].
+//! Callers that would rather discard the untrusted snapshot and replay from
+//! the beginning can opt in with
+//! [`WasmCommandExecution::with_snapshot_failure_policy`], passing
+//! [`trogon_decider_runtime::DiscardAndReplaySnapshotFailure`] in place of the
+//! default [`trogon_decider_runtime::FailOnSnapshotFailure`]. See
+//! [`WasmSnapshotFailurePolicy`] and [`WasmSnapshotFailureContext`].
+//!
+//! # Runtime rollout
+//!
+//! [`DeciderRegistry`] is immutable once built: swapping in a new module
+//! version means building and installing a whole new registry. Callers that
+//! need to change routes while commands are in flight, without dropping
+//! executions already dispatched against the old routes, should build a
+//! [`DeciderRegistryHandle`] instead (via [`DeciderRegistryBuilder::build_handle`]
+//! or [`DeciderRegistryHandle::from`]). See its type-level docs for the
+//! atomicity guarantee the handle provides and for what a version swap means
+//! for a stream's snapshots.
 
 mod command_spec;
 mod command_type;
@@ -55,20 +78,28 @@ mod registry;
 mod snapshot_id;
 
 #[cfg(test)]
+mod test_doubles;
+#[cfg(test)]
 mod test_fixture;
 
 pub use command_spec::WasmCommandSpec;
 pub use command_type::{CommandType, CommandTypeError};
 pub use domain_error_detail::DomainErrorDetail;
 pub use engine::{
-    DEFAULT_FUEL_PER_CALL, DEFAULT_MAX_MEMORY_BYTES, WasmDeciderEngine, WasmEngineConfig, WasmEngineError,
+    DEFAULT_EPOCH_TICK_INTERVAL, DEFAULT_EPOCH_TICKS_PER_CALL, DEFAULT_FUEL_PER_CALL, DEFAULT_MAX_CONCURRENT_SESSIONS,
+    DEFAULT_MAX_INSTANCES_PER_SESSION, DEFAULT_MAX_MEMORIES_PER_SESSION, DEFAULT_MAX_MEMORY_BYTES,
+    DEFAULT_MAX_TABLE_ELEMENTS, DEFAULT_MAX_TABLES_PER_SESSION, WasmDeciderEngine, WasmEngineConfig, WasmEngineError,
 };
 pub use execution::{
-    WasmCommandError, WasmCommandExecution, WasmExecutionResult, WithSnapshotStore, WithoutSnapshotStore,
+    WasmCommandError, WasmCommandExecution, WasmExecutionResult, WasmSnapshotFailureContext, WasmSnapshotFailurePolicy,
+    WithSnapshotStore, WithoutSnapshotStore,
 };
 pub use module::{InvalidDescriptorError, LoadWasmDeciderError, WasmDeciderModule};
 pub use module_name::{ModuleName, ModuleNameError};
 pub use module_version::{ModuleVersion, ModuleVersionError};
 pub use opaque_snapshot::OpaqueSnapshotPayload;
-pub use registry::{DeciderRegistry, DeciderRegistryBuilder, RegisterModuleError, UnknownCommandTypeError};
+pub use registry::{
+    ActivatedRoute, DeciderRegistry, DeciderRegistryBuilder, DeciderRegistryHandle, RegisterModuleError, RetiredRoute,
+    RouteInfo, UnknownCommandTypeError,
+};
 pub use snapshot_id::WasmSnapshotId;

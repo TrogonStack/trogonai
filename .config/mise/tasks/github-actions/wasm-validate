@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Assert every built decider component declares zero imports and passes wasm validation"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT"
+
+shopt -s nullglob
+components=(rsworkspace/dist/decider/*.wasm)
+if [[ ${#components[@]} -eq 0 ]]; then
+    echo "no decider components found under rsworkspace/dist/decider; run 'mise run artifacts:wasm-components' first" >&2
+    exit 1
+fi
+
+for wasm in "${components[@]}"; do
+    wit_text="$(wasm-tools component wit "$wasm")"
+    printf '%s\n' "$wit_text"
+    if grep -E '^[[:space:]]*import ' <<<"$wit_text"; then
+        echo "component declares imports: $wasm" >&2
+        exit 1
+    fi
+    wasm-tools validate "$wasm"
+done

@@ -4,14 +4,27 @@ use std::process::Command;
 use thiserror::Error;
 use trogon_std::env::{ReadEnv as _, SystemEnv};
 
+/// Failure verifying that a compiled component declares no imports.
 #[derive(Debug, Error)]
 pub enum ImportCheckError {
+    /// The component's core wasm import section names an import (wasmparser fallback path).
     #[error("component declares import '{module}/{name}'")]
-    ImportPresent { module: String, name: String },
+    ImportPresent {
+        /// The imported module name.
+        module: String,
+        /// The imported item name within `module`.
+        name: String,
+    },
+    /// The component's decompiled WIT declares an `import` line (wasm-tools path).
     #[error("component WIT declares import: {line}")]
-    WorldImport { line: String },
+    WorldImport {
+        /// The offending `import` line, trimmed of leading whitespace.
+        line: String,
+    },
+    /// The wasm bytes could not be parsed as a module or component.
     #[error("failed to parse wasm module: {0}")]
     Parse(String),
+    /// The `wasm-tools` binary could not be located or invoked.
     #[error("wasm-tools not available: {0}")]
     WasmToolsUnavailable(String),
 }

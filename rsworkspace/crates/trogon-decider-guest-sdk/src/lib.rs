@@ -1,7 +1,8 @@
 //! Bridges [`Decider`](trogon_decider::Decider) implementations to the Trogon WIT guest contract.
 
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 #![doc = "\n\
-Guest deciders must use [`std::collections::BTreeMap`] (not `HashMap`) for any map fields — \
+Guest deciders must use [`std::collections::BTreeMap`] (not `HashMap`) for any map fields: \
 proto `map<>` decoded via buffa seeds a hasher that pulls `wasi:random` on wasip2.\n\
 "]
 

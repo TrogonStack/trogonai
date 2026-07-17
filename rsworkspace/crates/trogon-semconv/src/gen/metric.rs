@@ -56,6 +56,206 @@ pub fn build_acp_requests(meter: &opentelemetry::metrics::Meter) -> opentelemetr
         .build()
 }
 
+/// Optimistic concurrency conflicts (wrong expected stream version) surfaced by an append
+///
+/// Instrument: `counter`. Unit: `{conflict}`.
+pub const DECIDER_APPEND_CONFLICTS: &str = "decider.append.conflicts";
+
+/// Optimistic concurrency conflicts (wrong expected stream version) surfaced by an append
+///
+/// Instrument: `counter`. Unit: `{conflict}`.
+pub fn build_decider_append_conflicts(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_APPEND_CONFLICTS)
+        .with_description("Optimistic concurrency conflicts (wrong expected stream version) surfaced by an append.")
+        .with_unit("{conflict}")
+        .build()
+}
+
+/// Duration of appending decided events to a JetStream-backed stream
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const DECIDER_APPEND_DURATION: &str = "decider.append.duration";
+
+/// Duration of appending decided events to a JetStream-backed stream
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_decider_append_duration(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(DECIDER_APPEND_DURATION)
+        .with_description("Duration of appending decided events to a JetStream-backed stream.")
+        .with_unit("s")
+        .build()
+}
+
+/// Duration of replaying events from an ordered, subject-filtered JetStream consumer
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const DECIDER_REPLAY_DURATION: &str = "decider.replay.duration";
+
+/// Duration of replaying events from an ordered, subject-filtered JetStream consumer
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_decider_replay_duration(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(DECIDER_REPLAY_DURATION)
+        .with_description("Duration of replaying events from an ordered, subject-filtered JetStream consumer.")
+        .with_unit("s")
+        .build()
+}
+
+/// Events replayed to rebuild decider state before a command decision
+///
+/// Instrument: `counter`. Unit: `{event}`.
+pub const DECIDER_REPLAY_EVENTS: &str = "decider.replay.events";
+
+/// Events replayed to rebuild decider state before a command decision
+///
+/// Instrument: `counter`. Unit: `{event}`.
+pub fn build_decider_replay_events(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_REPLAY_EVENTS)
+        .with_description("Events replayed to rebuild decider state before a command decision.")
+        .with_unit("{event}")
+        .build()
+}
+
+/// Ordered-consumer replay attempts retried after a transient JetStream failure
+///
+/// Instrument: `counter`. Unit: `{attempt}`.
+pub const DECIDER_REPLAY_RETRIES: &str = "decider.replay.retries";
+
+/// Ordered-consumer replay attempts retried after a transient JetStream failure
+///
+/// Instrument: `counter`. Unit: `{attempt}`.
+pub fn build_decider_replay_retries(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_REPLAY_RETRIES)
+        .with_description("Ordered-consumer replay attempts retried after a transient JetStream failure.")
+        .with_unit("{attempt}")
+        .build()
+}
+
+/// JetStream KV snapshot read failures in the storage adapter
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub const DECIDER_SNAPSHOT_KV_READ_FAILURES: &str = "decider.snapshot.kv_read_failures";
+
+/// JetStream KV snapshot read failures in the storage adapter
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub fn build_decider_snapshot_kv_read_failures(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_SNAPSHOT_KV_READ_FAILURES)
+        .with_description("JetStream KV snapshot read failures in the storage adapter.")
+        .with_unit("{failure}")
+        .build()
+}
+
+/// JetStream KV snapshot write failures in the storage adapter
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub const DECIDER_SNAPSHOT_KV_WRITE_FAILURES: &str = "decider.snapshot.kv_write_failures";
+
+/// JetStream KV snapshot write failures in the storage adapter
+///
+/// Instrument: `counter`. Unit: `{failure}`.
+pub fn build_decider_snapshot_kv_write_failures(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_SNAPSHOT_KV_WRITE_FAILURES)
+        .with_description("JetStream KV snapshot write failures in the storage adapter.")
+        .with_unit("{failure}")
+        .build()
+}
+
+/// Snapshot reads at the start of command execution, by outcome
+///
+/// Instrument: `counter`. Unit: `{read}`.
+pub const DECIDER_SNAPSHOT_READS: &str = "decider.snapshot.reads";
+
+/// Snapshot reads at the start of command execution, by outcome
+///
+/// Instrument: `counter`. Unit: `{read}`.
+pub fn build_decider_snapshot_reads(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_SNAPSHOT_READS)
+        .with_description("Snapshot reads at the start of command execution, by outcome.")
+        .with_unit("{read}")
+        .build()
+}
+
+/// Scheduled decider snapshot writes, by success
+///
+/// Instrument: `counter`. Unit: `{write}`.
+pub const DECIDER_SNAPSHOT_WRITES: &str = "decider.snapshot.writes";
+
+/// Scheduled decider snapshot writes, by success
+///
+/// Instrument: `counter`. Unit: `{write}`.
+pub fn build_decider_snapshot_writes(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_SNAPSHOT_WRITES)
+        .with_description("Scheduled decider snapshot writes, by success.")
+        .with_unit("{write}")
+        .build()
+}
+
+/// Duration of a WASM guest execution phase
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub const DECIDER_WASM_EXECUTION_DURATION: &str = "decider.wasm.execution.duration";
+
+/// Duration of a WASM guest execution phase
+///
+/// Instrument: `histogram`. Unit: `s`.
+pub fn build_decider_wasm_execution_duration(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<f64> {
+    meter
+        .f64_histogram(DECIDER_WASM_EXECUTION_DURATION)
+        .with_description("Duration of a WASM guest execution phase.")
+        .with_unit("s")
+        .build()
+}
+
+/// Wasmtime fuel consumed by a WASM guest execution phase
+///
+/// Instrument: `histogram`. Unit: `{fuel_unit}`.
+pub const DECIDER_WASM_FUEL_CONSUMED: &str = "decider.wasm.fuel.consumed";
+
+/// Wasmtime fuel consumed by a WASM guest execution phase
+///
+/// Instrument: `histogram`. Unit: `{fuel_unit}`.
+pub fn build_decider_wasm_fuel_consumed(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Histogram<u64> {
+    meter
+        .u64_histogram(DECIDER_WASM_FUEL_CONSUMED)
+        .with_description("Wasmtime fuel consumed by a WASM guest execution phase.")
+        .with_unit("{fuel_unit}")
+        .build()
+}
+
+/// WASM guest call traps, by classification
+///
+/// Instrument: `counter`. Unit: `{trap}`.
+pub const DECIDER_WASM_TRAPS: &str = "decider.wasm.traps";
+
+/// WASM guest call traps, by classification
+///
+/// Instrument: `counter`. Unit: `{trap}`.
+pub fn build_decider_wasm_traps(meter: &opentelemetry::metrics::Meter) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(DECIDER_WASM_TRAPS)
+        .with_description("WASM guest call traps, by classification.")
+        .with_unit("{trap}")
+        .build()
+}
+
 /// Execution schedule messages published
 ///
 /// Instrument: `counter`. Unit: `{message}`.

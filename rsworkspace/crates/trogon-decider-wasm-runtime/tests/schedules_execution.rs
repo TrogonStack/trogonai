@@ -10,7 +10,9 @@ use buffa::Message as _;
 use buffa::MessageField;
 use buffa::MessageName as _;
 use support::{InMemoryEventStore, InMemorySnapshotStore};
-use trogon_decider_runtime::{ImmediateSnapshotTaskScheduler, ReadFrom, StreamPosition, StreamWritePrecondition};
+use trogon_decider_runtime::{
+    DiscardAndReplaySnapshotFailure, ImmediateSnapshotTaskScheduler, ReadFrom, StreamPosition, StreamWritePrecondition,
+};
 use trogon_decider_wasm_runtime::{
     OpaqueSnapshotPayload, WasmCommandError, WasmCommandExecution, WasmDeciderEngine, WasmDeciderModule,
     WasmEngineConfig, WasmSnapshotId,
@@ -238,6 +240,96 @@ async fn a_snapshot_ahead_of_the_stream_is_rejected() {
 }
 
 #[tokio::test]
+async fn a_snapshot_read_failure_is_rejected_by_default() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds");
+    snapshot_store.fail_reads();
+
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .execute()
+        .await
+    else {
+        panic!("expected snapshot read failure");
+    };
+
+    assert!(matches!(error, WasmCommandError::ReadSnapshot(_)), "{error}");
+    assert_eq!(event_store.read_stream_calls(), 0);
+}
+
+#[tokio::test]
+async fn discard_and_replay_recovers_from_a_snapshot_read_failure() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds");
+    snapshot_store.fail_reads();
+
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+        .execute()
+        .await
+        .expect("discard-and-replay recovers from the unreadable snapshot");
+
+    assert_eq!(result.stream_position, position(2));
+    assert_eq!(event_store.reads_from(), vec![ReadFrom::Beginning]);
+
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot = snapshot_store
+        .get(snapshot_id.as_str())
+        .expect("a fresh snapshot replaces the unreadable one");
+    assert_eq!(snapshot.position, position(2));
+}
+
+#[tokio::test]
+async fn discard_and_replay_recovers_from_a_snapshot_ahead_of_stream() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds");
+
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    snapshot_store.insert(
+        snapshot_id.as_str(),
+        trogon_decider_runtime::Snapshot::new(position(5), OpaqueSnapshotPayload::new(Vec::new())),
+    );
+
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+        .execute()
+        .await
+        .expect("discard-and-replay recovers from the ahead-of-stream snapshot");
+
+    assert_eq!(result.stream_position, position(2));
+    let stale_resume = ReadFrom::after(position(5)).expect("resume position advances");
+    assert_eq!(event_store.reads_from(), vec![stale_resume, ReadFrom::Beginning]);
+
+    let refreshed = snapshot_store
+        .get(snapshot_id.as_str())
+        .expect("a fresh snapshot replaces the ahead-of-stream one");
+    assert_eq!(refreshed.position, position(2));
+}
+
+#[tokio::test]
 async fn builder_overrides_shape_the_appended_events() {
     #[derive(Debug, Clone, Copy)]
     struct FixedUuidGenerator(uuid::Uuid);
@@ -326,4 +418,30 @@ async fn a_failing_snapshot_write_does_not_fail_the_command() {
 fn an_exhausted_fuel_budget_fails_the_load_probe() {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default().with_fuel_per_call(1)).expect("engine builds");
     assert!(WasmDeciderModule::load(engine, &schedules_wasm()).is_err());
+}
+
+#[tokio::test]
+async fn the_pooling_allocator_engine_executes_the_fixture_end_to_end() {
+    let engine = WasmDeciderEngine::new(
+        WasmEngineConfig::default()
+            .with_max_concurrent_sessions(2)
+            .with_max_instances_per_session(3)
+            .with_max_tables_per_session(2)
+            .with_max_memories_per_session(1),
+    )
+    .expect("pooling-allocator engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_wasm()).expect("module loads under the pooling allocator");
+    let event_store = InMemoryEventStore::default();
+
+    let create_result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .execute()
+        .await
+        .expect("create succeeds under the pooling allocator");
+    assert_eq!(create_result.stream_position, position(1));
+
+    let pause_result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+        .execute()
+        .await
+        .expect("pause succeeds under the pooling allocator");
+    assert_eq!(pause_result.stream_position, position(2));
 }

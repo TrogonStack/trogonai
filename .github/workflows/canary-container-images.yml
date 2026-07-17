@@ -40,9 +40,8 @@ jobs:
         id: image
         env:
           IMAGE_OWNER: ${{ github.repository_owner }}
-        run: |
-          echo "name=ghcr.io/${IMAGE_OWNER,,}/${{ steps.service_config.outputs.image }}" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          SERVICE_IMAGE: ${{ steps.service_config.outputs.image }}
+        run: ./.config/mise/tasks/github-actions/resolve-image
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -88,16 +87,9 @@ jobs:
 
       - name: Document image security audit
         shell: bash
-        run: |
-          {
-            echo "## Image security audit: \`${{ matrix.service }}\`"
-            echo ""
-            echo "- Image: \`${{ steps.image.outputs.name }}@${{ steps.build_image.outputs.digest }}\`"
-            echo "- Runtime base: \`debian:bookworm-20260518-slim\`"
-            echo "- SBOM artifact: \`sbom-${{ matrix.service }}-spdx\` (SPDX JSON)"
-            echo ""
-            echo "### Vulnerability scan (Trivy, image packages)"
-            echo '```text'
-            cat trivy-results.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.build_image.outputs.digest }}
+          RUNTIME_BASE: debian:bookworm-20260518-slim
+        run: ./.config/mise/tasks/github-actions/image-audit-summary

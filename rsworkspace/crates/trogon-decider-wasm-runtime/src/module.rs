@@ -15,24 +15,33 @@ pub enum LoadWasmDeciderError {
     /// [`Linker`] instead of shelling out to `wasm-tools`.
     #[error("component declares an import; wasm decider components must be zero-import")]
     ForbiddenImports {
+        /// Underlying wasmtime error raised instantiating against an empty [`Linker`].
         #[source]
         source: wasmtime::Error,
     },
+    /// The component's bytes are not a valid wasm component, or targeted a wasmtime feature
+    /// this engine was not configured with.
     #[error("failed to compile wasm component")]
     Compile {
+        /// Underlying wasmtime compilation error.
         #[source]
         source: wasmtime::Error,
     },
+    /// Instantiating the pre-instantiated component against a fresh store failed.
     #[error("failed to instantiate wasm component to probe its descriptor")]
     Instantiate {
+        /// Underlying wasmtime instantiation error.
         #[source]
         source: wasmtime::Error,
     },
+    /// The guest's `descriptor()` export trapped or exceeded its call budget.
     #[error("failed to call descriptor() on wasm component")]
     Descriptor {
+        /// Underlying wasmtime error from the guest call.
         #[source]
         source: wasmtime::Error,
     },
+    /// The guest's declared [`ModuleDescriptor`] failed structural validation.
     #[error("wasm component descriptor is invalid")]
     InvalidDescriptor(#[from] InvalidDescriptorError),
 }
@@ -40,14 +49,21 @@ pub enum LoadWasmDeciderError {
 /// A structurally invalid [`ModuleDescriptor`] reported by a guest component.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InvalidDescriptorError {
+    /// The descriptor's `name` field is not a well-formed [`ModuleName`].
     #[error("wasm component descriptor has an invalid module name")]
     InvalidName(#[source] crate::ModuleNameError),
+    /// The descriptor's `version` field is not a well-formed [`ModuleVersion`].
     #[error("wasm component descriptor has an invalid module version")]
     InvalidVersion(#[source] crate::ModuleVersionError),
+    /// One of the descriptor's declared commands has an invalid command type string.
     #[error("wasm component descriptor declares an invalid command type")]
     InvalidCommandType(#[source] crate::CommandTypeError),
+    /// The descriptor declares the same command type more than once.
     #[error("wasm component descriptor declares command type '{command_type}' more than once")]
-    DuplicateCommandType { command_type: CommandType },
+    DuplicateCommandType {
+        /// The command type declared more than once.
+        command_type: CommandType,
+    },
 }
 
 /// A compiled, load-time-validated WASM decider component.
@@ -57,6 +73,7 @@ pub enum InvalidDescriptorError {
 /// [`DeciderPre`] for cheap per-command instantiation, and probes the
 /// guest's `descriptor()` export once so routing and validation do not need
 /// to spin up a guest session.
+#[derive(Clone)]
 pub struct WasmDeciderModule {
     engine: WasmDeciderEngine,
     decider_pre: DeciderPre<crate::engine::GuestState>,
@@ -121,13 +138,31 @@ impl WasmDeciderModule {
     }
 }
 
+#[cfg(test)]
+impl WasmDeciderModule {
+    /// Returns a copy of this module reporting a different declared version.
+    ///
+    /// The only compiled fixture available to this crate's tests always
+    /// reports one fixed identity, so registry and rollout tests that need a
+    /// second, distinct module version synthesize one from the same compiled
+    /// bytes rather than building a second fixture.
+    pub(crate) fn with_version(mut self, version: ModuleVersion) -> Self {
+        self.version = version;
+        self
+    }
+}
+
 fn probe_descriptor(
     engine: &WasmDeciderEngine,
     decider_pre: &DeciderPre<crate::engine::GuestState>,
 ) -> Result<ModuleDescriptor, LoadWasmDeciderError> {
     let mut store = engine.new_store();
-    store
-        .set_fuel(engine.config().fuel_per_call())
+    engine
+        .arm_guest_call(
+            &mut store,
+            engine.config().fuel_per_call(),
+            engine.config().epoch_ticks_per_call(),
+        )
         .map_err(|source| LoadWasmDeciderError::Instantiate { source })?;
     let bindings = decider_pre
         .instantiate(&mut store)

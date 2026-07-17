@@ -8,20 +8,22 @@ publish = false
 [lints]
 workspace = true
 
+[lib]
+name = "trogon_decider_test"
+path = "src/lib.rs"
+
 [[bin]]
 name = "decider-test"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = { workspace = true }
 buffa = { workspace = true }
-buffa-types = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
-trogon-decider = { workspace = true }
 trogon-decider-sim = { workspace = true }
-trogon-decider-wit = { workspace = true, features = ["host"] }
 trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["schedules"] }

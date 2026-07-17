@@ -1,18 +1,26 @@
 use super::*;
 
-fn error_expectation(yaml: &str) -> String {
-    match serde_yaml::from_str::<Then>(yaml) {
-        Ok(Then::Error { error }) => error.expected().unwrap_or_default(),
-        _ => String::new(),
-    }
+fn set(values: &[&str]) -> BTreeSet<String> {
+    values.iter().map(|value| value.to_string()).collect()
 }
 
 #[test]
-fn then_error_accepts_structured_code() {
-    assert_eq!(error_expectation("error:\n  code: already-exists\n"), "already-exists");
+fn coverage_gaps_are_counted() {
+    let declared = set(&["a", "b"]);
+    let exercised = set(&["a"]);
+    assert_eq!(report_coverage_gaps(&declared, &exercised, "command", false), 1);
 }
 
 #[test]
-fn then_error_accepts_plain_string() {
-    assert_eq!(error_expectation("error: already-exists\n"), "already-exists");
+fn coverage_gaps_zero_when_fully_covered() {
+    let declared = set(&["a"]);
+    let exercised = set(&["a"]);
+    assert_eq!(report_coverage_gaps(&declared, &exercised, "command", false), 0);
+}
+
+#[test]
+fn coverage_gaps_counted_regardless_of_strict_flag() {
+    let declared = set(&["a", "b"]);
+    let exercised = set(&["a"]);
+    assert_eq!(report_coverage_gaps(&declared, &exercised, "command", true), 1);
 }

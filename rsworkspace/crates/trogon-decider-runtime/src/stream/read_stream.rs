@@ -9,7 +9,9 @@ use crate::StreamEvent;
 /// "start at" primitive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadFrom {
+    /// Reads from the first event in the stream.
     Beginning,
+    /// Reads from the given position, inclusive.
     Position(StreamPosition),
 }
 

@@ -4,22 +4,38 @@
 /// rather than a string) and only rendered to a message at the WIT-facing boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotDecodeError {
+    /// The decoded frame's `schema_version` did not match what the caller expected.
     #[error("expected schema '{expected}', got '{actual}'")]
-    SchemaMismatch { expected: String, actual: String },
+    SchemaMismatch {
+        /// The schema version the caller expected to load.
+        expected: String,
+        /// The schema version actually stored in the frame.
+        actual: String,
+    },
+    /// The frame decoded structurally, but the inner [`buffa::Message`] payload failed to
+    /// decode.
     #[error("failed to decode snapshot payload: {0}")]
     Payload(#[source] buffa::DecodeError),
+    /// The frame's `schema_version` field was not valid UTF-8.
     #[error("invalid utf8 in schema_version: {0}")]
     SchemaVersionUtf8(#[source] std::string::FromUtf8Error),
+    /// The frame had no `schema_version` field (protobuf field 1).
     #[error("missing schema_version")]
     MissingSchemaVersion,
+    /// The frame had no `payload` field (protobuf field 2).
     #[error("missing payload")]
     MissingPayload,
+    /// The byte buffer ended before a field's declared length.
     #[error("unexpected eof")]
     UnexpectedEof,
+    /// A varint exceeded 64 bits, or its final byte carried more than the single valid high bit.
     #[error("varint overflow")]
     VarintOverflow,
+    /// A length-delimited field's declared length would overflow when added to the current
+    /// offset.
     #[error("length overflow")]
     LengthOverflow,
+    /// An unhandled protobuf wire type was encountered while skipping an unknown field.
     #[error("unsupported wire type")]
     UnsupportedWireType,
 }
@@ -57,6 +73,8 @@ where
     Some(encode_snapshot(state, schema_version))
 }
 
+/// Encodes decider state plus a schema version tag into this crate's versioned snapshot frame
+/// format.
 pub fn encode_snapshot<S>(state: &S, schema_version: &str) -> Vec<u8>
 where
     S: buffa::Message,
@@ -64,6 +82,8 @@ where
     encode_snapshot_frame(schema_version, buffa::Message::encode_to_vec(state))
 }
 
+/// Decodes a snapshot frame, validates its `schema_version` matches `expected_schema` (else
+/// [`SnapshotDecodeError::SchemaMismatch`]), then decodes the payload as `S`.
 pub fn decode_snapshot<S>(bytes: &[u8], expected_schema: &str) -> Result<S, SnapshotDecodeError>
 where
     S: buffa::Message,

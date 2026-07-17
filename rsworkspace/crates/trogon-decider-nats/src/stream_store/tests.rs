@@ -1,20 +1,21 @@
+use std::time::Duration;
+
 use async_nats::{
     HeaderMap,
     header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
-    jetstream::{
-        context::PublishErrorKind,
-        message::StreamMessage,
-        stream::{LastRawMessageError, LastRawMessageErrorKind},
-    },
+    jetstream,
+    jetstream::{context::PublishErrorKind, stream::LastRawMessageError, stream::LastRawMessageErrorKind},
 };
 use bytes::Bytes;
-use time::OffsetDateTime;
+use testcontainers_modules::nats::{Nats, NatsServerCmd};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumerFactory, MockJetStreamPublishMessage};
 use uuid::Uuid;
 
 use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 
+use super::replay::is_empty_replay_range;
 use super::{
     NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, StreamStoreError, StreamSubject, TROGON_EVENT_HEADER_PREFIX,
     TROGON_EVENT_TYPE, append_stream, build_publish_message, headers_from_nats_headers, read_stream, read_stream_range,
@@ -161,14 +162,10 @@ fn build_publish_message_omits_occ_header_without_expected_sequence() {
 
 #[test]
 fn read_stream_range_rejects_empty_ranges() {
-    assert!(read_stream_range_bounds(0, 1));
-    assert!(read_stream_range_bounds(1, 0));
-    assert!(read_stream_range_bounds(2, 1));
-    assert!(!read_stream_range_bounds(1, 1));
-}
-
-fn read_stream_range_bounds(from_sequence: u64, to_sequence: u64) -> bool {
-    from_sequence == 0 || to_sequence == 0 || from_sequence > to_sequence
+    assert!(is_empty_replay_range(0, 1));
+    assert!(is_empty_replay_range(1, 0));
+    assert!(is_empty_replay_range(2, 1));
+    assert!(!is_empty_replay_range(1, 1));
 }
 
 fn make_event(id: u128, content: &[u8]) -> Event {
@@ -182,51 +179,6 @@ fn make_event(id: u128, content: &[u8]) -> Event {
 
 fn make_subject(value: &str) -> StreamSubject {
     StreamSubject::new(value).expect("subject must be valid")
-}
-
-fn make_stream_message(subject: &str, sequence: u64, event_id: Uuid) -> StreamMessage {
-    let mut headers = HeaderMap::new();
-    headers.insert(NATS_MESSAGE_ID, event_id.to_string().as_str());
-    headers.insert(TROGON_EVENT_TYPE, "test.event.v1");
-    StreamMessage {
-        subject: subject.into(),
-        sequence,
-        headers,
-        payload: Bytes::from_static(b"{}"),
-        time: OffsetDateTime::UNIX_EPOCH,
-    }
-}
-
-fn make_stream_info(last_sequence: u64) -> async_nats::jetstream::stream::Info {
-    serde_json::from_value(serde_json::json!({
-        "config": {
-            "name": "TEST_STREAM",
-            "subjects": [],
-            "retention": "limits",
-            "max_consumers": -1,
-            "max_msgs": -1,
-            "max_bytes": -1,
-            "discard": "old",
-            "max_age": 0,
-            "storage": "file",
-            "num_replicas": 1
-        },
-        "created": "1970-01-01T00:00:00Z",
-        "state": {
-            "messages": 0_u64,
-            "bytes": 0_u64,
-            "first_seq": 0_u64,
-            "first_ts": "1970-01-01T00:00:00Z",
-            "last_seq": last_sequence,
-            "last_ts": "1970-01-01T00:00:00Z",
-            "consumer_count": 0_usize,
-            "num_subjects": 0_u64
-        },
-        "cluster": null,
-        "mirror": null,
-        "sources": []
-    }))
-    .expect("test stream info must be valid")
 }
 
 #[tokio::test]
@@ -373,129 +325,6 @@ async fn append_stream_maps_ack_error_to_publish_error() {
 }
 
 #[tokio::test]
-async fn read_stream_range_skips_no_message_found_gaps() {
-    let factory = MockJetStreamConsumerFactory::new();
-    factory.add_raw_message(1, make_stream_message("test.events", 1, Uuid::from_u128(1)));
-    // sequence 2 missing → mock returns NoMessageFound by default
-    factory.add_raw_message(3, make_stream_message("test.events", 3, Uuid::from_u128(3)));
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    let events = read_stream_range(&stream, 1, 3).await.expect("read should succeed");
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].stream_position, StreamPosition::try_new(1).unwrap());
-    assert_eq!(events[1].stream_position, StreamPosition::try_new(3).unwrap());
-    assert_eq!(factory.raw_message_calls(), vec![1, 2, 3]);
-}
-
-#[tokio::test]
-async fn read_subject_stream_filters_by_subject() {
-    let factory = MockJetStreamConsumerFactory::new();
-    factory.add_raw_message(1, make_stream_message("test.events.a", 1, Uuid::from_u128(1)));
-    factory.add_raw_message(2, make_stream_message("test.events.b", 2, Uuid::from_u128(2)));
-    factory.add_raw_message(3, make_stream_message("test.events.a", 3, Uuid::from_u128(3)));
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    let events = super::read_subject_stream(&stream, "test.events.a", "test.events.a", 1, 3)
-        .await
-        .expect("read should succeed");
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].stream_id, "test.events.a");
-    assert_eq!(events[1].stream_id, "test.events.a");
-}
-
-#[tokio::test]
-async fn read_subject_stream_uses_caller_stream_id() {
-    let factory = MockJetStreamConsumerFactory::new();
-    factory.add_raw_message(1, make_stream_message("test.events.a", 1, Uuid::from_u128(1)));
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    let events = super::read_subject_stream(&stream, "a", "test.events.a", 1, 1)
-        .await
-        .expect("read should succeed");
-
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].stream_id, "a");
-}
-
-#[tokio::test]
-async fn read_subject_stream_observes_semantic_publish_mock() {
-    let js = MockJetStreamPublishMessage::new();
-    append_stream(
-        &js,
-        make_subject("test.events.alpha"),
-        Some(0),
-        &[make_event(1, b"alpha-one")],
-    )
-    .await
-    .expect("alpha publish should succeed");
-    append_stream(
-        &js,
-        make_subject("test.events.beta"),
-        Some(0),
-        &[make_event(2, b"beta-one")],
-    )
-    .await
-    .expect("beta publish should succeed");
-    append_stream(
-        &js,
-        make_subject("test.events.alpha"),
-        Some(1),
-        &[make_event(3, b"alpha-two")],
-    )
-    .await
-    .expect("alpha second publish should succeed");
-
-    let events = super::read_subject_stream(&js, "alpha", "test.events.alpha", 1, 3)
-        .await
-        .expect("read should succeed");
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].stream_id, "alpha");
-    assert_eq!(events[0].stream_position, StreamPosition::try_new(1).unwrap());
-    assert_eq!(events[1].stream_position, StreamPosition::try_new(3).unwrap());
-}
-
-#[tokio::test]
-async fn read_stream_range_returns_empty_for_invalid_bounds() {
-    let factory = MockJetStreamConsumerFactory::new();
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    assert!(read_stream_range(&stream, 0, 1).await.unwrap().is_empty());
-    assert!(read_stream_range(&stream, 1, 0).await.unwrap().is_empty());
-    assert!(read_stream_range(&stream, 5, 3).await.unwrap().is_empty());
-    assert!(factory.raw_message_calls().is_empty());
-}
-
-#[tokio::test]
-async fn read_stream_range_propagates_non_no_message_errors() {
-    let factory = MockJetStreamConsumerFactory::new();
-    factory.add_raw_message_error(1, LastRawMessageErrorKind::Other);
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    let error = read_stream_range(&stream, 1, 1)
-        .await
-        .expect_err("error should propagate");
-
-    assert!(matches!(error, StreamStoreError::Read(_)));
-}
-
-#[tokio::test]
-async fn read_stream_uses_info_last_sequence_as_upper_bound() {
-    let factory = MockJetStreamConsumerFactory::new();
-    factory.set_info(make_stream_info(2));
-    factory.add_raw_message(1, make_stream_message("test.events", 1, Uuid::from_u128(1)));
-    factory.add_raw_message(2, make_stream_message("test.events", 2, Uuid::from_u128(2)));
-    let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
-
-    let events = read_stream(&stream, 1).await.expect("read should succeed");
-
-    assert_eq!(events.len(), 2);
-    assert_eq!(factory.raw_message_calls(), vec![1, 2]);
-}
-
-#[tokio::test]
 async fn subject_current_position_returns_none_when_no_message_found() {
     let factory = MockJetStreamConsumerFactory::new();
     let stream = JetStreamGetStream::get_stream(&factory, "TEST_STREAM").await.unwrap();
@@ -534,4 +363,282 @@ async fn subject_current_position_propagates_non_no_message_errors() {
     let error = subject_current_position(&stream, &subject).await.unwrap_err();
 
     assert!(matches!(error, StreamStoreError::Read(_)));
+}
+
+/// A real, ephemeral single-node NATS server with JetStream enabled, used to
+/// exercise the ordered-consumer replay path against actual wire behavior
+/// that `trogon-nats`'s mocks cannot represent (delivered-message sequence
+/// metadata is only available through a real JetStream consumer).
+struct NatsServer {
+    _container: ContainerAsync<Nats>,
+    url: String,
+}
+
+impl NatsServer {
+    async fn start() -> Self {
+        let cmd = NatsServerCmd::default().with_jetstream();
+        let container = Nats::default()
+            .with_cmd(&cmd)
+            .start()
+            .await
+            .expect("start NATS testcontainer for JetStream replay tests");
+        let host = container.get_host().await.expect("get NATS testcontainer host");
+        let port = container
+            .get_host_port_ipv4(4222)
+            .await
+            .expect("get NATS testcontainer port");
+        Self {
+            _container: container,
+            url: format!("{host}:{port}"),
+        }
+    }
+
+    fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+async fn connect(server: &NatsServer) -> jetstream::Context {
+    let client = async_nats::ConnectOptions::new()
+        .connection_timeout(Duration::from_secs(2))
+        .connect(server.url())
+        .await
+        .expect("connect to NATS testcontainer");
+    jetstream::new(client)
+}
+
+async fn create_events_stream(
+    js: &jetstream::Context,
+    name: &str,
+    subject_wildcard: &str,
+) -> jetstream::stream::Stream {
+    js.create_stream(jetstream::stream::Config {
+        name: name.to_string(),
+        subjects: vec![subject_wildcard.to_string()],
+        allow_atomic_publish: true,
+        ..Default::default()
+    })
+    .await
+    .expect("create test events stream")
+}
+
+async fn publish_noise(js: &jetstream::Context, subject: &str, count: usize) {
+    for index in 0..count {
+        js.publish(subject.to_string(), Bytes::from(format!("noise-{index}")))
+            .await
+            .expect("send noise publish")
+            .await
+            .expect("ack noise publish");
+    }
+}
+
+#[cfg(not(coverage))]
+#[tokio::test]
+async fn read_subject_stream_filters_by_subject_amid_heavy_foreign_traffic() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "FILTER_TEST", "filter.test.>").await;
+
+    let alpha_subject = "filter.test.alpha";
+    let noise_subject = "filter.test.noise";
+
+    let mut alpha_positions = Vec::new();
+    for index in 0..3u128 {
+        publish_noise(&js, noise_subject, 25).await;
+        let position = append_stream(
+            &js,
+            make_subject(alpha_subject),
+            None,
+            &[make_event(100 + index, format!("alpha-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish alpha event");
+        alpha_positions.push(position);
+    }
+    publish_noise(&js, noise_subject, 25).await;
+
+    let to_sequence = subject_current_position(&stream, &make_subject(alpha_subject))
+        .await
+        .expect("read alpha current position")
+        .expect("alpha subject should have a current position")
+        .as_u64();
+
+    let events = super::read_subject_stream(&stream, "alpha", alpha_subject, 1, to_sequence)
+        .await
+        .expect("replay should succeed");
+
+    assert_eq!(events.len(), 3);
+    for (event, position) in events.iter().zip(alpha_positions.iter()) {
+        assert_eq!(event.stream_id, "alpha");
+        assert_eq!(event.stream_position, *position);
+    }
+}
+
+#[tokio::test]
+async fn read_subject_stream_respects_from_and_to_sequence_bounds() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "BOUNDS_TEST", "bounds.test.>").await;
+
+    let subject = "bounds.test.alpha";
+    let mut positions = Vec::new();
+    for index in 0..5u128 {
+        let position = append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+        positions.push(position);
+    }
+
+    let middle = super::read_subject_stream(&stream, "alpha", subject, positions[1].as_u64(), positions[3].as_u64())
+        .await
+        .expect("replay should succeed");
+
+    assert_eq!(middle.len(), 3);
+    assert_eq!(middle[0].stream_position, positions[1]);
+    assert_eq!(middle[2].stream_position, positions[3]);
+
+    let inverted = super::read_subject_stream(&stream, "alpha", subject, positions[3].as_u64(), positions[1].as_u64())
+        .await
+        .expect("inverted range should not error");
+    assert!(inverted.is_empty());
+}
+
+#[tokio::test]
+async fn read_subject_stream_uses_caller_stream_id() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "STREAM_ID_TEST", "stream.id.test.>").await;
+
+    let subject = "stream.id.test.alpha";
+    let position = append_stream(&js, make_subject(subject), None, &[make_event(1, b"payload")])
+        .await
+        .expect("publish event");
+
+    let events = super::read_subject_stream(&stream, "custom-stream-id", subject, 1, position.as_u64())
+        .await
+        .expect("replay should succeed");
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].stream_id, "custom-stream-id");
+}
+
+#[tokio::test]
+async fn read_stream_range_reads_all_subjects_in_sequence_order() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "ALL_SUBJECTS_TEST", "all.subjects.test.>").await;
+
+    let alpha = "all.subjects.test.alpha";
+    let beta = "all.subjects.test.beta";
+    let mut expected_subjects = Vec::new();
+    for index in 0..4u128 {
+        let subject = if index % 2 == 0 { alpha } else { beta };
+        append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+        expected_subjects.push(subject.to_string());
+    }
+
+    let events = read_stream_range(&stream, 1, 4).await.expect("replay should succeed");
+
+    assert_eq!(events.len(), 4);
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(
+            event.stream_position,
+            StreamPosition::try_new((index as u64) + 1).unwrap()
+        );
+        assert_eq!(event.stream_id, expected_subjects[index]);
+    }
+}
+
+#[tokio::test]
+async fn read_stream_reads_up_to_current_stream_tail() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "TAIL_TEST", "tail.test.>").await;
+
+    let subject = "tail.test.alpha";
+    for index in 0..3u128 {
+        append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+    }
+
+    let events = read_stream(&stream, 1).await.expect("replay should succeed");
+
+    assert_eq!(events.len(), 3);
+}
+
+#[tokio::test]
+async fn read_stream_range_propagates_fatal_errors_without_retrying() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "DELETED_STREAM_TEST", "deleted.stream.test.>").await;
+    js.delete_stream("DELETED_STREAM_TEST")
+        .await
+        .expect("delete underlying stream");
+
+    let error = read_stream_range(&stream, 1, 1)
+        .await
+        .expect_err("replay against a deleted stream should fail");
+
+    assert!(matches!(error, StreamStoreError::Read(_)));
+}
+
+#[tokio::test]
+async fn read_subject_stream_resumes_from_next_sequence_after_partial_progress() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "RESUME_TEST", "resume.test.>").await;
+
+    let subject = "resume.test.alpha";
+    let noise_subject = "resume.test.noise";
+    let mut positions = Vec::new();
+    for index in 0..5u128 {
+        publish_noise(&js, noise_subject, 5).await;
+        let position = append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+        positions.push(position);
+    }
+    let to_sequence = positions.last().unwrap().as_u64();
+
+    let full = super::read_subject_stream(&stream, "alpha", subject, 1, to_sequence)
+        .await
+        .expect("full replay should succeed");
+    assert_eq!(full.len(), 5);
+
+    // Simulates what the outer retry loop does after a transient failure: it
+    // recreates the consumer starting right after the last event it already
+    // produced, instead of restarting the whole range from scratch.
+    let checkpoint = full[2].stream_position.as_u64();
+    let resumed = super::read_subject_stream(&stream, "alpha", subject, checkpoint + 1, to_sequence)
+        .await
+        .expect("resumed replay should succeed");
+
+    assert_eq!(resumed.len(), 2);
+    assert_eq!(resumed[0].event.id, full[3].event.id);
+    assert_eq!(resumed[1].event.id, full[4].event.id);
+    assert_eq!(resumed[0].stream_position, full[3].stream_position);
+    assert_eq!(resumed[1].stream_position, full[4].stream_position);
 }

@@ -19,6 +19,27 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         .into();
     }
 
+    // `trogon_decider_wit::WIT_DIR` is this crate's own dependency on `trogon-decider-wit`,
+    // resolved (and baked into a `&'static str`) when *this* proc-macro crate was compiled.
+    // Reading it here, rather than emitting `env!("CARGO_MANIFEST_DIR")` into the generated
+    // tokens, keeps `wit_bindgen::generate!`'s `path:` absolute and independent of the
+    // directory depth of whichever crate calls `export_decider!`.
+    let wit_dir = trogon_decider_wit::WIT_DIR;
+    if !std::path::Path::new(wit_dir).is_dir() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!(
+                "export_decider!: WIT contract directory not found at '{wit_dir}' \
+                 (resolved from trogon_decider_wit::WIT_DIR); this points at the \
+                 trogon-decider-wit crate that trogon-decider-guest-macros itself \
+                 depends on, so a missing directory means that crate's checkout is \
+                 incomplete or its `wit/` directory was moved",
+            ),
+        )
+        .to_compile_error()
+        .into();
+    }
+
     let canonical = &commands[0];
     let canonical_ty = &canonical.ty;
     let module_name = &canonical.module;
@@ -204,7 +225,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
         mod __trogon_decider_bindings {
             wit_bindgen::generate!({
                 world: "decider",
-                path: "../../crates/trogon-decider-wit/wit",
+                path: #wit_dir,
                 generate_all,
             });
 
@@ -222,6 +243,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
                     Self {
                         code: value.code,
                         message: value.message,
+                        details: value.details,
                     }
                 }
             }
@@ -300,6 +322,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
                     other => Err(__trogon_decider_bindings::DomainError {
                         code: "invalid-command".to_string(),
                         message: format!("unknown command type '{other}'"),
+                        details: Vec::new(),
                     }),
                 }
             }
@@ -348,6 +371,7 @@ pub fn export_decider(input: TokenStream) -> TokenStream {
                         __trogon_decider_bindings::DomainError {
                             code: "invalid-command".to_string(),
                             message: format!("unknown command type '{other}'"),
+                            details: Vec::new(),
                         },
                     )),
                 }
