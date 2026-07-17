@@ -432,6 +432,7 @@ async fn publish_noise(js: &jetstream::Context, subject: &str, count: usize) {
     }
 }
 
+#[cfg(not(coverage))]
 #[tokio::test]
 async fn read_subject_stream_filters_by_subject_amid_heavy_foreign_traffic() {
     let server = NatsServer::start().await;
