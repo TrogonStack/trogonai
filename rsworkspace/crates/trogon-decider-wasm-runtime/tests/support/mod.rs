@@ -13,9 +13,11 @@ use trogon_decider_wasm_runtime::OpaqueSnapshotPayload;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InfraError {
     #[error("append rejected by write precondition")]
-    PreconditionFailed,
+    PreconditionRejected,
     #[error("snapshot write failed")]
     SnapshotWriteFailed,
+    #[error("snapshot read failed")]
+    SnapshotReadFailed,
 }
 
 #[derive(Default)]
@@ -112,7 +114,7 @@ impl StreamAppend<str> for InMemoryEventStore {
             StreamWritePrecondition::StreamExists if current_position.is_some() => {}
             StreamWritePrecondition::NoStream if current_position.is_none() => {}
             StreamWritePrecondition::At(position) if current_position == Some(position) => {}
-            _ => return Err(InfraError::PreconditionFailed),
+            _ => return Err(InfraError::PreconditionRejected),
         }
 
         let mut next_sequence = current_position.map(StreamPosition::as_u64).unwrap_or(0);
@@ -137,6 +139,7 @@ impl StreamAppend<str> for InMemoryEventStore {
 pub struct InMemorySnapshotStore {
     snapshots: Arc<Mutex<HashMap<String, Snapshot<OpaqueSnapshotPayload>>>>,
     fail_writes: Arc<std::sync::atomic::AtomicBool>,
+    fail_reads: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InMemorySnapshotStore {
@@ -146,6 +149,10 @@ impl InMemorySnapshotStore {
 
     pub fn fail_writes(&self) {
         self.fail_writes.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn fail_reads(&self) {
+        self.fail_reads.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn get(&self, snapshot_id: &str) -> Option<Snapshot<OpaqueSnapshotPayload>> {
@@ -164,6 +171,9 @@ impl SnapshotRead<OpaqueSnapshotPayload, str> for InMemorySnapshotStore {
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<OpaqueSnapshotPayload>, Self::Error> {
+        if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(InfraError::SnapshotReadFailed);
+        }
         Ok(ReadSnapshotResponse {
             snapshot: self.get(request.snapshot_id),
         })

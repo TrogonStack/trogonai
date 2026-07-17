@@ -42,6 +42,18 @@
 //! module version bump changes the id every snapshot lookup uses, so an old
 //! snapshot is simply not found and execution falls back to a full replay.
 //!
+//! # Snapshot failure recovery
+//!
+//! A snapshot the host cannot trust, either because reading it failed or
+//! because it claims a position past the stream's own history, is by default
+//! a hard error, mirroring [`trogon_decider_runtime::execution::CommandExecution`].
+//! Callers that would rather discard the untrusted snapshot and replay from
+//! the beginning can opt in with
+//! [`WasmCommandExecution::with_snapshot_failure_policy`], passing
+//! [`trogon_decider_runtime::DiscardAndReplaySnapshotFailure`] in place of the
+//! default [`trogon_decider_runtime::FailOnSnapshotFailure`]. See
+//! [`WasmSnapshotFailurePolicy`] and [`WasmSnapshotFailureContext`].
+//!
 //! # Runtime rollout
 //!
 //! [`DeciderRegistry`] is immutable once built: swapping in a new module
@@ -79,7 +91,8 @@ pub use engine::{
     DEFAULT_MAX_TABLE_ELEMENTS, DEFAULT_MAX_TABLES_PER_SESSION, WasmDeciderEngine, WasmEngineConfig, WasmEngineError,
 };
 pub use execution::{
-    WasmCommandError, WasmCommandExecution, WasmExecutionResult, WithSnapshotStore, WithoutSnapshotStore,
+    WasmCommandError, WasmCommandExecution, WasmExecutionResult, WasmSnapshotFailureContext, WasmSnapshotFailurePolicy,
+    WithSnapshotStore, WithoutSnapshotStore,
 };
 pub use module::{InvalidDescriptorError, LoadWasmDeciderError, WasmDeciderModule};
 pub use module_name::{ModuleName, ModuleNameError};

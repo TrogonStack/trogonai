@@ -38,9 +38,10 @@ use opentelemetry::metrics::{Counter, Histogram};
 use opentelemetry::{KeyValue, global};
 use thiserror::Error;
 use trogon_decider_runtime::{
-    AppendStreamRequest, Event, EventId, Headers, ReadAfterOverflow, ReadFrom, ReadSnapshotRequest, ReadStreamRequest,
-    Snapshot, SnapshotAheadOfStream, SnapshotRead, SnapshotTaskScheduler, SnapshotWrite, StreamAppend, StreamPosition,
-    StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
+    AppendStreamRequest, DiscardAndReplaySnapshotFailure, Event, EventId, FailOnSnapshotFailure, Headers,
+    ReadAfterOverflow, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream,
+    SnapshotFailure, SnapshotFailureDecision, SnapshotRead, SnapshotTaskScheduler, SnapshotWrite, StreamAppend,
+    StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
 };
 use trogon_decider_wit::host::{self, AnyEnvelope, CommandEnvelope, DecideError};
 use trogon_semconv::{attribute, metric, span};
@@ -199,14 +200,72 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     Blocking(#[source] tokio::task::JoinError),
 }
 
+/// Module identity, command type, and stream id a [`WasmSnapshotFailurePolicy`]
+/// inspects before deciding how to react to a snapshot a [`WasmCommandExecution`]
+/// cannot trust.
+///
+/// Mirrors [`trogon_decider_runtime::SnapshotFailureContext`], adapted for the
+/// WASM boundary: there is no typed `Decider` to hand the policy, so this
+/// carries the identity the wasm execution actually has in hand at this point
+/// instead of a command reference.
+#[derive(Debug)]
+pub struct WasmSnapshotFailureContext<'a, ReadSnapshotError> {
+    /// Name of the module executing the command that triggered this failure.
+    pub module_name: &'a str,
+    /// Version of the module executing the command that triggered this failure.
+    pub module_version: &'a str,
+    /// Wire type URL of the command that triggered this failure.
+    pub command_type: &'a str,
+    /// Stream id the command resolved before loading its snapshot.
+    pub stream_id: &'a str,
+    /// The failure the policy must decide how to handle.
+    pub failure: SnapshotFailure<'a, ReadSnapshotError>,
+}
+
+/// Chooses how a [`WasmCommandExecution`] reacts to a snapshot it cannot trust.
+///
+/// Mirrors [`trogon_decider_runtime::SnapshotFailurePolicy`] for the WASM
+/// boundary, which has no typed `Decider` to bound the policy on.
+/// [`FailOnSnapshotFailure`] keeps today's behavior of failing the command;
+/// [`DiscardAndReplaySnapshotFailure`] discards the bad snapshot and replays
+/// from the beginning of the stream. Both are reused directly from
+/// `trogon_decider_runtime` since neither carries decider-specific state.
+pub trait WasmSnapshotFailurePolicy<ReadSnapshotError> {
+    /// Decides how the command execution should react to the given snapshot failure.
+    fn decide_snapshot_failure(
+        &self,
+        context: WasmSnapshotFailureContext<'_, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision;
+}
+
+impl<ReadSnapshotError> WasmSnapshotFailurePolicy<ReadSnapshotError> for FailOnSnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: WasmSnapshotFailureContext<'_, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::Fail
+    }
+}
+
+impl<ReadSnapshotError> WasmSnapshotFailurePolicy<ReadSnapshotError> for DiscardAndReplaySnapshotFailure {
+    fn decide_snapshot_failure(
+        &self,
+        _context: WasmSnapshotFailureContext<'_, ReadSnapshotError>,
+    ) -> SnapshotFailureDecision {
+        SnapshotFailureDecision::DiscardAndReplay
+    }
+}
+
 /// Marker type used before a snapshot store is attached to an execution.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WithoutSnapshotStore;
 
-/// Snapshot store and best-effort task scheduler attached to an execution.
-pub struct WithSnapshotStore<'a, S, Sched> {
+/// Snapshot store, best-effort task scheduler, and snapshot failure policy
+/// attached to an execution.
+pub struct WithSnapshotStore<'a, S, Sched, F = FailOnSnapshotFailure> {
     store: &'a S,
     task_scheduler: &'a Sched,
+    failure_policy: F,
 }
 
 /// Builder for one command execution against a [`WasmDeciderModule`].
@@ -237,11 +296,16 @@ impl<'a, E> WasmCommandExecution<'a, E, WithoutSnapshotStore, trogon_std::UuidV7
 
 impl<'a, E, G> WasmCommandExecution<'a, E, WithoutSnapshotStore, G> {
     /// Attaches a snapshot store and best-effort snapshot task scheduler.
+    ///
+    /// Defaults to [`FailOnSnapshotFailure`], which fails the command on an
+    /// untrusted snapshot exactly as before this policy existed. Chain
+    /// [`WasmCommandExecution::with_snapshot_failure_policy`] to recover
+    /// instead.
     pub fn with_snapshot_store<S, Sched>(
         self,
         snapshot_store: &'a S,
         snapshot_task_scheduler: &'a Sched,
-    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched>, G> {
+    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, FailOnSnapshotFailure>, G> {
         WasmCommandExecution {
             module: self.module,
             event_store: self.event_store,
@@ -249,6 +313,33 @@ impl<'a, E, G> WasmCommandExecution<'a, E, WithoutSnapshotStore, G> {
             snapshots: WithSnapshotStore {
                 store: snapshot_store,
                 task_scheduler: snapshot_task_scheduler,
+                failure_policy: FailOnSnapshotFailure,
+            },
+            write_precondition: self.write_precondition,
+            headers: self.headers,
+            event_id_generator: self.event_id_generator,
+        }
+    }
+}
+
+impl<'a, E, S, Sched, F, G> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, F>, G> {
+    /// Sets how this execution reacts to a snapshot it cannot trust.
+    ///
+    /// Defaults to [`FailOnSnapshotFailure`], which fails the command exactly
+    /// as before this policy existed. Use [`DiscardAndReplaySnapshotFailure`]
+    /// or a custom [`WasmSnapshotFailurePolicy`] to recover instead.
+    pub fn with_snapshot_failure_policy<NextF>(
+        self,
+        failure_policy: NextF,
+    ) -> WasmCommandExecution<'a, E, WithSnapshotStore<'a, S, Sched, NextF>, G> {
+        WasmCommandExecution {
+            module: self.module,
+            event_store: self.event_store,
+            command: self.command,
+            snapshots: WithSnapshotStore {
+                store: self.snapshots.store,
+                task_scheduler: self.snapshots.task_scheduler,
+                failure_policy,
             },
             write_precondition: self.write_precondition,
             headers: self.headers,
@@ -295,14 +386,13 @@ impl<'a, E, Snapshots, G> WasmCommandExecution<'a, E, Snapshots, G> {
 }
 
 /// Prior stream events replayed as guest envelopes, the stream's current
-/// position, the snapshot position they resumed from (if any), and the raw
-/// snapshot bytes passed to the guest session constructor.
-type ReplayContext = (
-    Vec<AnyEnvelope>,
-    Option<StreamPosition>,
-    Option<StreamPosition>,
-    Option<Vec<u8>>,
-);
+/// position, and the raw snapshot bytes passed to the guest session
+/// constructor.
+struct ReplayContext {
+    replayed_envelopes: Vec<AnyEnvelope>,
+    current_position: Option<StreamPosition>,
+    snapshot_bytes: Option<Vec<u8>>,
+}
 
 impl<E, G> WasmCommandExecution<'_, E, WithoutSnapshotStore, G>
 where
@@ -387,7 +477,7 @@ where
     }
 }
 
-impl<E, S, Sched, G> WasmCommandExecution<'_, E, WithSnapshotStore<'_, S, Sched>, G>
+impl<E, S, Sched, F, G> WasmCommandExecution<'_, E, WithSnapshotStore<'_, S, Sched, F>, G>
 where
     E: StreamRead<str> + StreamAppend<str>,
     S: SnapshotRead<OpaqueSnapshotPayload, str>
@@ -397,6 +487,7 @@ where
         + Sync
         + 'static,
     Sched: SnapshotTaskScheduler,
+    F: WasmSnapshotFailurePolicy<<S as SnapshotRead<OpaqueSnapshotPayload, str>>::Error>,
     G: NowV7,
 {
     /// Runs the command against a fresh guest session, appends its decided
@@ -426,12 +517,19 @@ where
         .await?;
 
         let write_precondition = command_write_precondition(self.module, &self.command.type_);
-        let (replayed_envelopes, current_position, _snapshot_position, snapshot_bytes) =
-            if is_no_stream(write_precondition) {
-                (Vec::new(), None, None, None)
-            } else {
-                self.load_replay_context(&stream_id).await?
-            };
+        let ReplayContext {
+            replayed_envelopes,
+            current_position,
+            snapshot_bytes,
+        } = if is_no_stream(write_precondition) {
+            ReplayContext {
+                replayed_envelopes: Vec::new(),
+                current_position: None,
+                snapshot_bytes: None,
+            }
+        } else {
+            self.load_replay_context(&stream_id).await?
+        };
 
         let engine = self.module.engine().clone();
         let command = self.command.clone();
@@ -497,6 +595,32 @@ where
         })
     }
 
+    /// Builds the context a [`WasmSnapshotFailurePolicy`] inspects for one
+    /// snapshot failure this execution encountered.
+    fn snapshot_failure_context<'ctx, ReadSnapshotError>(
+        &'ctx self,
+        stream_id: &'ctx str,
+        failure: SnapshotFailure<'ctx, ReadSnapshotError>,
+    ) -> WasmSnapshotFailureContext<'ctx, ReadSnapshotError> {
+        WasmSnapshotFailureContext {
+            module_name: self.module.name().as_str(),
+            module_version: self.module.version().as_str(),
+            command_type: self.command.type_.as_str(),
+            stream_id,
+            failure,
+        }
+    }
+
+    /// Loads the snapshot (if any) and the stream events replayed after it.
+    ///
+    /// A snapshot the configured [`WasmSnapshotFailurePolicy`] cannot trust,
+    /// whether it failed to read or claims a position ahead of the stream, is
+    /// routed through that policy. [`SnapshotFailureDecision::Fail`] returns
+    /// the concrete [`WasmCommandError`] for the failure, matching this
+    /// execution's behavior before the policy existed.
+    /// [`SnapshotFailureDecision::DiscardAndReplay`] discards the untrusted
+    /// snapshot and replays the stream from the beginning instead, exactly as
+    /// [`trogon_decider_runtime::CommandExecution`] does natively.
     #[allow(clippy::type_complexity)]
     async fn load_replay_context(
         &self,
@@ -510,18 +634,27 @@ where
         >,
     > {
         let snapshot_id = WasmSnapshotId::new(self.module.name(), self.module.version(), stream_id);
-        let response = <S as SnapshotRead<OpaqueSnapshotPayload, str>>::read_snapshot(
-            self.snapshots.store,
-            ReadSnapshotRequest {
-                snapshot_id: snapshot_id.as_str(),
-            },
-        )
-        .await
-        .map_err(WasmCommandError::ReadSnapshot)?;
-        let (snapshot_position, snapshot_bytes) = match response.snapshot {
-            Some(snapshot) => (Some(snapshot.position), Some(snapshot.payload.into_bytes())),
-            None => (None, None),
-        };
+        let (snapshot_position, mut snapshot_bytes) =
+            match <S as SnapshotRead<OpaqueSnapshotPayload, str>>::read_snapshot(
+                self.snapshots.store,
+                ReadSnapshotRequest {
+                    snapshot_id: snapshot_id.as_str(),
+                },
+            )
+            .await
+            {
+                Ok(response) => match response.snapshot {
+                    Some(snapshot) => (Some(snapshot.position), Some(snapshot.payload.into_bytes())),
+                    None => (None, None),
+                },
+                Err(error) => {
+                    let context = self.snapshot_failure_context(stream_id, SnapshotFailure::ReadFailed(&error));
+                    match self.snapshots.failure_policy.decide_snapshot_failure(context) {
+                        SnapshotFailureDecision::Fail => return Err(WasmCommandError::ReadSnapshot(error)),
+                        SnapshotFailureDecision::DiscardAndReplay => (None, None),
+                    }
+                }
+            };
 
         let from = match snapshot_position {
             Some(position) => ReadFrom::after(position).map_err(WasmCommandError::ReadAfterOverflow)?,
@@ -530,19 +663,40 @@ where
         let stream_read = <E as StreamRead<str>>::read_stream(self.event_store, ReadStreamRequest { stream_id, from })
             .await
             .map_err(WasmCommandError::ReadStream)?;
-        let current_position = stream_read.current_position;
+        let mut current_position = stream_read.current_position;
+        let mut replayed_envelopes = to_any_envelopes(stream_read.events);
 
-        if let Some(snapshot_position) = snapshot_position {
-            ensure_snapshot_not_ahead(snapshot_position, current_position)
-                .map_err(WasmCommandError::SnapshotAheadOfStream)?;
+        if let Some(position) = snapshot_position
+            && let Err(ahead_of_stream) = ensure_snapshot_not_ahead(position, current_position)
+        {
+            let context = self.snapshot_failure_context(stream_id, SnapshotFailure::AheadOfStream(ahead_of_stream));
+            match self.snapshots.failure_policy.decide_snapshot_failure(context) {
+                SnapshotFailureDecision::Fail => {
+                    return Err(WasmCommandError::SnapshotAheadOfStream(ahead_of_stream));
+                }
+                SnapshotFailureDecision::DiscardAndReplay => {
+                    snapshot_bytes = None;
+
+                    let replay = <E as StreamRead<str>>::read_stream(
+                        self.event_store,
+                        ReadStreamRequest {
+                            stream_id,
+                            from: ReadFrom::Beginning,
+                        },
+                    )
+                    .await
+                    .map_err(WasmCommandError::ReadStream)?;
+                    current_position = replay.current_position;
+                    replayed_envelopes = to_any_envelopes(replay.events);
+                }
+            }
         }
 
-        Ok((
-            to_any_envelopes(stream_read.events),
+        Ok(ReplayContext {
+            replayed_envelopes,
             current_position,
-            snapshot_position,
             snapshot_bytes,
-        ))
+        })
     }
 }
 

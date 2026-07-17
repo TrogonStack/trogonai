@@ -322,6 +322,29 @@ snapshot will observe that session again, so folding would only burn guest fuel 
 one that exceeded its wall-clock epoch deadline (`DeadlineExceeded`), classified by
 downcasting the trap to `wasmtime::Trap::Interrupt`.
 
+### Snapshot failure recovery mirrors the native path
+
+`WasmCommandExecution::with_snapshot_failure_policy` mirrors native's
+`SnapshotFailurePolicy`: a snapshot the host cannot trust, either because reading it failed or
+because it claims a position ahead of the stream, is routed through a
+`WasmSnapshotFailurePolicy<ReadSnapshotError>` before either failure is allowed to fail the
+command. `FailOnSnapshotFailure` (the default) keeps today's behavior;
+`DiscardAndReplaySnapshotFailure` discards the untrusted snapshot and replays the stream from
+the beginning instead, exactly as `CommandExecution` does natively. Both policy types are
+reused directly from `trogon-decider-runtime`, since neither carries any decider-specific
+state.
+
+The WASM boundary has no typed `Decider`, so the policy's input is a `WasmSnapshotFailureContext`
+carrying whatever identity the execution actually has in hand at that point instead of a
+command reference: the module's name and version, the command's wire type URL, the resolved
+stream id, and the failure itself (reused as native's `SnapshotFailure`).
+
+Native forces the post-append snapshot write unconditionally when a bad snapshot was just
+discarded, so a `SnapshotPolicy` that would otherwise skip cannot let the bad snapshot linger.
+The WASM path needs no equivalent branch: it has no host-side `SnapshotPolicy` to skip with in
+the first place, since a snapshot is written whenever the guest's `snapshot()` export returns
+one at all.
+
 ### Registry rollout: swapping modules without a restart
 
 `DeciderRegistry` routes command types to the `WasmDeciderModule` that declared them, built
