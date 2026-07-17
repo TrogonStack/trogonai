@@ -5,7 +5,7 @@ status: draft
 date: 2026-07-15
 ---
 
-# ADR 0029: Snapshot-Derived Retention Watermark for Decider Streams
+# ADR#0029: Snapshot-Derived Retention Watermark for Decider Streams
 
 ## Context
 
@@ -29,7 +29,7 @@ cannot know that one logical stream's oldest event is still needed while
 another's is not; tuning it for a fast-moving stream would silently evict a
 slow-moving stream's un-snapshotted history.
 
-[ADR 0013](./0013-origin-stream-sequence-header.md) already separates
+[ADR#0013](./0013-origin-stream-sequence-header.md) already separates
 physical JetStream stream sequence (authoritative for checkpoints,
 high-water marks, and optimistic concurrency) from
 `Trogon-Origin-Stream-Sequence` (provenance metadata only, present only on
@@ -63,7 +63,7 @@ explicitly invoked maintenance job (an operator command, a scheduled task, or
 an admin action) reads the watermark and issues the purge. This keeps
 "decide whether to truncate," an operational and reviewable decision, apart
 from "execute a command," the store's actual job -- the same separation
-[ADR 0023](./0023-secret-management-and-key-custody-direction.md) draws
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md) draws
 between routine operation and an operator-invoked, out-of-band action.
 
 ### 3. Recommended retention policy posture
@@ -77,7 +77,7 @@ that a needed event disappears prematurely. A conservative stream-wide
 `max_age` far longer than any expected snapshot interval is a reasonable
 backstop, but it is a safety net, not the retention mechanism.
 
-### 4. Interplay with ADR 0013 physical positions
+### 4. Interplay with ADR#0013 physical positions
 
 The watermark is computed and purge is executed exclusively in terms of
 physical JetStream stream sequence, never `Trogon-Origin-Stream-Sequence`. A
@@ -105,7 +105,7 @@ first as an observable, reviewable report.
 ### Key the watermark off `Trogon-Origin-Stream-Sequence`
 
 Rejected. That header is provenance metadata only
-([ADR 0013](./0013-origin-stream-sequence-header.md)), deliberately not
+([ADR#0013](./0013-origin-stream-sequence-header.md)), deliberately not
 authoritative for checkpoints or optimistic concurrency, and absent on the
 common case of an ordinary append. Using it would either break on
 non-restored streams or misjudge safety on restored ones, where physical and
@@ -124,7 +124,7 @@ origin positions diverge by design.
   `FrequencySnapshot`). Retention consumes whatever cadence a decider already
   chose.
 - Per-tenant retention policy differences. Composes with, but does not
-  depend on, [ADR 0027](./0027-decider-multi-tenancy-primitive.md).
+  depend on, [ADR#0027](./0027-decider-multi-tenancy-primitive.md).
 
 ## Consequences
 
@@ -148,7 +148,7 @@ origin positions diverge by design.
 
 ## References
 
-- [ADR 0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
-- [ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
-- [ADR 0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
+- [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [NATS JetStream Source and Mirror Streams](https://docs.nats.io/nats-concepts/jetstream/source_and_mirror)

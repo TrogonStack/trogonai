@@ -102,7 +102,7 @@ function validateUniqueAdrNumbers(records: AdrRecord[]) {
   const duplicateSummaries = duplicates.map(([number, matchingRecords]) => {
     const fileNames = matchingRecords.map((record) => path.basename(record.filePath)).join(", ");
 
-    return `ADR ${number}: ${fileNames}`;
+    return `ADR#${number}: ${fileNames}`;
   });
 
   throw new Error(`ADR numbers must be unique.\n\n${duplicateSummaries.join("\n")}`);

@@ -5,7 +5,7 @@ status: draft
 date: 2026-07-15
 ---
 
-# ADR 0027: Tenant Value Object for Decider Stream and Snapshot Resolution
+# ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution
 
 ## Context
 
@@ -46,7 +46,7 @@ Introduce `Tenant` as a validated, non-empty identifier type in
 (`StreamPosition`, `EventId`). A `Tenant` is constructed once, at the
 application boundary that knows which tenant is operating, the same place
 that already assembles `Headers` and a `CommandPrincipal`
-([ADR 0026](./0026-command-authorization-principal.md)) before execution.
+([ADR#0026](./0026-command-authorization-principal.md)) before execution.
 
 ### 2. Tenant-aware resolution, verified at the store boundary
 
@@ -79,7 +79,7 @@ Its existing subjects and snapshot keys already satisfy the new validation
 trivially, because there is exactly one tenant and the resolver's output
 already matches it. No historical subject or key is rewritten; validation
 applies going forward from adoption, the same posture
-[ADR 0013](./0013-origin-stream-sequence-header.md) takes toward provenance
+[ADR#0013](./0013-origin-stream-sequence-header.md) takes toward provenance
 metadata on pre-existing events.
 
 ## Alternatives Considered
@@ -106,7 +106,7 @@ Rejected as the sole mechanism. Server-side ACLs protect against a
 compromised or malicious client but do nothing for a resolver bug inside a
 trusted process holding broad JetStream credentials -- which is this crate's
 own client shape. A host-side check catches programming errors ACLs cannot
-see, the same reasoning [ADR 0023](./0023-secret-management-and-key-custody-direction.md)
+see, the same reasoning [ADR#0023](./0023-secret-management-and-key-custody-direction.md)
 applies to keeping OpenBao access behind a single trusted client rather than
 relying on network policy alone.
 
@@ -118,7 +118,7 @@ relying on network policy alone.
   Validation applies going forward only.
 - Cross-tenant data sharing or tenant-to-tenant migration tooling.
 - Changing the command-authorization boundary
-  ([ADR 0026](./0026-command-authorization-principal.md)). `Tenant` is a
+  ([ADR#0026](./0026-command-authorization-principal.md)). `Tenant` is a
   storage-resolution concept; associating a caller's authorization principal
   with a tenant is left to the application boundary.
 
@@ -141,7 +141,7 @@ relying on network policy alone.
 
 ## References
 
-- [ADR 0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
-- [ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
-- [ADR 0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
+- [ADR#0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
+- [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
 - [Event Metadata](../architecture/event-metadata.md)

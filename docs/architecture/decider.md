@@ -147,7 +147,7 @@ routing), distinct from event payloads, which are the canonical domain facts. Th
 does not derive required headers from commands or events through a generic callback;
 callers set headers explicitly via `CommandExecution::with_headers`. See
 [Event Metadata](./event-metadata.md) for the full policy, and
-[ADR 0013](../adr/0013-origin-stream-sequence-header.md) for the one reserved header name
+[ADR#0013](../adr/0013-origin-stream-sequence-header.md) for the one reserved header name
 this repository defines today, `Trogon-Origin-Stream-Sequence`, used only for provenance
 when an event is republished into a different stream from the one it originally lived in.
 It is never used for checkpoints, positions, or concurrency; those always use the stream's
@@ -156,7 +156,7 @@ current sequence.
 ## JetStream storage layer (`trogon-decider-nats`)
 
 `trogon-decider-nats` implements the native runtime's storage traits (stream read/append,
-snapshot read/write) against NATS JetStream. Per [ADR 0002](../adr/0002-rust-crate-boundaries.md),
+snapshot read/write) against NATS JetStream. Per [ADR#0002](../adr/0002-rust-crate-boundaries.md),
 this crate is the adapter layer: it knows how to store and replay a stream, not how to
 `decide`/`evolve`.
 
@@ -391,7 +391,7 @@ Four layers, from unit-level to conformance-level:
 
 ## Observability
 
-Per [ADR 0008](../adr/0008-opentelemetry-observability.md), the decider platform is
+Per [ADR#0008](../adr/0008-opentelemetry-observability.md), the decider platform is
 instrumented against `otel/semconv/registry/decider.yaml`'s `registry.trogonai.decider`
 attribute group. All decider telemetry is `stability: development`.
 
@@ -420,17 +420,17 @@ Metrics: `decider.replay.events` (counter), `decider.snapshot.reads` (counter, b
 
 Accepted and reflected in the platform as built:
 
-- [ADR 0002: Rust Crate Boundaries](../adr/0002-rust-crate-boundaries.md): the
+- [ADR#0002: Rust Crate Boundaries](../adr/0002-rust-crate-boundaries.md): the
   domain/runtime/adapter split this document follows (`trogon-decider` /
   `trogon-decider-runtime` / `trogon-decider-nats`).
-- [ADR 0008: OpenTelemetry Observability](../adr/0008-opentelemetry-observability.md): the
+- [ADR#0008: OpenTelemetry Observability](../adr/0008-opentelemetry-observability.md): the
   vocabulary requirement behind the Observability section above.
-- [ADR 0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
+- [ADR#0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
   the `Trogon-Origin-Stream-Sequence` header described under Headers above.
 
 Draft, **not yet implemented**; do not treat these as current behavior:
 
-- [ADR 0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md)
-- [ADR 0027: Decider Multi-Tenancy Primitive](../adr/0027-decider-multi-tenancy-primitive.md)
-- [ADR 0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md)
-- [ADR 0029: Decider Retention and Truncation Watermark](../adr/0029-decider-retention-and-truncation-watermark.md)
+- [ADR#0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md)
+- [ADR#0027: Decider Multi-Tenancy Primitive](../adr/0027-decider-multi-tenancy-primitive.md)
+- [ADR#0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md)
+- [ADR#0029: Decider Retention and Truncation Watermark](../adr/0029-decider-retention-and-truncation-watermark.md)

@@ -4,7 +4,7 @@ NATS JetStream storage adapter for `trogon-decider-runtime`. Owns the mapping fr
 logical stream identifiers onto one physical JetStream stream (subject-per-logical-stream, via a
 caller-supplied `StreamSubjectResolver`), atomic multi-event append with optimistic concurrency,
 ordered subject-filtered replay with bounded retry, and KV-backed snapshot storage
-(`snapshot_store`). Per the crate boundaries in [ADR 0002](../../../docs/adr/0002-rust-crate-boundaries.md),
+(`snapshot_store`). Per the crate boundaries in [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md),
 this crate is the NATS-specific adapter layer; it implements `trogon-decider-runtime`'s storage
 traits (`StreamRead`/`StreamAppend`, `SnapshotRead`/`SnapshotWrite`) but knows nothing about
 `decide`/`evolve` or command execution itself.

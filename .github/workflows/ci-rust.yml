@@ -48,7 +48,7 @@ jobs:
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
 
-      - name: Enforce TLS policy (ADR 0015)
+      - name: Enforce TLS policy (ADR#0015)
         run: cargo deny check bans
         working-directory: rsworkspace
 

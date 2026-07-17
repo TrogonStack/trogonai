@@ -5,7 +5,7 @@ status: accepted
 date: 2026-07-11
 ---
 
-# ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service
+# ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service
 
 ## Context
 
@@ -17,7 +17,7 @@ SaaS sources (eleven inbound webhook routes plus Discord's outbound WebSocket
 gateway), and every integration carries a webhook signing secret, bot token,
 or verification token. Those values currently resolve from environment
 variables at config-load time through the `SecretInput` pattern, which
-[ADR 0007](./0007-configuration-sources.md) sanctions as a bootstrap
+[ADR#0007](./0007-configuration-sources.md) sanctions as a bootstrap
 mechanism, not a durable model: configuration files must not store secrets,
 and env vars cannot express per-company, console-managed connections. The
 second consumer is near-term direction rather than shipped code: the MCP
@@ -26,7 +26,7 @@ servers on a company's behalf will require presenting per-company
 `Authorization` headers. Behind those two sit known future consumers: OAuth
 refresh tokens for user-delegated outbound calls (the pattern the console
 gateway of
-[ADR 0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
+[ADR#0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
 already sets by holding operator OAuth tokens server-side), and custody of
 the platform's own JWT signing keys, for which `a2a-auth-callout` already
 ships an unimplemented vault-backed signing-key source.
@@ -47,7 +47,7 @@ problems that must not share one interface:
 - **Password hashing**: intentionally one-way, owned by the application, and
   never a KMS concern.
 - **Short-lived protocol tokens**: AAuth JWTs
-  ([ADR 0017](./0017-aauth-agent-authentication.md)), CSRF tokens, and
+  ([ADR#0017](./0017-aauth-agent-authentication.md)), CSRF tokens, and
   session state stay in their owning subsystems; central storage adds nothing
   to values designed to expire.
 
@@ -169,7 +169,8 @@ path is part of this decision rather than an implementation detail:
   to an identity the deployment attests: service-account JWT auth where the
   orchestrator provides one, AppRole or TLS certificate auth as the
   self-hosted baseline. No standing OpenBao token lives in a config file or
-  environment variable; the ADR 0007 rule applies to the secrets service
+  environment variable; the [ADR#0007](./0007-configuration-sources.md) rule
+  applies to the secrets service
   itself.
 - **The bootstrap policy is minting-only.** Login yields a short-TTL token
   whose ACL permits creating the per-request child credentials under the
@@ -310,9 +311,9 @@ callers.
 
 ## References
 
-- [ADR 0007: Configuration Sources](./0007-configuration-sources.md)
-- [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
-- [ADR 0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
+- [ADR#0007: Configuration Sources](./0007-configuration-sources.md)
+- [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
+- [ADR#0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
 - [OpenBao documentation](https://openbao.org/docs/)
 - [OpenBao Transit engine](https://openbao.org/docs/secrets/transit/)
 - [OpenBao KV v2](https://openbao.org/docs/secrets/kv/)

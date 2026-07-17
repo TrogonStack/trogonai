@@ -1,6 +1,6 @@
 # trogon-decider-sim
 
-Per [ADR 0002](../../../docs/adr/0002-rust-crate-boundaries.md), this crate is a testing-only
+Per [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md), this crate is a testing-only
 adapter around the same wasmtime host machinery `trogon-decider-wasm-runtime` uses in
 production, so a decider's guest behavior can be exercised in-process without a real
 deployment. `SimHost`/`SimInstance` load a component and run every guest call against the same

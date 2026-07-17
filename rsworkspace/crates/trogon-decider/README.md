@@ -1,6 +1,6 @@
 # trogon-decider
 
-The `trogon-*` prefix (per [ADR 0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks
+The `trogon-*` prefix (per [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks
 first-party platform crates whose public contract does not depend on this repository's own
 product assumptions; this crate is the pure decision-logic domain: the `Decider` trait
 (`stream_id`, `initial_state`, `evolve`, `decide`), the `Decision` enum

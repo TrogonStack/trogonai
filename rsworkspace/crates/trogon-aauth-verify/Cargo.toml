@@ -21,7 +21,7 @@ base64 = { workspace = true }
 # version pin local to this crate so main's other jsonwebtoken 9.3
 # consumers (auth-callout, etc.) are not forced to upgrade in lockstep.
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
-# rustls-tls only, never native-tls, per ADR 0015.
+# rustls-tls only, never native-tls, per ADR#0015.
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

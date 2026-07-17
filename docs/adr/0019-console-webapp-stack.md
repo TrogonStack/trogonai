@@ -5,18 +5,18 @@ status: accepted
 date: 2026-07-08
 ---
 
-# ADR 0019: Console Webapp Stack
+# ADR#0019: Console Webapp Stack
 
 ## Context
 
 The platform needs an operator console: a product-facing web application for
 managing agents and schedules, browsing the discovery catalog
-([ADR 0012](./0012-ard-compatible-discovery-catalog.md)), and observing live
+([ADR#0012](./0012-ard-compatible-discovery-catalog.md)), and observing live
 execution. It is the repository's first product web application, so its stack
 choices set the default for every later TypeScript product surface.
 
 The console's data path is decided by
-[ADR 0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md): the
+[ADR#0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md): the
 browser speaks ConnectRPC to a gateway that bridges onto the NATS backbone and
 owns all credentials. This ADR decides everything above that boundary: the
 application framework, build tooling, component system, data and form
@@ -29,18 +29,19 @@ first-paint-for-logged-out-users requirement.
 
 ## Decision
 
-### 1. Placement follows ADR 0005
+### 1. Placement follows [ADR#0005](./0005-polyglot-workspace-layout.md)
 
 The console lives at `tsworkspace/apps/console/`, with reusable TypeScript
 packages under `tsworkspace/packages/`, per the layout and App Surface Rules
-in [ADR 0005](./0005-polyglot-workspace-layout.md). There is no top-level
+in [ADR#0005](./0005-polyglot-workspace-layout.md). There is no top-level
 `webapps/` directory. If the console later grows desktop or mobile surfaces,
-it regroups as `tsworkspace/apps/console/{web,desktop,shared}/` as ADR 0005
-already prescribes. The workspace uses pnpm, with Turborepo as the task
+it regroups as `tsworkspace/apps/console/{web,desktop,shared}/` as
+[ADR#0005](./0005-polyglot-workspace-layout.md) already prescribes. The workspace uses pnpm, with Turborepo as the task
 runner so build, test, and typecheck tasks are dependency-ordered and cached
 as the package graph grows.
 
-Package names use the `@trogonai/<name>` scope per ADR 0005, and the scope is
+Package names use the `@trogonai/<name>` scope per
+[ADR#0005](./0005-polyglot-workspace-layout.md), and the scope is
 protected against public-registry collision deliberately. An npm scope is an
 owned namespace, so the `@trogonai` organization must be registered on the
 public npm registry (unclaimed and empty as of 2026-07-08) before these names
@@ -59,7 +60,8 @@ The console is a client-rendered SPA built with Vite. Next.js, Nuxt, and
 similar server-rendering meta-frameworks are not used. Their value is a
 server tier for SEO and anonymous first paint, which this surface does not
 have, and that tier would duplicate session and credential responsibilities
-that ADR 0018 assigns to the gateway. The build output is static assets served
+that [ADR#0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md) assigns
+to the gateway. The build output is static assets served
 by the console gateway, keeping the product surface one deployable workload.
 
 If server rendering ever becomes a real requirement, the migration path is
@@ -93,14 +95,14 @@ directly or transitively. Community shadcn components that import Radix are
 ported to Base UI rather than adopted as-is. The workspace enforces the ban
 with tooling rather than review vigilance.
 
-### 5. Validation is zod at the boundary, per the ADR 0009 conversion rule
+### 5. Validation is zod at the boundary, per the [ADR#0009](./0009-protocol-buffers-wire-contracts.md) conversion rule
 
 Runtime validation uses zod, wired into TanStack Form through Standard
 Schema. Generated protobuf types do not leak primitive obsession into
 application code: screens and forms convert generated messages into richer
 edit models at the boundary when validation, units, identity, or invariants
 matter, the same conversion rule
-[ADR 0009](./0009-protocol-buffers-wire-contracts.md) sets for domain code.
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md) sets for domain code.
 
 ### 6. Generated Connect clients come from the existing Buf pipeline
 
@@ -110,7 +112,7 @@ matter, the same conversion rule
 wire contract; the console defines no hand-written request or response
 shapes.
 
-### 7. Testing is unit-first, per ADR 0010's posture
+### 7. Testing is unit-first, per [ADR#0010](./0010-testcontainers-for-infrastructure-tests.md)'s posture
 
 - Vitest with Testing Library for unit and component tests.
 - Connect's router transport for API mocking, so tests exercise the same
@@ -129,13 +131,13 @@ warranted only if a needed rule class (for example exhaustive React hooks
 checks) is missing from oxlint, and that adoption is additive rather than a
 replacement.
 
-### 9. Telemetry follows ADR 0008
+### 9. Telemetry follows [ADR#0008](./0008-opentelemetry-observability.md)
 
 The console uses the OpenTelemetry Web SDK, exports OTLP to the same
 collector path the platform uses, and propagates `traceparent` on every
 Connect call through a client interceptor so one operator action traces from
 the browser through the gateway onto the backbone
-([ADR 0008](./0008-opentelemetry-observability.md)).
+([ADR#0008](./0008-opentelemetry-observability.md)).
 
 ### 10. The console scales by vertical slices, not microfrontends
 
@@ -156,7 +158,8 @@ singleton version skew, and design drift. The reopening conditions are:
   bridge, not module federation, because the problem is isolation.
 
 A different audience, trust level, or release cadence is a new app under
-`tsworkspace/apps/` with its own gateway workload (ADR 0018), sharing code
+`tsworkspace/apps/` with its own gateway workload
+([ADR#0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md)), sharing code
 through workspace packages at build time, never through runtime federation.
 
 ## Consequences
@@ -174,18 +177,19 @@ through workspace packages at build time, never through runtime federation.
 - Chart tooling is deliberately not pinned here; it is a reversible choice
   to make when the first chart lands.
 - A future schema-driven UI (rendering service-declared config and status
-  surfaces from the ADR 0012 discovery catalog) is the preferred path for
+  surfaces from the [ADR#0012](./0012-ard-compatible-discovery-catalog.md)
+  discovery catalog) is the preferred path for
   third-party extensibility, keeping extension a matter of publishing
   schemas rather than shipping JavaScript into the console.
 
 ## References
 
-- [ADR 0005: Polyglot Workspace Layout](./0005-polyglot-workspace-layout.md)
-- [ADR 0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
-- [ADR 0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
-- [ADR 0012: ARD-Compatible Discovery Catalog](./0012-ard-compatible-discovery-catalog.md)
-- [ADR 0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
+- [ADR#0005: Polyglot Workspace Layout](./0005-polyglot-workspace-layout.md)
+- [ADR#0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)
+- [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
+- [ADR#0012: ARD-Compatible Discovery Catalog](./0012-ard-compatible-discovery-catalog.md)
+- [ADR#0018: ConnectRPC Gateway for Browser Product Surfaces](./0018-connectrpc-gateway-for-browser-product-surfaces.md)
 - [TanStack](https://tanstack.com/)
 - [Base UI](https://base-ui.com/)
 - [shadcn/ui](https://ui.shadcn.com/)

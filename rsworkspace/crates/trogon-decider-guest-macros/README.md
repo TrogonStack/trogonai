@@ -1,6 +1,6 @@
 # trogon-decider-guest-macros
 
-The `-macros` suffix (per [ADR 0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks a
+The `-macros` suffix (per [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks a
 proc-macro crate; this one owns exactly one function-like macro, `export_decider!`, which turns
 one or more `Decider` implementations sharing a `State`/`Event` into a compiled WASM
 component's WIT glue: a hidden `wit_bindgen::generate!` bindings module, a `Component` unit

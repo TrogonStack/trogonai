@@ -5,7 +5,7 @@ status: draft
 date: 2026-07-15
 ---
 
-# ADR 0026: Command Authorization Principal and Authorizer Hook for Decider Execution
+# ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution
 
 ## Context
 
@@ -32,7 +32,7 @@ an input the runtime checks before evaluating a decision.
 
 Command execution is also reached from more than one direction. The A2A
 gateway resolves caller identity at ingress
-([ADR 0017](./0017-aauth-agent-authentication.md)), but internal callers such
+([ADR#0017](./0017-aauth-agent-authentication.md)), but internal callers such
 as `trogon-scheduler`'s worker processor construct `CommandExecution::new`
 directly, off the gateway path entirely. Any authorization hook that only
 lives at the gateway leaves every non-gateway caller of `CommandExecution`
@@ -98,7 +98,7 @@ PoP-verified agent's `sub`/`cnf.jwk` thumbprint maps to an agent principal,
 and an `aa-auth+jwt`'s `principal` string, when present, is carried as an
 opaque hint attached to that principal rather than trusted as a scoped claim
 on its own. This ADR does not change AAuth's wire shape or fix the
-optional-string limitation -- that is ADR 0017's pinned draft shape. The
+optional-string limitation -- that is ADR#0017's pinned draft shape. The
 mapping boundary is the one place that has to absorb the limitation, and it
 must fail closed: a missing or unparsable principal where one is required is
 a denial, never a silent anonymous principal.
@@ -173,6 +173,6 @@ be composed, tested, or swapped independently of the domain type.
 
 ## References
 
-- [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
-- [ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
+- [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [Event Metadata](../architecture/event-metadata.md)

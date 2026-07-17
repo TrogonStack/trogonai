@@ -10,7 +10,7 @@ use agent_client_protocol::{Error, Result};
 
 /// Bridge-owned replacement for the SDK's removed `Client` trait.
 ///
-/// See ADR 0020 for why this trait exists instead of implementing an SDK trait directly.
+/// See ADR#0020 for why this trait exists instead of implementing an SDK trait directly.
 #[async_trait::async_trait]
 pub trait ClientHandler {
     async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse>;

@@ -5,7 +5,7 @@ status: draft
 date: 2026-07-15
 ---
 
-# ADR 0028: Admission Control for Decider Command Execution
+# ADR#0028: Admission Control for Decider Command Execution
 
 ## Context
 
@@ -101,8 +101,8 @@ Rejected as the default. Queueing without a bound hides the same failure
 mode behind added latency instead of surfacing it as a fast, distinguishable
 error; it also gives callers (schedulers, gateway dispatch) no signal to
 shed or retry, unlike this codebase's existing fail-loudly posture
-([ADR 0017](./0017-aauth-agent-authentication.md),
-[ADR 0023](./0023-secret-management-and-key-custody-direction.md)).
+([ADR#0017](./0017-aauth-agent-authentication.md),
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md)).
 
 ## Non-Goals
 
@@ -112,7 +112,7 @@ shed or retry, unlike this codebase's existing fail-loudly posture
 - Per-tenant fairness or quality-of-service scheduling. A global or
   per-command-type bound is in scope; weighting by tenant is a follow-on
   decision that would compose with
-  [ADR 0027](./0027-decider-multi-tenancy-primitive.md)'s tenant value
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant value
   object, but that composition is left open here.
 - Bounding NATS-level publish/consume throughput. Only host-side execution
   concurrency for command dispatch is in scope.
@@ -125,7 +125,7 @@ shed or retry, unlike this codebase's existing fail-loudly posture
   of admission), a breaking addition to `CommandError`/`WasmCommandError`
   that existing callers must handle, the same category of change as the
   authorization variant in
-  [ADR 0026](./0026-command-authorization-principal.md).
+  [ADR#0026](./0026-command-authorization-principal.md).
 - Legitimate bursts are slowed or explicitly rejected rather than silently
   degrading the whole host, but only if callers actually implement retry or
   backoff against the new error; without that, callers just see more
@@ -140,7 +140,7 @@ shed or retry, unlike this codebase's existing fail-loudly posture
 
 ## References
 
-- [ADR 0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
-- [ADR 0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
-- [ADR 0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
-- [ADR 0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0017: AAuth Agent Authentication over a Trogon NATS PoP Binding](./0017-aauth-agent-authentication.md)
+- [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
+- [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
+- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)

@@ -1,6 +1,6 @@
 # trogon-decider-wasm-runtime
 
-The `-runtime` suffix (per [ADR 0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks
+The `-runtime` suffix (per [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks
 execution machinery, here for deciders compiled to WASM components rather than linked in
 natively. `WasmDeciderModule::load` compiles a component, structurally enforces it declares
 zero imports (by instantiating it against an empty `wasmtime::component::Linker`), and probes
