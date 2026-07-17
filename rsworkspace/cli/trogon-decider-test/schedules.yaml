@@ -21,7 +21,7 @@ scenarios:
       message:
         content:
           content_type: application/json
-          data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
@@ -37,7 +37,7 @@ scenarios:
           message:
             content:
               content_type: application/json
-              data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+              data: { utf8: '{"kind":"heartbeat"}' }
 
   - name: reject create when schedule already exists
     given:
@@ -54,7 +54,7 @@ scenarios:
         message:
           content:
             content_type: application/json
-            data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+            data: { utf8: '{"kind":"heartbeat"}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
       schedule_id: backup
@@ -69,7 +69,7 @@ scenarios:
       message:
         content:
           content_type: application/json
-          data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       rejected: true
 
@@ -88,7 +88,7 @@ scenarios:
         message:
           content:
             content_type: application/json
-            data: e30=
+            data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
       schedule_id: backup
@@ -120,7 +120,7 @@ scenarios:
         message:
           content:
             content_type: application/json
-            data: e30=
+            data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
         schedule_id: backup
     when:
@@ -146,7 +146,7 @@ scenarios:
         message:
           content:
             content_type: application/json
-            data: e30=
+            data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveSchedule
       schedule_id: backup
@@ -170,7 +170,7 @@ scenarios:
         message:
           content:
             content_type: application/json
-            data: e30=
+            data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
         schedule_id: backup
     when:
@@ -187,7 +187,7 @@ scenarios:
       message:
         content:
           content_type: application/json
-          data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       rejected: true
 
@@ -207,7 +207,7 @@ scenarios:
           message:
             content:
               content_type: application/json
-              data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+              data: { utf8: '{"kind":"heartbeat"}' }
         then:
           events:
             - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
@@ -223,7 +223,7 @@ scenarios:
               message:
                 content:
                   content_type: application/json
-                  data: eyJraW5kIjoiaGVhcnRiZWF0In0=
+                  data: { utf8: '{"kind":"heartbeat"}' }
       - when:
           '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
           schedule_id: backup

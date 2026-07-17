@@ -55,6 +55,20 @@ fn json_any_to_envelope_uses_bare_full_name() {
 }
 
 #[test]
+fn utf8_wrapper_encodes_identically_to_base64() {
+    let mut wrapped = create_schedule_value();
+    wrapped["message"]["content"]["data"] = serde_json::json!({ "utf8": "{}" });
+
+    let from_wrapper = json_any_to_command(&wrapped).expect("encode wrapped command");
+    let from_base64 = json_any_to_command(&create_schedule_value()).expect("encode base64 command");
+    assert_eq!(from_wrapper.payload, from_base64.payload);
+
+    let decoded = schedules_v1::CreateSchedule::decode_from_slice(&from_wrapper.payload).expect("decode command");
+    let content = decoded.message.expect("message").content.expect("content");
+    assert_eq!(content.data, b"{}");
+}
+
+#[test]
 fn missing_type_is_an_error() {
     let value = serde_json::json!({ "schedule_id": "backup" });
     let error = json_any_to_command(&value).unwrap_err().to_string();

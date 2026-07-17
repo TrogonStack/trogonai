@@ -188,5 +188,9 @@ A suite file has a top-level `suite` name and a list of `scenarios`, each with:
   - `error: { code: ..., message: ... }` (or a bare string): the command must be rejected or
     faulted with a matching `code` or `message`.
 
+Proto `bytes` fields take canonical-JSON base64 strings, or the human-readable wrapper
+`{ utf8: '...' }`, which the runner expands to the base64 encoding of the string's UTF-8 bytes
+(e.g. `data: { utf8: '{"kind":"heartbeat"}' }`).
+
 See `cli/trogon-decider-test/schedules.yaml` for a full example covering creation, rejection, and
 multi-step scenarios.
