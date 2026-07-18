@@ -33,3 +33,4 @@ future implementation work.
 - [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0028: Admission Control for Decider Command Execution](./0028-decider-admission-control-and-backpressure.md)
 - [ADR#0029: Snapshot-Derived Retention Watermark for Decider Streams](./0029-decider-retention-and-truncation-watermark.md)
+- [ADR#0030: Customer-Controlled Key Backend Routing](./0030-customer-controlled-key-backend-routing.md)
