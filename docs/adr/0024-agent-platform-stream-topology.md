@@ -166,7 +166,7 @@ Registry stream for `agent-pr-reviewer`:
 ```text
 1  AgentProvisioned    { agent: "agent-pr-reviewer", revision: 1,
                          artifact: "artifact-revision-1",
-                         digest: "sha256:01...", owner: "principal-owner" }
+                         digest: "sha256:01...", parent: "project-example" }
 2  RevisionActivated   { revision: 2, previous: 1,
                          proposal: "prop-7f3a",
                          candidate: "artifact-prop-7f3a",

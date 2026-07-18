@@ -112,10 +112,8 @@ AgentRevision is the numbered binding created by provisioning or activation.
 ```text
 Agent
   agent_id
-  tenant_id
   name
-  accountable_owner
-  runtime_constraint
+  runtime
   active_revision -> AgentRevision
   lifecycle_state
   annotations
@@ -128,7 +126,7 @@ AgentRevision
   source = provisioning | proposal_id
 
 AgentConfiguration
-  runtime_constraint_commitment -> Agent.runtime_constraint
+  runtime_commitment -> Agent.runtime
     (derived, immutable, not proposable)
   description
   model_default + deterministic_parameters
@@ -156,6 +154,16 @@ Proposal
   withdrawal = author
   supersedes?
 ```
+
+The Agent record deliberately carries no placement, tenancy, or ownership
+fields. AgentProvisioned takes `parent` as input and records it as the
+birth placement; hierarchy owns placement from then on. Ownership and
+authority are policy-plane bindings on the hierarchy, inherited and
+evaluated live at each protected action, never registry fields. The
+customer an agent belongs to is fixed by that creation fact and never
+changes; whether customers share infrastructure or receive dedicated cells
+is a deployment decision, and no location or physical topology appears in
+this model.
 
 `Agent` owns no selectable label map. `AgentConfiguration.selectable_labels`
 owns every selector key, including `family`, because changing one can alter
@@ -196,7 +204,7 @@ not move data across the boundary fixed here.
   hierarchy or policy contexts. Memory's internal structure is a
   memory-domain decision.
 - **ToolDefinition.** A versioned reusable tool that owns its input schema.
-  A AgentConfiguration declares tool dependencies by selector or exact pin; it
+  An AgentConfiguration declares tool dependencies by selector or exact pin; it
   never copies a tool's schema. Versions resolve at session start.
 - **WorkContract.** A versioned contract that owns the input and result
   schemas for one kind of work, separate from the agent because one agent
@@ -230,10 +238,10 @@ The revision boundary is therefore mechanical:
 | Transcript, actions, resolved delegates, or outcomes | Session execution record | No |
 | Tool schema or work schema | ToolDefinition or WorkContract version | No |
 | Parent, placement, scope, or visibility | Hierarchy operation | No |
-| Owner | Dedicated Agent lifecycle operation | No |
+| Ownership or authority | Policy plane binding on hierarchy | No |
 | Annotations | Agent metadata operation | No |
-| Agent id or tenant | Immutable Agent identity | No |
-| Name or runtime constraint | Immutable; runtime change creates a sibling Agent | No |
+| Agent id | Immutable Agent identity | No |
+| Name or runtime | Immutable; runtime change creates a sibling Agent | No |
 | Grants, secrets, budgets, evaluation, routing, or schedules | External plane | No |
 
 #### Worked example: one proposal becomes revision 2
@@ -252,10 +260,8 @@ protobuf field names.
 ```yaml
 agent:
   agent_id: agent-pr-reviewer
-  tenant_id: tenant-example
   name: pr-reviewer
-  accountable_owner: principal-platform-team
-  runtime_constraint: runtime-default-v1
+  runtime: runtime-default-v1
   active_revision:
     agent_id: agent-pr-reviewer
     revision_number: 2
@@ -267,7 +273,7 @@ agent_configurations:
   - configuration_ref: configuration-pr-reviewer-v1
     configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     content:
-      runtime_constraint_commitment:
+      runtime_commitment:
         ref: runtime-default-v1
         digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       description: Reviews pull requests for correctness and maintainability.
@@ -391,19 +397,21 @@ After this activation:
 
 #### Boundary rationale
 
-The Agent registry owns stable identity and lifecycle. Owner transfer is a
-dedicated audited operation, not revision content. Hierarchy owns placement
-and derives visibility; Agent projections may expose `parent`, but the
-registry stream and revision do not own it. There is no independent `scope`
+The Agent registry owns stable identity and lifecycle. Hierarchy owns
+placement and derives visibility; Agent projections may expose `parent`,
+but the registry stream and revision do not own it. Ownership and authority
+are policy bindings on the hierarchy, evaluated live: a move requires
+rights on both source and destination, and taking authority over an agent
+is a policy change, never a registry write. There is no independent `scope`
 field. Annotations are opaque record metadata and never affect selection,
 model input, runtime behavior, or the configuration digest.
 
-The runtime constraint participates in every revision digest by value or an
+The runtime participates in every revision digest by value or an
 immutable reference to the Agent-owned fact, keeping verification evidence
 self-describing. Changing runtime creates a sibling Agent rather than a new
 revision.
 
-A AgentConfiguration is content-addressed and never edited. Its digest
+An AgentConfiguration is content-addressed and never edited. Its digest
 commits transitively to every configuration-owned artifact, so a skill pin commits
 to immutable skill content rather than only a mutable version label.
 
@@ -453,8 +461,9 @@ still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
 - Charter-class changes include the model default and deterministic model
   parameters, required tool or delegate declarations, well-known grouping
   labels such as `family`, and the `variables_schema`.
-- Name and runtime are immutable agent facts. Placement and owner changes use
-  dedicated operations rather than proposals for behavior revisions.
+- Name and runtime are immutable agent facts. Placement changes are
+  hierarchy operations and authority changes are policy operations, never
+  proposals for behavior revisions.
 
 For v1, the variable schema is charter-class because it is an interface
 offered to session callers. Adding or removing a binding, changing a type, or
@@ -516,7 +525,7 @@ The following data never enters an AgentConfiguration:
   runtime checkpoints; and
 - work payloads, WorkContracts, and tool invocation schemas.
 
-A AgentConfiguration declares what it needs. External planes decide what it may
+An AgentConfiguration declares what it needs. External planes decide what it may
 use, what work it receives, how it is judged, and what happened. Changes on
 those planes do not mint agent revisions. If observed evidence justifies a
 behavior change, a curator turns that evidence into a Proposal through the
