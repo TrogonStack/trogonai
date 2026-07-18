@@ -137,6 +137,8 @@ AgentConfiguration
   exact_skill_pins
   required_tool_declarations + optional_tool_declarations
   required_delegate_declarations + optional_delegate_declarations
+  required_memory_declarations + optional_memory_declarations
+    (selectors by kind, never an instance reference)
   selectable_labels
 
 Proposal
@@ -200,11 +202,13 @@ not move data across the boundary fixed here.
   The revision digest answers "what did the agent declare?"; any
   session-side digest answers "what did the model see?"; they are never the
   same field. Activation never changes an in-flight session's pin.
-- **Memory.** Its own resource and lifecycle under hierarchy and policy. A
-  session records the selected memory as reference and digest. Memory writes
-  never mint revisions, and sharing an agent never moves memory across
-  hierarchy or policy contexts. Memory's internal structure is a
-  memory-domain decision.
+- **Memory.** Its own resource and lifecycle under hierarchy and policy.
+  The configuration declares memory dependencies by kind selector, never by
+  instance; a session resolves those declarations against its hierarchy
+  context under live policy, possibly to several memories or none, and
+  records each selection as reference and digest. Memory writes never mint
+  revisions, and sharing an agent never moves memory across hierarchy or
+  policy contexts. Memory's internal structure is a memory-domain decision.
 - **ToolDefinition.** A versioned reusable tool that owns its input schema.
   An AgentConfiguration declares tool dependencies by selector or exact pin; it
   never copies a tool's schema. Versions resolve at session start.
@@ -232,7 +236,7 @@ The revision boundary is therefore mechanical:
 | --- | --- | --- |
 | Instructions, wrappers, description | AgentConfiguration proposal | Yes |
 | Model defaults, parameters, or `variables_schema` | AgentConfiguration proposal | Yes |
-| Skill pins or tool/delegate declarations | AgentConfiguration proposal | Yes |
+| Skill pins or tool/delegate/memory declarations | AgentConfiguration proposal | Yes |
 | Selectable labels | AgentConfiguration proposal | Yes |
 | Skill content | Skill resource; a revision changes only when its pin changes | No by itself |
 | Memory content | Memory write | No |
@@ -310,6 +314,10 @@ agent_configurations:
         - selector:
             labels:
               family: security-review
+      required_memory_declarations: []
+      optional_memory_declarations:
+        - selector:
+            kind: project-conventions
       selectable_labels:
         family: code-review
         language: any
@@ -418,6 +426,11 @@ creates a sibling Agent. Each session resolves and records the concrete
 runtime version that actually executed it, so a runtime upgrade never
 mints a revision and is never invisible either.
 
+Verification evidence records what it actually exercised: the concrete
+runtime version, tool versions, and memory snapshots. A revision's score is
+always interpretable as "under these resolved facts", never as a
+context-free claim.
+
 An AgentConfiguration is content-addressed and never edited. Its digest
 commits transitively to every configuration-owned artifact, so a skill pin commits
 to immutable skill content rather than only a mutable version label.
@@ -463,11 +476,12 @@ documents and do not create competing sources of truth. Every activation
 still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
 
 - Learned-layer changes include instructions, turn wrappers, description,
-  skill pins, optional tool or delegate declarations, and selectable labels
-  that do not alter a well-known routing or comparison group.
+  skill pins, optional tool, delegate, or memory declarations, and
+  selectable labels that do not alter a well-known routing or comparison
+  group.
 - Charter-class changes include the model default and deterministic model
-  parameters, required tool or delegate declarations, well-known grouping
-  labels such as `family`, and the `variables_schema`.
+  parameters, required tool, delegate, or memory declarations, well-known
+  grouping labels such as `family`, and the `variables_schema`.
 - Name and runtime are immutable agent facts. Placement changes are
   hierarchy operations and authority changes are policy operations, never
   proposals for behavior revisions.
@@ -527,6 +541,10 @@ The following data never enters an AgentConfiguration:
 - schedules, triggers, channel bindings, delivery destinations, and routing
   policy;
 - ownership policy and authorization principal kinds;
+- inbound identity: who may invoke the agent is authentication and policy,
+  never configuration;
+- sandbox and execution-environment configuration: filesystem, network,
+  containers, and environment variables belong to the runtime plane;
 - success rates, usage counts, cost, priority, and fitness projections;
 - environment contents, workspace contents, memory records, transcripts, and
   runtime checkpoints; and
