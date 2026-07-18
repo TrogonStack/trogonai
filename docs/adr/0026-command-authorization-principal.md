@@ -98,7 +98,7 @@ PoP-verified agent's `sub`/`cnf.jwk` thumbprint maps to an agent principal,
 and an `aa-auth+jwt`'s `principal` string, when present, is carried as an
 opaque hint attached to that principal rather than trusted as a scoped claim
 on its own. This ADR does not change AAuth's wire shape or fix the
-optional-string limitation -- that is ADR#0017's pinned draft shape. The
+optional-string limitation -- that is [ADR#0017](./0017-aauth-agent-authentication.md)'s pinned draft shape. The
 mapping boundary is the one place that has to absorb the limitation, and it
 must fail closed: a missing or unparsable principal where one is required is
 a denial, never a silent anonymous principal.

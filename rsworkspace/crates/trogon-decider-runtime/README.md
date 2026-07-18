@@ -16,4 +16,4 @@ adapter that implements its traits against NATS JetStream, and `#[cfg(feature =
 
 See `src/lib.rs` for a runnable example, and
 [Decider Platform](../../../docs/architecture/decider.md) for the full `CommandExecution` flow,
-including snapshot failure recovery and the header/ADR#0013 interaction.
+including snapshot failure recovery and the header/[ADR#0013](../../../docs/adr/0013-origin-stream-sequence-header.md) interaction.
