@@ -77,7 +77,7 @@ that a needed event disappears prematurely. A conservative stream-wide
 `max_age` far longer than any expected snapshot interval is a reasonable
 backstop, but it is a safety net, not the retention mechanism.
 
-### 4. Interplay with ADR#0013 physical positions
+### 4. Interplay with [ADR#0013](./0013-origin-stream-sequence-header.md) physical positions
 
 The watermark is computed and purge is executed exclusively in terms of
 physical JetStream stream sequence, never `Trogon-Origin-Stream-Sequence`. A
