@@ -115,7 +115,8 @@ Agent
   name
   parent -> Hierarchy node
     (placement; recorded at provisioning, moves are hierarchy operations)
-  runtime
+  runtime -> Runtime resource
+    (typed reference to the runtime family, immutable, never a raw string)
   active_revision -> AgentRevision
   lifecycle_state
   annotations
@@ -129,7 +130,8 @@ AgentRevision
 
 AgentConfiguration
   runtime_commitment -> Agent.runtime
-    (derived, immutable, not proposable)
+    (reference and digest of the runtime definition verification ran
+     under; derived, immutable, not proposable)
   description
   model_default + deterministic_parameters
   instructions
@@ -192,8 +194,9 @@ contracts are future decisions in their own domains, and those decisions may
 not move data across the boundary fixed here.
 
 - **Session.** A session pins exactly one AgentRevision at start, by
-  reference and digest, and resolves everything else as session facts:
-  variable values, tool versions, memory selection, work input, overrides.
+  reference and digest, and resolves everything else as session facts: the
+  concrete runtime version, variable values, tool versions, memory
+  selection, work input, overrides.
   The AgentConfiguration is not the literal model input; the runtime assembles
   input from the configuration plus session-resolved facts, and the session must
   record enough references and digests to reconstruct what the model saw.
@@ -264,7 +267,7 @@ agent:
   agent_id: agent-pr-reviewer
   name: pr-reviewer
   parent: project-example
-  runtime: runtime-default-v1
+  runtime: runtime-default
   active_revision:
     agent_id: agent-pr-reviewer
     revision_number: 2
@@ -409,10 +412,19 @@ is a policy change, never a registry write. There is no independent `scope`
 field. Annotations are opaque record metadata and never affect selection,
 model input, runtime behavior, or the configuration digest.
 
-The runtime participates in every revision digest by value or an
-immutable reference to the Agent-owned fact, keeping verification evidence
-self-describing. Changing runtime creates a sibling Agent rather than a new
-revision.
+`runtime` is a typed reference to a Runtime resource the platform owns,
+never a raw string and never inline runtime configuration. The Runtime
+resource describes the loop engine (a managed default loop, an established
+harness such as claude-code, or a custom loop behind a turn contract),
+which models it can drive, and its versions; its contract is runtime-plane
+work, not this ADR. Versions bind at three times: the Agent pins the
+runtime family, immutably, because verification does not transfer across
+loop engines and switching families creates a sibling Agent; the
+configuration's `runtime_commitment` records the exact runtime definition,
+by reference and digest, that the candidate was verified against, keeping
+evidence self-describing; and each session resolves and records the
+concrete runtime version that actually executed it. A runtime upgrade
+therefore never mints a revision, and is never invisible either.
 
 An AgentConfiguration is content-addressed and never edited. Its digest
 commits transitively to every configuration-owned artifact, so a skill pin commits
