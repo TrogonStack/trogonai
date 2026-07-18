@@ -102,11 +102,6 @@ fn act_propagates_evolve_errors() {
 }
 
 #[test]
-fn decide_error_code_defaults_to_rejected() {
-    assert_eq!(TestCommand::decide_error_code(&TestError::Decide), "rejected");
-}
-
-#[test]
 fn decide_exposes_typed_stream_id() {
     let command = TestCommand;
     assert_eq!(command.stream_id(), "alpha");

@@ -563,6 +563,70 @@ async fn tokio_snapshot_task_scheduler_spawns_on_current_runtime() {
     assert!(executed.load(Ordering::SeqCst));
 }
 
+#[tokio::test]
+async fn tokio_snapshot_task_scheduler_drain_does_not_wait_for_scheduled_tasks() {
+    let scheduler = TokioSnapshotTaskScheduler;
+    let release = Arc::new(tokio::sync::Notify::new());
+    let task_release = Arc::clone(&release);
+    let executed = Arc::new(AtomicBool::new(false));
+    let task_executed = Arc::clone(&executed);
+
+    scheduler.schedule(async move {
+        task_release.notified().await;
+        task_executed.store(true, Ordering::SeqCst);
+    });
+
+    scheduler.drain().await;
+
+    assert!(!executed.load(Ordering::SeqCst));
+
+    release.notify_one();
+    tokio::task::yield_now().await;
+
+    assert!(executed.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn drainable_snapshot_task_scheduler_drain_resolves_immediately_when_idle() {
+    let scheduler = DrainableSnapshotTaskScheduler::new();
+
+    scheduler.drain().await;
+}
+
+#[tokio::test]
+async fn drainable_snapshot_task_scheduler_drain_awaits_outstanding_task() {
+    let scheduler = DrainableSnapshotTaskScheduler::new();
+    let executed = Arc::new(AtomicBool::new(false));
+    let task_executed = Arc::clone(&executed);
+
+    scheduler.schedule(async move {
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        task_executed.store(true, Ordering::SeqCst);
+    });
+
+    scheduler.drain().await;
+
+    assert!(executed.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn drainable_snapshot_task_scheduler_shares_tracking_across_clones() {
+    let scheduler = DrainableSnapshotTaskScheduler::new();
+    let scheduling_clone = scheduler.clone();
+    let executed = Arc::new(AtomicBool::new(false));
+    let task_executed = Arc::clone(&executed);
+
+    scheduling_clone.schedule(async move {
+        tokio::task::yield_now().await;
+        task_executed.store(true, Ordering::SeqCst);
+    });
+
+    scheduler.drain().await;
+
+    assert!(executed.load(Ordering::SeqCst));
+}
+
 #[test]
 fn immediate_snapshot_task_scheduler_catches_task_panic() {
     ImmediateSnapshotTaskScheduler.schedule(async {
@@ -884,6 +948,123 @@ fn errors_when_snapshot_exists_without_stream_history() {
             stream_position: None,
         }) if snapshot_position == position(1)
     ));
+}
+
+#[test]
+fn fail_on_snapshot_failure_policy_still_errors_on_ahead_of_stream() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+        current_position: Some(position(2)),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(FailOnSnapshotFailure)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
+            snapshot_position,
+            stream_position: Some(stream_position),
+        }) if snapshot_position == position(3) && stream_position == position(2)
+    ));
+    assert!(runtime.written_snapshots.lock().unwrap().is_empty());
+}
+
+#[test]
+fn fail_on_snapshot_failure_policy_still_errors_on_read_failure() {
+    let runtime = FakeRuntime {
+        fail_read_snapshot: true,
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(FailOnSnapshotFailure)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::ReadSnapshot(TestInfraError::ReadSnapshot)
+    ));
+    assert!(runtime.written_snapshots.lock().unwrap().is_empty());
+}
+
+#[test]
+fn discard_and_replay_recovers_from_snapshot_ahead_of_stream() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+        current_position: Some(position(2)),
+        stream_events: vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(3),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(
+        runtime.reads_from.lock().unwrap().as_slice(),
+        &[ReadFrom::Position(position(4)), ReadFrom::Beginning]
+    );
+    assert_eq!(
+        runtime.written_snapshots.lock().unwrap().as_slice(),
+        &[Snapshot::new(position(3), TestState::Missing)]
+    );
+}
+
+#[test]
+fn discard_and_replay_recovers_from_snapshot_read_failure() {
+    let runtime = FakeRuntime {
+        fail_read_snapshot: true,
+        current_position: Some(position(1)),
+        stream_events: vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(2),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Disable);
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Present { enabled: false });
+    assert_eq!(runtime.reads_from.lock().unwrap().as_slice(), &[ReadFrom::Beginning]);
+    assert_eq!(
+        runtime.written_snapshots.lock().unwrap().as_slice(),
+        &[Snapshot::new(position(2), TestState::Present { enabled: false })]
+    );
 }
 
 #[test]

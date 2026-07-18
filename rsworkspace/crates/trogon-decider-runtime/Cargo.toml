@@ -10,6 +10,7 @@ repository = "https://github.com/TrogonStack/trogonai"
 test-support = ["trogon-decider/test-support"]
 
 [lints.rust]
+missing_docs = "warn"
 warnings = "deny"
 unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)'] }
 
@@ -23,11 +24,13 @@ unwrap_used = "deny"
 thiserror = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true }
 trogon-decider = { version = "0.1.0", path = "../trogon-decider" }
+trogon-semconv = { workspace = true }
 trogon-std = { version = "0.1.0", path = "../trogon-std", features = ["uuid"] }
 uuid = { workspace = true }
 

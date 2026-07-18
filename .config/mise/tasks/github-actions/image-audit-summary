@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Append the canary image security audit report to GITHUB_STEP_SUMMARY"
+set -euo pipefail
+
+: "${SERVICE:?SERVICE is required}"
+: "${IMAGE_NAME:?IMAGE_NAME is required}"
+: "${IMAGE_DIGEST:?IMAGE_DIGEST is required}"
+: "${RUNTIME_BASE:?RUNTIME_BASE is required}"
+: "${GITHUB_STEP_SUMMARY:?GITHUB_STEP_SUMMARY is required}"
+
+{
+    echo "## Image security audit: \`${SERVICE}\`"
+    echo ""
+    echo "- Image: \`${IMAGE_NAME}@${IMAGE_DIGEST}\`"
+    echo "- Runtime base: \`${RUNTIME_BASE}\`"
+    echo "- SBOM artifact: \`sbom-${SERVICE}-spdx\` (SPDX JSON)"
+    echo ""
+    echo "### Vulnerability scan (Trivy, image packages)"
+    echo '```text'
+    cat trivy-results.txt
+    echo '```'
+} >>"$GITHUB_STEP_SUMMARY"

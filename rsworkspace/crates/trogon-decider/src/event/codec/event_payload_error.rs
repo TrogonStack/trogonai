@@ -14,7 +14,10 @@ pub enum EventPayloadError<Source> {
     MissingEvent,
     /// The envelope event type is not recognized by this payload decoder.
     #[error("unknown event type '{event_type}'")]
-    UnknownEventType { event_type: String },
+    UnknownEventType {
+        /// The unrecognized event type stored with the envelope.
+        event_type: String,
+    },
 }
 
 impl<Source> EventPayloadError<Source> {

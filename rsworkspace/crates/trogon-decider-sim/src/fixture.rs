@@ -9,6 +9,8 @@ pub struct SimFixture {
 }
 
 impl SimFixture {
+    /// Loads the pre-built `trogon_schedules_decider.wasm` release artifact from the workspace
+    /// target directory.
     pub fn schedules() -> Self {
         Self::load(
             "trogon_schedules_decider.wasm",
@@ -16,6 +18,7 @@ impl SimFixture {
         )
     }
 
+    /// Returns the fixture's compiled component bytes.
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

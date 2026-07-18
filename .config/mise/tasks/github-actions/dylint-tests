@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run the repo Rust policy lint crate's own tests on its pinned dylint toolchain"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace/dylints/trogon_lints"
+
+dylint_toolchain="$(python - <<'PY'
+import tomllib
+
+with open("rust-toolchain.toml", "rb") as toolchain_file:
+    print(tomllib.load(toolchain_file)["toolchain"]["channel"])
+PY
+)"
+
+rustup run "$dylint_toolchain" cargo test

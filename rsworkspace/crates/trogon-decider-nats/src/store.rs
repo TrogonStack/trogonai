@@ -1,6 +1,14 @@
 use std::convert::Infallible;
+#[cfg(not(coverage))]
+use std::sync::OnceLock;
+#[cfg(not(coverage))]
+use std::time::Instant;
 
 use async_nats::jetstream::{self, kv};
+#[cfg(not(coverage))]
+use opentelemetry::metrics::Histogram;
+#[cfg(not(coverage))]
+use opentelemetry::{global, metrics::Counter};
 #[cfg(any(test, not(coverage)))]
 use trogon_decider_runtime::ReadFrom;
 #[cfg(not(coverage))]
@@ -14,11 +22,53 @@ use trogon_decider_runtime::{
     StreamAppend, StreamRead,
 };
 use trogon_decider_runtime::{StreamPosition, StreamWritePrecondition};
+#[cfg(not(coverage))]
+use trogon_semconv::{attribute, metric, span};
 
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
 #[cfg(not(coverage))]
 use crate::stream_store::{StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream};
+#[cfg(not(coverage))]
+use tracing::Instrument;
+
+#[cfg(not(coverage))]
+const METER_NAME: &str = "trogon-decider-nats";
+
+#[cfg(not(coverage))]
+struct StoreMetrics {
+    append_duration: Histogram<f64>,
+    append_conflicts: Counter<u64>,
+}
+
+#[cfg(not(coverage))]
+impl StoreMetrics {
+    fn new() -> Self {
+        let meter = global::meter(METER_NAME);
+        Self {
+            append_duration: metric::build_decider_append_duration(&meter),
+            append_conflicts: metric::build_decider_append_conflicts(&meter),
+        }
+    }
+}
+
+#[cfg(not(coverage))]
+static METRICS: OnceLock<StoreMetrics> = OnceLock::new();
+
+#[cfg(not(coverage))]
+fn metrics() -> &'static StoreMetrics {
+    METRICS.get_or_init(StoreMetrics::new)
+}
+
+#[cfg(not(coverage))]
+fn write_precondition_attribute(precondition: StreamWritePrecondition) -> attribute::WritePrecondition {
+    match precondition {
+        StreamWritePrecondition::Any => attribute::WritePrecondition::Any,
+        StreamWritePrecondition::StreamExists => attribute::WritePrecondition::StreamExists,
+        StreamWritePrecondition::NoStream => attribute::WritePrecondition::NoStream,
+        StreamWritePrecondition::At(_) => attribute::WritePrecondition::At,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 /// Optimistic concurrency conflict details for a failed stream append.
@@ -230,30 +280,51 @@ where
         let stream_id = request.stream_id;
         let expected_state = request.stream_write_precondition;
         let events = request.events;
-        let subject_state = self
-            .subject_resolver
-            .resolve_subject_state(self.events_stream(), stream_id)
-            .await
-            .map_err(JetStreamStoreError::ResolveSubject)?;
-        let current_position = subject_state.current_position;
-        let expected_last_subject_sequence =
-            resolve_expected_last_subject_sequence(stream_id, expected_state, current_position)?;
+        let span = tracing::info_span!(
+            span::DECIDER_APPEND_STREAM,
+            otel.kind = "client",
+            stream_id = %stream_id.as_ref(),
+            write_precondition = %write_precondition_attribute(expected_state).as_str(),
+        );
 
-        let stream_position = append_subject_stream(
-            self.as_jetstream(),
-            subject_state.subject,
-            expected_last_subject_sequence,
-            &events,
-        )
+        async move {
+            let subject_state = self
+                .subject_resolver
+                .resolve_subject_state(self.events_stream(), stream_id)
+                .await
+                .map_err(JetStreamStoreError::ResolveSubject)?;
+            let current_position = subject_state.current_position;
+            let expected_last_subject_sequence =
+                resolve_expected_last_subject_sequence(stream_id, expected_state, current_position)?;
+
+            let append_start = Instant::now();
+            let append_result = append_subject_stream(
+                self.as_jetstream(),
+                subject_state.subject,
+                expected_last_subject_sequence,
+                &events,
+            )
+            .await;
+            metrics()
+                .append_duration
+                .record(append_start.elapsed().as_secs_f64(), &[]);
+
+            let stream_position = append_result.map_err(|source| match source {
+                StreamStoreError::WrongExpectedVersion => {
+                    metrics().append_conflicts.add(1, &[]);
+                    JetStreamStoreError::OptimisticConcurrencyConflict(OptimisticConcurrencyConflictError::new(
+                        stream_id.to_string(),
+                        expected_state,
+                        current_position,
+                    ))
+                }
+                other => JetStreamStoreError::AppendStream(other),
+            })?;
+
+            Ok(AppendStreamResponse { stream_position })
+        }
+        .instrument(span)
         .await
-        .map_err(|source| match source {
-            StreamStoreError::WrongExpectedVersion => JetStreamStoreError::OptimisticConcurrencyConflict(
-                OptimisticConcurrencyConflictError::new(stream_id.to_string(), expected_state, current_position),
-            ),
-            other => JetStreamStoreError::AppendStream(other),
-        })?;
-
-        Ok(AppendStreamResponse { stream_position })
     }
 }
 

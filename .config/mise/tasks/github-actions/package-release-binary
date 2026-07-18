@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Package the built acp-nats-stdio binary into a versioned tarball and export ASSET via GITHUB_ENV"
+set -euo pipefail
+
+: "${VERSION:?VERSION is required}"
+: "${TARGET:?TARGET is required}"
+: "${GITHUB_ENV:?GITHUB_ENV is required}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT"
+
+staging="acp-nats-stdio-${VERSION}-${TARGET}"
+mkdir -p "$staging"
+cp "rsworkspace/target/${TARGET}/release/acp-nats-stdio" "$staging/"
+tar czf "$staging.tar.gz" "$staging"
+echo "ASSET=$staging.tar.gz" >>"$GITHUB_ENV"

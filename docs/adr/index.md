@@ -31,3 +31,7 @@ future implementation work.
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0024: Agent Platform Stream Topology](./0024-agent-platform-stream-topology.md)
 - [ADR#0025: Agent Definition Data Ownership](./0025-agent-definition-data-ownership.md)
+- [ADR#0026: Command Authorization Principal and Authorizer Hook for Decider Execution](./0026-command-authorization-principal.md)
+- [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0028: Admission Control for Decider Command Execution](./0028-decider-admission-control-and-backpressure.md)
+- [ADR#0029: Snapshot-Derived Retention Watermark for Decider Streams](./0029-decider-retention-and-truncation-watermark.md)

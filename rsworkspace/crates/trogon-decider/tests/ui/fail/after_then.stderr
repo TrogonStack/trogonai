@@ -1,4 +1,4 @@
-error[E0599]: no method named `when` found for struct `ThenEvents<Event>` in the current scope
+error[E0599]: no method named `when` found for struct `ThenEvents<Event, State>` in the current scope
   --> tests/ui/fail/after_then.rs:13:10
    |
  9 |       TestCase::<TestCommand>::new()
@@ -12,6 +12,6 @@ error[E0599]: no method named `when` found for struct `ThenEvents<Event>` in the
    | |          ----------------- method `when` is available on `TestCase<TestCommand, trogon_decider::testing::When<TestEvent, TestState, TestCommand>>`
 12 | |         .then([TestEvent::Registered])
 13 | |         .when(TestCommand);
-   | |         -^^^^ method not found in `ThenEvents<TestEvent>`
+   | |         -^^^^ method not found in `ThenEvents<TestEvent, TestState>`
    | |_________|
    |

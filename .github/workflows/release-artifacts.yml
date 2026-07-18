@@ -59,29 +59,18 @@ jobs:
           tool: cross
 
       - name: Build
-        working-directory: rsworkspace
         shell: bash
         env:
           USE_CROSS: ${{ matrix.use-cross }}
           TARGET: ${{ matrix.target }}
-        run: |
-          if [ "$USE_CROSS" = "true" ]; then
-            cross build --release --target "$TARGET" -p acp-nats-stdio
-          else
-            cargo build --release --target "$TARGET" -p acp-nats-stdio
-          fi
+        run: mise run github-actions:build-release-binary
 
       - name: Package
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ matrix.target }}
-        run: |
-          staging="acp-nats-stdio-${VERSION}-${TARGET}"
-          mkdir -p "$staging"
-          cp "rsworkspace/target/${TARGET}/release/acp-nats-stdio" "$staging/"
-          tar czf "$staging.tar.gz" "$staging"
-          echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
+        run: mise run github-actions:package-release-binary
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -119,7 +108,4 @@ jobs:
       - name: Upload to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" || \
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+        run: ./.config/mise/tasks/github-actions/release-upload

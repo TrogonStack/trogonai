@@ -1,0 +1,456 @@
+groups:
+  # trogon-decider-runtime, trogon-decider-nats, trogon-decider-wasm-runtime:
+  # decider command execution, event-sourced replay/append, and WASM guest
+  # execution. `stream_id` is defined in scheduler.yaml and reused here as-is.
+  - id: registry.trogonai.decider
+    type: attribute_group
+    display_name: Decider Attributes
+    brief: Attributes emitted by the decider runtime, its NATS JetStream storage adapter, and its WASM guest execution engine.
+    attributes:
+      - id: command_type
+        type: string
+        stability: development
+        brief: Command type identifier for the decider command being processed.
+        examples: ["OpenAccount", "schedules.create_schedule"]
+      - id: module_name
+        type: string
+        stability: development
+        brief: Name of the WASM decider module handling the command.
+        examples: ["schedules"]
+      - id: module_version
+        type: string
+        stability: development
+        brief: Version of the WASM decider module handling the command.
+        examples: ["1.0.0"]
+      - id: write_precondition
+        type:
+          members:
+            - id: any
+              value: "any"
+              brief: Append regardless of the stream's current position.
+              stability: development
+            - id: stream_exists
+              value: "stream_exists"
+              brief: Append only if the stream already has at least one event.
+              stability: development
+            - id: no_stream
+              value: "no_stream"
+              brief: Append only if the stream has no events.
+              stability: development
+            - id: at
+              value: "at"
+              brief: Append only if the stream is still at the observed position.
+              stability: development
+        stability: development
+        brief: Optimistic concurrency precondition applied to a stream append.
+        examples: ["any", "at"]
+      - id: decision_outcome
+        type:
+          members:
+            - id: decided
+              value: "decided"
+              brief: The command was decided and its events appended.
+              stability: development
+            - id: rejected
+              value: "rejected"
+              brief: The command was rejected by domain decision logic.
+              stability: development
+            - id: faulted
+              value: "faulted"
+              brief: Command execution faulted on an infrastructure or guest execution failure.
+              stability: development
+        stability: development
+        brief: Outcome of a command execution attempt.
+        examples: ["decided", "rejected"]
+      - id: snapshot_outcome
+        type:
+          members:
+            - id: hit
+              value: "hit"
+              brief: A snapshot was found and used as the replay starting point.
+              stability: development
+            - id: miss
+              value: "miss"
+              brief: No snapshot existed; state was rebuilt from the initial state.
+              stability: development
+            - id: discarded_read_failure
+              value: "discarded_read_failure"
+              brief: A snapshot read failure was discarded and replay restarted from the initial state.
+              stability: development
+            - id: discarded_ahead_of_stream
+              value: "discarded_ahead_of_stream"
+              brief: A snapshot ahead of the stream's current position was discarded.
+              stability: development
+            - id: failed
+              value: "failed"
+              brief: A snapshot problem was detected and the command failed instead of discarding the snapshot.
+              stability: development
+        stability: development
+        brief: Outcome of the snapshot read at the start of command execution.
+        examples: ["hit", "miss"]
+      - id: snapshot_write_success
+        type: boolean
+        stability: development
+        brief: Whether a decider snapshot write succeeded.
+      - id: guest_phase
+        type:
+          members:
+            - id: instantiate
+              value: "instantiate"
+              brief: Instantiating the WASM guest component.
+              stability: development
+            - id: replay
+              value: "replay"
+              brief: Replaying prior events into the guest session.
+              stability: development
+            - id: decide
+              value: "decide"
+              brief: Calling the guest's decide export.
+              stability: development
+            - id: snapshot
+              value: "snapshot"
+              brief: Reading or writing the guest session's snapshot.
+              stability: development
+        stability: development
+        brief: Phase of WASM guest command execution.
+        examples: ["instantiate", "decide"]
+      - id: trap_classification
+        type:
+          members:
+            - id: deadline_exceeded
+              value: "deadline_exceeded"
+              brief: The guest call exceeded its wall-clock epoch deadline.
+              stability: development
+            - id: trap
+              value: "trap"
+              brief: The guest call trapped for a reason other than the epoch deadline, e.g. fuel exhaustion, a memory limit, or an ABI failure.
+              stability: development
+        stability: development
+        brief: Classification of a WASM guest call trap.
+        examples: ["deadline_exceeded", "trap"]
+
+  - id: metric.decider.replay.events
+    type: metric
+    metric_name: decider.replay.events
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Events replayed to rebuild decider state before a command decision.
+    instrument: counter
+    unit: "{event}"
+    stability: development
+    attributes:
+      - ref: command_type
+        requirement_level: recommended
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.snapshot.reads
+    type: metric
+    metric_name: decider.snapshot.reads
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Snapshot reads at the start of command execution, by outcome.
+    instrument: counter
+    unit: "{read}"
+    stability: development
+    attributes:
+      - ref: snapshot_outcome
+        requirement_level: required
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.snapshot.writes
+    type: metric
+    metric_name: decider.snapshot.writes
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Scheduled decider snapshot writes, by success.
+    instrument: counter
+    unit: "{write}"
+    stability: development
+    attributes:
+      - ref: snapshot_write_success
+        requirement_level: required
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.snapshot.kv_read_failures
+    type: metric
+    metric_name: decider.snapshot.kv_read_failures
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: JetStream KV snapshot read failures in the storage adapter.
+    instrument: counter
+    unit: "{failure}"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.snapshot.kv_write_failures
+    type: metric
+    metric_name: decider.snapshot.kv_write_failures
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: JetStream KV snapshot write failures in the storage adapter.
+    instrument: counter
+    unit: "{failure}"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.append.duration
+    type: metric
+    metric_name: decider.append.duration
+    annotations:
+      code_generation:
+        metric_value_type: double
+    brief: Duration of appending decided events to a JetStream-backed stream.
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.append.conflicts
+    type: metric
+    metric_name: decider.append.conflicts
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Optimistic concurrency conflicts (wrong expected stream version) surfaced by an append.
+    instrument: counter
+    unit: "{conflict}"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.replay.duration
+    type: metric
+    metric_name: decider.replay.duration
+    annotations:
+      code_generation:
+        metric_value_type: double
+    brief: Duration of replaying events from an ordered, subject-filtered JetStream consumer.
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.replay.retries
+    type: metric
+    metric_name: decider.replay.retries
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Ordered-consumer replay attempts retried after a transient JetStream failure.
+    instrument: counter
+    unit: "{attempt}"
+    stability: development
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: metric.decider.wasm.execution.duration
+    type: metric
+    metric_name: decider.wasm.execution.duration
+    annotations:
+      code_generation:
+        metric_value_type: double
+    brief: Duration of a WASM guest execution phase.
+    instrument: histogram
+    unit: "s"
+    stability: development
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required
+
+  - id: metric.decider.wasm.fuel.consumed
+    type: metric
+    metric_name: decider.wasm.fuel.consumed
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Wasmtime fuel consumed by a WASM guest execution phase.
+    instrument: histogram
+    unit: "{fuel_unit}"
+    stability: development
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required
+
+  - id: metric.decider.wasm.traps
+    type: metric
+    metric_name: decider.wasm.traps
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: WASM guest call traps, by classification.
+    instrument: counter
+    unit: "{trap}"
+    stability: development
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: recommended
+      - ref: trap_classification
+        requirement_level: required
+
+  - id: span.decider.execute_command
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Execution of a single decider command, from snapshot and stream read through decide and append.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: write_precondition
+        requirement_level: recommended
+      - ref: decision_outcome
+        requirement_level:
+          conditionally_required: When execution completes without an error.
+
+  - id: span.decider.read_snapshot
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Reading a decider snapshot before replaying a command.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+      - ref: snapshot_outcome
+        requirement_level:
+          conditionally_required: When the read completes without an error.
+
+  - id: span.decider.write_snapshot
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Writing a decider snapshot after a command decision.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+      - ref: snapshot_write_success
+        requirement_level:
+          conditionally_required: When the write attempt completes.
+
+  - id: span.decider.append_stream
+    type: span
+    span_kind: client
+    stability: development
+    brief: Appending decided events to a JetStream-backed stream.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+      - ref: write_precondition
+        requirement_level: recommended
+
+  - id: span.decider.replay_stream
+    type: span
+    span_kind: client
+    stability: development
+    brief: Replaying events from an ordered, subject-filtered JetStream consumer.
+    attributes:
+      - ref: stream_id
+        requirement_level: recommended
+
+  - id: span.decider.wasm.instantiate
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Instantiating a WASM decider guest component for a command.
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required
+      - ref: trap_classification
+        requirement_level:
+          conditionally_required: When the guest call traps.
+
+  - id: span.decider.wasm.replay
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Replaying prior events into a WASM decider guest session.
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required
+      - ref: trap_classification
+        requirement_level:
+          conditionally_required: When the guest call traps.
+
+  - id: span.decider.wasm.decide
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Calling a WASM decider guest's decide export.
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required
+      - ref: decision_outcome
+        requirement_level:
+          conditionally_required: When the call completes without a trap.
+      - ref: trap_classification
+        requirement_level:
+          conditionally_required: When the guest call traps.
+
+  - id: span.decider.wasm.snapshot
+    type: span
+    span_kind: internal
+    stability: development
+    brief: Reading or writing a WASM decider guest session's snapshot.
+    attributes:
+      - ref: module_name
+        requirement_level: recommended
+      - ref: module_version
+        requirement_level: recommended
+      - ref: command_type
+        requirement_level: recommended
+      - ref: guest_phase
+        requirement_level: required

@@ -10,11 +10,24 @@
 
 mod store;
 
+/// Durable pull-consumer message processing.
+pub mod processor;
+/// Generic catch-up driver for subject-filtered JetStream projections.
+pub mod projector;
+/// Idempotent create-or-open provisioning for JetStream streams and buckets.
+pub mod provision;
 /// Snapshot storage helpers backed by JetStream Key/Value.
 pub mod snapshot_store;
 /// Event stream storage helpers backed by JetStream streams.
 pub mod stream_store;
 
+pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};
+pub use projector::{
+    CatchUpError, CatchUpOutcome, CheckpointSequence, ProjectionApply, ProjectionCheckpointStore, Projector,
+};
+pub use provision::{
+    EnsureBucketError, EnsureStreamError, KvConfigMismatch, StreamConfigMismatch, ensure_bucket, ensure_stream,
+};
 pub use snapshot_store::{
     NatsSnapshotConfig, SnapshotChange, SnapshotCodecError, SnapshotKvError, SnapshotStoreError, checkpoint_key,
     list_snapshots, maybe_advance_checkpoint, persist_snapshot_change, read_checkpoint, read_snapshot,
