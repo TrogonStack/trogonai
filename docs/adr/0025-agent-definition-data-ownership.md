@@ -113,6 +113,8 @@ AgentRevision is the numbered binding created by provisioning or activation.
 Agent
   agent_id
   name
+  parent -> Hierarchy node
+    (placement; recorded at provisioning, moves are hierarchy operations)
   runtime
   active_revision -> AgentRevision
   lifecycle_state
@@ -155,15 +157,15 @@ Proposal
   supersedes?
 ```
 
-The Agent record deliberately carries no placement, tenancy, or ownership
-fields. AgentProvisioned takes `parent` as input and records it as the
-birth placement; hierarchy owns placement from then on. Ownership and
-authority are policy-plane bindings on the hierarchy, inherited and
-evaluated live at each protected action, never registry fields. The
-customer an agent belongs to is fixed by that creation fact and never
-changes; whether customers share infrastructure or receive dedicated cells
-is a deployment decision, and no location or physical topology appears in
-this model.
+`parent` is the only placement fact and everything contextual derives from
+it. AgentProvisioned records it at birth; after that, moves are hierarchy
+operations, so the hierarchy domain owns the current value and the Agent
+record projects it. Ownership and authority are policy-plane bindings on
+the hierarchy, inherited and evaluated live at each protected action, never
+registry fields. The customer an agent belongs to is fixed by its creation
+placement and never changes; whether customers share infrastructure or
+receive dedicated cells is a deployment decision, and no location or
+physical topology appears in this model.
 
 `Agent` owns no selectable label map. `AgentConfiguration.selectable_labels`
 owns every selector key, including `family`, because changing one can alter
@@ -261,6 +263,7 @@ protobuf field names.
 agent:
   agent_id: agent-pr-reviewer
   name: pr-reviewer
+  parent: project-example
   runtime: runtime-default-v1
   active_revision:
     agent_id: agent-pr-reviewer
