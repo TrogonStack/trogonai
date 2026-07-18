@@ -129,9 +129,6 @@ AgentRevision
   source = provisioning | proposal_id
 
 AgentConfiguration
-  runtime_commitment -> Agent.runtime
-    (reference and digest of the runtime definition verification ran
-     under; derived, immutable, not proposable)
   description
   model_default + deterministic_parameters
   instructions
@@ -279,9 +276,6 @@ agent_configurations:
   - configuration_ref: configuration-pr-reviewer-v1
     configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     content:
-      runtime_commitment:
-        ref: runtime-default-v1
-        digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       description: Reviews pull requests for correctness and maintainability.
       model_default:
         model_id: model-reviewer-v1
@@ -417,14 +411,12 @@ never a raw string and never inline runtime configuration. The Runtime
 resource describes the loop engine (a managed default loop, an established
 harness such as claude-code, or a custom loop behind a turn contract),
 which models it can drive, and its versions; its contract is runtime-plane
-work, not this ADR. Versions bind at three times: the Agent pins the
-runtime family, immutably, because verification does not transfer across
-loop engines and switching families creates a sibling Agent; the
-configuration's `runtime_commitment` records the exact runtime definition,
-by reference and digest, that the candidate was verified against, keeping
-evidence self-describing; and each session resolves and records the
-concrete runtime version that actually executed it. A runtime upgrade
-therefore never mints a revision, and is never invisible either.
+work, not this ADR. The Agent pins the runtime family, immutably, so every
+revision and configuration is bound to one engine by construction:
+verification does not transfer across loop engines, and switching families
+creates a sibling Agent. Each session resolves and records the concrete
+runtime version that actually executed it, so a runtime upgrade never
+mints a revision and is never invisible either.
 
 An AgentConfiguration is content-addressed and never edited. Its digest
 commits transitively to every configuration-owned artifact, so a skill pin commits
