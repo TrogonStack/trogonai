@@ -33,8 +33,9 @@ scheduling, routing, or observation stays beside the agent on its own plane.
 This ADR defines the agent entity and its configuration, and nothing else.
 The scope follows the strongest infrastructure model in the study,
 [Bedrock AgentCore](../research/agent-platform/products/bedrock-agentcore.md):
-a bare entity made of identity, immutable numbered revisions, and a mutable
-active pointer, with everything else detachable. Sessions, memory, work, and
+a bare entity made of identity and immutable numbered revisions, with
+everything else detachable; the newest revision is what runs, and reverting
+mints a new revision from a prior configuration. Sessions, memory, work, and
 tools appear here only as boundary references; their own shapes are separate,
 later decisions.
 
@@ -117,7 +118,9 @@ Agent
     (placement; recorded at provisioning, moves are hierarchy operations)
   runtime -> Runtime resource
     (typed reference to the runtime family, immutable, never a raw string)
-  active_revision -> AgentRevision
+  latest_revision -> AgentRevision
+    (derived: the highest minted revision, what new sessions run by
+     default; not a stored pointer)
   lifecycle_state
   annotations
 
@@ -126,7 +129,7 @@ AgentRevision
   revision_number
   configuration_ref -> AgentConfiguration
   configuration_digest
-  source = provisioning | proposal_id
+  source = provisioning | proposal_id | revert_of_revision
 
 AgentConfiguration
   description
@@ -171,7 +174,7 @@ physical topology appears in this model.
 `Agent` owns no selectable label map. `AgentConfiguration.selectable_labels`
 owns every selector key, including `family`, because changing one can alter
 routing, evaluation binding, and comparison groups. An Agent projection may
-expose the active revision's labels, and a session resolves labels from its
+expose the latest revision's labels, and a session resolves labels from its
 pinned revision, but neither projection is an independent writable copy.
 
 ```text
@@ -269,8 +272,7 @@ agent:
   name: pr-reviewer
   parent: project-example
   runtime: runtime-default
-  active_revision:
-    agent_id: agent-pr-reviewer
+  latest_revision:
     revision_number: 2
   lifecycle_state: active
   annotations:
@@ -443,7 +445,7 @@ binds the candidate already fixed by ProposalOpened without duplicating its
 reference or digest. It references evaluation results rather than copying
 them.
 
-Activation requires the Proposal base to match the Agent's current active
+Activation requires the Proposal base to match the Agent's latest
 AgentRevision. A stale Proposal must be rebased, differenced, digested, and
 verified again.
 
@@ -457,13 +459,14 @@ preserve the model:
   but no revision number.
 - RevisionActivated records Proposal provenance plus the candidate reference
   and digest.
-- RevisionRolledBack selects an existing AgentRevision.
+- Reverting is RevisionActivated minting a new revision from a previously
+  activated configuration; digest equality proves the revert exact.
 - AgentArchived blocks activation but never deletes referenced artifacts.
 
 Actor identities on commands and events are provenance facts, not behavior
 content. Authentication owns principal kind and authorization policy.
 
-Routing a new session uses `selectable_labels` from the active revision's
+Routing a new session uses `selectable_labels` from the latest revision's
 AgentConfiguration; an existing session keeps the labels of its pinned revision.
 Recorded capabilities never become entitlements: policy remains live at
 every protected action and is evaluated against the session's pinned
@@ -583,7 +586,8 @@ and equip the tool call outside the prompt.
 - Proposal change class and changed fields must come from the typed canonical
   revision difference. They cannot depend only on duplicate metadata supplied
   independently of the candidate artifact.
-- Activation rejects a proposal based on a revision that is no longer active.
+- Activation rejects a proposal based on a revision that is no longer the
+  latest.
   Rebase changes the candidate and therefore requires a new digest and
   verification.
 - Tool and work schemas evolve once at their owning resource. Agents and

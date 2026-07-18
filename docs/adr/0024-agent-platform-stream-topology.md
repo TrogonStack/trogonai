@@ -16,7 +16,8 @@ A runtime instantiates the agent into sessions pinned to a specific revision.
 The evolution loop is the product: sessions produce outcomes, curators distill
 outcomes into behavior-change proposals, fresh-context verifiers judge
 proposals (the proposer never approves its own change), approved proposals
-activate into revisions, and rollback is one pointer move. The design comes
+activate into revisions, and reverting mints a new revision from a prior
+configuration. The design comes
 from a study of how the industry's agent products define, version, and evolve
 agents. The full corpus ships alongside this ADR: one dossier per product,
 the cross-product synthesis, and the running decision record, under
@@ -108,16 +109,19 @@ must enforce. A fact whose latest value is all that matters lives aside and
 arrives as proven command input.
 
 **A registry stream per agent**, holding the record's lifecycle: the agent
-comes into existence, an approved proposal becomes the next active
-revision, the active pointer rolls back, the agent is archived (for
-example: AgentProvisioned, RevisionActivated, RevisionRolledBack,
+comes into existence, an approved proposal becomes the next revision, a
+revert mints a new revision from a previously activated configuration, the
+agent is archived (for example: AgentProvisioned, RevisionActivated,
 AgentArchived). Invariants this stream enforces:
 
-- Provisioning mints revision 1 as the initial active revision. Later revision
-  numbers are minted linearly at activation and nowhere else.
-- Nothing activates on an archived agent, and nothing activates twice.
-- Rollback targets only revisions that were previously active, including
-  revision 1 made active by provisioning.
+- Provisioning mints revision 1. Later revision numbers are minted linearly
+  at activation and nowhere else, and the newest revision is what new
+  sessions run by default: the registry never moves backward.
+- Nothing activates on an archived agent, and the same proposal never
+  activates twice.
+- A revert is an activation that mints a new revision from a previously
+  activated configuration; the configuration digest proves the revert
+  exact.
 - The activation command carries the exact approved proposal, pinned base
   revision and digest, and candidate reference and digest. The registry
   rejects a base that is no longer current. The activation event preserves
@@ -245,13 +249,13 @@ authentication context (aauth, [ADR#0017](./0017-aauth-agent-authentication.md))
 enforced at command dispatch.
 Charter-class activation requiring a human and the human-only policy
 mutations remain dispatch preconditions; deciders treat principals as opaque
-identities. Rollback authorization is also a dispatch concern outside this
+identities. Revert authorization is also a dispatch concern outside this
 topology decision.
 
 ## Consequences
 
 - The agent domain implementation ships as two decider families: agent
-  stream (provision, activate, rollback, archive) and proposal stream (open,
+  stream (provision, activate, archive) and proposal stream (open,
   record verdict, withdraw). The proto packages split the same way, and each
   decider carries its own serialized fold state.
 - Agent stream replay stays proportional to meaningful history (activations
