@@ -58,9 +58,9 @@ run, but they have different authors, consistency rules, security properties,
 and change cadences.
 
 The first lifecycle contract draft makes this ambiguity visible. It models a
-partial charter and a digest for a larger bundle, while instructions, turn
+partial charter and a digest for a larger configuration, while instructions, turn
 wrappers, variables, skills, and description appear only in a changed-field
-inventory. Without a complete logical `BehaviorBundle` and an explicit
+inventory. Without a complete logical `AgentConfiguration` and an explicit
 `AgentRevision` binding, the digest has no normative content, the
 changed-field inventory can drift from the artifact it describes, and the
 lifecycle contract can accidentally become the definition contract.
@@ -81,7 +81,7 @@ This decision must preserve four properties:
 Place each datum with the resource whose invariants and change cadence it
 describes.
 
-A datum belongs to a `BehaviorBundle` only when all three statements are
+A datum belongs to an `AgentConfiguration` only when all three statements are
 true:
 
 1. It is the agent's own behavior or dependency declaration.
@@ -105,8 +105,8 @@ their reference and digest. Identifier types, field cardinalities, canonical
 serialization, and command or event envelopes remain contract-design work;
 that work may not move data across the ownership boundaries decided here.
 
-The distinction hidden by the earlier draft is explicit in this model: a
-BehaviorBundle exists before activation, while an AgentRevision does not.
+The distinction hidden by the earlier draft is explicit in this model: an
+AgentConfiguration exists before activation, while an AgentRevision does not.
 AgentRevision is the numbered binding created by provisioning or activation.
 
 ```text
@@ -123,11 +123,11 @@ Agent
 AgentRevision
   agent_id
   revision_number
-  bundle_ref -> BehaviorBundle
-  bundle_digest
+  configuration_ref -> AgentConfiguration
+  configuration_digest
   source = provisioning | proposal_id
 
-BehaviorBundle
+AgentConfiguration
   runtime_constraint_commitment -> Agent.runtime_constraint
     (derived, immutable, not proposable)
   description
@@ -144,8 +144,8 @@ Proposal
   proposal_id
   agent_id
   base_revision -> AgentRevision
-  candidate_bundle_ref -> BehaviorBundle
-  candidate_bundle_digest
+  candidate_configuration_ref -> AgentConfiguration
+  candidate_configuration_digest
   canonical_typed_difference | difference_ref + difference_digest
   derived_change_class
   author
@@ -157,21 +157,21 @@ Proposal
   supersedes?
 ```
 
-`Agent` owns no selectable label map. `BehaviorBundle.selectable_labels`
+`Agent` owns no selectable label map. `AgentConfiguration.selectable_labels`
 owns every selector key, including `family`, because changing one can alter
 routing, evaluation binding, and comparison groups. An Agent projection may
 expose the active revision's labels, and a session resolves labels from its
 pinned revision, but neither projection is an independent writable copy.
 
 ```text
-Proposal.candidate_bundle_ref -> BehaviorBundle
-AgentRevision.bundle_ref      -> the exact same BehaviorBundle
+Proposal.candidate_configuration_ref -> AgentConfiguration
+AgentRevision.configuration_ref      -> the exact same AgentConfiguration
 ```
 
 Activation assigns the revision number and records provenance. It never
-rebuilds the candidate. `bundle_digest` is the revision digest and remains
+rebuilds the candidate. `configuration_digest` is the revision digest and remains
 unchanged through activation; the revision number and provenance are not part
-of the behavior digest.
+of the configuration digest.
 
 ### 2. Keep adjacent resources behind references
 
@@ -184,8 +184,8 @@ not move data across the boundary fixed here.
 - **Session.** A session pins exactly one AgentRevision at start, by
   reference and digest, and resolves everything else as session facts:
   variable values, tool versions, memory selection, work input, overrides.
-  The BehaviorBundle is not the literal model input; the runtime assembles
-  input from the bundle plus session-resolved facts, and the session must
+  The AgentConfiguration is not the literal model input; the runtime assembles
+  input from the configuration plus session-resolved facts, and the session must
   record enough references and digests to reconstruct what the model saw.
   The revision digest answers "what did the agent declare?"; any
   session-side digest answers "what did the model see?"; they are never the
@@ -196,7 +196,7 @@ not move data across the boundary fixed here.
   hierarchy or policy contexts. Memory's internal structure is a
   memory-domain decision.
 - **ToolDefinition.** A versioned reusable tool that owns its input schema.
-  A BehaviorBundle declares tool dependencies by selector or exact pin; it
+  A AgentConfiguration declares tool dependencies by selector or exact pin; it
   never copies a tool's schema. Versions resolve at session start.
 - **WorkContract.** A versioned contract that owns the input and result
   schemas for one kind of work, separate from the agent because one agent
@@ -214,16 +214,16 @@ Everything else remains with its existing owner:
 - scheduling and routing own triggers, channels, destinations, and routing;
 - work and environment resources own work payloads and workspace contents;
 - the runtime and session own transcripts and runtime checkpoints; and
-- skill resources own skill content, while a BehaviorBundle owns exact pins.
+- skill resources own skill content, while an AgentConfiguration owns exact pins.
 
 The revision boundary is therefore mechanical:
 
 | Change | Owner and effect | New AgentRevision? |
 | --- | --- | --- |
-| Instructions, wrappers, description | BehaviorBundle proposal | Yes |
-| Model defaults, parameters, or `variables_schema` | BehaviorBundle proposal | Yes |
-| Skill pins or tool/delegate declarations | BehaviorBundle proposal | Yes |
-| Selectable labels | BehaviorBundle proposal | Yes |
+| Instructions, wrappers, description | AgentConfiguration proposal | Yes |
+| Model defaults, parameters, or `variables_schema` | AgentConfiguration proposal | Yes |
+| Skill pins or tool/delegate declarations | AgentConfiguration proposal | Yes |
+| Selectable labels | AgentConfiguration proposal | Yes |
 | Skill content | Skill resource; a revision changes only when its pin changes | No by itself |
 | Memory content | Memory write | No |
 | Variable values, overrides, or resolved tools | Session start facts | No |
@@ -243,8 +243,8 @@ protobuf field names.
 
 | Record | Concrete binding |
 | --- | --- |
-| Proposal `prop-7f3a` | candidate `bundle-pr-reviewer-v2` |
-| AgentRevision 2 | bundle `bundle-pr-reviewer-v2` |
+| Proposal `prop-7f3a` | candidate `configuration-pr-reviewer-v2` |
+| AgentRevision 2 | configuration `configuration-pr-reviewer-v2` |
 
 <details>
 <summary>Complete logical example data</summary>
@@ -263,9 +263,9 @@ agent:
   annotations:
     display_name: Pull Request Reviewer
 
-behavior_bundles:
-  - bundle_ref: bundle-pr-reviewer-v1
-    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+agent_configurations:
+  - configuration_ref: configuration-pr-reviewer-v1
+    configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     content:
       runtime_constraint_commitment:
         ref: runtime-default-v1
@@ -308,10 +308,10 @@ behavior_bundles:
         family: code-review
         language: any
 
-  - bundle_ref: bundle-pr-reviewer-v2
-    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  - configuration_ref: configuration-pr-reviewer-v2
+    configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     content:
-      # identical to bundle-pr-reviewer-v1 except the two differenced fields
+      # identical to configuration-pr-reviewer-v1 except the two differenced fields
       instructions:
         - Report correctness defects with file and line evidence.
         - Treat missing regression coverage as blocking when behavior changes.
@@ -324,14 +324,14 @@ behavior_bundles:
 agent_revisions:
   - agent_id: agent-pr-reviewer
     revision_number: 1
-    bundle_ref: bundle-pr-reviewer-v1
-    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+    configuration_ref: configuration-pr-reviewer-v1
+    configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     source: provisioning
 
   - agent_id: agent-pr-reviewer
     revision_number: 2
-    bundle_ref: bundle-pr-reviewer-v2
-    bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    configuration_ref: configuration-pr-reviewer-v2
+    configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     source: prop-7f3a
 
 proposal:
@@ -340,10 +340,10 @@ proposal:
   base_revision:
     agent_id: agent-pr-reviewer
     revision_number: 1
-    bundle_ref: bundle-pr-reviewer-v1
-    bundle_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
-  candidate_bundle_ref: bundle-pr-reviewer-v2
-  candidate_bundle_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    configuration_ref: configuration-pr-reviewer-v1
+    configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+  candidate_configuration_ref: configuration-pr-reviewer-v2
+  candidate_configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
   canonical_typed_difference:
     - field: instructions
       operation: replace
@@ -374,7 +374,7 @@ proposal:
 
 </details>
 
-The equal `bundle_ref` and `bundle_digest` values are the load-bearing part of
+The equal `configuration_ref` and `configuration_digest` values are the load-bearing part of
 the example: Proposal `prop-7f3a` was verified against exactly the bytes that
 AgentRevision 2 later references. Activation added the number and provenance;
 it did not rebuild the candidate.
@@ -387,7 +387,7 @@ After this activation:
 | Revoke a tool authorization | Next call is denied live; no revision 3 |
 | Publish a new WorkContract version | Work plane changes; no revision 3 |
 | Publish skill-code-review v5 | No revision 3 until a proposal changes the pin |
-| Propose different instructions or a new skill pin | New bundle; activation may mint revision 3 |
+| Propose different instructions or a new skill pin | New configuration; activation may mint revision 3 |
 
 #### Boundary rationale
 
@@ -396,15 +396,15 @@ dedicated audited operation, not revision content. Hierarchy owns placement
 and derives visibility; Agent projections may expose `parent`, but the
 registry stream and revision do not own it. There is no independent `scope`
 field. Annotations are opaque record metadata and never affect selection,
-model input, runtime behavior, or the behavior digest.
+model input, runtime behavior, or the configuration digest.
 
 The runtime constraint participates in every revision digest by value or an
 immutable reference to the Agent-owned fact, keeping verification evidence
 self-describing. Changing runtime creates a sibling Agent rather than a new
 revision.
 
-A BehaviorBundle is content-addressed and never edited. Its digest
-commits transitively to every bundle-owned artifact, so a skill pin commits
+A AgentConfiguration is content-addressed and never edited. Its digest
+commits transitively to every configuration-owned artifact, so a skill pin commits
 to immutable skill content rather than only a mutable version label.
 
 Proposal facts explain why a candidate did or did not become a revision; they
@@ -436,7 +436,7 @@ Actor identities on commands and events are provenance facts, not behavior
 content. Authentication owns principal kind and authorization policy.
 
 Routing a new session uses `selectable_labels` from the active revision's
-BehaviorBundle; an existing session keeps the labels of its pinned revision.
+AgentConfiguration; an existing session keeps the labels of its pinned revision.
 Recorded capabilities never become entitlements: policy remains live at
 every protected action and is evaluated against the session's pinned
 behavior facts.
@@ -445,7 +445,7 @@ behavior facts.
 
 The charter and learned layer classify changes; they are not two mutable
 documents and do not create competing sources of truth. Every activation
-still produces an `AgentRevision` bound to one complete `BehaviorBundle`.
+still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
 
 - Learned-layer changes include instructions, turn wrappers, description,
   skill pins, optional tool or delegate declarations, and selectable labels
@@ -467,7 +467,7 @@ changes as learned-layer changes.
 
 ### 4. Put every schema on the contract it validates
 
-There is no generic `schema` field on Agent, AgentRevision, or BehaviorBundle.
+There is no generic `schema` field on Agent, AgentRevision, or AgentConfiguration.
 
 The product corpus does not converge on structured work schema placement.
 ADK, OpenAI, and Vercel attach structured input or result configuration to an
@@ -478,8 +478,8 @@ WorkContract because work is reusable across agents and an agent is reusable
 across kinds of work. That is a TrogonAI ownership decision, not an industry
 invariant.
 
-- `BehaviorBundle.variables_schema` declares the names, types, and requiredness
-  of session-start values referenced by the behavior bundle. Variable values
+- `AgentConfiguration.variables_schema` declares the names, types, and requiredness
+  of session-start values referenced by the configuration. Variable values
   belong to the session.
 - `ToolDefinition.input_schema` declares the input accepted by that version
   of a reusable tool.
@@ -501,7 +501,7 @@ before recording successful completion.
 
 ### 5. Keep external stances and observations beside the agent
 
-The following data never enters a BehaviorBundle:
+The following data never enters an AgentConfiguration:
 
 - grants, access shares, credential bindings, secret references, and secret
   material, consistent with
@@ -516,7 +516,7 @@ The following data never enters a BehaviorBundle:
   runtime checkpoints; and
 - work payloads, WorkContracts, and tool invocation schemas.
 
-A BehaviorBundle declares what it needs. External planes decide what it may
+A AgentConfiguration declares what it needs. External planes decide what it may
 use, what work it receives, how it is judged, and what happened. Changes on
 those planes do not mint agent revisions. If observed evidence justifies a
 behavior change, a curator turns that evidence into a Proposal through the
@@ -533,7 +533,7 @@ and equip the tool call outside the prompt.
 
 - The definition contract stays small enough to hand to another engineer:
   four records, one membership test, and one revision-boundary table.
-- The agent platform needs typed contracts for Agent, BehaviorBundle,
+- The agent platform needs typed contracts for Agent, AgentConfiguration,
   AgentRevision, Proposal, and `variables_schema`. A partial charter plus an
   opaque content digest is not a complete definition contract.
 - The definition records alone answer which agent existed, which revision
