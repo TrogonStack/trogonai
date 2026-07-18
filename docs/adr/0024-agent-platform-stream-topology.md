@@ -236,9 +236,9 @@ their own streams. The judged never owns the yardstick: rubrics and bindings
 never enter the agent or proposal streams; only the verdict result lands on
 the proposal it judges.
 
-[ADR#0025](./0025-agent-definition-data-ownership.md) defines the complete
-AgentRevision, Session, Memory, contract, and external-plane ownership
-boundaries that this topology preserves.
+[ADR#0025](./0025-agent-definition-data-ownership.md) defines the agent
+definition records (Agent, BehaviorBundle, AgentRevision, Proposal) and the
+ownership boundaries that this topology preserves.
 
 **App-level gates, unchanged:** principal kind (human versus machine) is
 authentication context (aauth, [ADR#0017](./0017-aauth-agent-authentication.md))
