@@ -140,6 +140,7 @@ pub struct InMemorySnapshotStore {
     snapshots: Arc<Mutex<HashMap<String, Snapshot<OpaqueSnapshotPayload>>>>,
     fail_writes: Arc<std::sync::atomic::AtomicBool>,
     fail_reads: Arc<std::sync::atomic::AtomicBool>,
+    read_snapshot_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl InMemorySnapshotStore {
@@ -153,6 +154,10 @@ impl InMemorySnapshotStore {
 
     pub fn fail_reads(&self) {
         self.fail_reads.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn read_snapshot_calls(&self) -> usize {
+        self.read_snapshot_calls.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn get(&self, snapshot_id: &str) -> Option<Snapshot<OpaqueSnapshotPayload>> {
@@ -171,6 +176,8 @@ impl SnapshotRead<OpaqueSnapshotPayload, str> for InMemorySnapshotStore {
         &self,
         request: ReadSnapshotRequest<'_, str>,
     ) -> Result<ReadSnapshotResponse<OpaqueSnapshotPayload>, Self::Error> {
+        self.read_snapshot_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if self.fail_reads.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(InfraError::SnapshotReadFailed);
         }

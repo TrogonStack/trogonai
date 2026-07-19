@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(not(coverage))]
+mod command_execution_tests;
+
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test position must be non-zero")
 }

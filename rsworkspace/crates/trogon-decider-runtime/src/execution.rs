@@ -959,7 +959,7 @@ where
     async fn execute_inner(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
         tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
-        if has_no_stream_write_precondition::<C>() {
+        if has_no_stream_write_precondition::<C>(self.write_precondition) {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
             return Ok(ExecutionResult {
@@ -1041,7 +1041,7 @@ where
     async fn execute_inner(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
         tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
-        if has_no_stream_write_precondition::<C>() {
+        if has_no_stream_write_precondition::<C>(self.write_precondition) {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
             maybe_take_snapshot(
@@ -1217,8 +1217,8 @@ impl From<WritePrecondition> for StreamWritePrecondition {
     }
 }
 
-fn has_no_stream_write_precondition<C: Decider>() -> bool {
-    C::WRITE_PRECONDITION == Some(WritePrecondition::NoStream)
+fn has_no_stream_write_precondition<C: Decider>(configured: Option<StreamWritePrecondition>) -> bool {
+    execute_command_write_precondition::<C>(configured) == Some(StreamWritePrecondition::NoStream)
 }
 
 fn ensure_snapshot_not_ahead(

@@ -419,21 +419,22 @@ where
         .await?;
 
         let write_precondition = command_write_precondition(self.module, &self.command.type_);
-        let (replayed_envelopes, current_position) = if is_no_stream(write_precondition) {
-            (Vec::new(), None)
-        } else {
-            let stream_read = <E as StreamRead<str>>::read_stream(
-                self.event_store,
-                ReadStreamRequest {
-                    stream_id: stream_id.as_str(),
-                    from: ReadFrom::Beginning,
-                },
-            )
-            .await
-            .map_err(WasmCommandError::ReadStream)?;
-            let current_position = stream_read.current_position;
-            (to_any_envelopes(stream_read.events), current_position)
-        };
+        let (replayed_envelopes, current_position) =
+            if has_no_stream_write_precondition(write_precondition, self.write_precondition) {
+                (Vec::new(), None)
+            } else {
+                let stream_read = <E as StreamRead<str>>::read_stream(
+                    self.event_store,
+                    ReadStreamRequest {
+                        stream_id: stream_id.as_str(),
+                        from: ReadFrom::Beginning,
+                    },
+                )
+                .await
+                .map_err(WasmCommandError::ReadStream)?;
+                let current_position = stream_read.current_position;
+                (to_any_envelopes(stream_read.events), current_position)
+            };
 
         let engine = self.module.engine().clone();
         let command = self.command.clone();
@@ -521,7 +522,7 @@ where
             replayed_envelopes,
             current_position,
             snapshot_bytes,
-        } = if is_no_stream(write_precondition) {
+        } = if has_no_stream_write_precondition(write_precondition, self.write_precondition) {
             ReplayContext {
                 replayed_envelopes: Vec::new(),
                 current_position: None,
@@ -1030,8 +1031,14 @@ fn command_write_precondition(module: &WasmDeciderModule, command_type: &str) ->
         .and_then(|spec| spec.write_precondition())
 }
 
-fn is_no_stream(write_precondition: Option<host::WritePrecondition>) -> bool {
-    matches!(write_precondition, Some(host::WritePrecondition::NoStream))
+fn has_no_stream_write_precondition(
+    spec_write_precondition: Option<host::WritePrecondition>,
+    override_write_precondition: Option<StreamWritePrecondition>,
+) -> bool {
+    matches!(
+        configured_write_precondition(spec_write_precondition, override_write_precondition),
+        Some(StreamWritePrecondition::NoStream)
+    )
 }
 
 fn resolve_write_precondition(
@@ -1039,10 +1046,17 @@ fn resolve_write_precondition(
     override_write_precondition: Option<StreamWritePrecondition>,
     current_position: Option<StreamPosition>,
 ) -> StreamWritePrecondition {
+    configured_write_precondition(spec_write_precondition, override_write_precondition)
+        .unwrap_or_else(|| current_position.into())
+}
+
+fn configured_write_precondition(
+    spec_write_precondition: Option<host::WritePrecondition>,
+    override_write_precondition: Option<StreamWritePrecondition>,
+) -> Option<StreamWritePrecondition> {
     spec_write_precondition
         .map(to_stream_write_precondition)
         .or(override_write_precondition)
-        .unwrap_or_else(|| current_position.into())
 }
 
 /// Maps the WIT write precondition onto the storage port's precondition type.

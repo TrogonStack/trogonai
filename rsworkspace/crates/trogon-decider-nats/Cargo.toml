@@ -37,7 +37,6 @@ uuid = { workspace = true }
 [dev-dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-testcontainers-modules = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 trogon-nats = { version = "0.1.0", path = "../trogon-nats", features = ["test-support"] }

@@ -5,9 +5,8 @@ use std::time::Duration;
 use async_nats::jetstream;
 use async_nats::jetstream::consumer::{AckPolicy, pull};
 use bytes::Bytes;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio_util::sync::CancellationToken;
+use trogon_nats::test_support::JetStreamTestServer;
 
 use super::{HandlerVerdict, MessageHandler, PoisonReason, Processor, RedeliveryDecision, RedeliveryPolicy};
 
@@ -47,44 +46,6 @@ fn redelivery_policy_reports_max_deliveries() {
     let policy = RedeliveryPolicy::new(7, Duration::from_millis(1), Duration::from_millis(1));
 
     assert_eq!(policy.max_deliveries(), 7);
-}
-
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer for processor tests");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-
-    fn url(&self) -> &str {
-        &self.url
-    }
-}
-
-async fn connect(server: &NatsServer) -> jetstream::Context {
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(2))
-        .connect(server.url())
-        .await
-        .expect("connect to NATS testcontainer");
-    jetstream::new(client)
 }
 
 async fn create_events_stream(
@@ -197,8 +158,8 @@ impl MessageHandler for RecordingHandler {
 
 #[tokio::test]
 async fn processor_acks_message_and_never_redelivers_it() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_ACK", "processor.ack.>").await;
     publish(&js, "processor.ack.one", "payload").await;
 
@@ -224,8 +185,8 @@ async fn processor_acks_message_and_never_redelivers_it() {
 
 #[tokio::test]
 async fn processor_naks_with_backoff_and_redelivers_until_ack() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_RETRY", "processor.retry.>").await;
     publish(&js, "processor.retry.one", "payload").await;
 
@@ -255,8 +216,8 @@ async fn processor_naks_with_backoff_and_redelivers_until_ack() {
 
 #[tokio::test]
 async fn processor_poisons_message_on_explicit_poison_verdict() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_POISON", "processor.poison.>").await;
     publish(&js, "processor.poison.one", "payload").await;
 
@@ -287,8 +248,8 @@ async fn processor_poisons_message_on_explicit_poison_verdict() {
 
 #[tokio::test]
 async fn processor_poisons_message_after_exhausting_redeliveries() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_EXHAUST", "processor.exhaust.>").await;
     publish(&js, "processor.exhaust.one", "payload").await;
 
@@ -343,8 +304,8 @@ async fn processor_poisons_message_on_handler_error_after_exhausting_redeliverie
         }
     }
 
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_HANDLER_ERROR", "processor.handler_error.>").await;
     publish(&js, "processor.handler_error.one", "payload").await;
 
@@ -380,8 +341,8 @@ async fn processor_poisons_message_on_handler_error_after_exhausting_redeliverie
 
 #[tokio::test]
 async fn processor_stops_cleanly_on_shutdown() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_SHUTDOWN", "processor.shutdown.>").await;
 
     let handler = RecordingHandler::new(vec![HandlerVerdict::Ack]);
@@ -402,8 +363,8 @@ async fn processor_stops_cleanly_on_shutdown() {
 
 #[tokio::test]
 async fn processor_rejects_non_explicit_ack_policy() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROCESSOR_ACK_POLICY", "processor.ack_policy.>").await;
 
     let mut config = consumer_config("processor-ack-policy");

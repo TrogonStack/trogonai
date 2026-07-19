@@ -6475,7 +6475,6 @@ dependencies = [
  "opentelemetry",
  "serde",
  "serde_json",
- "testcontainers-modules",
  "thiserror 2.0.18",
  "time",
  "tokio",
@@ -6548,6 +6547,8 @@ dependencies = [
 name = "trogon-decider-wasm-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
+ "base64",
  "buffa",
  "buffa-types",
  "chrono",
@@ -6555,8 +6556,10 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-decider-wit",
+ "trogon-nats",
  "trogon-semconv",
  "trogon-std",
  "trogonai-proto",
@@ -6651,6 +6654,7 @@ dependencies = [
  "opentelemetry",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "time",
  "tokio",

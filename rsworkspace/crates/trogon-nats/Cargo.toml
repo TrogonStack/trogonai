@@ -22,6 +22,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
+testcontainers-modules = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -30,4 +31,4 @@ trogon-std = { workspace = true, features = ["test-support"] }
 
 [features]
 default = []
-test-support = []
+test-support = ["dep:testcontainers-modules"]

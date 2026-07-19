@@ -19,6 +19,7 @@ panic = "deny"
 unwrap_used = "deny"
 
 [dependencies]
+base64 = { workspace = true }
 opentelemetry = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
@@ -30,10 +31,13 @@ trogon-std = { workspace = true, features = ["uuid"] }
 wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "pooling-allocator", "runtime", "cranelift"] }
 
 [dev-dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "server_2_12"] }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 chrono = { version = "0.4" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
 uuid = { workspace = true }

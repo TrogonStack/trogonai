@@ -135,6 +135,8 @@ enum TestInfraError {
     #[error("{self:?}")]
     Append,
     #[error("{self:?}")]
+    WriteConflict,
+    #[error("{self:?}")]
     Json,
     #[error("{self:?}")]
     EventType,
@@ -451,7 +453,7 @@ impl StreamAppend<str> for FakeRuntime {
             StreamWritePrecondition::StreamExists if self.current_position.is_some() => {}
             StreamWritePrecondition::NoStream if self.current_position.is_none() => {}
             StreamWritePrecondition::At(position) if self.current_position == Some(position) => {}
-            _ => return Err(TestInfraError::Append),
+            _ => return Err(TestInfraError::WriteConflict),
         }
         self.appended_events.lock().unwrap().extend(request.events);
         Ok(AppendStreamResponse {
@@ -1252,7 +1254,7 @@ fn no_stream_command_rejects_existing_stream_during_append_without_replay() {
 
     let error = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap_err();
 
-    assert!(matches!(error, CommandError::Append(TestInfraError::Append)));
+    assert!(matches!(error, CommandError::Append(TestInfraError::WriteConflict)));
     assert!(runtime.reads_from.lock().unwrap().is_empty());
     assert_eq!(
         runtime.stream_write_preconditions.lock().unwrap().as_slice(),
@@ -1385,6 +1387,40 @@ fn explicit_write_precondition_overrides_exact_current_position_fallback() {
 }
 
 #[test]
+fn explicit_no_stream_precondition_defers_existing_stream_conflict_to_append() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(1)),
+        stream_events: vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(2),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_write_precondition(StreamWritePrecondition::NoStream)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert!(runtime.reads_from.lock().unwrap().is_empty());
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[StreamWritePrecondition::NoStream]
+    );
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+}
+
+#[test]
 fn explicit_stream_exists_precondition_allows_existing_stream() {
     let runtime = FakeRuntime {
         current_position: Some(position(1)),
@@ -1410,6 +1446,43 @@ fn explicit_stream_exists_precondition_allows_existing_stream() {
         runtime.stream_write_preconditions.lock().unwrap().as_slice(),
         &[StreamWritePrecondition::StreamExists]
     );
+}
+
+#[test]
+fn explicit_no_stream_precondition_ignores_stale_snapshot_and_defers_conflict_to_append() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(1), TestState::Missing)),
+        current_position: Some(position(2)),
+        stream_events: vec![stream_event(
+            2,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(3),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_write_precondition(StreamWritePrecondition::NoStream)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, CommandError::Append(TestInfraError::WriteConflict)),
+        "unexpected error: {error:?}"
+    );
+    assert!(runtime.reads_from.lock().unwrap().is_empty());
+    assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
+    assert_eq!(
+        runtime.stream_write_preconditions.lock().unwrap().as_slice(),
+        &[StreamWritePrecondition::NoStream]
+    );
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -1459,6 +1532,7 @@ fn no_stream_command_with_snapshots_skips_snapshot_and_stream_reads() {
     let result = block_on(
         CommandExecution::new(&runtime, &command)
             .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_write_precondition(StreamWritePrecondition::Any)
             .execute(),
     )
     .unwrap();

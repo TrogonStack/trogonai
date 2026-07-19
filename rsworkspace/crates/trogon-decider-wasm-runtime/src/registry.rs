@@ -178,7 +178,8 @@ impl DeciderRegistryBuilder {
 /// # Snapshot behavior across a version swap
 ///
 /// [`crate::WasmSnapshotId`] folds a module's name and version into every
-/// snapshot id it produces (`{module_name}@{module_version}/{stream_id}`).
+/// snapshot id by encoding the complete logical identity
+/// (`{module_name}@{module_version}/{stream_id}`) as unpadded base64url.
 /// Rerouting a command type from module version `v1` to `v2` via
 /// [`Self::activate`] does not migrate or invalidate `v1`'s snapshots: `v2`'s
 /// snapshot id for a given stream is simply a different string. The first
