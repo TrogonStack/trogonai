@@ -9,9 +9,9 @@ date: 2026-06-08
 
 ## Context
 
-The repository already uses Protocol Buffers for generated protocol packages and
-scheduler message contracts. [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) prefers NATS-backed internal boundaries
-when both sides are first-party runtime components, and prefers ConnectRPC over
+The repository already uses Protocol Buffers for generated [protocol](../glossary/protocol) packages and
+scheduler message contracts. [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) prefers [NATS](../glossary/nats)-backed internal boundaries
+when both sides are first-party runtime components, and prefers [ConnectRPC](../glossary/connectrpc) over
 direct gRPC after a first-party service API surface is necessary. [ADR#0005](./0005-polyglot-workspace-layout.md) names
 Protocol Buffers as the preferred cross-language contract, with NATS-backed
 messages for internal paths and ConnectRPC for service APIs.
@@ -37,8 +37,8 @@ Use Protocol Buffers by default for:
 
 - First-party service API schemas, normally served through ConnectRPC after ADR
   0003 selects an API surface.
-- Cross-language request, response, command, and event contracts.
-- Durable queue, stream, and event payloads owned by this repository.
+- Cross-language request, response, [command](../glossary/command), and [event](../glossary/event) contracts.
+- Durable queue, [stream](../glossary/stream), and event payloads owned by this repository.
 - Schemaless persistence values, including KV records, document-store records,
   state snapshots, and blob metadata, when this repository owns the stored value
   shape.
@@ -85,7 +85,7 @@ Use Protocol Buffers' compatibility model deliberately:
 - For schemaless persistence, keep enough type or version information at the key,
   envelope, or message boundary to select the correct decoder during migrations
   and repairs.
-- Keep transport concerns such as NATS subjects, HTTP paths, headers, and retry
+- Keep [transport](../glossary/transport) concerns such as NATS subjects, HTTP paths, headers, and retry
   policy outside the domain message unless they are part of the stable contract.
 
 Generated protobuf types should not leak primitive obsession into domain code.
@@ -99,7 +99,7 @@ ecosystem that requires another format.
 
 Valid exceptions include:
 
-- MCP, ACP, JSON-RPC, webhook, or third-party API surfaces with protocol-defined
+- [MCP](../glossary/mcp), [ACP](../glossary/acp), [JSON-RPC](../glossary/json-rpc), webhook, or third-party API surfaces with protocol-defined
   JSON contracts.
 - Human-edited configuration files, which follow [ADR#0007](./0007-configuration-sources.md).
 - OpenAPI or REST-like HTTP contracts allowed by [ADR#0003](./0003-ai-protocol-transport-taxonomy.md).

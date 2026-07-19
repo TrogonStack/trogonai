@@ -15,7 +15,7 @@ such as `crates`, `services`, `apps`, and `cli` can become interchangeable
 buckets for anything executable.
 
 The taxonomy should align with industry language instead of inventing local
-terms. OpenTelemetry defines an application as one or more services, and a
+terms. [OpenTelemetry](../glossary/opentelemetry) defines an application as one or more services, and a
 service as a component that can have multiple deployed instances. Runtime
 platforms use similar but more operational terms: Kubernetes calls deployed
 runtime objects workloads, and process-model platforms commonly describe
@@ -27,7 +27,7 @@ Use these meanings across the repository:
 
 | Term | Meaning | Repository location |
 | --- | --- | --- |
-| Crate | A Rust package or reusable Rust library boundary. | `rsworkspace/crates/` |
+| [Crate](../glossary/crate) | A Rust package or reusable Rust library boundary. | `rsworkspace/crates/` |
 | Service | A production-operated runtime workload with its own lifecycle and OpenTelemetry service identity. | Future `rsworkspace/services/` or equivalent service-owned package path. |
 | App | A product-facing application surface for users or external systems. An app may be composed from one or more services. | Future `apps/` or product-specific application path. |
 | CLI | A command-line application. A CLI is an app when product-facing, workspace automation when internal, and a service only when deployed as a managed production workload. | `apps/`, `cli/`, `xtask`, or a named package path depending on ownership. |
@@ -40,7 +40,7 @@ runtime unit with operational ownership. It normally has most of these traits:
 - It owns an OpenTelemetry `service.name`, and optionally a `service.namespace`.
 - It may have many runtime instances identified by `service.instance.id`.
 - Its failure affects product behavior.
-- It is operated as an API, worker, daemon, scheduler, webhook receiver, MCP
+- It is operated as an API, worker, daemon, scheduler, webhook receiver, [MCP](../glossary/mcp)
   server, Job, or CronJob.
 
 `apps/` must not mean "all deployable things." An app is the product-facing
@@ -66,7 +66,7 @@ workspace automation  -> crates
 Do not make reusable crates depend on services, apps, CLIs, or workspace
 automation. Do not make an app or CLI depend directly on a service
 implementation package. Do not make one service depend directly on another
-service's implementation. Use shared crates, protocol crates, or client crates
+service's implementation. Use shared crates, [protocol](../glossary/protocol) crates, or client crates
 for cross-boundary communication.
 
 ## Placement Rules

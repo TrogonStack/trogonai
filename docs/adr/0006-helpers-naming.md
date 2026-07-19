@@ -9,7 +9,7 @@ date: 2026-06-08
 
 ## Context
 
-Straw Hat has an approved organization-wide ADR for the long-running `Helper`
+Straw Hat has an approved organization-wide [ADR](../glossary/adr) for the long-running `Helper`
 versus `Util` naming debate. TrogonAI should not reopen that choice locally or
 let language-specific habits create inconsistent names across the monorepo.
 

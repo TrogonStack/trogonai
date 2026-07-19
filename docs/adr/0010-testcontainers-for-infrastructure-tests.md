@@ -9,10 +9,10 @@ date: 2026-06-09
 
 ## Context
 
-The repository has service and transport code that depends on infrastructure
-with behavior that is difficult to model faithfully with mocks alone. NATS,
-JetStream, object stores, databases, queues, and webhook-facing services can
-fail because of protocol behavior, network lifecycle, readiness, persistence,
+The repository has service and [transport](../glossary/transport) code that depends on infrastructure
+with behavior that is difficult to model faithfully with mocks alone. [NATS](../glossary/nats),
+[JetStream](../glossary/jetstream), object stores, databases, queues, and webhook-facing services can
+fail because of [protocol](../glossary/protocol) behavior, network lifecycle, readiness, persistence,
 ordering, permissions, or server-specific configuration.
 
 Unit tests with mocks, contract tests, and in-memory fakes are the preferred
@@ -39,7 +39,7 @@ Testcontainers is appropriate only when the test needs to validate:
 
 - Protocol behavior from a real server.
 - Connection lifecycle, reconnects, timeouts, or readiness handling.
-- Persistence, stream, queue, lease, object-store, or transaction behavior.
+- Persistence, [stream](../glossary/stream), queue, lease, object-store, or transaction behavior.
 - Authentication, authorization, or server-side configuration.
 - Cross-process integration between first-party code and infrastructure.
 - Regression coverage for a failure that only appears against the real service.
@@ -55,7 +55,7 @@ Container-backed tests should be deterministic and self-contained:
 - Start dependencies through Testcontainers-owned fixtures or helpers.
 - Use dynamic ports and container-provided connection details.
 - Wait for explicit readiness before the test exercises the system.
-- Create isolated subjects, streams, buckets, databases, schemas, or tenants per
+- Create isolated subjects, streams, buckets, databases, schemas, or [tenants](../glossary/tenant) per
   test when state can leak across assertions.
 - Clean up test-owned state through the fixture lifecycle.
 - Keep infrastructure setup close to the package that owns the integration.

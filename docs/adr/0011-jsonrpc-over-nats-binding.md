@@ -9,9 +9,9 @@ date: 2026-06-23
 
 ## Context
 
-Several first-party protocols are JSON-RPC 2.0 protocols carried over the NATS
-backbone ([ADR#0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and
-A2A. [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) states that the same
+Several first-party [protocols](../glossary/protocol) are JSON-RPC 2.0 protocols carried over the [NATS](../glossary/nats)
+backbone ([ADR#0003](./0003-ai-protocol-transport-taxonomy.md)): [ACP](../glossary/acp), [MCP](../glossary/mcp), and
+[A2A](../glossary/a2a). [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) states that the same
 JSON-RPC lifecycle can run over stdio, a remote endpoint, or the internal
 backbone, and [ADR#0004](./0004-protocol-and-transport-layering.md) places
 request/response mapping, notifications, and protocol error semantics in the
@@ -22,7 +22,7 @@ within one protocol:
 
 - The ACP command path (client to agent) strips the JSON-RPC envelope. The NATS
   body is the bare params struct, the method is the subject, and correlation rides
-  in a transport header. The reply is a bare result struct.
+  in a transport [header](../glossary/headers). The reply is a bare result struct.
 - The ACP callback path (agent to client) keeps the full JSON-RPC envelope in the
   body.
 - MCP over NATS keeps the full JSON-RPC envelope in the body end to end.
@@ -30,7 +30,7 @@ within one protocol:
 Because the command path has no envelope and no explicit discriminator, success
 and failure are told apart by attempting to deserialize the body as the success
 type and, on failure, re-attempting as a JSON-RPC error. This is centralized on
-the JetStream paths but absent on the core request/reply command handlers, where
+the [JetStream](../glossary/jetstream) paths but absent on the core request/reply command handlers, where
 the reply is typed only as the success type. A structured protocol error there
 fails to deserialize and collapses into a generic internal error, discarding the
 originating code and message. Authentication rejection is the clearest casualty:
@@ -66,7 +66,7 @@ of the message, not a different message.
 | `error.code` | header `Jsonrpc-Error-Code` | Integer. Present only on errors; its presence is the success/error discriminator. |
 | `error.message`, `error.data` | body | Human-readable and structured error detail. |
 
-Correlation and routing metadata are a separate, protocol-agnostic transport
+Correlation and routing metadata are a separate, protocol-agnostic [transport](../glossary/transport)
 concern under [ADR#0004](./0004-protocol-and-transport-layering.md), not part of
 this mapping.
 
@@ -118,7 +118,7 @@ numeric-looking strings, large integers, null, unicode string ids, results,
 errors, notifications).
 
 Canonical JSON-RPC is reconstructed only at protocol edges — the remote
-HTTP/WebSocket/SSE listeners and the stdio bridges. The on-NATS encoding is an
+HTTP/WebSocket/SSE listeners and the stdio [bridges](../glossary/bridge). The on-NATS encoding is an
 internal wire format; nothing external consumes the raw stream as JSON-RPC. The
 edge holds the original typed `id` while awaiting the reply (correlated by the
 transport), so live request/reply type fidelity holds independent of the header

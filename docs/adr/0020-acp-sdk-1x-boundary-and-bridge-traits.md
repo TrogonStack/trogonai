@@ -20,8 +20,8 @@ stabilized as 1.x. Two changes force a decision here:
    `Bridge` implements `Agent`, and `NatsClientProxy` implements `Client`
    ([ADR#0004](./0004-protocol-and-transport-layering.md) describes this
    layering).
-2. The SDK now ships official transports (`ByteStreams`, and HTTP/WebSocket in
-   `agent-client-protocol-http`). Our ACP-over-NATS transport is hand-rolled,
+2. The SDK now ships official [transports](../glossary/transport) (`ByteStreams`, and HTTP/WebSocket in
+   `agent-client-protocol-http`). Our [ACP](../glossary/acp)-over-[NATS](../glossary/nats) transport is hand-rolled,
    which raises the question of whether the official transport abstraction
    should replace parts of it.
 
@@ -31,7 +31,7 @@ stabilized as 1.x. Two changes force a decision here:
 
 The SDK transports model point-to-point byte streams between exactly two
 peers. The NATS leg is not that: it is subject-routed (per-session subjects,
-global subjects, wildcard subscriptions), durable where required (JetStream
+global subjects, wildcard subscriptions), durable where required ([JetStream](../glossary/jetstream)
 COMMANDS stream with keepalive acks), and multi-peer. Flattening it into a
 `ByteStreams` pair would discard the routing model that
 [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) and

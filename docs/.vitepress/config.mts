@@ -1,11 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
-import { readAdrRecords, toAdrSidebarItem } from "./helpers";
+import { readAdrRecords, readGlossaryRecords, toAdrSidebarItem, toGlossarySidebarGroups } from "./helpers";
 
 const base = process.env.DOCS_BASE ?? "/";
 
 export default async () => {
-  const adrRecords = await readAdrRecords(fileURLToPath(new URL("..", import.meta.url)));
+  const rootDir = fileURLToPath(new URL("..", import.meta.url));
+  const adrRecords = await readAdrRecords(rootDir);
+  const glossaryRecords = await readGlossaryRecords(rootDir);
 
   return defineConfig({
     title: "TrogonAI",
@@ -24,6 +26,7 @@ export default async () => {
       nav: [
         { text: "Docs", link: "/get-started/" },
         { text: "ADRs", link: "/adr/" },
+        { text: "Glossary", link: "/glossary/" },
         { text: "GitHub", link: "https://github.com/TrogonStack/trogonai" },
       ],
       sidebar: [
@@ -38,6 +41,10 @@ export default async () => {
             { text: "Decider", link: "/architecture/decider" },
             { text: "Event Metadata", link: "/architecture/event-metadata" },
           ],
+        },
+        {
+          text: "Glossary",
+          items: [{ text: "Overview", link: "/glossary/" }, ...toGlossarySidebarGroups(glossaryRecords)],
         },
         {
           text: "Architecture Decision Records",

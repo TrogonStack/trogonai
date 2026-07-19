@@ -9,7 +9,7 @@ date: 2026-07-07
 
 ## Context
 
-The ACP-over-NATS bridge decodes every message into typed SDK structs and
+The [ACP](../glossary/acp)-over-[NATS](../glossary/nats) [bridge](../glossary/bridge) decodes every message into typed SDK structs and
 re-serializes them (`acp-nats/src/wire.rs`). During the schema 0.11.4 to 1.4.0
 catch-up this bit us: fields the pinned SDK did not model were silently
 stripped in transit, and unknown `session/update` variants failed decode and
@@ -24,7 +24,7 @@ Keep typed decode. The evaluation concluded that passthrough trades a managed
 maintenance cost for the loss of properties the bridge depends on:
 
 1. **Validation at the boundary.** The bridge rejects malformed payloads with
-   `InvalidParams` before they reach runners or JetStream durable streams.
+   `InvalidParams` before they reach runners or [JetStream](../glossary/jetstream) durable streams.
    With passthrough, malformed frames propagate and fail deep inside
    consumers, where the blast radius includes persisted garbage in the
    COMMANDS stream.

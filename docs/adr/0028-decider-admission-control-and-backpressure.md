@@ -10,14 +10,14 @@ date: 2026-07-15
 ## Context
 
 `trogon_decider_wasm_runtime::engine::WasmDeciderEngine::new_store` creates a
-fresh `wasmtime::Store<GuestState>` for every command execution, with a fixed
-per-store memory ceiling (`DEFAULT_MAX_MEMORY_BYTES`, 64 MiB) and a fuel
+fresh `wasmtime::Store<GuestState>` for every [command](../glossary/command) execution, with a fixed
+per-store memory ceiling (`DEFAULT_MAX_MEMORY_BYTES`, 64 MiB) and a [fuel](../glossary/fuel)
 budget consumed per guest export call. Both
 `WasmCommandExecution::execute` implementations (with and without a snapshot
 store) call `engine.new_store()` unconditionally at the top of every
 execution, with no check on how many stores already exist concurrently. The
 per-store limiter bounds one store's worst case; it says nothing about how
-many worst cases can exist at once. A burst of concurrent WASM-routed
+many worst cases can exist at once. A burst of concurrent [WASM](../glossary/wasm)-routed
 commands can pin `N x 64 MiB` of linear memory well before any individual
 guest ever hits its own limiter.
 
@@ -39,7 +39,7 @@ mechanism to shed load when concurrency spikes.
 Introduce an `AdmissionLimiter`-shaped hook (a bounded-concurrency permit,
 semaphore-shaped) acquired at the top of `CommandExecution::execute` and
 `WasmCommandExecution::execute`, released on completion (RAII permit), before
-any I/O or wasmtime work begins. It sits at the execution layer, not inside
+any I/O or [wasmtime](../glossary/wasmtime) work begins. It sits at the execution layer, not inside
 `DeciderRegistry` or `WasmDeciderEngine`: the registry is deliberately
 stateless and shared read-only, and making every `route()` lookup also
 mutate a shared counter would add contention to what is today a lock-free
@@ -109,7 +109,7 @@ shed or retry, unlike this codebase's existing fail-loudly posture
 - Specifying the limiter's exact algorithm (token bucket, semaphore, leaky
   bucket). Only that one exists at a defined layer with a defined error
   contract.
-- Per-tenant fairness or quality-of-service scheduling. A global or
+- Per-[tenant](../glossary/tenant) fairness or quality-of-service scheduling. A global or
   per-command-type bound is in scope; weighting by tenant is a follow-on
   decision that would compose with
   [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant value

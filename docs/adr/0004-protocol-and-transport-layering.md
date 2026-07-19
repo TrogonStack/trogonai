@@ -9,9 +9,9 @@ date: 2026-06-08
 
 ## Context
 
-The repository will contain many protocol role SDKs, transport adapters, bridges,
-gateways, and application services. Without a strict layering rule, ACP, MCP,
-NATS, HTTP, stdio, and callback SDK types can leak into every crate and make
+The repository will contain many [protocol](../glossary/protocol) role SDKs, transport adapters, [bridges](../glossary/bridge),
+gateways, and application services. Without a strict layering rule, [ACP](../glossary/acp), [MCP](../glossary/mcp),
+[NATS](../glossary/nats), HTTP, stdio, and callback SDK types can leak into every crate and make
 domain code depend on whichever protocol or transport happened to arrive first.
 
 This decision defines when protocol concepts are allowed to enter a component and
@@ -46,9 +46,9 @@ that protocol:
 - bridges that translate one protocol transport to another
 - gateways whose public product boundary is the protocol
 
-Do not inject protocol types into domain code by default. Domain types, deciders,
-application services, and reusable workflow crates should use domain commands,
-domain events, value objects, and ports. Convert protocol requests and responses
+Do not inject protocol types into domain code by default. Domain types, [deciders](../glossary/decider),
+application services, and reusable workflow crates should use domain [commands](../glossary/command),
+domain [events](../glossary/event), value objects, and ports. Convert protocol requests and responses
 at the application boundary.
 
 Protocol types may cross deeper only when that type is the explicit contract of

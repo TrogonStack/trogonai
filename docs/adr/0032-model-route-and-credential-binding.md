@@ -9,20 +9,20 @@ date: 2026-07-18
 
 ## Context
 
-An AgentImplementation executes the exact model selections in an
-AgentConfiguration, but the implementation is not the model provider and must
+An [AgentImplementation](../glossary/agentimplementation) executes the exact [model selections](../glossary/modelselection) in an
+[AgentConfiguration](../glossary/agentconfiguration), but the implementation is not the model provider and must
 not become the custodian of provider credentials. When their pinned releases
 and adapters declare compatibility, Codex, Claude Code, a fully pinned OpenClaw
 implementation, and the platform managed loop can use a selected model through
 Amazon Bedrock, OpenAI, or another provider. The provider may authenticate with
-a tenant API key, delegated OAuth, mutual TLS, an auth-free deployment-local
+a [tenant](../glossary/tenant) API key, delegated OAuth, mutual TLS, an auth-free deployment-local
 endpoint, or deployment-attested workload identity.
 
 Those choices have different ownership and lifecycle:
 
 1. The immutable AgentConfiguration owns the exact primary and auxiliary
    ModelSelection values and deterministic parameters.
-2. The Session resolves one provider route for each pinned selection. It does
+2. The [Session](../glossary/session) resolves one provider route for each pinned selection. It does
    not choose or override the model.
 3. A model provider connection identifies the provider security and billing
    boundary.
@@ -43,25 +43,25 @@ The repository already fixes adjacent boundaries:
   Agent identity is not a model provider credential.
 - [ADR#0023](./0023-secret-management-and-key-custody-direction.md) places API
   credentials and durable OAuth material behind SecretStore, exposes only
-  opaque SecretRefs, makes the platform secrets service the only OpenBao
+  opaque SecretRefs, makes the platform secrets service the only [OpenBao](../glossary/openbao)
   client, and requires fail-closed resolution with bounded plaintext
   lifetimes.
 - Draft [ADR#0025](./0025-agent-definition-data-ownership.md) makes exact
   implementation and model selections immutable AgentConfiguration content
-  while keeping live credential bindings outside Agent revisions.
+  while keeping live credential bindings outside [Agent revisions](../glossary/agentrevision).
 - Draft
   [ADR#0031](./0031-agent-implementation-and-session-plan.md) defines
-  SessionExecutionPlan as the immutable Session record of the exact revision,
+  [SessionExecutionPlan](../glossary/sessionexecutionplan) as the immutable Session record of the exact revision,
   implementation, models, provider routes, and dependencies admitted to run.
 
-The current ACP provider operations are not a safe place to define this
+The current [ACP](../glossary/acp) provider operations are not a safe place to define this
 boundary. Their authorization headers are arbitrary data, and the global
 provider selection method does not identify the platform Session whose grant
 would authorize the request.
 
-This ADR defines model provider routing and credential custody for hosted
+This [ADR](../glossary/adr) defines model provider routing and credential custody for hosted
 model access. It does not define implementation or model selection, execution
-placement, execution-attempt attestation, host operational authentication,
+placement, [execution-attempt](../glossary/executionattempt) attestation, host operational authentication,
 model catalogs, pricing, budgets, channel credentials, tool credentials, or
 detailed provider translation semantics beyond requiring an exact driver and
 translation-contract pin.
@@ -305,7 +305,7 @@ product state. Secret input is write-only and goes directly to the platform
 secrets service. Read APIs return redacted metadata and stable binding
 identity, never the submitted value.
 
-Durable commands, events, snapshots, and projections may carry connection
+Durable [commands](../glossary/command), [events](../glossary/event), [snapshots](../glossary/snapshot), and [projections](../glossary/projection) may carry connection
 ids, binding ids, credential kinds, subject fingerprints, lifecycle state, and
 failure categories. They never carry raw values, authorization headers, OAuth
 refresh tokens, AWS access keys, signed AWS requests, or provider-native
@@ -329,7 +329,7 @@ Credentials bind to the component and purpose that consume them:
 Reusing the same secret material for more than one purpose still requires
 separate typed bindings. A remote implementation that requires the platform to
 copy a tenant provider key into a second vault is unsupported. It is an
-external delegated agent outside the hosted model-access guarantees unless a
+[external delegated agent](../glossary/external-delegated-agent) outside the hosted model-access guarantees unless a
 later ADR explicitly amends
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s custody
 boundary.
@@ -408,7 +408,7 @@ access service cannot select a different role, model, connection, binding, or
 provider account from the selected ResolvedModelRoute.
 
 A compromised implementation may spend within its live grant through its
-bound supervisor. Proof of possession, short expiry, exact route
+bound supervisor. [Proof of possession](../glossary/pop), short expiry, exact route
 authorization, and Session-scoped access bound that risk. Budget and rate
 enforcement belong at the model access service but their product policy is
 outside this ADR.
@@ -656,7 +656,7 @@ model, provider route, binding, supervisor, or execution attempt.
 Every model request records enough non-secret context to reconstruct who used
 which provider account and under which execution plan:
 
-- tenant, principal, Session, Agent, and AgentRevision;
+- tenant, principal, Session, [Agent](../glossary/agent), and AgentRevision;
 - AgentConfiguration, AgentImplementationVersion, exact primary and auxiliary
   ModelSelection values, and all definition and configuration digests;
 - SessionExecutionPlan, its plan digest, and the active ExecutionAttempt and
@@ -682,7 +682,7 @@ shows:
 
 - no upstream credential enters Agent, AgentConfiguration, native
   implementation, execution attempt, ACP, prompt, transcript, checkpoint,
-  JetStream, NATS KV, NATS Object Store, database, backup, log, trace, or crash
+  [JetStream](../glossary/jetstream), [NATS KV](../glossary/kv-bucket), NATS Object Store, database, backup, log, trace, or crash
   state;
 - grant tokens, confirmation keys, and renewal authority exist only in the
   platform-controlled supervisor's bounded memory and never enter the native

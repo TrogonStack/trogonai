@@ -9,7 +9,7 @@ date: 2026-06-30
 
 ## Context
 
-The scheduler crate organizes its write side as commands and its read side as
+The scheduler [crate](../glossary/crate) organizes its write side as commands and its read side as
 queries. The command modules already read as verb + noun
 (`create_schedule`, `pause_schedule`, `resume_schedule`, `remove_schedule`,
 `record_schedule_occurrence`, `schedule_next_occurrence`), so the file name

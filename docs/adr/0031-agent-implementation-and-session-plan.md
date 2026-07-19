@@ -64,12 +64,12 @@ decision.
 The repository already establishes adjacent constraints:
 
 - [ADR#0009](./0009-protocol-buffers-wire-contracts.md) requires typed,
-  versioned protobuf contracts and prefers explicit messages over untyped
+  versioned [protobuf](../glossary/protocol-buffers) contracts and prefers explicit messages over untyped
   maps.
 - [ADR#0023](./0023-secret-management-and-key-custody-direction.md) keeps
   secret values behind the secrets service.
 - [ADR#0024](./0024-agent-platform-stream-topology.md) places a durable fact
-  in the stream whose ordering is required for its invariant.
+  in the [stream](../glossary/stream) whose ordering is required for its invariant.
 - Draft [ADR#0032](./0032-model-route-and-credential-binding.md) separates
   exact model selection from provider connections and credentials.
 - The generated protobuf types use unknown_fields=false. Older readers can
@@ -152,7 +152,7 @@ not silently create that rule.
 
 For example, AgentRevision 7 can pin `codex-release-42` plus
 `model-release-17`. A Session may resolve that exact model through an admitted
-Bedrock connection and credential binding, but it cannot replace either pin.
+Bedrock connection and [credential binding](../glossary/credentialbinding), but it cannot replace either pin.
 Moving the same plan to another conforming host does not create a revision.
 Selecting Claude Code, a newer Codex release, or another model requires a new
 AgentConfiguration and AgentRevision.
@@ -164,7 +164,7 @@ The following boundary decides where a value belongs:
   choice, or model-visible state, it belongs in the immutable implementation
   version or AgentConfiguration.
 - If a value adapts an already-pinned ModelSelection to an external provider,
-  it belongs to the exact ResolvedModelRoute in the immutable
+  it belongs to the exact [ResolvedModelRoute](../glossary/resolvedmodelroute) in the immutable
   SessionExecutionPlan. Because provider translation can affect observable
   behavior, verification evidence is scoped to that route and changing it
   requires a new Session.
@@ -203,10 +203,10 @@ AgentConfiguration. Session admission verifies them but never chooses a
 different implementation, implementation version, model, or deterministic
 parameter. V1 has no Session override for those values.
 
-The resolved model routes add the provider connection, non-secret credential
+The resolved model routes add the [provider connection](../glossary/modelproviderconnection), non-secret credential
 binding reference, exact provider driver, and protocol required to serve each
 ModelSelection. They cannot substitute another model. Attempt-scoped
-model-access grants, secret values, and short-lived provider credentials never
+[model-access grants](../glossary/modelaccessgrant), secret values, and short-lived provider credentials never
 enter the plan.
 
 Admission proceeds in this order:
@@ -339,7 +339,7 @@ internal tools, transcript, or execution plan.
 The delegation or integration plane owns the external destination binding,
 endpoint, and authentication data. SessionExecutionPlan copies only the
 resolved non-secret reference and digest required to authorize dispatch. At
-dispatch, that plane authenticates the transport without exposing credential
+dispatch, that plane authenticates the [transport](../glossary/transport) without exposing credential
 material to AgentConfiguration, the native implementation, the prompt, or the
 operation payload.
 
@@ -503,7 +503,7 @@ arm, a standalone OpenClaw version in a CompositeImplementation arm, or any
 other mismatch is ImplementationKindMismatch.
 
 The registered_extension arm is the only place this decision permits
-google.protobuf.Any. Its immutable extension version pins one allowed type URL,
+google.protobuf.Any. Its immutable extension version pins one allowed [type URL](../glossary/type-url),
 descriptor-set digest, adapter artifact digest, configuration contract version,
 and capabilities. The platform never fetches code or schemas from the type
 URL. Mismatched, unavailable, undecodable, or unregistered values fail closed.
@@ -528,7 +528,7 @@ Apply these rules:
    version. A newer behavior-affecting field requires a newer contract version,
    even when protobuf considers the field additive.
 4. SessionExecutionPlan and ResolvedModelRoute carry independent contract
-   versions. Coordinators, adapters, supervisors, and the model access service
+   versions. Coordinators, adapters, supervisors, and the [model access service](../glossary/model-access-service)
    advertise the exact versions they interpret. Admission requires every plan
    consumer to support both versions. A missing or unsupported version is a
    typed admission failure, never a default. Any behavior-affecting or
@@ -547,8 +547,8 @@ Apply these rules:
 ProtoJSON is diagnostic or interoperable output, not the canonical persistence
 form. Unknown JSON keys are not an extension mechanism.
 
-Durable event envelopes store the stable full name and exact bytes of each
-concrete event. SessionStarted stores StoredSessionExecutionPlan once in the
+Durable [event envelopes](../glossary/event-envelope) store the stable full name and exact bytes of each
+concrete [event](../glossary/event). SessionStarted stores StoredSessionExecutionPlan once in the
 Session stream. Do not persist the bytes of a top-level event oneof wrapper.
 Large immutable implementation definitions and checkpoints may be external
 only when the event retains their exact reference, type, and digest.

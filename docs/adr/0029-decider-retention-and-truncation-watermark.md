@@ -9,16 +9,16 @@ date: 2026-07-15
 
 ## Context
 
-Nothing in `trogon-decider-nats` computes the minimum JetStream stream
-sequence still needed for a logical stream. A snapshot's recorded
+Nothing in `trogon-decider-nats` computes the minimum [JetStream](../glossary/jetstream) [stream](../glossary/stream)
+sequence still needed for a logical stream. A [snapshot](../glossary/snapshot)'s recorded
 `StreamPosition` is, in principle, exactly the value that makes earlier
 events safe to discard for that stream: both `CommandExecution` and
 `WasmCommandExecution` resume replay from `ReadFrom::after(snapshot_position)`
 after loading a snapshot, so nothing before the newest snapshot's position is
 ever read again in the normal execution path. But nothing aggregates this
-across the snapshot ids and checkpoints (`snapshots.checkpoint.*` keys,
-tracked via `NatsSnapshotConfig`) that share the one physical stream and KV
-bucket, and `JetStreamStore` never calls a JetStream purge or trim operation
+across the snapshot ids and [checkpoints](../glossary/checkpoint) (`snapshots.checkpoint.*` keys,
+tracked via `NatsSnapshotConfig`) that share the one physical stream and [KV
+bucket](../glossary/kv-bucket), and `JetStreamStore` never calls a JetStream purge or trim operation
 at all -- it only reads stream info and raw messages, publishes, and reads or
 writes KV entries. Streams and KV history both grow unboundedly by default.
 
@@ -123,7 +123,7 @@ origin positions diverge by design.
 - Changing snapshot frequency or policy (`SnapshotPolicy`,
   `FrequencySnapshot`). Retention consumes whatever cadence a decider already
   chose.
-- Per-tenant retention policy differences. Composes with, but does not
+- Per-[tenant](../glossary/tenant) retention policy differences. Composes with, but does not
   depend on, [ADR#0027](./0027-decider-multi-tenancy-primitive.md).
 
 ## Consequences

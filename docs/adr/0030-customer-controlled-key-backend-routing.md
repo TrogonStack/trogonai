@@ -36,11 +36,11 @@ the application payload. OpenBao Transit, AWS KMS, and Google Cloud KMS can all
 support that narrow operation while retaining different authentication,
 resource, lifecycle, and consistency semantics.
 
-This ADR amends Decision 1, the provider-artifact rule in Decision 2, and the
+This [ADR](../glossary/adr) amends Decision 1, the provider-artifact rule in Decision 2, and the
 customer-controlled portion of Decision 6 in
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) if accepted.
 OpenBao remains the `SecretStore` provider and the default `KeyManagement`
-provider. The typed boundaries, service mediation, tenant isolation, audit, and
+provider. The typed boundaries, service mediation, [tenant](../glossary/tenant) isolation, audit, and
 fail-closed rules in
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) remain in
 force. Its scheduled platform key-destruction rule continues to govern
@@ -117,10 +117,10 @@ on provider artifacts crossing the boundary: raw provider ciphertext may be
 carried only as an opaque payload inside this value object and interpreted only
 by its adapter.
 
-The raw DEK crosses the service boundary only on authenticated, encrypted NATS
+The raw DEK crosses the service boundary only on authenticated, encrypted [NATS](../glossary/nats)
 core request/reply between an authorized encryption caller and the secrets
 service: into the service for wrap and back to the caller after unwrap. It never
-enters JetStream, another durable transport, logs, or traces. This is the same
+enters [JetStream](../glossary/jetstream), another durable transport, logs, or traces. This is the same
 synchronous sensitive-value boundary
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md) establishes
 for `SecretStore`.

@@ -11,7 +11,7 @@ date: 2026-07-13
 
 [ADR#0024](./0024-agent-platform-stream-topology.md) separates the agent
 registry record from the proposal workflow. Activation mints an immutable
-revision, sessions pin a revision, and rejected or withdrawn proposals never
+revision, [sessions](../glossary/session) pin a revision, and rejected or withdrawn proposals never
 enter the registry history. That topology deliberately does not answer the
 next question: what data is part of the agent, what data is part of an
 activated revision, and what merely influences one execution?
@@ -30,7 +30,7 @@ then refined the platform boundary further: the agent owns its facts and
 dependency declarations; another party's permission, judgment, funding,
 scheduling, routing, or observation stays beside the agent on its own plane.
 
-This ADR defines the agent entity and its configuration, and nothing else.
+This [ADR](../glossary/adr) defines the agent entity and its configuration, and nothing else.
 The scope follows the strongest infrastructure model in the study,
 [Bedrock AgentCore](../research/agent-platform/products/bedrock-agentcore.md):
 a bare entity made of identity and immutable numbered revisions, with
@@ -53,7 +53,7 @@ The research also exposes why a field inventory alone is insufficient:
 
 Putting any of these behind a generic `schema` field would erase who owns the
 contract, when it binds, and which change must mint a revision. The same
-problem appears outside schemas. An exact model selection, a live tool grant,
+problem appears outside schemas. An exact [model selection](../glossary/modelselection), a live tool grant,
 a memory selection, a budget ceiling, and an observed success rate can all
 influence a run, but they have different authors, consistency rules, security
 properties, and change cadences.
@@ -100,10 +100,10 @@ authorship alone does not change which resource owns the declaration.
 
 This is the normative implementation handoff, and it is deliberately small:
 the agent is four records. The model defines logical records and ownership,
-not protobuf field spelling, physical storage, or event envelopes. Large
-immutable values may live outside an event, but the event must preserve
+not [protobuf](../glossary/protocol-buffers) field spelling, physical storage, or [event envelopes](../glossary/event-envelope). Large
+immutable values may live outside an [event](../glossary/event), but the event must preserve
 their reference and digest. Identifier types, field cardinalities, canonical
-serialization, and command or event envelopes remain contract-design work;
+serialization, and [command](../glossary/command) or event envelopes remain contract-design work;
 that work may not move data across the ownership boundaries decided here.
 
 The distinction hidden by the earlier draft is explicit in this model: an
@@ -183,7 +183,7 @@ physical topology appears in this model.
 
 `Agent` owns no selectable label map. `AgentConfiguration.selectable_labels`
 owns every selector key, including `family`, because changing one can alter
-routing, evaluation binding, and comparison groups. An Agent projection may
+routing, evaluation binding, and comparison groups. An Agent [projection](../glossary/projection) may
 expose the latest revision's labels, and a session resolves labels from its
 pinned revision, but neither projection is an independent writable copy.
 
@@ -209,19 +209,19 @@ contracts are future decisions in their own domains, and those decisions may
 not move data across the boundary fixed here.
 
 - **Session.** A session pins exactly one AgentRevision at start, by reference
-  and digest. Its immutable SessionExecutionPlan copies the revision's exact
+  and digest. Its immutable [SessionExecutionPlan](../glossary/sessionexecutionplan) copies the revision's exact
   implementation version and definition digest, implementation configuration
   digest, and primary and auxiliary ModelSelection values. It never selects a
   newer implementation or another model. The plan resolves only external facts:
-  ResolvedModelRoute values that bind those exact models to authorized
+  [ResolvedModelRoute](../glossary/resolvedmodelroute) values that bind those exact models to authorized
   credential routes, variable bindings, tool versions, memory selections, work
   input, and other dependencies under
   [ADR#0031](./0031-agent-implementation-and-session-plan.md).
-  Session-owned ExecutionAttempt facts separately record behavior-neutral
+  Session-owned [ExecutionAttempt](../glossary/executionattempt) facts separately record behavior-neutral
   hosting, placement, restart, and attestation evidence without changing the
   plan.
   The AgentConfiguration is not the literal model input; the pinned
-  AgentImplementation adapter assembles input from the configuration plus
+  [AgentImplementation](../glossary/agentimplementation) adapter assembles input from the configuration plus
   session-resolved facts, and the session must record enough references and
   digests to reconstruct what the model saw.
   The revision digest answers "what did the agent declare?"; any
@@ -499,7 +499,7 @@ After this activation:
 
 The Agent registry owns stable identity and lifecycle. Hierarchy owns
 placement and derives visibility; Agent projections may expose `parent`,
-but the registry stream and revision do not own it. Ownership and authority
+but the registry [stream](../glossary/stream) and revision do not own it. Ownership and authority
 are policy bindings on the hierarchy, evaluated live: a move requires
 rights on both source and destination, and taking authority over an agent
 is a policy change, never a registry write. There is no independent `scope`

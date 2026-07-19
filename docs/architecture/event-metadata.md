@@ -2,11 +2,11 @@
 
 Event payloads are the canonical domain facts used for replay, projections, and
 business behavior. Event headers are envelope metadata for operational context
-such as correlation, tenancy, causation, or transport routing.
+such as correlation, [tenancy](../glossary/tenant), causation, or [transport](../glossary/transport) routing.
 Recorder-assigned time belongs to the persisted event envelope as `recorded_at`,
 not to individual domain payloads.
 
-The decider runtime should not derive required headers from commands or emitted
+The [decider](../glossary/decider) runtime should not derive required headers from [commands](../glossary/command) or emitted
 events through a generic callback. If a workflow requires a fixed header set,
 make that requirement explicit before command execution with a typed input owned
 by the application boundary, validate it there, then pass the validated

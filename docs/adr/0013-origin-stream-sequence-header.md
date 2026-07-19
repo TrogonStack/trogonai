@@ -9,12 +9,12 @@ date: 2026-06-29
 
 ## Context
 
-JetStream assigns each stored message a stream sequence. Processors and
-projections use the current JetStream stream sequence as the physical position of
-an event in the stream they are consuming. That position is the correct cursor
-for checkpoints, high-water marks, and replay progress within the current stream.
+[JetStream](../glossary/jetstream) assigns each stored message a [stream](../glossary/stream) sequence. [Processors](../glossary/processor) and
+[projections](../glossary/projection) use the current JetStream stream sequence as the physical position of
+an [event](../glossary/event) in the stream they are consuming. That position is the correct cursor
+for [checkpoints](../glossary/checkpoint), high-water marks, and replay progress within the current stream.
 
-Some event-sourcing workflows can republish an event into a different stream from
+Some [event-sourcing](../glossary/event-sourcing) workflows can republish an event into a different stream from
 the one where it originally lived. Examples include restoring archived events,
 backfilling historical events, rebuilding a stream after a topology change, or
 migrating events between stream layouts.
@@ -24,7 +24,7 @@ stream. The current sequence still identifies where the event lives now, but it
 no longer tells a projection, repair tool, or diagnostic workflow where the event
 originally lived.
 
-NATS has server-owned headers such as `Nats-Sequence` for republish and direct
+[NATS](../glossary/nats) has server-owned [headers](../glossary/headers) such as `Nats-Sequence` for republish and direct
 get contexts, and reserves the `Nats-` header namespace. Application-owned event
 metadata must not use that namespace.
 
