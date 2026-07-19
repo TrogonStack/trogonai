@@ -47,11 +47,20 @@ fn missing_position_falls_back_to_no_stream() {
 }
 
 #[test]
-fn only_no_stream_uses_the_fast_path() {
-    assert!(is_no_stream(Some(host::WritePrecondition::NoStream)));
-    assert!(!is_no_stream(Some(host::WritePrecondition::Any)));
-    assert!(!is_no_stream(Some(host::WritePrecondition::StreamExists)));
-    assert!(!is_no_stream(None));
+fn configured_no_stream_uses_the_fast_path() {
+    assert!(has_no_stream_write_precondition(
+        Some(host::WritePrecondition::NoStream),
+        None
+    ));
+    assert!(has_no_stream_write_precondition(
+        None,
+        Some(StreamWritePrecondition::NoStream)
+    ));
+    assert!(!has_no_stream_write_precondition(
+        Some(host::WritePrecondition::Any),
+        Some(StreamWritePrecondition::NoStream)
+    ));
+    assert!(!has_no_stream_write_precondition(None, None));
 }
 
 #[test]

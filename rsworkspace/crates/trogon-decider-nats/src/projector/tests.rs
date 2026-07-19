@@ -231,6 +231,94 @@ async fn catch_up_filters_by_subject() {
 }
 
 #[tokio::test]
+async fn catch_up_filter_stops_at_last_matching_event_when_foreign_subject_owns_stream_tail() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "PROJECTOR_FOREIGN_TAIL", "projector.foreign_tail.>").await;
+    let alpha = make_subject("projector.foreign_tail.alpha");
+    let beta = make_subject("projector.foreign_tail.beta");
+
+    let alpha_position = append_stream(&js, alpha.clone(), None, &[make_event(1, b"alpha")])
+        .await
+        .expect("publish alpha event");
+    append_stream(&js, beta, None, &[make_event(2, b"beta")])
+        .await
+        .expect("publish beta event at physical stream tail");
+
+    let checkpoint_store = FakeCheckpointStore::new(CheckpointSequence::NONE);
+    let projector = Projector::new(stream, "alpha-projection", checkpoint_store).with_filter_subject(alpha.to_string());
+    let apply = RecordingApply::default();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), projector.catch_up(apply.clone()))
+        .await
+        .expect("catch up should not wait for another matching publish")
+        .expect("catch up should succeed");
+    let applied = apply.applied().await;
+
+    assert_eq!(outcome.events_applied, 1);
+    assert_eq!(outcome.checkpoint, CheckpointSequence::from(alpha_position));
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].stream_position, alpha_position);
+}
+
+#[tokio::test]
+async fn catch_up_wildcard_filter_stops_at_last_matching_event() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "PROJECTOR_WILDCARD_TAIL", "projector.wildcard_tail.>").await;
+    let alpha = make_subject("projector.wildcard_tail.alpha.one");
+    let beta = make_subject("projector.wildcard_tail.beta.one");
+
+    let alpha_position = append_stream(&js, alpha, None, &[make_event(1, b"alpha")])
+        .await
+        .expect("publish alpha event");
+    append_stream(&js, beta, None, &[make_event(2, b"beta")])
+        .await
+        .expect("publish beta event at physical stream tail");
+
+    let checkpoint_store = FakeCheckpointStore::new(CheckpointSequence::NONE);
+    let projector = Projector::new(stream, "alpha-projection", checkpoint_store)
+        .with_filter_subject("projector.wildcard_tail.alpha.>");
+    let apply = RecordingApply::default();
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), projector.catch_up(apply.clone()))
+        .await
+        .expect("catch up should stop at the wildcard filter tail")
+        .expect("catch up should succeed");
+    let applied = apply.applied().await;
+
+    assert_eq!(outcome.events_applied, 1);
+    assert_eq!(outcome.checkpoint, CheckpointSequence::from(alpha_position));
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].stream_position, alpha_position);
+}
+
+#[tokio::test]
+async fn catch_up_filter_with_no_matching_events_completes_without_replay() {
+    let server = NatsServer::start().await;
+    let js = connect(&server).await;
+    let stream = create_events_stream(&js, "PROJECTOR_NO_MATCH", "projector.no_match.>").await;
+    let beta = make_subject("projector.no_match.beta");
+
+    append_stream(&js, beta, None, &[make_event(1, b"beta")])
+        .await
+        .expect("publish non-matching event");
+
+    let checkpoint_store = FakeCheckpointStore::new(CheckpointSequence::NONE);
+    let projector =
+        Projector::new(stream, "alpha-projection", checkpoint_store).with_filter_subject("projector.no_match.alpha");
+
+    let outcome = tokio::time::timeout(Duration::from_secs(2), projector.catch_up(RecordingApply::default()))
+        .await
+        .expect("catch up should not wait for a first matching publish")
+        .expect("catch up should succeed");
+
+    assert_eq!(outcome.events_applied, 0);
+    assert_eq!(outcome.checkpoint, CheckpointSequence::NONE);
+    assert!(outcome.reached_target);
+}
+
+#[tokio::test]
 async fn catch_up_reports_no_new_events_when_checkpoint_is_at_tail() {
     let server = NatsServer::start().await;
     let js = connect(&server).await;

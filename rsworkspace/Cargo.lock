@@ -6548,13 +6548,17 @@ dependencies = [
 name = "trogon-decider-wasm-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
+ "base64",
  "buffa",
  "buffa-types",
  "chrono",
  "opentelemetry",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "trogon-decider-nats",
  "trogon-decider-runtime",
  "trogon-decider-wit",
  "trogon-semconv",

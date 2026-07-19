@@ -2,8 +2,8 @@
 //!
 //! [`Projector`] owns the parts of a read-model catch-up that stay identical
 //! across backends: creating the subject-filtered ordered consumer (via
-//! [`crate::stream_store`]'s replay helpers), finding the stream's current
-//! tail, and applying events in order. What differs across backends is where
+//! [`crate::stream_store`]'s replay helpers), finding the current catch-up
+//! target, and applying events in order. What differs across backends is where
 //! the checkpoint lives and how it advances, which [`ProjectionCheckpointStore`]
 //! captures behind one contract:
 //!
@@ -24,12 +24,13 @@
 //! stored checkpoint) can compose that by implementing `load` to always return
 //! [`CheckpointSequence::NONE`]; the driver itself has no such policy baked in.
 //!
-//! The stream tail used as the catch-up target is captured once, at the start
-//! of the call, via a fresh [`jetstream::stream::Stream::get_info`]. Events
-//! published after that point are not included; call [`Projector::catch_up`]
-//! again to pick them up.
+//! The catch-up target is captured once at the start of the call. An unfiltered
+//! projector uses a fresh [`jetstream::stream::Stream::get_info`] to capture
+//! the physical stream tail. A filtered projector captures the latest sequence
+//! matching its exact or wildcard subject filter. Events published after that
+//! point are not included; call [`Projector::catch_up`] again to pick them up.
 
-use async_nats::jetstream;
+use async_nats::jetstream::{self, stream::LastRawMessageErrorKind};
 use trogon_decider_runtime::StreamEvent;
 
 use crate::stream_store::{ReadStreamError, StreamStoreError, read_stream_range, read_subject_stream};
@@ -122,8 +123,8 @@ pub enum CatchUpError<CheckpointError, ApplyError> {
     /// Loading the checkpoint to resume from failed.
     #[error("failed to load projection checkpoint: {0}")]
     LoadCheckpoint(#[source] CheckpointError),
-    /// Querying the stream's current tail failed.
-    #[error("failed to query stream tail: {0}")]
+    /// Querying the current catch-up target failed.
+    #[error("failed to query catch-up target: {0}")]
     QueryTail(#[source] StreamStoreError),
     /// Replaying stream events failed.
     #[error("failed to replay stream events: {0}")]
@@ -149,10 +150,10 @@ pub struct CatchUpOutcome {
     pub events_applied: usize,
     /// Checkpoint recorded after the call completed.
     pub checkpoint: CheckpointSequence,
-    /// Whether the replay reached the stream tail observed at the start of the call.
+    /// Whether the replay reached the catch-up target observed at the start of the call.
     ///
-    /// This is `true` on every successful return: a stream ending before the
-    /// observed tail is a transient condition retried internally, and only
+    /// This is `true` on every successful return: a replay ending before the
+    /// observed target is a transient condition retried internally, and only
     /// gives up (returning [`CatchUpError::Replay`]) after exhausting
     /// retries. The field stays meaningful as a caller-facing signal for
     /// "did this call make full progress", separate from how that guarantee
@@ -194,7 +195,7 @@ where
         &self.checkpoint
     }
 
-    /// Catches a projection up to the stream tail observed when this call started.
+    /// Catches a projection up to the matching tail observed when this call started.
     ///
     /// Resumes from whatever [`ProjectionCheckpointStore::load`] returns.
     /// Applies events in stream order, saving the checkpoint after each one.
@@ -208,12 +209,7 @@ where
         let checkpoint = self.checkpoint.load().await.map_err(CatchUpError::LoadCheckpoint)?;
         let from_sequence = checkpoint.next_from_sequence();
 
-        let info = self
-            .stream
-            .get_info()
-            .await
-            .map_err(|source| CatchUpError::QueryTail(ReadStreamError::QueryStreamInfo { source }.into()))?;
-        let to_sequence = info.state.last_sequence;
+        let to_sequence = self.catch_up_target().await.map_err(CatchUpError::QueryTail)?;
 
         let events = self
             .replay(from_sequence, to_sequence)
@@ -254,6 +250,23 @@ where
                 .await
             }
             None => read_stream_range(&self.stream, from_sequence, to_sequence).await,
+        }
+    }
+
+    async fn catch_up_target(&self) -> Result<u64, StreamStoreError> {
+        let Some(filter_subject) = self.filter_subject.as_deref() else {
+            return self
+                .stream
+                .get_info()
+                .await
+                .map(|info| info.state.last_sequence)
+                .map_err(|source| ReadStreamError::QueryStreamInfo { source }.into());
+        };
+
+        match self.stream.get_last_raw_message_by_subject(filter_subject).await {
+            Ok(message) => Ok(message.sequence),
+            Err(error) if matches!(error.kind(), LastRawMessageErrorKind::NoMessageFound) => Ok(0),
+            Err(source) => Err(ReadStreamError::ReadLatestSubjectMessage { source }.into()),
         }
     }
 }

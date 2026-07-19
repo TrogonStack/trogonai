@@ -125,6 +125,62 @@ async fn create_takes_the_no_stream_fast_path() {
 }
 
 #[tokio::test]
+async fn descriptor_precondition_wins_over_builder_override_for_replay() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+
+    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+        .with_write_precondition(StreamWritePrecondition::Any)
+        .execute()
+        .await
+        .expect("create succeeds");
+
+    assert_eq!(event_store.read_stream_calls(), 0);
+    assert_eq!(
+        event_store.write_preconditions(),
+        vec![StreamWritePrecondition::NoStream]
+    );
+}
+
+#[tokio::test]
+async fn builder_no_stream_skips_replay_when_descriptor_has_no_precondition() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("missing"))
+        .with_write_precondition(StreamWritePrecondition::NoStream)
+        .execute()
+        .await
+    else {
+        panic!("expected rejection");
+    };
+
+    assert!(matches!(error, WasmCommandError::Rejected(_)), "{error}");
+    assert_eq!(event_store.read_stream_calls(), 0);
+}
+
+#[tokio::test]
+async fn builder_no_stream_skips_snapshot_and_stream_reads_when_descriptor_has_no_precondition() {
+    let module = schedules_module();
+    let event_store = InMemoryEventStore::default();
+    let snapshot_store = InMemorySnapshotStore::default();
+    let scheduler = ImmediateSnapshotTaskScheduler;
+
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("missing"))
+        .with_snapshot_store(&snapshot_store, &scheduler)
+        .with_write_precondition(StreamWritePrecondition::NoStream)
+        .execute()
+        .await
+    else {
+        panic!("expected rejection");
+    };
+
+    assert!(matches!(error, WasmCommandError::Rejected(_)), "{error}");
+    assert_eq!(snapshot_store.read_snapshot_calls(), 0);
+    assert_eq!(event_store.read_stream_calls(), 0);
+}
+
+#[tokio::test]
 async fn pause_replays_history_and_appends_at_observed_position() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();

@@ -102,11 +102,13 @@ CommandExecution::new(&event_store, &command)
 There are two `execute` methods, selected by type state (whether `.with_snapshot(...)` was
 called):
 
-- **Without snapshots**: if the decider declares `WRITE_PRECONDITION = Some(NoStream)`, the
-  stream isn't read at all and the command is decided straight against `C::initial_state()`.
-  Otherwise the stream is read from the beginning (`ReadFrom::Beginning`), folded through
-  `evolve`, decided, and appended.
-- **With snapshots**: a snapshot is read first. On a snapshot the configured
+- **Without snapshots**: if the effective write precondition is `NoStream`, the stream isn't
+  read at all and the command is decided straight against `C::initial_state()`. The decider's
+  declared precondition takes precedence; the builder value applies when the decider does not
+  declare one. Otherwise the stream is read from the beginning (`ReadFrom::Beginning`), folded
+  through `evolve`, decided, and appended.
+- **With snapshots**: the same effective `NoStream` precondition skips both snapshot and stream
+  reads. Otherwise a snapshot is read first. On a snapshot the configured
   `SnapshotFailurePolicy` cannot trust, the policy decides `Fail` or `DiscardAndReplay`; a
   discarded snapshot falls back to a full replay from the beginning. Otherwise only the
   stream events *after* the snapshot's position are read (`ReadFrom::after(position)`). A
@@ -309,6 +311,11 @@ for cheap per-command instantiation, and probes the guest's `descriptor()` expor
 `tokio::task::spawn_blocking` so a guest's fuel- and epoch-bounded call never occupies the
 async executor for its duration.
 
+Before loading state, execution resolves the command descriptor's write precondition ahead of
+the builder override. An effective `NoStream` precondition starts the guest from initial state
+without reading a snapshot or stream history. The same resolved value is later used for append,
+so replay planning and optimistic concurrency cannot disagree about precedence.
+
 The guest's generated `decide` export only reads session state; it never folds its own
 newly decided events back into it (`evolve` mutates the session's `RefCell<State>`, `decide`
 only borrows it). A snapshot taken immediately after `decide` would therefore silently drop
@@ -368,15 +375,22 @@ a module once per command dispatch and keeps using that resolved `Arc`; a later 
 or `retire` never reaches back into an execution already running against a module it
 resolved earlier.
 
-`WasmSnapshotId` folds a module's identity into every snapshot id it produces:
-`{module_name}@{module_version}/{stream_id}`. Routing a command type from module version `v1`
-to `v2` via `activate` does not migrate or invalidate `v1`'s snapshots: `v2`'s snapshot id for
-a given stream is simply a different string, so `v2`'s first command against a stream `v1`
-had already snapshotted finds nothing under `v2`'s id and falls back to a full replay from
-the beginning, the same fallback taken for a stream that was never snapshotted at all. That
-replay reconstructs the same guest state a snapshot would have, just without resuming from a
-saved position. No explicit migration or invalidation step is needed; the version bump
-folded into the snapshot id is enough on its own.
+`WasmSnapshotId` folds a module's identity into every snapshot id it produces. It builds the
+collision-free logical identity `{module_name}@{module_version}/{stream_id}`, then encodes that
+complete value as unpadded base64url with a `v1_` format prefix so it remains a valid NATS
+Key/Value key when a stream id contains characters outside the NATS key alphabet. Routing a
+command type from module version `v1` to `v2` via `activate` does not migrate or invalidate
+`v1`'s snapshots: `v2`'s snapshot id for a given stream is simply a different string, so `v2`'s
+first command against a stream `v1` had already snapshotted finds nothing under `v2`'s id and
+falls back to a full replay from the beginning, the same fallback taken for a stream that was
+never snapshotted at all. That replay reconstructs the same guest state a snapshot would have,
+just without resuming from a saved position. No explicit migration or invalidation step is
+needed; the version bump folded into the snapshot id is enough on its own.
+
+The `v1_` representation replaces the earlier raw logical identity. NATS could not persist
+that legacy form because `@` is outside its Key/Value key alphabet. A non-NATS store that
+persisted the legacy id needs replayable history for one cold rebuild or an explicit key
+migration before adopting the encoded format.
 
 ## Testing story
 
