@@ -4,13 +4,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
 
 use async_nats::jetstream;
 use buffa::Message as _;
 use buffa::MessageName as _;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_decider_nats::{
     JetStreamStore, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
 };
@@ -23,36 +20,12 @@ use trogon_decider_wasm_runtime::{
     WasmEngineConfig, WasmSnapshotId,
 };
 use trogon_decider_wit::host::CommandEnvelope;
+use trogon_nats::test_support::JetStreamTestServer;
 use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, v1};
 
 const EVENTS_STREAM: &str = "WASM_EXECUTION_EVENTS";
 const EVENTS_SUBJECT: &str = "wasm.execution.events.>";
 const SNAPSHOT_BUCKET: &str = "WASM_EXECUTION_SNAPSHOTS";
-
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-}
 
 #[derive(Clone, Copy)]
 struct TestSubjectResolver;
@@ -140,14 +113,9 @@ fn pause_command(id: &str) -> CommandEnvelope {
     }
 }
 
-async fn live_store() -> (NatsServer, JetStreamStore<TestSubjectResolver>) {
-    let server = NatsServer::start().await;
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(2))
-        .connect(&server.url)
-        .await
-        .expect("connect to NATS testcontainer");
-    let js = jetstream::new(client);
+async fn live_store() -> (JetStreamTestServer, JetStreamStore<TestSubjectResolver>) {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let events_stream = js
         .create_stream(jetstream::stream::Config {
             name: EVENTS_STREAM.to_string(),

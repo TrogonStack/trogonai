@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use async_nats::{
     HeaderMap,
     header::{NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_ID},
@@ -7,10 +5,9 @@ use async_nats::{
     jetstream::{context::PublishErrorKind, stream::LastRawMessageError, stream::LastRawMessageErrorKind},
 };
 use bytes::Bytes;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_nats::jetstream::JetStreamGetStream;
 use trogon_nats::jetstream::mocks::{MockJetStreamConsumerFactory, MockJetStreamPublishMessage};
+use trogon_nats::test_support::JetStreamTestServer;
 use uuid::Uuid;
 
 use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
@@ -365,48 +362,7 @@ async fn subject_current_position_propagates_non_no_message_errors() {
     assert!(matches!(error, StreamStoreError::Read(_)));
 }
 
-/// A real, ephemeral single-node NATS server with JetStream enabled, used to
-/// exercise the ordered-consumer replay path against actual wire behavior
-/// that `trogon-nats`'s mocks cannot represent (delivered-message sequence
-/// metadata is only available through a real JetStream consumer).
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer for JetStream replay tests");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-
-    fn url(&self) -> &str {
-        &self.url
-    }
-}
-
-async fn connect(server: &NatsServer) -> jetstream::Context {
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(2))
-        .connect(server.url())
-        .await
-        .expect("connect to NATS testcontainer");
-    jetstream::new(client)
-}
-
+// Ordered-consumer delivery metadata requires a real JetStream server and cannot be represented by the mocks.
 async fn create_events_stream(
     js: &jetstream::Context,
     name: &str,
@@ -435,8 +391,8 @@ async fn publish_noise(js: &jetstream::Context, subject: &str, count: usize) {
 #[cfg(not(coverage))]
 #[tokio::test]
 async fn read_subject_stream_filters_by_subject_amid_heavy_foreign_traffic() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "FILTER_TEST", "filter.test.>").await;
 
     let alpha_subject = "filter.test.alpha";
@@ -476,8 +432,8 @@ async fn read_subject_stream_filters_by_subject_amid_heavy_foreign_traffic() {
 
 #[tokio::test]
 async fn read_subject_stream_respects_from_and_to_sequence_bounds() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "BOUNDS_TEST", "bounds.test.>").await;
 
     let subject = "bounds.test.alpha";
@@ -510,8 +466,8 @@ async fn read_subject_stream_respects_from_and_to_sequence_bounds() {
 
 #[tokio::test]
 async fn read_subject_stream_uses_caller_stream_id() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "STREAM_ID_TEST", "stream.id.test.>").await;
 
     let subject = "stream.id.test.alpha";
@@ -529,8 +485,8 @@ async fn read_subject_stream_uses_caller_stream_id() {
 
 #[tokio::test]
 async fn read_stream_range_reads_all_subjects_in_sequence_order() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "ALL_SUBJECTS_TEST", "all.subjects.test.>").await;
 
     let alpha = "all.subjects.test.alpha";
@@ -563,8 +519,8 @@ async fn read_stream_range_reads_all_subjects_in_sequence_order() {
 
 #[tokio::test]
 async fn read_stream_reads_up_to_current_stream_tail() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "TAIL_TEST", "tail.test.>").await;
 
     let subject = "tail.test.alpha";
@@ -586,8 +542,8 @@ async fn read_stream_reads_up_to_current_stream_tail() {
 
 #[tokio::test]
 async fn read_stream_range_propagates_fatal_errors_without_retrying() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "DELETED_STREAM_TEST", "deleted.stream.test.>").await;
     js.delete_stream("DELETED_STREAM_TEST")
         .await
@@ -602,8 +558,8 @@ async fn read_stream_range_propagates_fatal_errors_without_retrying() {
 
 #[tokio::test]
 async fn read_subject_stream_resumes_from_next_sequence_after_partial_progress() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "RESUME_TEST", "resume.test.>").await;
 
     let subject = "resume.test.alpha";

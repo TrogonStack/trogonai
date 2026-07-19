@@ -52,6 +52,8 @@ pub mod nats_token;
 pub mod server_info;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 pub(crate) mod token;
 
 #[cfg(any(test, feature = "test-support"))]

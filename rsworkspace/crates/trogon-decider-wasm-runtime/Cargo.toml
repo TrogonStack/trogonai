@@ -35,9 +35,9 @@ async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_10", "
 buffa = { workspace = true }
 buffa-types = { workspace = true }
 chrono = { version = "0.4" }
-testcontainers-modules = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true, features = ["test-support"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
 uuid = { workspace = true }

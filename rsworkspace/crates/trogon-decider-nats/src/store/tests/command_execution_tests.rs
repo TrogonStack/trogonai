@@ -1,17 +1,15 @@
 use std::{
     convert::Infallible,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 use async_nats::jetstream::{self, kv};
 use serde::{Deserialize, Serialize};
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_decider_runtime::{
     CommandError, CommandExecution, Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode,
     EventIdentity, EventType, ReadFrom, ReadStreamRequest, StreamRead, StreamWritePrecondition,
 };
+use trogon_nats::test_support::JetStreamTestServer;
 
 use crate::{
     JetStreamStore, JetStreamStoreError, OptimisticConcurrencyConflictError, StreamStoreError, StreamSubject,
@@ -148,46 +146,15 @@ impl StreamSubjectResolver<str> for TestSubjectResolver {
     }
 }
 
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer for command execution tests");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-}
-
 struct Harness {
-    _server: NatsServer,
+    _server: JetStreamTestServer,
     store: JetStreamStore<TestSubjectResolver>,
 }
 
 impl Harness {
     async fn start() -> Self {
-        let server = NatsServer::start().await;
-        let client = async_nats::ConnectOptions::new()
-            .connection_timeout(Duration::from_secs(2))
-            .connect(&server.url)
-            .await
-            .expect("connect to NATS testcontainer");
-        let js = jetstream::new(client);
+        let server = JetStreamTestServer::start().await;
+        let js = server.jetstream().await;
         let events_stream = js
             .create_stream(jetstream::stream::Config {
                 name: "COMMAND_EXECUTION".to_string(),

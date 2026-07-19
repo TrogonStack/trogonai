@@ -36,7 +36,9 @@ impl WasmSnapshotId {
     /// Renders the snapshot id for one stream under one module identity.
     pub fn new(module_name: &ModuleName, module_version: &ModuleVersion, stream_id: &str) -> Self {
         let logical_identity = format!("{module_name}@{module_version}/{stream_id}");
-        Self(format!("v1_{}", URL_SAFE_NO_PAD.encode(logical_identity)))
+        let mut snapshot_id = String::from("v1_");
+        URL_SAFE_NO_PAD.encode_string(logical_identity, &mut snapshot_id);
+        Self(snapshot_id)
     }
 
     /// Returns the rendered snapshot id.

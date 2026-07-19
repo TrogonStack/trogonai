@@ -2,54 +2,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use tokio::sync::Mutex;
 use trogon_decider_runtime::{Event, EventId, Headers, StreamEvent};
+use trogon_nats::test_support::JetStreamTestServer;
 use uuid::Uuid;
 
 use crate::append_stream;
-use crate::stream_store::StreamSubject;
+use crate::stream_store::{ReadStreamError, StreamStoreError, StreamSubject};
 
-use super::{CheckpointSequence, ProjectionApply, ProjectionCheckpointStore, Projector};
-
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer for projector tests");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-
-    fn url(&self) -> &str {
-        &self.url
-    }
-}
-
-async fn connect(server: &NatsServer) -> jetstream::Context {
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(2))
-        .connect(server.url())
-        .await
-        .expect("connect to NATS testcontainer");
-    jetstream::new(client)
-}
+use super::{CatchUpError, CheckpointSequence, ProjectionApply, ProjectionCheckpointStore, Projector};
 
 async fn create_events_stream(
     js: &jetstream::Context,
@@ -144,8 +105,8 @@ fn checkpoint_sequence_resumes_right_after_itself() {
 
 #[tokio::test]
 async fn catch_up_applies_all_events_from_zero() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_FROM_ZERO", "projector.from_zero.>").await;
     let subject = make_subject("projector.from_zero.alpha");
     for index in 0..4u128 {
@@ -170,8 +131,8 @@ async fn catch_up_applies_all_events_from_zero() {
 
 #[tokio::test]
 async fn catch_up_resumes_from_existing_checkpoint() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_RESUME", "projector.resume.>").await;
     let subject = make_subject("projector.resume.alpha");
     let mut positions = Vec::new();
@@ -200,8 +161,8 @@ async fn catch_up_resumes_from_existing_checkpoint() {
 
 #[tokio::test]
 async fn catch_up_filters_by_subject() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_FILTER", "projector.filter.>").await;
     let alpha = make_subject("projector.filter.alpha");
     let beta = make_subject("projector.filter.beta");
@@ -232,8 +193,8 @@ async fn catch_up_filters_by_subject() {
 
 #[tokio::test]
 async fn catch_up_filter_stops_at_last_matching_event_when_foreign_subject_owns_stream_tail() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_FOREIGN_TAIL", "projector.foreign_tail.>").await;
     let alpha = make_subject("projector.foreign_tail.alpha");
     let beta = make_subject("projector.foreign_tail.beta");
@@ -263,8 +224,8 @@ async fn catch_up_filter_stops_at_last_matching_event_when_foreign_subject_owns_
 
 #[tokio::test]
 async fn catch_up_wildcard_filter_stops_at_last_matching_event() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_WILDCARD_TAIL", "projector.wildcard_tail.>").await;
     let alpha = make_subject("projector.wildcard_tail.alpha.one");
     let beta = make_subject("projector.wildcard_tail.beta.one");
@@ -295,8 +256,8 @@ async fn catch_up_wildcard_filter_stops_at_last_matching_event() {
 
 #[tokio::test]
 async fn catch_up_filter_with_no_matching_events_completes_without_replay() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_NO_MATCH", "projector.no_match.>").await;
     let beta = make_subject("projector.no_match.beta");
 
@@ -319,9 +280,33 @@ async fn catch_up_filter_with_no_matching_events_completes_without_replay() {
 }
 
 #[tokio::test]
+async fn catch_up_filter_propagates_target_query_failure() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let stream = create_events_stream(&js, "PROJECTOR_DELETED", "projector.deleted.>").await;
+    js.delete_stream("PROJECTOR_DELETED")
+        .await
+        .expect("delete underlying stream");
+
+    let checkpoint_store = FakeCheckpointStore::new(CheckpointSequence::NONE);
+    let projector =
+        Projector::new(stream, "projection", checkpoint_store).with_filter_subject("projector.deleted.alpha");
+
+    let error = projector
+        .catch_up(RecordingApply::default())
+        .await
+        .expect_err("querying a deleted stream should fail");
+
+    assert!(matches!(
+        error,
+        CatchUpError::QueryTail(StreamStoreError::Read(ReadStreamError::ReadLatestSubjectMessage { .. }))
+    ));
+}
+
+#[tokio::test]
 async fn catch_up_reports_no_new_events_when_checkpoint_is_at_tail() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let stream = create_events_stream(&js, "PROJECTOR_AT_TAIL", "projector.at_tail.>").await;
     let subject = make_subject("projector.at_tail.alpha");
     let position = append_stream(&js, subject, None, &[make_event(1, b"payload")])

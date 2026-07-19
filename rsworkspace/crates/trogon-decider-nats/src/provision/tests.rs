@@ -1,52 +1,11 @@
-use std::time::Duration;
-
 use async_nats::jetstream;
 use async_nats::jetstream::kv;
 use async_nats::jetstream::stream::RetentionPolicy;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use trogon_nats::test_support::JetStreamTestServer;
 
 use super::{
     EnsureBucketError, EnsureStreamError, KvConfigMismatch, StreamConfigMismatch, ensure_bucket, ensure_stream,
 };
-
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer for provisioning tests");
-        let host = container.get_host().await.expect("get NATS testcontainer host");
-        let port = container
-            .get_host_port_ipv4(4222)
-            .await
-            .expect("get NATS testcontainer port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-
-    fn url(&self) -> &str {
-        &self.url
-    }
-}
-
-async fn connect(server: &NatsServer) -> jetstream::Context {
-    let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(2))
-        .connect(server.url())
-        .await
-        .expect("connect to NATS testcontainer");
-    jetstream::new(client)
-}
 
 fn stream_config(name: &str, subject: &str) -> jetstream::stream::Config {
     jetstream::stream::Config {
@@ -68,8 +27,8 @@ fn bucket_config(bucket: &str, history: i64) -> kv::Config {
 
 #[tokio::test]
 async fn ensure_stream_creates_a_fresh_stream() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     let stream = ensure_stream(&js, stream_config("FRESH_STREAM", "fresh.stream.>"))
         .await
@@ -80,8 +39,8 @@ async fn ensure_stream_creates_a_fresh_stream() {
 
 #[tokio::test]
 async fn ensure_stream_opens_an_existing_matching_stream() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let config = stream_config("EXISTING_STREAM", "existing.stream.>");
 
     ensure_stream(&js, config.clone())
@@ -97,8 +56,8 @@ async fn ensure_stream_opens_an_existing_matching_stream() {
 
 #[tokio::test]
 async fn ensure_stream_rejects_retention_mismatch() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let mut config = stream_config("RETENTION_STREAM", "retention.stream.>");
     config.retention = RetentionPolicy::Limits;
     ensure_stream(&js, config.clone()).await.expect("create stream");
@@ -117,8 +76,8 @@ async fn ensure_stream_rejects_retention_mismatch() {
 
 #[tokio::test]
 async fn ensure_stream_rejects_allow_atomic_publish_mismatch() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     // NATS 2.10 (the testcontainer server version) does not persist
     // `allow_atomic_publish`, so it always round-trips as `false` regardless
     // of what is requested at creation. Creating with the (honored) default
@@ -142,8 +101,8 @@ async fn ensure_stream_rejects_allow_atomic_publish_mismatch() {
 
 #[tokio::test]
 async fn ensure_stream_rejects_missing_subject() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let config = stream_config("SUBJECT_STREAM", "subject.stream.one");
     ensure_stream(&js, config).await.expect("create stream");
 
@@ -161,8 +120,8 @@ async fn ensure_stream_rejects_missing_subject() {
 
 #[tokio::test]
 async fn ensure_stream_is_idempotent_under_concurrent_creation() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let config = stream_config("RACE_STREAM", "race.stream.>");
 
     let (first, second) = tokio::join!(ensure_stream(&js, config.clone()), ensure_stream(&js, config));
@@ -179,8 +138,8 @@ async fn ensure_stream_is_idempotent_under_concurrent_creation() {
 
 #[tokio::test]
 async fn ensure_bucket_creates_a_fresh_bucket() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     let store = ensure_bucket(&js, bucket_config("fresh_bucket", 5))
         .await
@@ -191,8 +150,8 @@ async fn ensure_bucket_creates_a_fresh_bucket() {
 
 #[tokio::test]
 async fn ensure_bucket_opens_an_existing_matching_bucket() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let config = bucket_config("existing_bucket", 3);
 
     ensure_bucket(&js, config.clone())
@@ -208,8 +167,8 @@ async fn ensure_bucket_opens_an_existing_matching_bucket() {
 
 #[tokio::test]
 async fn ensure_bucket_rejects_history_mismatch() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let mut config = bucket_config("history_bucket", 2);
     ensure_bucket(&js, config.clone()).await.expect("create bucket");
 
@@ -227,8 +186,8 @@ async fn ensure_bucket_rejects_history_mismatch() {
 
 #[tokio::test]
 async fn ensure_bucket_is_idempotent_under_concurrent_creation() {
-    let server = NatsServer::start().await;
-    let js = connect(&server).await;
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
     let config = bucket_config("race_bucket", 1);
 
     let (first, second) = tokio::join!(ensure_bucket(&js, config.clone()), ensure_bucket(&js, config));
