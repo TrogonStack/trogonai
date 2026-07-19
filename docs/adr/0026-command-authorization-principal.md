@@ -12,10 +12,10 @@ date: 2026-07-15
 `trogon_decider_runtime::execution::CommandExecution` is the single entry
 point every native command execution goes through: it loads history, replays
 it, calls `Decider::decide`, encodes the resulting events, and appends them.
-Its builder carries an event store, the command, an optional write
-precondition, an optional snapshot policy, an event id generator, and
+Its builder carries an [event](../glossary/event) store, the command, an optional [write
+precondition](../glossary/write-precondition), an optional [snapshot](../glossary/snapshot) policy, an event id generator, and
 `headers: Headers` -- a freeform, caller-supplied metadata bag. Nothing in
-that builder, nothing in the `Decider` trait itself, and nothing in the WASM
+that builder, nothing in the `Decider` trait itself, and nothing in the [WASM](../glossary/wasm)
 mirror (`trogon_decider_wasm_runtime::execution::WasmCommandExecution`, which
 has the identical shape) represents who is submitting a command or what they
 are allowed to do. `decide` runs against decider state and the command
@@ -23,14 +23,14 @@ payload only.
 
 `docs/architecture/event-metadata.md` is explicit that the runtime should not
 derive headers generically: an application that wants a fixed header
-(tenancy, correlation, and by the same reasoning, caller identity) must build
+([tenancy](../glossary/tenant), correlation, and by the same reasoning, caller identity) must build
 it itself before calling `CommandExecution::with_headers`. In practice this
 means the closest thing to "who acted" today is whatever string an
 application chooses to put in a header, which `decide` never sees and which
 carries no authorization semantics -- it is envelope metadata for storage, not
 an input the runtime checks before evaluating a decision.
 
-Command execution is also reached from more than one direction. The A2A
+Command execution is also reached from more than one direction. The [A2A](../glossary/a2a)
 gateway resolves caller identity at ingress
 ([ADR#0017](./0017-aauth-agent-authentication.md)), but internal callers such
 as `trogon-scheduler`'s worker processor construct `CommandExecution::new`
@@ -38,7 +38,7 @@ directly, off the gateway path entirely. Any authorization hook that only
 lives at the gateway leaves every non-gateway caller of `CommandExecution`
 unenforced.
 
-AAuth itself is not a ready-made carrier for this. Its three-party auth token
+[AAuth](../glossary/aauth) itself is not a ready-made carrier for this. Its three-party auth token
 (`aa-auth+jwt`) does carry a `principal` claim, but on the wire it is an
 `Option<&str>` (`trogon-aauth-person::mint::MintInputs::principal`,
 mirrored in `trogon-aauth-as`) -- an optional, unstructured string naming a
@@ -77,7 +77,7 @@ authorizer is configured, `execute()` calls it after the command's stream id
 and the loaded state are available (an authorizer may need to know the
 target stream) but strictly before `evaluate_decision`/`decide` runs, so a
 denied command never reaches domain logic and never spends replay or, on the
-WASM path, guest fuel on work that will be rejected.
+WASM path, guest [fuel](../glossary/fuel) on work that will be rejected.
 
 ### 3. Both native and WASM dispatch paths
 
@@ -97,7 +97,7 @@ verification) is where a verified identity becomes a `CommandPrincipal`: the
 PoP-verified agent's `sub`/`cnf.jwk` thumbprint maps to an agent principal,
 and an `aa-auth+jwt`'s `principal` string, when present, is carried as an
 opaque hint attached to that principal rather than trusted as a scoped claim
-on its own. This ADR does not change AAuth's wire shape or fix the
+on its own. This [ADR](../glossary/adr) does not change AAuth's wire shape or fix the
 optional-string limitation -- that is [ADR#0017](./0017-aauth-agent-authentication.md)'s pinned draft shape. The
 mapping boundary is the one place that has to absorb the limitation, and it
 must fail closed: a missing or unparsable principal where one is required is

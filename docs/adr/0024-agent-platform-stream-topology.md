@@ -62,7 +62,7 @@ raised the question this ADR answers: why do a proposal and its verdict
 live in the registry record's stream?
 
 The first candidate topology puts six
-commands and six events in one Agent stream: AgentProvisioned,
+[commands](../glossary/command) and six [events](../glossary/event) in one Agent stream: AgentProvisioned,
 RevisionStaged, RevisionVerdictRecorded, RevisionActivated,
 RevisionRolledBack, AgentArchived. Reviewing it found a coupling:
 RevisionStaged plus RevisionVerdictRecorded form a proposal workflow (the
@@ -85,10 +85,10 @@ repository). Three consequences follow:
    planes arrive as data. Revocable facts (grants) are the dangerous kind,
    and even those arrive as data with live evaluation.
 
-Related but distinct: the decider runtime serializes one fold-state per
-command, because deciders compile to WASM components and their state
-crosses the host boundary. Those per-command states are projections of a
-stream, not streams, and this ADR does not change that pattern.
+Related but distinct: the [decider](../glossary/decider) runtime serializes one fold-state per
+command, because deciders compile to [WASM](../glossary/wasm) components and their state
+crosses the host boundary. Those per-command states are [projections](../glossary/projection) of a
+stream, not streams, and this [ADR](../glossary/adr) does not change that pattern.
 
 ## Decision
 
@@ -99,7 +99,7 @@ below are illustrative; the wire contracts own the final spelling, and
 renames do not reopen this decision.
 
 Here, stream means one logical ordered event history. This ADR does not
-choose physical JetStream resources, subject partitioning, retention, or
+choose physical [JetStream](../glossary/jetstream) resources, subject partitioning, retention, or
 projection checkpointing. Those deployment choices require a separate
 decision before infrastructure provisioning.
 
@@ -245,7 +245,7 @@ definition records (Agent, AgentConfiguration, AgentRevision, Proposal) and the
 ownership boundaries that this topology preserves.
 
 **App-level gates, unchanged:** principal kind (human versus machine) is
-authentication context (aauth, [ADR#0017](./0017-aauth-agent-authentication.md))
+authentication context ([aauth](../glossary/aauth), [ADR#0017](./0017-aauth-agent-authentication.md))
 enforced at command dispatch.
 Charter-class activation requiring a human and the human-only policy
 mutations remain dispatch preconditions; deciders treat principals as opaque

@@ -48,6 +48,91 @@ export function toAdrSidebarItem(record: AdrRecord) {
   };
 }
 
+const GlossaryFrontmatter = z.object({
+  term: z.string().min(1),
+  section: z.string().min(1),
+  order: z.number().int().nonnegative(),
+});
+
+type GlossaryRecord = {
+  slug: string;
+  frontmatter: z.infer<typeof GlossaryFrontmatter>;
+};
+
+const GLOSSARY_SECTION_ORDER = [
+  "Repository and process",
+  "Protocols and transports",
+  "Event sourcing and the decider",
+  "Agent execution model",
+  "Messaging and storage infrastructure",
+  "WebAssembly execution",
+  "Wire contracts and serialization",
+  "Identity, security, and multi-tenancy",
+  "Observability",
+];
+
+export async function readGlossaryRecords(rootDir: string): Promise<GlossaryRecord[]> {
+  const glossaryDir = path.join(rootDir, "glossary");
+  const entries = await fs.promises.readdir(glossaryDir, { withFileTypes: true });
+  const files = entries.filter(isFile).map(toFileName).filter(isGlossaryMarkdownFile);
+
+  return files.map((fileName) => {
+    const filePath = path.join(glossaryDir, fileName);
+    const parsed = matter(fs.readFileSync(filePath, "utf-8"));
+
+    return {
+      slug: path.basename(fileName, ".md"),
+      frontmatter: parseGlossaryFrontmatter(filePath, parsed.data),
+    };
+  });
+}
+
+export function toGlossarySidebarGroups(records: GlossaryRecord[]) {
+  const recordsBySection = new Map<string, GlossaryRecord[]>();
+
+  for (const record of records) {
+    const section = record.frontmatter.section;
+    const sectionRecords = recordsBySection.get(section) ?? [];
+    sectionRecords.push(record);
+    recordsBySection.set(section, sectionRecords);
+  }
+
+  const sections = [...recordsBySection.keys()].sort(compareGlossarySections);
+
+  return sections.map((section) => ({
+    text: section,
+    collapsed: true,
+    items: (recordsBySection.get(section) ?? [])
+      .sort((left, right) => left.frontmatter.order - right.frontmatter.order)
+      .map((record) => ({ text: record.frontmatter.term, link: `/glossary/${record.slug}` })),
+  }));
+}
+
+function compareGlossarySections(left: string, right: string) {
+  const leftIndex = GLOSSARY_SECTION_ORDER.indexOf(left);
+  const rightIndex = GLOSSARY_SECTION_ORDER.indexOf(right);
+
+  if (leftIndex === -1 || rightIndex === -1) {
+    throw new Error(`Unknown glossary section. Add it to GLOSSARY_SECTION_ORDER: ${leftIndex === -1 ? left : right}`);
+  }
+
+  return leftIndex - rightIndex;
+}
+
+function parseGlossaryFrontmatter(filePath: string, data: unknown) {
+  const result = GlossaryFrontmatter.safeParse(data);
+
+  if (!result.success) {
+    throw new Error(`${filePath}\n\n${z.prettifyError(result.error)}`);
+  }
+
+  return result.data;
+}
+
+function isGlossaryMarkdownFile(fileName: string) {
+  return path.extname(fileName) === ".md" && fileName !== "index.md";
+}
+
 function parseAdrFrontmatter(filePath: string, data: unknown) {
   const result = AdrFrontmatter.safeParse(data);
 

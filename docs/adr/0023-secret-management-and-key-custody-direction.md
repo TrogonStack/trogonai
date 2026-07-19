@@ -9,7 +9,7 @@ date: 2026-07-11
 
 ## Context
 
-The platform is accumulating credentials it must hold on behalf of tenants,
+The platform is accumulating credentials it must hold on behalf of [tenants](../glossary/tenant),
 and today it has no place to put them.
 
 The first consumer is concrete. `trogon-gateway` ingests events from twelve
@@ -20,8 +20,8 @@ variables at config-load time through the `SecretInput` pattern, which
 [ADR#0007](./0007-configuration-sources.md) sanctions as a bootstrap
 mechanism, not a durable model: configuration files must not store secrets,
 and env vars cannot express per-company, console-managed connections. The
-second consumer is near-term direction rather than shipped code: the MCP
-layer bridges MCP over NATS today, and connecting outbound to remote MCP
+second consumer is near-term direction rather than shipped code: the [MCP](../glossary/mcp)
+layer bridges MCP over [NATS](../glossary/nats) today, and connecting outbound to remote MCP
 servers on a company's behalf will require presenting per-company
 `Authorization` headers. Behind those two sit known future consumers: OAuth
 refresh tokens for user-delegated outbound calls (the pattern the console
@@ -37,7 +37,7 @@ inside their company. The platform will run as a hosted multi-tenant service
 and also be self-hosted by third parties, so whatever this decision commits to
 must be operable by people who are not us, under a real open source license.
 
-"KMS" is an overloaded word, and this ADR deliberately splits it into
+"KMS" is an overloaded word, and this [ADR](../glossary/adr) deliberately splits it into
 problems that must not share one interface:
 
 - **Secret storage**: values an authorized workload must retrieve later
@@ -46,7 +46,7 @@ problems that must not share one interface:
   signing, where the key itself is never retrieved.
 - **Password hashing**: intentionally one-way, owned by the application, and
   never a KMS concern.
-- **Short-lived protocol tokens**: AAuth JWTs
+- **Short-lived protocol tokens**: [AAuth](../glossary/aauth) JWTs
   ([ADR#0017](./0017-aauth-agent-authentication.md)), CSRF tokens, and
   session state stay in their owning subsystems; central storage adds nothing
   to values designed to expire.
@@ -59,7 +59,7 @@ managed-service baseline.
 
 An earlier prototype already exercised the storage split this ADR wants,
 embedded inside `trogon-gateway`: an event-sourced credential aggregate that
-writes raw values to OpenBao KV v2 and everything else to NATS JetStream.
+writes raw values to OpenBao KV v2 and everything else to NATS [JetStream](../glossary/jetstream).
 This ADR adopts that prototype's validated mechanics and supersedes its
 embedded-in-gateway shape (Decision 4).
 

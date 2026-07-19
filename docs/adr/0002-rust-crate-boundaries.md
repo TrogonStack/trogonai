@@ -12,7 +12,7 @@ date: 2026-06-08
 The Rust workspace needs stable rules for package names, crate granularity, and
 feature flags. Without those rules, the workspace can drift toward two bad
 shapes: tiny crates for every concept, or large crates that mix domain,
-transport, runtime, test, and operational concerns behind feature flags.
+[transport](../glossary/transport), runtime, test, and operational concerns behind feature flags.
 
 Cargo terminology matters here. A package is the `Cargo.toml` unit. A package
 contains one or more crate targets: at most one library crate and any number of
@@ -57,7 +57,7 @@ Use the existing workspace prefixes consistently:
 - `trogonai-*` for crates whose public contract belongs to this repo or product
   as it exists today, including product-facing APIs, generated types, schemas,
   workflows, deployment assumptions, and repo-specific integrations.
-- `mcp-*` and `acp-*` when the external protocol identity is the primary
+- `mcp-*` and `acp-*` when the external [protocol](../glossary/protocol) identity is the primary
   boundary.
 
 When the boundary is ambiguous, default to `trogonai-*` until the crate has a
@@ -119,11 +119,11 @@ Use this pattern for protocol role SDKs:
 
 Examples:
 
-- `mcp-server-sdk` for implementing MCP server callbacks.
+- `mcp-server-sdk` for implementing [MCP](../glossary/mcp) server callbacks.
 - `mcp-client-sdk` for implementing MCP client callbacks.
-- `acp-agent-sdk` for implementing ACP agent callbacks.
+- `acp-agent-sdk` for implementing [ACP](../glossary/acp) agent callbacks.
 - `acp-client-sdk` for implementing ACP client callbacks.
-- `acp-nats-agent-sdk` only when the SDK is intentionally NATS-specific.
+- `acp-nats-agent-sdk` only when the SDK is intentionally [NATS](../glossary/nats)-specific.
 
 Use protocol role names from the protocol, not deployment words. In an SDK name,
 `server` is acceptable when it means the protocol role, such as MCP server. It
@@ -271,7 +271,7 @@ WebSocket together when they share connection management, configuration,
 telemetry identity, deployment, and ownership.
 
 Use separate packages or binaries when transports imply different execution
-models. A local stdio bridge and a network listener may share protocol code, but
+models. A local stdio [bridge](../glossary/bridge) and a network listener may share protocol code, but
 they often differ in dependencies, startup, shutdown, configuration, telemetry
 identity, and operational ownership.
 

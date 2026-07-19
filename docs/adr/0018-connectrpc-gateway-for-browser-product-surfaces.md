@@ -12,11 +12,11 @@ date: 2026-07-08
 The platform is getting its first product-facing web application, the operator
 console ([ADR#0019](./0019-console-webapp-stack.md)). A browser has to call
 first-party platform services, and every existing first-party RPC path lives on
-the NATS backbone: protobuf services bind to NATS micro
-([ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)), the JSON-RPC
+the [NATS](../glossary/nats) backbone: [protobuf](../glossary/protocol-buffers) services bind to [NATS micro](../glossary/nats-micro)
+([ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md)), the [JSON-RPC](../glossary/json-rpc)
 family binds to NATS subjects
 ([ADR#0011](./0011-jsonrpc-over-nats-binding.md)), and every signed request on
-the mesh carries the AAuth NATS PoP envelope
+the mesh carries the [AAuth](../glossary/aauth) NATS [PoP](../glossary/pop) envelope
 ([ADR#0017](./0017-aauth-agent-authentication.md)).
 
 NATS itself does not keep a browser off the backbone. `nats-server` ships a
@@ -56,7 +56,7 @@ A browser product surface talks to a first-party gateway service exposing
 ConnectRPC over HTTPS. The gateway is a gateway in the
 [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) sense: a production edge
 component that accepts external traffic and routes it inward,
-containing a bridge onto the backbone.
+containing a [bridge](../glossary/bridge) onto the backbone.
 
 The ConnectRPC surface is generated from the same `.proto` sources that define
 the backbone services ([ADR#0009](./0009-protocol-buffers-wire-contracts.md)).

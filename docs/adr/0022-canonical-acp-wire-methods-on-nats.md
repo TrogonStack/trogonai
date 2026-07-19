@@ -9,9 +9,9 @@ date: 2026-07-09
 
 ## Context
 
-A change was proposed (and briefly implemented) to rename the NATS layer's
+A change was proposed (and briefly implemented) to rename the [NATS](../glossary/nats) layer's
 method labels from their subject-token forms (`session.new`, bare `prompt`,
-`ext.{name}`) to the ACP spec's canonical names (`session/new`,
+`ext.{name}`) to the [ACP](../glossary/acp) spec's canonical names (`session/new`,
 `session/prompt`, `_{name}`). The motivations were: self-describing wire
 traffic, conformance checks against the spec's `meta.json` without a
 translation table, and enabling decode through the SDK's `ClientRequest`
@@ -39,7 +39,7 @@ from the metrics labels that kept the token names, and traded a NATS-native
 invariant for cosmetic spec alignment.
 
 The ACP spec's vocabulary governs the layers where methods actually flow as
-JSON-RPC on a wire: the byte-stream boundaries (WebSocket, HTTP, stdio),
+[JSON-RPC](../glossary/json-rpc) on a wire: the byte-stream boundaries (WebSocket, HTTP, stdio),
 which have always used canonical names, including the `_{name}` extension
 prefix in `ConnectionClient`. The NATS embedding (subject grammar, token
 vocabulary, durability, ACL granularity) is governed by

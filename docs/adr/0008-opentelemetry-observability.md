@@ -50,7 +50,7 @@ helpers that make the package's behavior observable. Package-specific metrics
 stay with the package that emits them.
 
 Do not put general runtime integration code in `telemetry/`. Service-owned
-connections to NATS, databases, queues, external APIs, storage, or other
+connections to [NATS](../glossary/nats), databases, queues, external APIs, storage, or other
 infrastructure belong in a module named for the integration or adapter it owns,
 such as `nats/`, `postgres/`, `jetstream/`, `connectrpc/`, or `adapters/` when
 one service composes several private integrations. Extract the integration to a

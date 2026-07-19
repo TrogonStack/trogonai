@@ -15,7 +15,7 @@ expected. Go or Python may be added later.
 
 The workspace layout should feel consistent across ecosystems without erasing
 important language-specific conventions. In particular, Rust should keep its
-Cargo-specific crate rules from [ADR#0002](./0002-rust-crate-boundaries.md).
+Cargo-specific [crate](../glossary/crate) rules from [ADR#0002](./0002-rust-crate-boundaries.md).
 
 ## Decision
 
@@ -229,10 +229,10 @@ Rust functionality.
 
 Cross-language packages should communicate through explicit contracts:
 
-- Protocol Buffers for first-party machine-to-machine contracts.
-- NATS-backed messages for internal runtime paths, when possible.
-- ConnectRPC for first-party service APIs after an API surface is necessary.
-- Protocol role SDKs for MCP/ACP callback surfaces.
+- [Protocol Buffers](../glossary/protocol-buffers) for first-party machine-to-machine contracts.
+- [NATS](../glossary/nats)-backed messages for internal runtime paths, when possible.
+- [ConnectRPC](../glossary/connectrpc) for first-party service APIs after an API surface is necessary.
+- [Protocol](../glossary/protocol) role SDKs for [MCP](../glossary/mcp)/[ACP](../glossary/acp) callback surfaces.
 - Generated clients or generated protocol packages.
 - Stable CLI or process boundaries when appropriate.
 

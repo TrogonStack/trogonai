@@ -10,7 +10,7 @@ date: 2026-07-15
 ## Context
 
 `trogon_decider_nats::JetStreamStore<Resolver>` binds to exactly one physical
-JetStream `events_stream` and one physical KV `snapshot_bucket` per store
+[JetStream](../glossary/jetstream) `events_stream` and one physical KV `snapshot_bucket` per store
 instance. Isolation across tenants depends entirely on the
 `StreamSubjectResolver<StreamId>` implementation an application supplies --
 the trait's own doc comment says implementations "usually compose a tenant or
@@ -50,7 +50,7 @@ that already assembles `Headers` and a `CommandPrincipal`
 
 ### 2. Tenant-aware resolution, verified at the store boundary
 
-Extend `StreamSubjectResolver` and the snapshot key resolution surface
+Extend `StreamSubjectResolver` and the [snapshot](../glossary/snapshot) key resolution surface
 (currently the bare `&str` snapshot id passed into
 `crate::snapshot_store::{read_snapshot, write_snapshot}`) to take a `Tenant`
 explicitly, and to return a tenant-scoped result type rather than a bare

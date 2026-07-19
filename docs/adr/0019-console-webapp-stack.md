@@ -17,8 +17,8 @@ choices set the default for every later TypeScript product surface.
 
 The console's data path is decided by
 [ADR#0018](./0018-connectrpc-gateway-for-browser-product-surfaces.md): the
-browser speaks ConnectRPC to a gateway that bridges onto the NATS backbone and
-owns all credentials. This ADR decides everything above that boundary: the
+browser speaks [ConnectRPC](../glossary/connectrpc) to a gateway that bridges onto the [NATS](../glossary/nats) backbone and
+owns all credentials. This [ADR](../glossary/adr) decides everything above that boundary: the
 application framework, build tooling, component system, data and form
 libraries, testing, and how the application scales to more product areas
 without a runtime composition scheme.
@@ -36,7 +36,7 @@ packages under `tsworkspace/packages/`, per the layout and App Surface Rules
 in [ADR#0005](./0005-polyglot-workspace-layout.md). There is no top-level
 `webapps/` directory. If the console later grows desktop or mobile surfaces,
 it regroups as `tsworkspace/apps/console/{web,desktop,shared}/` as
-[ADR#0005](./0005-polyglot-workspace-layout.md) already prescribes. The workspace uses pnpm, with Turborepo as the task
+[ADR#0005](./0005-polyglot-workspace-layout.md) already prescribes. The [workspace](../glossary/workspace) uses pnpm, with Turborepo as the task
 runner so build, test, and typecheck tasks are dependency-ordered and cached
 as the package graph grows.
 
@@ -98,7 +98,7 @@ with tooling rather than review vigilance.
 ### 5. Validation is zod at the boundary, per the [ADR#0009](./0009-protocol-buffers-wire-contracts.md) conversion rule
 
 Runtime validation uses zod, wired into TanStack Form through Standard
-Schema. Generated protobuf types do not leak primitive obsession into
+Schema. Generated [protobuf](../glossary/protocol-buffers) types do not leak primitive obsession into
 application code: screens and forms convert generated messages into richer
 edit models at the boundary when validation, units, identity, or invariants
 matter, the same conversion rule
@@ -133,7 +133,7 @@ replacement.
 
 ### 9. Telemetry follows [ADR#0008](./0008-opentelemetry-observability.md)
 
-The console uses the OpenTelemetry Web SDK, exports OTLP to the same
+The console uses the [OpenTelemetry](../glossary/opentelemetry) Web SDK, exports OTLP to the same
 collector path the platform uses, and propagates `traceparent` on every
 Connect call through a client interceptor so one operator action traces from
 the browser through the gateway onto the backbone

@@ -12,7 +12,7 @@ date: 2026-07-01
 First-party Rust code needs one default TLS implementation for both the client
 side (outbound HTTP, WebSocket, and other network clients) and the server side
 (in-process HTTPS listeners). Without one default, TLS choices drift across
-crates: some link [OpenSSL](https://openssl-library.org/) through
+[crates](../glossary/crate): some link [OpenSSL](https://openssl-library.org/) through
 [`native-tls`](https://crates.io/crates/native-tls), others link
 [rustls](https://github.com/rustls/rustls), and a single process can end up with
 two independent TLS stacks, two certificate-trust models, and two sets of

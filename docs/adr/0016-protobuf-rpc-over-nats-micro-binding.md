@@ -11,8 +11,8 @@ date: 2026-07-04
 
 [ADR#0009](./0009-protocol-buffers-wire-contracts.md) makes Protocol Buffers the
 wire contract for first-party owned service and message contracts.
-[ADR#0011](./0011-jsonrpc-over-nats-binding.md) defines how the JSON-RPC family
-(ACP, MCP, A2A) is carried over the NATS backbone, but it is explicitly scoped to
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md) defines how the [JSON-RPC](../glossary/json-rpc) family
+([ACP](../glossary/acp), [MCP](../glossary/mcp), [A2A](../glossary/a2a)) is carried over the [NATS](../glossary/nats) backbone, but it is explicitly scoped to
 JSON-RPC. There is no equivalent rule for how a first-party **protobuf** service
 is carried over NATS, so any such service would have to invent its own subject
 scheme, success/error signaling, and discovery.
@@ -25,7 +25,7 @@ same class of drift with no governing rule.
 a protocol-neutral set of options that attach NATS Services metadata to any
 protobuf `service` (`ServiceOptions`: `version`, `description`, `metadata`,
 `content_type`) and `rpc` method (`MethodOptions`: endpoint `metadata`). Its own
-example is a generic `OrderService`. This shared mechanism has no ADR governing
+example is a generic `OrderService`. This shared mechanism has no [ADR](../glossary/adr) governing
 what it means on the wire.
 
 NATS Services (NATS micro,
@@ -40,7 +40,7 @@ substrate as one shared rule, the protobuf-family sibling of
 This is a naming binding, not a protocol tunnel. It borrows gRPC's *idiom*
 (method-in-path routing, canonical status semantics) so the shape is familiar. It
 does not run gRPC: there is no HTTP/2, no gRPC framing, and no gRPC library on the
-path. The transport is core NATS; the RPC semantics are NATS micro.
+path. The [transport](../glossary/transport) is core NATS; the RPC semantics are NATS micro.
 
 ## Decision
 
