@@ -24,8 +24,8 @@ The [agent-platform research](../research/agent-platform/index.md) found one
 stable decomposition across otherwise different products: a durable
 definition, an execution or session, and memory are separate resources.
 Managed products version the definition and resolve it into a session, while
-memory, environment, credentials, and runtime state follow independent
-lifecycles. The [decision record](../research/agent-platform/decision-record.md)
+memory, environment, credentials, implementation state, and hosting state
+follow independent lifecycles. The [decision record](../research/agent-platform/decision-record.md)
 then refined the platform boundary further: the agent owns its facts and
 dependency declarations; another party's permission, judgment, funding,
 scheduling, routing, or observation stays beside the agent on its own plane.
@@ -53,10 +53,10 @@ The research also exposes why a field inventory alone is insufficient:
 
 Putting any of these behind a generic `schema` field would erase who owns the
 contract, when it binds, and which change must mint a revision. The same
-problem appears outside schemas. A model default, a live tool grant, a memory
-selection, a budget ceiling, and an observed success rate can all influence a
-run, but they have different authors, consistency rules, security properties,
-and change cadences.
+problem appears outside schemas. An exact model selection, a live tool grant,
+a memory selection, a budget ceiling, and an observed success rate can all
+influence a run, but they have different authors, consistency rules, security
+properties, and change cadences.
 
 The first lifecycle contract draft makes this ambiguity visible. It models a
 partial charter and a digest for a larger configuration, while instructions, turn
@@ -116,8 +116,6 @@ Agent
   name
   parent -> Hierarchy node
     (placement; recorded at provisioning, moves are hierarchy operations)
-  runtime -> Runtime resource
-    (typed reference to the runtime family, immutable, never a raw string)
   latest_revision -> AgentRevision
     (derived: the highest minted revision, what new sessions run by
      default; not a stored pointer)
@@ -133,7 +131,19 @@ AgentRevision
 
 AgentConfiguration
   description
-  model_default + deterministic_parameters
+  agent_implementation -> AgentImplementation
+    implementation_version_ref -> AgentImplementationVersion
+      (exact typed implementation kind + immutable version)
+    implementation_definition_digest
+    implementation_configuration
+      (typed for that exact implementation version)
+    implementation_configuration_digest
+  primary_model_selection -> ModelSelection
+    model_version_ref -> ModelVersion
+    model_definition_digest
+    deterministic_parameters
+  auxiliary_model_selections
+    role + ModelSelection
   instructions
   turn_wrappers
   variables_schema
@@ -183,9 +193,12 @@ AgentRevision.configuration_ref      -> the exact same AgentConfiguration
 ```
 
 Activation assigns the revision number and records provenance. It never
-rebuilds the candidate. `configuration_digest` is the revision digest and remains
-unchanged through activation; the revision number and provenance are not part
-of the configuration digest.
+rebuilds the candidate. `configuration_digest` is the revision digest and
+remains unchanged through activation; the revision number and provenance are
+not part of the configuration digest. The digest commits transitively to the
+exact implementation version, implementation definition, typed implementation
+configuration, primary model, auxiliary models, deterministic parameters, and
+every other configuration-owned artifact.
 
 ### 2. Keep adjacent resources behind references
 
@@ -195,13 +208,22 @@ separate, which datum it owns, and how it references the agent. Their full
 contracts are future decisions in their own domains, and those decisions may
 not move data across the boundary fixed here.
 
-- **Session.** A session pins exactly one AgentRevision at start, by
-  reference and digest, and resolves everything else as session facts: the
-  concrete runtime version, variable values, tool versions, memory
-  selection, work input, overrides.
-  The AgentConfiguration is not the literal model input; the runtime assembles
-  input from the configuration plus session-resolved facts, and the session must
-  record enough references and digests to reconstruct what the model saw.
+- **Session.** A session pins exactly one AgentRevision at start, by reference
+  and digest. Its immutable SessionExecutionPlan copies the revision's exact
+  implementation version and definition digest, implementation configuration
+  digest, and primary and auxiliary ModelSelection values. It never selects a
+  newer implementation or another model. The plan resolves only external facts:
+  ResolvedModelRoute values that bind those exact models to authorized
+  credential routes, variable bindings, tool versions, memory selections, work
+  input, and other dependencies under
+  [ADR#0031](./0031-agent-implementation-and-session-plan.md).
+  Session-owned ExecutionAttempt facts separately record behavior-neutral
+  hosting, placement, restart, and attestation evidence without changing the
+  plan.
+  The AgentConfiguration is not the literal model input; the pinned
+  AgentImplementation adapter assembles input from the configuration plus
+  session-resolved facts, and the session must record enough references and
+  digests to reconstruct what the model saw.
   The revision digest answers "what did the agent declare?"; any
   session-side digest answers "what did the model see?"; they are never the
   same field. Activation never changes an in-flight session's pin.
@@ -230,7 +252,11 @@ Everything else remains with its existing owner:
 - evaluation and Outcome own rubrics, bindings, verdict policy, and scores;
 - scheduling and routing own triggers, channels, destinations, and routing;
 - work and environment resources own work payloads and workspace contents;
-- the runtime and session own transcripts and runtime checkpoints; and
+- the pinned `AgentImplementation` owns loop-state semantics, while the
+  session owns transcripts and recorded implementation checkpoints;
+- the Session launch and deployment planes own process, container, isolation,
+  network, filesystem, hosting authentication, and execution-lifecycle facts;
+  and
 - skill resources own skill content, while an AgentConfiguration owns exact pins.
 
 The revision boundary is therefore mechanical:
@@ -238,19 +264,22 @@ The revision boundary is therefore mechanical:
 | Change | Owner and effect | New AgentRevision? |
 | --- | --- | --- |
 | Instructions, wrappers, description | AgentConfiguration proposal | Yes |
-| Model defaults, parameters, or `variables_schema` | AgentConfiguration proposal | Yes |
+| AgentImplementation kind, version, typed configuration, or digest | AgentConfiguration proposal | Yes |
+| Primary or auxiliary model selections, parameters, or `variables_schema` | AgentConfiguration proposal | Yes |
 | Skill pins or tool/delegate/memory declarations | AgentConfiguration proposal | Yes |
 | Selectable labels | AgentConfiguration proposal | Yes |
 | Skill content | Skill resource; a revision changes only when its pin changes | No by itself |
 | Memory content | Memory write | No |
-| Variable values, overrides, or resolved tools | Session start facts | No |
+| Variable bindings, work input, or resolved dependencies | Session start facts | No |
+| Exact implementation and model pins copied from AgentRevision | Session start record | No |
+| ResolvedModelRoute or behavior-neutral hosting fact | Session or deployment fact | No |
 | Transcript, actions, resolved delegates, or outcomes | Session execution record | No |
 | Tool schema or work schema | ToolDefinition or WorkContract version | No |
 | Parent, placement, scope, or visibility | Hierarchy operation | No |
 | Ownership or authority | Policy plane binding on hierarchy | No |
 | Annotations | Agent metadata operation | No |
 | Agent id | Immutable Agent identity | No |
-| Name or runtime | Immutable; runtime change creates a sibling Agent | No |
+| Name | Immutable Agent fact | No |
 | Grants, secrets, budgets, evaluation, routing, or schedules | External plane | No |
 
 #### Worked example: one proposal becomes revision 2
@@ -271,7 +300,6 @@ agent:
   agent_id: agent-pr-reviewer
   name: pr-reviewer
   parent: project-example
-  runtime: runtime-default
   latest_revision:
     revision_number: 2
   lifecycle_state: active
@@ -283,11 +311,24 @@ agent_configurations:
     configuration_digest: "sha256:0101010101010101010101010101010101010101010101010101010101010101"
     content:
       description: Reviews pull requests for correctness and maintainability.
-      model_default:
-        model_id: model-reviewer-v1
+      agent_implementation:
+        implementation_version_ref:
+          kind: managed
+          version: 3
+        implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
+        implementation_configuration:
+          context_strategy: rolling-summary-v2
+          max_tool_iterations: 24
+        implementation_configuration_digest: "sha256:0303030303030303030303030303030303030303030303030303030303030303"
+      primary_model_selection:
+        model_version_ref:
+          model_id: model-reviewer
+          version: 1
+        model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
         deterministic_parameters:
           temperature: 0.2
           max_output_tokens: 4096
+      auxiliary_model_selections: []
       instructions:
         - Report correctness defects with file and line evidence.
         - Separate blocking findings from suggestions.
@@ -327,15 +368,61 @@ agent_configurations:
   - configuration_ref: configuration-pr-reviewer-v2
     configuration_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
     content:
-      # identical to configuration-pr-reviewer-v1 except the two differenced fields
+      description: Reviews pull requests for correctness and maintainability.
+      agent_implementation:
+        implementation_version_ref:
+          kind: managed
+          version: 3
+        implementation_definition_digest: "sha256:0202020202020202020202020202020202020202020202020202020202020202"
+        implementation_configuration:
+          context_strategy: rolling-summary-v2
+          max_tool_iterations: 24
+        implementation_configuration_digest: "sha256:0303030303030303030303030303030303030303030303030303030303030303"
+      primary_model_selection:
+        model_version_ref:
+          model_id: model-reviewer
+          version: 1
+        model_definition_digest: "sha256:0404040404040404040404040404040404040404040404040404040404040404"
+        deterministic_parameters:
+          temperature: 0.2
+          max_output_tokens: 4096
+      auxiliary_model_selections: []
       instructions:
         - Report correctness defects with file and line evidence.
         - Treat missing regression coverage as blocking when behavior changes.
         - Separate blocking findings from suggestions.
+      turn_wrappers:
+        - wrapper-repository-context-v1
+      variables_schema:
+        review_depth:
+          type: string
+          allowed_values: [standard, strict]
+          required: true
+        output_language:
+          type: string
+          required: false
       exact_skill_pins:
         - skill_id: skill-code-review
           version: 4
           content_digest: "sha256:1515151515151515151515151515151515151515151515151515151515151515"
+      required_tool_declarations:
+        - selector:
+            name: repository-read
+      optional_tool_declarations:
+        - selector:
+            name: ci-status
+      required_delegate_declarations: []
+      optional_delegate_declarations:
+        - selector:
+            labels:
+              family: security-review
+      required_memory_declarations: []
+      optional_memory_declarations:
+        - selector:
+            kind: project-conventions
+      selectable_labels:
+        family: code-review
+        language: any
 
 agent_revisions:
   - agent_id: agent-pr-reviewer
@@ -404,6 +491,9 @@ After this activation:
 | Publish a new WorkContract version | Work plane changes; no revision 3 |
 | Publish skill-code-review v5 | No revision 3 until a proposal changes the pin |
 | Propose different instructions or a new skill pin | New configuration; activation may mint revision 3 |
+| Publish AgentImplementationVersion 4 | No revision 3 until a proposal changes the exact pin |
+| Propose implementation version 4, different implementation config, or another model | Charter-class configuration change; activation may mint revision 3 |
+| Move the same pinned implementation to another conforming host | Deployment changes; no revision 3 |
 
 #### Boundary rationale
 
@@ -414,28 +504,61 @@ are policy bindings on the hierarchy, evaluated live: a move requires
 rights on both source and destination, and taking authority over an agent
 is a policy change, never a registry write. There is no independent `scope`
 field. Annotations are opaque record metadata and never affect selection,
-model input, runtime behavior, or the configuration digest.
+model input, implementation behavior, hosting behavior, or the configuration
+digest.
 
-`runtime` is a typed reference to a Runtime resource the platform owns,
-never a raw string and never inline runtime configuration. The Runtime
-resource describes the loop engine (a managed default loop, an established
-harness such as claude-code, or a custom loop behind a turn contract),
-which models it can drive, and its versions; its contract is runtime-plane
-work, not this ADR. The Agent pins the runtime family, immutably, so every
-revision and configuration is bound to one engine by construction:
-verification does not transfer across loop engines, and switching families
-creates a sibling Agent. Each session resolves and records the concrete
-runtime version that actually executed it, so a runtime upgrade never
-mints a revision and is never invisible either.
+`AgentConfiguration.agent_implementation` binds the exact typed
+implementation kind, immutable AgentImplementationVersion reference and
+definition digest, typed per-Agent implementation configuration, and
+implementation-configuration digest. It is behavior, not placement. A newer
+implementation version is never selected automatically. Changing the
+implementation kind, version, definition digest, configuration, or
+configuration digest creates a candidate AgentConfiguration and requires the
+normal Proposal, verification, and activation workflow. The same Agent may
+therefore evolve its implementation through controlled revisions without
+mutating an existing revision or replacing the stable Agent identity.
 
-Verification evidence records what it actually exercised: the concrete
-runtime version, tool versions, and memory snapshots. A revision's score is
-always interpretable as "under these resolved facts", never as a
-context-free claim.
+The stable Agent contains neither an implementation binding nor a model
+selection. Both are behavior facts owned by its immutable configurations.
+
+`primary_model_selection` and every `auxiliary_model_selections` entry are
+equally exact configuration facts. An AgentImplementationVersion may declare
+which typed model roles it requires and validate their compatibility, but the
+AgentConfiguration contains the exact model and deterministic parameters for
+every role, including its ModelVersion reference and definition digest. Session
+admission does not add a hidden model role, replace a model, or merge in a newer
+implementation default.
+
+The SessionExecutionPlan copies these implementation and model pins from the
+AgentRevision and resolves a `ResolvedModelRoute` only to authorize each exact
+model through an exact provider driver, provider connection, and credential
+binding. Attempt-scoped model-access grants remain live authorization outside
+the immutable plan. The provider driver is a Session fact because it adapts an
+already-pinned model to an external provider rather than defining Agent
+behavior. Its exact pin remains part of verification evidence. The plan also
+resolves external dependencies and inputs under
+[ADR#0031](./0031-agent-implementation-and-session-plan.md). It never resolves
+the agent's implementation or model identity.
+
+Process, container, microVM, remote host, placement, isolation, network,
+filesystem, lifecycle, cancellation, recovery, and hosting authentication are
+Session launch or deployment facts. They do not enter AgentConfiguration and
+do not mint a revision while they remain behaviorally transparent. If a host
+setting changes model-visible input, tools, loop decisions, model selection,
+or terminal semantics, it is not merely hosting. The behaviorally relevant
+setting must become part of the exact AgentImplementation definition or typed
+AgentConfiguration before use.
+
+Verification evidence records what it actually exercised: AgentRevision and
+configuration digests, the exact implementation version and configuration
+digests, exact model selections, ResolvedModelRoute values, tool versions, and
+memory snapshots. A revision's score is always interpretable as "under these
+resolved facts", never as a context-free claim.
 
 An AgentConfiguration is content-addressed and never edited. Its digest
-commits transitively to every configuration-owned artifact, so a skill pin commits
-to immutable skill content rather than only a mutable version label.
+commits transitively to every configuration-owned artifact, so implementation
+and skill pins commit to immutable content rather than only mutable version
+labels.
 
 Proposal facts explain why a candidate did or did not become a revision; they
 are not behavior content. Change classification comes from the canonical
@@ -482,12 +605,15 @@ still produces an `AgentRevision` bound to one complete `AgentConfiguration`.
   skill pins, optional tool, delegate, or memory declarations, and
   selectable labels that do not alter a well-known routing or comparison
   group.
-- Charter-class changes include the model default and deterministic model
-  parameters, required tool, delegate, or memory declarations, well-known
-  grouping labels such as `family`, and the `variables_schema`.
-- Name and runtime are immutable agent facts. Placement changes are
-  hierarchy operations and authority changes are policy operations, never
-  proposals for behavior revisions.
+- Charter-class changes include AgentImplementation kind, version, definition
+  digest, typed configuration, or implementation-configuration digest; primary
+  and auxiliary model selections and deterministic model parameters; required
+  tool, delegate, or memory declarations; well-known grouping labels such as
+  `family`; and the `variables_schema`.
+- Name is an immutable agent fact. Implementation and model evolution use
+  proposals for new revisions. Placement changes are hierarchy or deployment
+  operations and authority changes are policy operations, never proposals for
+  behavior revisions.
 
 For v1, the variable schema is charter-class because it is an interface
 offered to session callers. Adding or removing a binding, changing a type, or
@@ -518,9 +644,9 @@ invariant.
   of a reusable tool.
 - `WorkContract.input_schema` and `WorkContract.result_schema` declare the
   structured input and successful result for one kind of work.
-- A runtime-state or checkpoint schema belongs to the runtime and session
-  implementation. Jido's state schema is this kind of contract, not evidence
-  for a generic Agent schema.
+- An AgentImplementation loop-state or checkpoint schema belongs to the exact
+  implementation version and the session contract. Jido's state schema is
+  this kind of contract, not evidence for a generic Agent schema.
 - Rubrics and quality scores remain in EvaluationBinding and
   OutcomeRecorded. Shape validity is not outcome quality.
 
@@ -546,11 +672,12 @@ The following data never enters an AgentConfiguration:
 - ownership policy and authorization principal kinds;
 - inbound identity: who may invoke the agent is authentication and policy,
   never configuration;
-- sandbox and execution-environment configuration: filesystem, network,
-  containers, and environment variables belong to the runtime plane;
+- behavior-neutral hosting configuration: processes, containers, remote hosts,
+  placement, isolation, filesystem, network, environment variables, hosting
+  authentication, and lifecycle belong to Session launch or deployment;
 - success rates, usage counts, cost, priority, and fitness projections;
-- environment contents, workspace contents, memory records, transcripts, and
-  runtime checkpoints; and
+- environment contents, workspace contents, memory records, transcripts,
+  implementation checkpoints, and hosting state; and
 - work payloads, WorkContracts, and tool invocation schemas.
 
 An AgentConfiguration declares what it needs. External planes decide what it may
@@ -571,8 +698,9 @@ and equip the tool call outside the prompt.
 - The definition contract stays small enough to hand to another engineer:
   four records, one membership test, and one revision-boundary table.
 - The agent platform needs typed contracts for Agent, AgentConfiguration,
-  AgentRevision, Proposal, and `variables_schema`. A partial charter plus an
-  opaque content digest is not a complete definition contract.
+  AgentRevision, Proposal, the exact AgentImplementation binding, exact model
+  selections, and `variables_schema`. A partial charter plus an opaque
+  content digest is not a complete definition contract.
 - The definition records alone answer which agent existed, which revision
   ran, and which proposal justified it. What the model saw and what was
   authorized are answered by the session and policy domains through the
@@ -600,5 +728,6 @@ and equip the tool call outside the prompt.
   to that interface, but prevents the evolution loop from silently breaking
   callers.
 - Exact prompt ordering, provider-specific message roles, compression
-  algorithms, and wrapper cadence remain runtime-adapter decisions. This ADR
-  fixes ownership and binding time rather than one universal prompt format.
+  algorithms, and wrapper cadence remain decisions of the implementation
+  adapter pinned by AgentConfiguration. This ADR fixes ownership and binding
+  time rather than one universal prompt format.
