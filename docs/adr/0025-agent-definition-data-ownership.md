@@ -244,6 +244,58 @@ not move data across the boundary fixed here.
   the payload, and the session records the work input as an immutable
   reference and digest.
 
+#### Memory can still be accessed through a tool
+
+The separation above is an ownership and lifecycle boundary, not a claim that
+Memory and tools are mutually exclusive runtime mechanisms. It matters because
+a memory write must not mint an AgentRevision, sharing an Agent must not share
+memory across hierarchy or policy contexts, and a session must record which
+memory influenced its execution. It does not require the runtime to give
+Memory a special invocation mechanism.
+
+The terms answer different questions:
+
+| Term | Meaning |
+| --- | --- |
+| Memory | Durable data with its own scope, policy, provenance, and lifecycle. |
+| ToolDefinition | A reusable, versioned callable interface and the schema for its accepted arguments. |
+| Tool call | One execution of a resolved ToolDefinition with concrete arguments. |
+
+A ToolDefinition is therefore closer to a function signature than to one
+function call. The logical example below is illustrative only; it does not
+propose wire fields, an SDK convention, or the future tool contract.
+
+```yaml
+tool_definition:
+  name: search-memory
+  version: 1
+  input_schema:
+    query:
+      type: string
+      required: true
+    limit:
+      type: integer
+      required: false
+
+tool_call:
+  call_id: call-17
+  resolved_tool: search-memory@1
+  arguments:
+    query: release note conventions
+    limit: 5
+```
+
+`search-memory@1` is the reusable definition. `call-17` is one specific call,
+and its arguments are validated against that definition's `input_schema`.
+Another call can use the same definition with different arguments. The session
+execution record owns the call and its outcome; the Memory resource still owns
+the records the operation reads or writes.
+
+A runtime may resolve Memory during session-start assembly, expose operations
+over Memory as tools during execution, or support both. The exact call result,
+error, authorization, endpoint-binding, and wire shapes remain future Tool and
+Session decisions.
+
 Everything else remains with its existing owner:
 
 - hierarchy owns `parent`, placement, moves, derived scope, and visibility;
