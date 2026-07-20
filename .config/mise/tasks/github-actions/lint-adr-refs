@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 #MISE description="Assert every ADR#NNNN reference in markdown is a link that resolves to its docs/adr/NNNN-*.md file"
 
-"""Lint ADR references.
+"""Lint ADR references and the ADR catalog itself.
 
-Rules (applied to every `ADR#NNNN` where NNNN is exactly 4 digits):
+Reference rules (applied to every `ADR#NNNN` where NNNN is exactly 4 digits):
   A. The reference must be a markdown link: `[ADR#NNNN: ...](target)`.
      Exception: the `# ADR#NNNN: ...` title heading inside docs/adr/NNNN-*.md.
   B. The link target must resolve (relative to the file) to an existing
      docs/adr/NNNN-*.md whose leading number equals NNNN.
+
+Catalog rules (applied to docs/adr/NNNN-*.md files, mirroring the VitePress
+build guard in docs/.vitepress/helpers.ts so duplicates are caught on PRs, not
+only on the post-merge docs build):
+  C. Every ADR number is unique: no two files share the same NNNN prefix and no
+     two files declare the same frontmatter `number`.
+  D. Within one ADR file the number agrees everywhere: filename prefix ==
+     frontmatter `number` == the `# ADR#NNNN:` H1 heading.
 
 Non-4-digit forms (e.g. ADR#6310044131 research placeholders) are ignored.
 
@@ -16,6 +24,7 @@ Exit code 1 if any violation is found.
 
 from __future__ import annotations
 
+import collections
 import os
 import re
 import subprocess
@@ -55,12 +64,13 @@ def adr_number_for(path: Path) -> str | None:
     return m.group(1) if path.parent == ADR_DIR and m else None
 
 
+# Directories that never contain committed docs: dependencies, git internals,
+# and gitignored agent scratch notes (`.trogonai/**/*.internal.trogonai.md`).
+IGNORED_DIRS = {"node_modules", ".git", ".trogonai"}
+
+
 def iter_markdown() -> list[Path]:
-    return [
-        p
-        for p in REPO.rglob("*.md")
-        if "node_modules" not in p.parts and ".git" not in p.parts
-    ]
+    return [p for p in REPO.rglob("*.md") if IGNORED_DIRS.isdisjoint(p.parts)]
 
 
 def check_file(path: Path) -> list[str]:
@@ -105,6 +115,49 @@ def check_file(path: Path) -> list[str]:
     return problems
 
 
+# frontmatter `number: "0011"` (single or double quoted, or bare)
+FRONTMATTER_NUMBER_RE = re.compile(r'^number:\s*["\']?(\d{4})["\']?\s*$', re.MULTILINE)
+# H1 title heading `# ADR#0011: ...`
+TITLE_NUMBER_RE = re.compile(r"^#\s+ADR#" + N + r"\b", re.MULTILINE)
+
+
+def check_catalog() -> list[str]:
+    """Enforce unique, self-consistent ADR numbers across docs/adr/NNNN-*.md."""
+    problems: list[str] = []
+    by_number: dict[str, list[str]] = collections.defaultdict(list)
+
+    for path in sorted(ADR_DIR.glob("*.md")):
+        file_num = adr_number_for(path)
+        if file_num is None:
+            continue  # index.md and any non-numbered doc
+        rel = path.relative_to(REPO)
+        by_number[file_num].append(str(rel))
+
+        text = path.read_text(encoding="utf-8", errors="replace")
+        fm = FRONTMATTER_NUMBER_RE.search(text)
+        title = TITLE_NUMBER_RE.search(text)
+
+        if fm is None:
+            problems.append(f"{rel}: missing frontmatter `number: \"{file_num}\"`")
+        elif fm.group(1) != file_num:
+            problems.append(
+                f"{rel}: frontmatter number {fm.group(1)} does not match filename number {file_num}"
+            )
+
+        if title is None:
+            problems.append(f"{rel}: missing `# ADR#{file_num}:` H1 title heading")
+        elif title.group(1) != file_num:
+            problems.append(
+                f"{rel}: title heading ADR#{title.group(1)} does not match filename number {file_num}"
+            )
+
+    for number, files in sorted(by_number.items()):
+        if len(files) > 1:
+            problems.append(f"duplicate ADR number {number}: {', '.join(files)}")
+
+    return problems
+
+
 def main() -> int:
     if not ADR_DIR.is_dir():
         print(f"error: {ADR_DIR} not found", file=sys.stderr)
@@ -112,13 +165,14 @@ def main() -> int:
     problems: list[str] = []
     for path in iter_markdown():
         problems.extend(check_file(path))
+    problems.extend(check_catalog())
 
     if problems:
         for p in sorted(problems):
             print(p)
-        print(f"\n{len(problems)} ADR reference problem(s) found.", file=sys.stderr)
+        print(f"\n{len(problems)} ADR problem(s) found.", file=sys.stderr)
         return 1
-    print("All ADR references are properly linked.")
+    print("All ADR references are properly linked and ADR numbers are unique.")
     return 0
 
 
