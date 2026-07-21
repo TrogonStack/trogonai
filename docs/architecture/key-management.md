@@ -273,12 +273,12 @@ Standing rules that hold across all eight categories:
   ratified value, and is validated only once the cipher suite is chosen
   ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
   Non-Goals).
-- **Scheduled destruction waiting period.** ADR#0023 fixes that destruction
+- **Scheduled destruction waiting period.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes that destruction
   of a platform-managed key is scheduled and reviewable rather than
   immediate, but does not fix how long the waiting period is
   ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)
   Decision 6).
-- **Console and API request shapes.** Neither ADR#0030 nor ADR#0033 defines
+- **Console and API request shapes.** Neither [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) nor [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) defines
   console screens or API request and response shapes; both fix only the
   vocabulary and boundaries those surfaces must respect
   ([ADR#0033](../adr/0033-two-tier-key-custody-product-model.md)

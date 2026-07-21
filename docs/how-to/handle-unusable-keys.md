@@ -15,9 +15,9 @@ page maps each category to who acts on it and what that action is.
 ## Failure categories and responses
 
 The console and API request shapes for the actions below are an open
-decision that ADR#0033 leaves to future work: it fixes only the vocabulary
+decision that [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) leaves to future work: it fixes only the vocabulary
 and boundaries those surfaces must respect, not their screens or request
-shapes (ADR#0033 Non-Goals).
+shapes ([ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) Non-Goals).
 
 | Category | Likely cause | Who acts | Action |
 | --- | --- | --- | --- |

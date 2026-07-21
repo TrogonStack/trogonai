@@ -13,7 +13,7 @@ changes and destruction, and which operations each state allows.
 
 ## Platform-managed key states
 
-ADR#0023 Decision 6 fixes five explicit key states. They describe a
+[ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6 fixes five explicit key states. They describe a
 [managed key](../glossary/managed-key): an OpenBao Transit key operated by
 the platform behind the secrets service.
 
@@ -33,14 +33,14 @@ the platform behind the secrets service.
 Two rules govern transitions into and around these states:
 
 - Destruction is scheduled and reviewable; it is never an immediate API
-  operation (ADR#0023 Decision 6). ADR#0023 fixes the existence of a pending
+  operation ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6). [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes the existence of a pending
   destruction state and a review step, but not how long a key waits in that
   state before it moves to destroyed. The duration of that waiting period is
-  an open decision, left for the implementation that ADR#0023 gates behind
+  an open decision, left for the implementation that [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) gates behind
   its adoption proofs.
 - A compromised KEK is not handled by moving between these states. It
   requires new DEKs and re-encryption of the payload under those new DEKs
-  (ADR#0023 Decision 6; ADR#0030 Decision 4). Rewrapping the same DEK under a
+  ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 6; [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4). Rewrapping the same DEK under a
   different key changes nothing about who already holds the plaintext the
   compromised key protected, so rewrapping is not a substitute for
   re-encryption when compromise, rather than routine migration, is the
@@ -50,7 +50,7 @@ Two rules govern transitions into and around these states:
 
 For a [customer managed key](../glossary/customer-managed-key), the states
 above describe desired and observed state, not enforced state: the bound
-provider is authoritative over what the key actually permits (ADR#0030
+provider is authoritative over what the key actually permits ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 6).
 
 Active therefore never asserts that the customer has not disabled or revoked
@@ -79,13 +79,13 @@ The table applies each state to the operations a `KeyRef` participates in:
 - **BindExternalKey / set-as-default**: complete an administrative
   `BindExternalKey` operation against the key, or select an already bound
   `KeyRef` as a tenant's default wrapping key for new envelopes of a purpose
-  (ADR#0030 Decisions 3 and 4).
+  ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decisions 3 and 4).
 - **Migration source**: use the key as the old `KeyRef` in the rewrap
-  migration ADR#0030 Decision 4 defines, unwrapping an envelope's `Dek`.
+  migration [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4 defines, unwrapping an envelope's `Dek`.
 - **Migration target**: use the key as the new `KeyRef` in that same
   migration, wrapping the migrated `Dek`.
 
-Each cell is `allowed` or the exact typed failure category from ADR#0030
+Each cell is `allowed` or the exact typed failure category from [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
 Decision 6.
 
 | State | wrap_dek (new envelopes) | unwrap_dek (existing envelopes) | BindExternalKey / set-as-default | Migration source | Migration target |
@@ -99,7 +99,7 @@ Decision 6.
 
 Migration source reuses the `unwrap_dek` gate, and migration target reuses
 the `wrap_dek` gate, because migration is defined as an unwrap under the old
-`KeyRef` followed by a wrap under the new one (ADR#0030 Decision 4).
+`KeyRef` followed by a wrap under the new one ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4).
 Decrypt-only is the one state where those two columns diverge: a key that no
 longer takes new envelopes can still be migrated away from, because unwrap
 still succeeds, but it cannot receive a migration as its target, because
@@ -107,14 +107,14 @@ wrap does not.
 
 BindExternalKey / set-as-default is gated with `wrap_dek` for the same
 reason in both directions: binding validates a complete wrap and unwrap
-round trip before it returns a `KeyRef` (ADR#0030 Decision 4), and setting a
+round trip before it returns a `KeyRef` ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4), and setting a
 `KeyRef` as the default only affects envelopes wrapped after the change
-(ADR#0030 Decision 3), so a key that cannot currently wrap cannot be validly
+([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 3), so a key that cannot currently wrap cannot be validly
 bound or newly selected as a default.
 
 ## Enforcement timing
 
-ADR#0030 Decision 6 states the bound on when a state change, whether
+[ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 6 states the bound on when a state change, whether
 platform-scheduled or provider-side, actually stops operations from
 succeeding:
 
@@ -139,7 +139,7 @@ document different timing:
 Envelope encryption means a destroyed or otherwise unrecoverable KEK makes
 every envelope still bound to its `KeyRef` permanently unreadable: the
 `WrappedDek` can no longer be unwrapped, and without the `Dek` the payload
-ciphertext it protects is unreadable too. ADR#0030's consequences record
+ciphertext it protects is unreadable too. [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)'s consequences record
 this outcome for customer destruction directly: the platform cannot
 override it, and that is both the purpose and the operational cost of
 independent customer control, not a failure to route around.

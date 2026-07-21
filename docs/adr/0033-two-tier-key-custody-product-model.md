@@ -19,7 +19,7 @@ envelope-wrapping contract.
 Two questions kept resurfacing while reviewing that direction, and both are
 product-model questions rather than adapter mechanics:
 
-1. What are the customer-facing custody offerings? ADR#0030's three adapters
+1. What are the customer-facing custody offerings? [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s three adapters
    are easy to misread as three offerings, which conflates who controls a key
    with which vendor hosts it.
 2. Which keys may live behind the platform's own key management? Every managed
@@ -40,8 +40,8 @@ behind those offerings is explained in
 [Key Custody](../architecture/key-custody.md).
 
 This ADR fixes the same two boundaries for this platform. It names the product
-tiers above ADR#0030's mechanics and draws the scope line that keeps the
-platform's own root of trust out of the business key path. ADR#0030 remains
+tiers above [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s mechanics and draws the scope line that keeps the
+platform's own root of trust out of the business key path. [ADR#0030](./0030-customer-controlled-key-backend-routing.md) remains
 authoritative for backend registration, binding, provider access, and failure
 semantics.
 
@@ -55,11 +55,11 @@ The product offers two tiers, and only two:
   key-encryption key is an OpenBao Transit key operated by the platform behind
   the secrets service. A [tenant](../glossary/tenant) configures nothing: no
   registration, no locator, no provider account. Which key wraps a tenant's
-  envelopes is resolved server-side from tenant and purpose, per ADR#0030.
+  envelopes is resolved server-side from tenant and purpose, per [ADR#0030](./0030-customer-controlled-key-backend-routing.md).
 - **[Customer managed key](../glossary/customer-managed-key)** is the opt-in.
   The key-encryption key lives in a backend the customer controls, bound
   through the `KeyBackendRegistration` and `BindExternalKey` operations of
-  ADR#0030. The customer retains an independent operational veto: disabling
+  [ADR#0030](./0030-customer-controlled-key-backend-routing.md). The customer retains an independent operational veto: disabling
   the key or revoking the platform's access in their own infrastructure fails
   every future wrap and unwrap closed, with no platform fallback.
 
@@ -69,7 +69,7 @@ shape of a cloud provider's "provider-managed" key. Such a tier changes what a
 tenant can see without changing who can stop use, and custody tiers here are
 defined by control, not visibility. Importing customer key material into
 platform OpenBao remains rejected, and double-wrapping under both a platform
-and a customer key remains rejected as the default, as recorded in ADR#0030's
+and a customer key remains rejected as the default, as recorded in [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s
 alternatives; deliberate two-party control stays a possible later capability
 and a separate decision.
 
@@ -87,19 +87,19 @@ implements it:
 
 Product surfaces (console, docs, APIs) present the two tiers, and provider
 selection appears only inside the customer-managed flow. Adding an adapter
-under ADR#0030's rules changes the provider list, never the tier list.
+under [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s rules changes the provider list, never the tier list.
 
 ### 3. Platform boot keys are outside both tiers
 
 No key or credential on the cold-start path from a deployment to a serving
 secrets service may be custodied behind the `SecretStore` or `KeyManagement`
 ports. That path includes at least the OpenBao bootstrap identity and unseal
-material (already fixed by ADR#0023), the `a2a-auth-callout` signing keys that
+material (already fixed by [ADR#0023](./0023-secret-management-and-key-custody-direction.md)), the `a2a-auth-callout` signing keys that
 admit platform workloads to NATS, and the credentials the secrets service uses
 for its own connections. These are provisioned by the deployment under the
 [ADR#0007](./0007-configuration-sources.md) bootstrap rule.
 
-ADR#0023's evolution path, where the callout's vault-backed signing-key source
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s evolution path, where the callout's vault-backed signing-key source
 becomes a `KeyManagement` caller, stays open only in a topology that takes the
 callout off the cold-start path: the callout and the secrets service
 authenticate to NATS with deployment-provisioned credentials that are not
@@ -115,11 +115,11 @@ With that line drawn, key custody is a strict dependency chain with no cycles:
 
 Each stage may depend only on earlier stages. The chain is a structural rule
 for designs, and it doubles as the adoption order: a stage ships only when a
-consumer demands it, consistent with ADR#0023's proof-gated adoption.
+consumer demands it, consistent with [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s proof-gated adoption.
 
 ### 4. Business key management wraps tenant business data only
 
-The `KeyManagement` envelope contract of ADR#0030 applies to tenant-scoped
+The `KeyManagement` envelope contract of [ADR#0030](./0030-customer-controlled-key-backend-routing.md) applies to tenant-scoped
 business payloads owned by data-plane subsystems. It does not apply to
 platform control-plane state that must be readable before the secrets service
 serves, and it is not the mechanism for infrastructure encryption at rest:
@@ -134,14 +134,14 @@ product model.
 AWS presents AWS-owned, AWS-managed, and customer-managed keys. Rejected: the
 middle tier grants audit visibility without any control over continued use,
 and this platform's tiers exist to answer exactly one question, who can stop
-the platform from using a key. ADR#0023's dual-audit rule already records who
+the platform from using a key. [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s dual-audit rule already records who
 used which key in both tiers; surfacing that record to tenants is a
 product-surface question, independent of custody tier.
 
 ### Envelope-encrypt platform state universally
 
 Rejected. Components that must start before the secrets service serves could
-not read their own state, recreating the cycle this ADR removes. ADR#0023
+not read their own state, recreating the cycle this ADR removes. [ADR#0023](./0023-secret-management-and-key-custody-direction.md)
 already keeps secret values out of streams and snapshots, so platform state
 does not carry material that would justify the dependency.
 
@@ -154,13 +154,13 @@ deadlock.
 
 ## Non-Goals
 
-- Approving or scheduling implementation. ADR#0030's mechanics remain
+- Approving or scheduling implementation. [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s mechanics remain
   direction, and its prerequisite, the versioned envelope format and cipher
   suite decision, must still exist before adapters are built.
 - Changing any registration, binding, provider-access, shutdown, or
-  failure-taxonomy rule in ADR#0030.
+  failure-taxonomy rule in [ADR#0030](./0030-customer-controlled-key-backend-routing.md).
 - Claiming HSM, FIPS, or exclusive-custody properties for either tier;
-  ADR#0030's non-goals stand.
+  [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s non-goals stand.
 - Defining console screens or API shapes; this ADR fixes the vocabulary and
   boundaries they must respect.
 
@@ -172,13 +172,13 @@ deadlock.
 - The cold-start rule is reviewable: a design that places a boot-path key
   behind the platform ports is structurally rejected rather than debated case
   by case.
-- The managed tier inherits ADR#0023's honesty about OpenBao: it is not an
+- The managed tier inherits [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s honesty about OpenBao: it is not an
   HSM, and key material exists in server process memory. A customer whose
   requirement is hardware-rooted custody chooses the customer-managed tier
   with a provider that terminates in hardware.
 - Deferral stays cheap. Because tiers are resolved server-side behind opaque
   references, a tenant can start on the managed tier and move to a customer
-  managed key later through ADR#0030's explicit rewrap migration, without
+  managed key later through [ADR#0030](./0030-customer-controlled-key-backend-routing.md)'s explicit rewrap migration, without
   data-plane callers changing.
 
 ## References

@@ -22,7 +22,7 @@ Do not use this procedure if you suspect the old key-encryption key (KEK) is
 compromised. Rewrapping under a new key does not change who already had
 access to the plaintext `Dek` the old key protected, so a suspected
 compromise requires new `Dek` values and re-encryption of the payload, not a
-rewrap of the existing ciphertext (per ADR#0030 Decision 4). See
+rewrap of the existing ciphertext (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4). See
 [Handle Unusable Keys](./handle-unusable-keys.md) for that procedure instead.
 
 ## Preconditions
@@ -35,7 +35,7 @@ Before you start a migration, confirm all of the following:
 - The new key does not need to be bound ahead of time through a separate
   procedure. Binding it through `BindExternalKey` is the first step of the
   migration flow described below, and it must complete before any envelope's
-  `Dek` is rewrapped under the new `KeyRef` (per ADR#0030 Decision 4).
+  `Dek` is rewrapped under the new `KeyRef` (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4).
 - If a customer disables the old key before migration completes, they have
   chosen unavailability over recoverability. The platform cannot unwrap the
   envelopes still referencing a disabled old key, and it cannot recover them
@@ -47,7 +47,7 @@ Before you start a migration, confirm all of the following:
 
 ## How migration works
 
-Migration follows the rewrap flow that ADR#0030 Decision 4 defines. The
+Migration follows the rewrap flow that [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 4 defines. The
 console and API request shapes that trigger it are an open decision that
 [ADR#0033](../adr/0033-two-tier-key-custody-product-model.md) leaves for
 later work; what follows is the operation sequence the implementation must
@@ -87,7 +87,7 @@ satisfy, not a concrete request format:
 - Retire the old `KeyRef` only after that check passes.
 - Expect the audit record for each migrated envelope to carry the tenant,
   the `KeyRef`, the `KeyBackendId`, the purpose, the provider, the outcome,
-  and a correlation ID (per ADR#0030 Decision 7).
+  and a correlation ID (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 7).
 
 ## See also
 

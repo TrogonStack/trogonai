@@ -75,7 +75,7 @@ two customer-facing tiers, which differ in who holds the KEK hop of the chain:
 
 Both tiers answer one question: who can stop the platform from using a key.
 Neither tier makes hardware or exclusive-custody claims beyond its backend;
-those bounds are recorded in ADR#0030's non-goals.
+those bounds are recorded in [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)'s non-goals.
 
 ## Why platform boot keys stay off this chain
 
