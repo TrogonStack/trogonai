@@ -38,3 +38,4 @@ future implementation work.
 - [ADR#0030: Customer-Controlled Key Backend Routing](./0030-customer-controlled-key-backend-routing.md)
 - [ADR#0031: Agent Implementation and Session Plan](./0031-agent-implementation-and-session-plan.md)
 - [ADR#0032: Model Route and Credential Binding](./0032-model-route-and-credential-binding.md)
+- [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)

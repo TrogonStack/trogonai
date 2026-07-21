@@ -96,6 +96,8 @@ not current behavior.
 - [AAuth](./aauth)
 - [PoP](./pop)
 - [OpenBao](./openbao)
+- [Managed key](./managed-key)
+- [Customer managed key](./customer-managed-key)
 
 ## Observability
 
