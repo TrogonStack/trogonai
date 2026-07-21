@@ -40,6 +40,20 @@ export default async () => {
             { text: "ACP Conformance", link: "/architecture/acp-conformance" },
             { text: "Decider", link: "/architecture/decider" },
             { text: "Event Metadata", link: "/architecture/event-metadata" },
+            { text: "Key Custody", link: "/architecture/key-custody" },
+            { text: "Key Management", link: "/architecture/key-management" },
+            { text: "Key States", link: "/architecture/key-states" },
+            { text: "Secret Management", link: "/architecture/secret-management" },
+          ],
+        },
+        {
+          text: "How-to",
+          items: [
+            { text: "Bring Your Own AWS KMS Key", link: "/how-to/bring-your-own-aws-kms-key" },
+            { text: "Bring Your Own Google Cloud KMS Key", link: "/how-to/bring-your-own-google-cloud-kms-key" },
+            { text: "Bring Your Own OpenBao", link: "/how-to/bring-your-own-openbao" },
+            { text: "Migrate Between Key Backends", link: "/how-to/migrate-key-backends" },
+            { text: "Handle Unusable Keys", link: "/how-to/handle-unusable-keys" },
           ],
         },
         {
