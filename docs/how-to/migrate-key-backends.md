@@ -55,17 +55,26 @@ satisfy, not a concrete request format:
 
 1. Bind the new key, producing a new `KeyRef`. This step must complete before
    any envelope migrates.
-2. For each envelope, unwrap its `Dek` with the old `KeyRef`, then wrap that
+2. Cut over new writes before rewrapping anything: set the new `KeyRef` as
+   the default wrapping key for every purpose whose default is currently the
+   old `KeyRef`. Defaults are resolved server-side on wrap
+   (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+   Decision 3), so after this step no new envelope can be wrapped under the
+   old `KeyRef`, and the set of envelopes to migrate stops growing. A wrap
+   already in flight when the default changes may still commit under the old
+   `KeyRef`; such operations are bounded by their operation deadline, and the
+   completion check below catches anything they commit.
+3. For each envelope, unwrap its `Dek` with the old `KeyRef`, then wrap that
    same `Dek` with the new `KeyRef`, producing a new `WrappedDek`.
-3. Commit the new `KeyRef` and the new `WrappedDek` together, as one
+4. Commit the new `KeyRef` and the new `WrappedDek` together, as one
    transactional or compare-and-set mutation against the envelope's expected
    version. That mutation records a stable migration operation ID.
-4. If the mutation conflicts, nothing partial is committed and the
+5. If the mutation conflicts, nothing partial is committed and the
    currently committed pair remains authoritative. A retry rereads the
    envelope: it recognizes its own operation ID as already committed when
    applicable, and otherwise recomputes only if no different migration has
    superseded it.
-5. A mismatched `KeyRef` and `WrappedDek` pair, one that does not name the key
+6. A mismatched `KeyRef` and `WrappedDek` pair, one that does not name the key
    that actually produced it, is never visible to any reader.
 
 ## Rules
@@ -76,15 +85,25 @@ satisfy, not a concrete request format:
 - Setting the default wrapping key for new envelopes and migrating existing
   envelopes are separate actions. Changing a tenant's default affects only
   envelopes created after the change; it does not migrate anything already
-  written.
+  written. In a migration they compose in a fixed order: the default cutover
+  comes first, so the set of envelopes referencing the old `KeyRef` stops
+  growing before the rewrap and the final reference scan.
 - The old `KeyRef` stays immutable: its binding to a backend and provider
-  locator never changes in place. It is retired only after no envelope
-  references it any longer.
+  locator never changes in place. It is retired only after no purpose still
+  selects it as a default wrapping key and no envelope references it any
+  longer.
 
 ## Verifying completion
 
-- Confirm that no envelope still references the old `KeyRef`.
-- Retire the old `KeyRef` only after that check passes.
+- Confirm that no purpose still selects the old `KeyRef` as its default
+  wrapping key. The cutover in the migration flow makes this true before any
+  envelope is rewrapped; this check guards against a default added
+  concurrently.
+- Run the reference scan only after wrap operations that could have resolved
+  the old default before the cutover have drained, which their operation
+  deadline bounds. Then confirm that no envelope still references the old
+  `KeyRef`.
+- Retire the old `KeyRef` only after both checks pass.
 - Expect the audit record for each migrated envelope to carry the tenant,
   the `KeyRef`, the `KeyBackendId`, the purpose, the provider, the outcome,
   and a correlation ID (per [ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 7).

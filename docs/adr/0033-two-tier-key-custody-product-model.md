@@ -111,11 +111,17 @@ Custody hygiene never justifies reintroducing the cycle.
 With that line drawn, key custody is a strict dependency chain with no cycles:
 
 > deployment-attested identity → OpenBao → secrets service (`SecretStore`) →
-> managed keys (`KeyManagement`) → customer-managed backends
+> `KeyManagement`, which routes each operation to exactly one backend: the
+> platform's OpenBao Transit (managed keys) or a customer-managed backend
 
-Each stage may depend only on earlier stages. The chain is a structural rule
-for designs, and it doubles as the adoption order: a stage ships only when a
-consumer demands it, consistent with [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s proof-gated adoption.
+Each stage may depend only on earlier stages, and the two backend families
+are alternatives behind the `KeyManagement` port, not stages of one another:
+an operation against a customer-managed key never routes through, or depends
+on, a platform-managed key. Adoption order is a separate statement layered on
+the same chain: managed keys ship before customer-managed backends because a
+stage ships only when a consumer demands it, consistent with
+[ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s
+proof-gated adoption.
 
 ### 4. Business key management wraps tenant business data only
 

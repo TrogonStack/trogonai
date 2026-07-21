@@ -73,11 +73,29 @@ endpoint:
    short, explicit token maximum lifetime apply to either method ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
    Decision 5).
 2. Grant the platform's authentication role use permissions only. Never
-   grant restore, deletion, or key-administration permissions.
-3. On encrypt paths, grant the platform's token update permission but not
-   create permission. This is what keeps a soft-deleted key from being
-   silently recreated: the platform can continue to use a key that already
-   exists, but it cannot bring a deleted key back by writing to its path
+   grant restore, deletion, or key-administration permissions. Concretely,
+   the token policy names exactly the two Transit endpoints for the bound
+   key, each with the `update` capability and never `create`:
+
+   ```hcl
+   path "<transit-mount>/encrypt/<key-name>" {
+     capabilities = ["update"]
+   }
+
+   path "<transit-mount>/decrypt/<key-name>" {
+     capabilities = ["update"]
+   }
+   ```
+
+   Grant nothing else under the mount: no `<transit-mount>/keys/` paths
+   (key administration, configuration, and rotation), no
+   `<transit-mount>/restore/` paths, and no deletion paths
+   ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md)
+   Decision 5).
+3. The `update`-without-`create` grant on the encrypt path is what keeps a
+   soft-deleted key from being silently recreated: the platform can continue
+   to use a key that already exists, but it cannot bring a deleted key back
+   by writing to its path
    again ([ADR#0030](../adr/0030-customer-controlled-key-backend-routing.md) Decision 5).
 
 ## Step 3: Register the endpoint and bind the key

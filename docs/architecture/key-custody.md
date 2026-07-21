@@ -91,10 +91,13 @@ required to reach it.
 a strict dependency order:
 
 > deployment-attested identity → OpenBao → secrets service (`SecretStore`) →
-> managed keys (`KeyManagement`) → customer-managed backends
+> `KeyManagement`, which routes each operation to exactly one backend: the
+> platform's OpenBao Transit (managed keys) or a customer-managed backend
 
-Each stage may depend only on earlier stages. Platform bootstrap material
-comes from the deployment
+Each stage may depend only on earlier stages, and the two backend families
+are alternatives behind the `KeyManagement` port: an operation against a
+customer-managed key never routes through, or depends on, a platform-managed
+key. Platform bootstrap material comes from the deployment
 ([ADR#0007](../adr/0007-configuration-sources.md)), and business key
 management wraps [tenant](../glossary/tenant) business payloads only.
 
