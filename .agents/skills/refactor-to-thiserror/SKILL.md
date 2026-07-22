@@ -19,7 +19,7 @@ All paths and commands below are relative to the Rust workspace root — run `cd
    Over-matches on purpose — it also catches value-object `Display` impls, which step 3 filters out.
 
 2. Refactor each error type to the codebase idiom. Read a canonical, test-backed example first
-   (`crates/trogon-decider-runtime/src/snapshot/codec/snapshot_decode_error.rs`, or find current ones
+   (`crates/decider/trogon-decider-runtime/src/snapshot/codec/snapshot_decode_error.rs`, or find current ones
    with `rg -l 'derive\(.*thiserror::Error' --type rust crates`):
    - `#[derive(Debug, thiserror::Error)]` enum; keep existing derives.
    - One `#[error("...")]` per variant — copy the old `Display` text verbatim so `to_string()` is unchanged.

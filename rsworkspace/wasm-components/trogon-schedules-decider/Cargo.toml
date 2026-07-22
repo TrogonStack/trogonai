@@ -14,8 +14,8 @@ workspace = true
 [dependencies]
 trogon-decider = { workspace = true }
 trogon-decider-guest-sdk = { workspace = true }
-trogon-scheduler-domain = { path = "../../crates/trogon-scheduler-domain", default-features = false }
-trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["schedules"] }
+trogon-scheduler-domain = { path = "../../crates/scheduler/trogon-scheduler-domain", default-features = false }
+trogonai-proto = { path = "../../crates/platform/trogonai-proto", default-features = false, features = ["schedules"] }
 wit-bindgen = { workspace = true }
 
 [package.metadata.component]

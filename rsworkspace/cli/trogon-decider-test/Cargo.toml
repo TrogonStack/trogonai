@@ -26,4 +26,4 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 trogon-decider-sim = { workspace = true }
-trogonai-proto = { path = "../../crates/trogonai-proto", default-features = false, features = ["schedules"] }
+trogonai-proto = { path = "../../crates/platform/trogonai-proto", default-features = false, features = ["schedules"] }

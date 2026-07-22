@@ -11,7 +11,7 @@ cov = [
     "--all-features",
     "--workspace",
     "--ignore-filename-regex",
-    "crates/(trogonai-proto|trogon-semconv)/src/gen/.*|crates/trogon-decider-guest-sdk/.*|wasm-components/.*|cli/trogon-decider-test/.*",
+    "crates/platform/(trogonai-proto|trogon-semconv)/src/gen/.*|crates/decider/trogon-decider-guest-sdk/.*|wasm-components/.*|cli/trogon-decider-test/.*",
 ]
 
 [target.wasm32-wasip2]
