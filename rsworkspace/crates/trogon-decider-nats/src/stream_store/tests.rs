@@ -97,7 +97,7 @@ fn make_event_with_header(name: &str, value: &str) -> Event {
 }
 
 #[test]
-fn build_publish_message_rejects_header_name_containing_colon() {
+fn validate_event_headers_rejects_header_name_containing_colon() {
     let event = make_event_with_header("tenant:id", "trogon");
 
     let error = validate_event_headers(&event).expect_err("header name with ':' must not panic");
@@ -106,7 +106,7 @@ fn build_publish_message_rejects_header_name_containing_colon() {
 }
 
 #[test]
-fn build_publish_message_rejects_header_name_containing_space() {
+fn validate_event_headers_rejects_header_name_containing_space() {
     let event = make_event_with_header("tenant id", "trogon");
 
     let error = validate_event_headers(&event).expect_err("header name with a space must not panic");
@@ -115,7 +115,7 @@ fn build_publish_message_rejects_header_name_containing_space() {
 }
 
 #[test]
-fn build_publish_message_rejects_header_name_containing_non_ascii_character() {
+fn validate_event_headers_rejects_header_name_containing_non_ascii_character() {
     let event = make_event_with_header("tenant-é", "trogon");
 
     let error = validate_event_headers(&event).expect_err("header name with a non-ASCII character must not panic");
