@@ -1,8 +1,7 @@
 use std::error::Error as _;
 
 use trogon_decider::{
-    Decider, DecisionFailureError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType,
-    evaluate_decision,
+    Decider, DecisionError, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType, evaluate_decision,
 };
 
 /// Abstraction over whatever concrete WIT-generated command-envelope type a guest's generated
@@ -210,18 +209,18 @@ where
     C::evolve(state, &event).map_err(|source| into_view(BridgeError::Evolve(Box::new(source))))
 }
 
-/// Project a [`DecisionFailureError`] into a [`BridgeError`], mirroring the native runtime's
+/// Project a [`DecisionError`] into a [`BridgeError`], mirroring the native runtime's
 /// handling of the same failure type (see `trogon-decider-runtime`'s `append_decision` and
 /// `trogon_decider::testing`'s `decide_events`).
-fn map_decision_failure<C>(failure: DecisionFailureError<C::DecideError, C::EvolveError>) -> BridgeError
+fn map_decision_failure<C>(failure: DecisionError<C::DecideError, C::EvolveError>) -> BridgeError
 where
     C: Decider<DecideError: std::error::Error + 'static, EvolveError: std::error::Error + 'static>,
 {
     match failure {
-        DecisionFailureError::Decide(source) => BridgeError::Rejected {
+        DecisionError::Decide(source) => BridgeError::Rejected {
             source: Box::new(source),
         },
-        DecisionFailureError::Evolve(source) => BridgeError::Evolve(Box::new(source)),
+        DecisionError::Evolve(source) => BridgeError::Evolve(Box::new(source)),
     }
 }
 

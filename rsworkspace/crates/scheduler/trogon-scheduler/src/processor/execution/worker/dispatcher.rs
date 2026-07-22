@@ -33,9 +33,7 @@ use crate::commands::domain::ScheduleId;
 use crate::processor::execution::checkpoints::ProcessingFailureRecord;
 use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleKey, lane_route_from_stream_event};
 
-use super::processor::{
-    AckAction, PoisonReasonError, Processed, ProcessedOutcome, RetrySignalError, ScheduleProcessor,
-};
+use super::processor::{AckAction, PoisonReasonError, Processed, ProcessedOutcome, RetryableError, ScheduleProcessor};
 
 /// A delivered NATS message the dispatcher settles after a durable outcome.
 pub trait DeliveredMessage: Send + 'static {
@@ -282,13 +280,13 @@ where
     }
 
     // Reduce the process result to `Send`-only values before any settlement
-    // await: a transient `RetrySignalError` can wrap a non-`Send` domain error, so it
+    // await: a transient `RetryableError` can wrap a non-`Send` domain error, so it
     // must not survive across `message.*().await`.
     let step = match AssertUnwindSafe(processor.process_decoded(&event, decoded, now))
         .catch_unwind()
         .await
     {
-        Ok(Err(RetrySignalError::MissingCheckpoint { schedule_id }))
+        Ok(Err(RetryableError::MissingCheckpoint { schedule_id }))
             if message.delivery_count() >= MISSING_CHECKPOINT_DELIVERY_CEILING =>
         {
             ProcessStep::MissingExhausted { schedule_id }
@@ -330,7 +328,7 @@ enum ProcessStep {
     Panic(StreamPosition),
 }
 
-fn reduce_processed(processed: Result<Processed, RetrySignalError>) -> (Settle, Result<ProcessedOutcome, String>) {
+fn reduce_processed(processed: Result<Processed, RetryableError>) -> (Settle, Result<ProcessedOutcome, String>) {
     match processed {
         Ok(processed) => (Settle::from(processed.ack), Ok(processed.outcome)),
         Err(retry) => (Settle::Retry, Err(retry.to_string())),

@@ -19,7 +19,7 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[doc(hidden)]
-pub enum DecisionFailureError<DecideError, EvolveError> {
+pub enum DecisionError<DecideError, EvolveError> {
     #[error("decide failed: {0}")]
     Decide(#[source] DecideError),
     #[error("evolve failed: {0}")]
@@ -29,7 +29,7 @@ pub enum DecisionFailureError<DecideError, EvolveError> {
 #[doc(hidden)]
 pub type DecisionResult<C> = Result<
     (<C as Decider>::State, Events<<C as Decider>::Event>),
-    DecisionFailureError<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
+    DecisionError<<C as Decider>::DecideError, <C as Decider>::EvolveError>,
 >;
 
 #[doc(hidden)]
@@ -42,7 +42,7 @@ where
     C: Decider,
 {
     C::decide(&state, command)
-        .map_err(DecisionFailureError::Decide)?
+        .map_err(DecisionError::Decide)?
         .handle(state, command)
 }
 
@@ -128,7 +128,7 @@ where
         match self {
             Self::Events(events) => {
                 for event in events.iter() {
-                    state = C::evolve(state, event).map_err(DecisionFailureError::Evolve)?;
+                    state = C::evolve(state, event).map_err(DecisionError::Evolve)?;
                 }
 
                 Ok((state, events))

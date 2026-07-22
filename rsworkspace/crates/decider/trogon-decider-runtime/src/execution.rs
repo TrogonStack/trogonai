@@ -21,7 +21,7 @@ use crate::{
     Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
     ReplayLimit, StreamEvent, WritePrecondition,
 };
-use trogon_decider::{DecisionFailureError, evaluate_decision};
+use trogon_decider::{DecisionError, evaluate_decision};
 use trogon_semconv::{attribute, metric, span};
 use trogon_std::{NowV7, UuidV7Generator};
 
@@ -889,8 +889,8 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
         let (state, events) = evaluate_decision(state, self.command).map_err(|failure| match failure {
-            DecisionFailureError::Decide(error) => AppendDecisionError::Decide(error),
-            DecisionFailureError::Evolve(error) => AppendDecisionError::Evolve(error),
+            DecisionError::Decide(error) => AppendDecisionError::Decide(error),
+            DecisionError::Evolve(error) => AppendDecisionError::Evolve(error),
         })?;
         let mut encoded_events = Vec::with_capacity(events.len());
         for event in events.iter() {
