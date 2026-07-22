@@ -41,3 +41,4 @@ trogon-decider-runtime = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogonai-proto = { path = "../trogonai-proto", default-features = false, features = ["schedules"] }
 uuid = { workspace = true }
+wat = "1"

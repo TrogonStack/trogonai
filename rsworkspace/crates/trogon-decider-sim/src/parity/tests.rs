@@ -1,5 +1,5 @@
 use super::*;
-use crate::ir::WireEnvelope;
+use crate::ir::{DomainErrorOutcome, WireEnvelope};
 
 fn events_outcome(type_url: &str) -> StepOutcome {
     StepOutcome::Events(vec![WireEnvelope::new(type_url, Vec::new())])
@@ -37,14 +37,64 @@ fn compare_outcomes_reports_the_first_mismatched_step() {
 
 #[test]
 fn compare_outcomes_distinguishes_rejected_from_faulted() {
-    let native = vec![StepOutcome::Rejected {
+    let native = vec![StepOutcome::Rejected(DomainErrorOutcome {
         code: "already-exists".to_string(),
         message: "nope".to_string(),
-    }];
-    let wasm = vec![StepOutcome::Faulted {
+        details: Vec::new(),
+    })];
+    let wasm = vec![StepOutcome::Faulted(DomainErrorOutcome {
         code: "already-exists".to_string(),
         message: "nope".to_string(),
-    }];
+        details: Vec::new(),
+    })];
     let error = compare_outcomes("scenario", native, wasm).unwrap_err();
     assert!(matches!(error, ParityError::Mismatch { index: 0, .. }));
+}
+
+#[test]
+fn compare_outcomes_distinguishes_by_details() {
+    let native = vec![StepOutcome::Rejected(DomainErrorOutcome {
+        code: "already-exists".to_string(),
+        message: "nope".to_string(),
+        details: vec![("cause".to_string(), "duplicate id".to_string())],
+    })];
+    let wasm = vec![StepOutcome::Rejected(DomainErrorOutcome {
+        code: "already-exists".to_string(),
+        message: "nope".to_string(),
+        details: Vec::new(),
+    })];
+    let error = compare_outcomes("scenario", native, wasm).unwrap_err();
+    assert!(matches!(error, ParityError::Mismatch { index: 0, .. }));
+}
+
+#[test]
+fn compare_stream_ids_passes_when_neither_runner_resolved_one() {
+    compare_stream_ids("scenario", None, None, None).expect("no stream id to compare");
+}
+
+#[test]
+fn compare_stream_ids_passes_when_identical_and_undeclared() {
+    let outcome = StreamIdOutcome::Resolved("backup".to_string());
+    compare_stream_ids("scenario", None, Some(&outcome), Some(&outcome)).expect("identical ids match");
+}
+
+#[test]
+fn compare_stream_ids_reports_native_wasm_divergence() {
+    let native = StreamIdOutcome::Resolved("backup".to_string());
+    let wasm = StreamIdOutcome::Resolved("other".to_string());
+    let error = compare_stream_ids("scenario", None, Some(&native), Some(&wasm)).unwrap_err();
+    assert!(matches!(error, ParityError::StreamIdMismatch { .. }));
+}
+
+#[test]
+fn compare_stream_ids_reports_a_declared_mismatch_even_when_runners_agree() {
+    let resolved = StreamIdOutcome::Resolved("backup".to_string());
+    let error = compare_stream_ids("scenario", Some("other"), Some(&resolved), Some(&resolved)).unwrap_err();
+    assert!(matches!(error, ParityError::StreamIdDeclaredMismatch { .. }));
+}
+
+#[test]
+fn compare_stream_ids_passes_when_declared_matches_both_runners() {
+    let resolved = StreamIdOutcome::Resolved("backup".to_string());
+    compare_stream_ids("scenario", Some("backup"), Some(&resolved), Some(&resolved)).expect("declared id matches");
 }

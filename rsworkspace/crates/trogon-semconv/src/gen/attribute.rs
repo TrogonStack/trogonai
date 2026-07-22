@@ -231,6 +231,8 @@ pub enum GuestPhase {
     Decide,
     /// Reading or writing the guest session's snapshot
     Snapshot,
+    /// Running the guest session resource's destructor
+    Drop,
 }
 
 impl GuestPhase {
@@ -242,6 +244,7 @@ impl GuestPhase {
             Self::Replay => "replay",
             Self::Decide => "decide",
             Self::Snapshot => "snapshot",
+            Self::Drop => "drop",
         }
     }
 }

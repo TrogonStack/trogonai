@@ -96,6 +96,29 @@ pub struct ScenarioStep {
     pub expect: ExpectedOutcome,
 }
 
+/// A domain error's shape, shared by every raw outcome that can carry a rejection or fault:
+/// [`StepOutcome::Rejected`], [`StepOutcome::Faulted`], and [`StreamIdOutcome::Failed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainErrorOutcome {
+    /// The domain error's stable, machine-readable code.
+    pub code: String,
+    /// The domain error's human-readable message.
+    pub message: String,
+    /// The domain error's causal chain, as ordered `(label, text)` pairs, most specific cause
+    /// last.
+    pub details: Vec<(String, String)>,
+}
+
+impl From<host::DomainError> for DomainErrorOutcome {
+    fn from(value: host::DomainError) -> Self {
+        Self {
+            code: value.code,
+            message: value.message,
+            details: value.details,
+        }
+    }
+}
+
 /// The actual outcome one step produced, captured raw rather than checked against a declared
 /// [`ExpectedOutcome`].
 ///
@@ -106,20 +129,35 @@ pub enum StepOutcome {
     /// The command was accepted, producing these events in order.
     Events(Vec<WireEnvelope>),
     /// The command was rejected by a business rule.
-    Rejected {
-        /// The domain error's stable, machine-readable code.
-        code: String,
-        /// The domain error's human-readable message.
-        message: String,
-    },
+    Rejected(DomainErrorOutcome),
     /// The command failed for a reason other than a business rule: an unknown command type, a
     /// decode failure, an encode failure, and so on.
-    Faulted {
-        /// The domain error's stable, machine-readable code.
-        code: String,
-        /// The domain error's human-readable message.
-        message: String,
-    },
+    Faulted(DomainErrorOutcome),
+}
+
+/// The stream id a scenario's first command resolved to, or the failure resolving it produced.
+///
+/// Captured raw the same way [`StepOutcome`] captures a step's decide outcome, so the parity
+/// harness can compare a native runner's and a wasm runner's resolved stream id directly against
+/// each other, independent of what the scenario declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamIdOutcome {
+    /// The command's stream id resolved successfully.
+    Resolved(String),
+    /// Resolving the command's stream id failed.
+    Failed(DomainErrorOutcome),
+}
+
+/// Everything one runner produced from a full run of a [`ScenarioIr`]: the stream id its first
+/// command resolved to (`None` if the scenario has no steps), and each step's raw
+/// [`StepOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScenarioRun {
+    /// The scenario's first command's resolved stream id, or `None` if the scenario has no
+    /// steps.
+    pub stream_id: Option<StreamIdOutcome>,
+    /// Each step's raw outcome, in order.
+    pub steps: Vec<StepOutcome>,
 }
 
 /// A decider-agnostic given/when/then scenario, expressed entirely in wire form.
@@ -135,9 +173,10 @@ pub struct ScenarioIr {
     pub name: String,
     /// The stream id every command in this scenario targets, when known ahead of time.
     ///
-    /// Both runners can derive a stream id from a command independently (via `Decider::stream_id`
-    /// natively, or the WIT `stream-id` export in wasm); when this is `Some`, the parity harness
-    /// also asserts that derived id matches it.
+    /// `assert_parity` resolves the first step's command's stream id independently through both
+    /// runners (via `Decider::stream_id` natively, or the WIT `stream-id` export in wasm) and
+    /// fails on any divergence between the two. When this field is `Some`, it also fails if the
+    /// resolved id does not match it.
     pub stream_id: Option<String>,
     /// The session's seeded history, replayed via `evolve` before the first step's command is
     /// decided.
@@ -178,12 +217,27 @@ impl ScenarioIr {
         sim
     }
 
-    /// Runs this scenario against a wasm component instance, capturing each step's raw
-    /// [`StepOutcome`] instead of asserting it against the step's declared [`ExpectedOutcome`].
+    /// Runs this scenario against a wasm component instance, capturing the first step's resolved
+    /// stream id and each step's raw [`StepOutcome`] instead of asserting it against the step's
+    /// declared [`ExpectedOutcome`].
     ///
     /// Used by the parity harness to compare the wasm runner's actual behavior against a native
     /// runner's.
-    pub fn run_wasm<T>(&self, instance: &mut SimInstance<T>) -> Result<Vec<StepOutcome>, ScenarioError> {
+    pub fn run_wasm<T>(&self, instance: &mut SimInstance<T>) -> Result<ScenarioRun, ScenarioError> {
+        let stream_id = match self.first_command() {
+            Some(command) => {
+                let command = host::CommandEnvelope::from(command);
+                let resolved = instance
+                    .stream_id(&command)
+                    .map_err(|source| ScenarioError::StreamIdCall { source })?;
+                Some(match resolved {
+                    Ok(id) => StreamIdOutcome::Resolved(id),
+                    Err(err) => StreamIdOutcome::Failed(err.into()),
+                })
+            }
+            None => None,
+        };
+
         let mut session = instance
             .open_session(None)
             .map_err(|source| ScenarioError::OpenSession { source })?;
@@ -225,19 +279,16 @@ impl ScenarioIr {
                     forwarded = events.iter().map(host::AnyEnvelope::from).collect();
                     StepOutcome::Events(events)
                 }
-                Err(host::DecideError::Rejected(err)) => StepOutcome::Rejected {
-                    code: err.code,
-                    message: err.message,
-                },
-                Err(host::DecideError::Faulted(err)) => StepOutcome::Faulted {
-                    code: err.code,
-                    message: err.message,
-                },
+                Err(host::DecideError::Rejected(err)) => StepOutcome::Rejected(err.into()),
+                Err(host::DecideError::Faulted(err)) => StepOutcome::Faulted(err.into()),
             };
             outcomes.push(step_outcome);
         }
 
-        Ok(outcomes)
+        Ok(ScenarioRun {
+            stream_id,
+            steps: outcomes,
+        })
     }
 }
 

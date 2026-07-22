@@ -6,7 +6,7 @@
 
 use async_nats::{
     HeaderMap, Subject, SubjectError,
-    header::{IntoHeaderName, NATS_MESSAGE_ID},
+    header::{HeaderName, HeaderValue, IntoHeaderName, NATS_MESSAGE_ID, ParseHeaderNameError, ParseHeaderValueError},
     jetstream::{
         self, Error as JetStreamError, ErrorCode, context,
         context::PublishErrorKind,
@@ -191,6 +191,19 @@ pub enum PublishStreamError {
         #[source]
         source: InvalidStreamPosition,
     },
+    #[error("failed to encode event header name '{header_name}': {source}")]
+    InvalidEventHeaderName {
+        header_name: String,
+        #[source]
+        source: ParseHeaderNameError,
+    },
+    #[error("failed to encode event header '{header_name}' value: {source}")]
+    InvalidEventHeaderValue {
+        header_name: String,
+        value: String,
+        #[source]
+        source: ParseHeaderValueError,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -237,16 +250,24 @@ where
     let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
 
-    for (index, event) in events.iter().enumerate() {
-        let publish = build_publish_message(
-            event,
-            event.content.clone(),
-            expected_last_subject_sequence,
-            batch_id.as_str(),
-            index,
-            events.len(),
-        );
+    // Building every message first surfaces a header-validation failure
+    // before any batch member reaches the server.
+    let publishes = events
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            build_publish_message(
+                event,
+                event.content.clone(),
+                expected_last_subject_sequence,
+                batch_id.as_str(),
+                index,
+                events.len(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
+    for (index, publish) in publishes.into_iter().enumerate() {
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
             .await
@@ -321,7 +342,7 @@ fn build_publish_message(
     batch_id: &str,
     index: usize,
     event_count: usize,
-) -> PublishMessage {
+) -> Result<PublishMessage, PublishStreamError> {
     let mut publish = PublishMessage::build()
         .payload(payload.into())
         .message_id(event.id.to_string())
@@ -329,7 +350,9 @@ fn build_publish_message(
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
     for (name, value) in event.headers.iter() {
-        publish = publish.header(event_header_name(name.as_str()), value.as_str());
+        let header_name = event_header_name(name.as_str())?;
+        let header_value = event_header_value(&header_name, value.as_str())?;
+        publish = publish.header(header_name, header_value);
     }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
         publish = publish.expected_last_subject_sequence(expected_last_subject_sequence);
@@ -337,7 +360,7 @@ fn build_publish_message(
     if index + 1 == event_count {
         publish = publish.header(NATS_BATCH_COMMIT, "1");
     }
-    publish
+    Ok(publish)
 }
 
 /// Reads all events from the JetStream stream starting at a stream sequence.
@@ -451,13 +474,20 @@ pub fn record_stream_message(
     })
 }
 
-fn event_header_name(name: &str) -> String {
-    // TODO: Use `async_nats::HeaderName::try_from` once nats-io/nats.rs#1587
-    // lands in a released async-nats version. `HeaderName` intentionally does
-    // not duplicate async-nats header-name validation; the adapter should
-    // validate the encoded `Trogon-Header-{name}` here with a fallible API
-    // instead of relying on `PublishMessage::header`'s panicking conversion.
-    format!("{TROGON_EVENT_HEADER_PREFIX}{name}")
+fn event_header_name(name: &str) -> Result<HeaderName, PublishStreamError> {
+    let header_name = format!("{TROGON_EVENT_HEADER_PREFIX}{name}");
+    HeaderName::try_from(header_name.as_str())
+        .map_err(|source| PublishStreamError::InvalidEventHeaderName { header_name, source })
+}
+
+fn event_header_value(header_name: &HeaderName, value: &str) -> Result<HeaderValue, PublishStreamError> {
+    value
+        .parse::<HeaderValue>()
+        .map_err(|source| PublishStreamError::InvalidEventHeaderValue {
+            header_name: header_name.to_string(),
+            value: value.to_string(),
+            source,
+        })
 }
 
 fn headers_from_nats_headers(headers: &HeaderMap) -> Result<Headers, StreamStoreError> {

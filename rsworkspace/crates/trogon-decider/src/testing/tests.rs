@@ -210,6 +210,32 @@ fn given_history_when_command_then_exact_error_succeeds() {
 }
 
 #[test]
+fn given_state_when_command_then_array_events_succeeds() {
+    let disabled = TestCase::<TestCommand>::new()
+        .given_state(TestState::Present { enabled: true })
+        .when(TestCommand::disable("alpha"))
+        .then([TestEvent::Disabled {
+            id: "alpha".to_string(),
+        }]);
+
+    assert_eq!(disabled.stream_id(), "alpha");
+    assert_eq!(disabled.given_events(), []);
+}
+
+#[test]
+fn given_state_when_command_then_exact_error_succeeds() {
+    let error = TestCase::<TestCommand>::new()
+        .given_state(TestState::Present { enabled: false })
+        .when(TestCommand::disable("alpha"))
+        .then_error(TestCommandError::AlreadyDisabled {
+            id: "alpha".to_string(),
+        });
+
+    assert_eq!(error.stream_id(), "alpha");
+    assert_eq!(error.given_events(), []);
+}
+
+#[test]
 fn state_can_assert_replayed_state_before_events() {
     TestCase::<TestCommand>::new()
         .given([TestEvent::Registered {

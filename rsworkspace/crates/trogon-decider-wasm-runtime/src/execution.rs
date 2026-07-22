@@ -156,6 +156,12 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     /// The guest faulted while deciding the command.
     #[error("command faulted: {0}")]
     Faulted(#[source] DomainErrorDetail),
+    /// The guest's `decide` call reported success but returned zero events,
+    /// violating the WIT `decide` contract's non-empty invariant (see
+    /// `world.wit`). Rejected before the session is folded, snapshotted, or
+    /// appended, the same as [`Self::Rejected`] and [`Self::Faulted`].
+    #[error("command decided no events")]
+    EmptyDecision,
     /// The guest could not evolve session state from a replayed or decided event.
     #[error("command state evolution failed: {0}")]
     Evolve(#[source] DomainErrorDetail),
@@ -450,10 +456,10 @@ where
                 &phase_context,
             )?;
             let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
+            let decided_envelopes = ensure_decided_events_are_non_empty(decided_envelopes)?;
             // No snapshot observes this session, so the decided events are not
             // folded back into it; folding here would only burn guest fuel.
-            host::drop_session(&bindings, &mut store, session)
-                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            drop_session_discarding_trap(&mut store, &bindings, &engine, session, &phase_context);
             Ok(decided_envelopes)
         })
         .await?;
@@ -552,6 +558,7 @@ where
                 &phase_context,
             )?;
             let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
+            let decided_envelopes = ensure_decided_events_are_non_empty(decided_envelopes)?;
             fold_decided_events(
                 &mut store,
                 &bindings,
@@ -561,8 +568,7 @@ where
                 &phase_context,
             )?;
             let new_snapshot_bytes = take_snapshot(&mut store, &bindings, &engine, session, &phase_context)?;
-            host::drop_session(&bindings, &mut store, session)
-                .map_err(|error| map_trap(error, WasmCommandError::Trap))?;
+            drop_session_discarding_trap(&mut store, &bindings, &engine, session, &phase_context);
             Ok((decided_envelopes, new_snapshot_bytes))
         })
         .await?;
@@ -946,6 +952,19 @@ fn map_decide_error<ReadSnapshotError, ReadStreamError, AppendStreamError>(
     }
 }
 
+/// Enforces the WIT `decide` contract's non-empty invariant (see `world.wit`)
+/// on the host side, rejecting a guest's `Ok([])` before it can reach
+/// [`fold_decided_events`] or the stream append.
+fn ensure_decided_events_are_non_empty<ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    decided_envelopes: Vec<AnyEnvelope>,
+) -> Result<Vec<AnyEnvelope>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
+    if decided_envelopes.is_empty() {
+        Err(WasmCommandError::EmptyDecision)
+    } else {
+        Ok(decided_envelopes)
+    }
+}
+
 /// Folds the guest's own newly decided events back into session state before
 /// a snapshot can observe them. See the module-level doc comment for why this
 /// call is required.
@@ -996,6 +1015,56 @@ fn take_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
             map_trap(error, WasmCommandError::Trap)
         })
     })
+}
+
+/// Drops a guest session after the command outcome it belongs to is already
+/// decided: the events [`decide`] returned, and for a [`WithSnapshotStore`]
+/// execution, the state [`fold_decided_events`] folded back in and
+/// [`take_snapshot`] serialized.
+///
+/// Unlike every guest call before it in this flow, the WIT `session`
+/// resource's destructor is real guest code (per the `resource session`
+/// contract in `world.wit`), so it needs its own fresh fuel and epoch budget
+/// here rather than running on whatever `decide` or `snapshot` left behind.
+/// Returns the trap instead of propagating it as a [`WasmCommandError`]: by
+/// the time this runs, the guest has nothing left to contribute to the
+/// command's outcome, so a destructor trap must not discard it.
+fn drop_session_after_decide<T>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+) -> wasmtime::Result<()> {
+    engine.arm_guest_call(
+        store,
+        engine.config().fuel_per_call(),
+        engine.config().epoch_ticks_per_call(),
+    )?;
+    host::drop_session(bindings, store, session)
+}
+
+/// Runs [`drop_session_after_decide`] and, when it fails, records the trap
+/// under [`attribute::GuestPhase::Drop`] and logs it instead of failing the
+/// command whose outcome is already decided.
+fn drop_session_discarding_trap<T>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+    context: &GuestPhaseContext,
+) {
+    if let Err(error) = drop_session_after_decide(store, bindings, engine, session) {
+        let classification = trap_classification(&error);
+        record_phase_trap(context, attribute::GuestPhase::Drop, classification);
+        tracing::warn!(
+            module_name = %context.module_name,
+            module_version = %context.module_version,
+            command_type = %context.command_type,
+            trap_classification = classification.as_str(),
+            error = %error,
+            "wasm decider session destructor trapped after its command outcome was already decided; keeping the decided outcome"
+        );
+    }
 }
 
 fn to_any_envelopes(stream_events: Vec<trogon_decider_runtime::StreamEvent>) -> Vec<AnyEnvelope> {

@@ -5,7 +5,8 @@ use buffa::Message as _;
 use buffa::MessageField;
 use buffa::MessageName as _;
 use trogon_decider_sim::{
-    ScenarioError, SimError, SimFixture, SimHost, SimScenario, WasmEngineConfig, assert_zero_imports,
+    ExpectedOutcome, ScenarioError, ScenarioIr, ScenarioStep, SimError, SimFixture, SimHost, SimScenario,
+    StreamIdOutcome, WasmEngineConfig, WireEnvelope, assert_zero_imports,
 };
 use trogon_decider_wit::host::{self, CommandEnvelope};
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
@@ -176,6 +177,31 @@ fn stream_id_returns_schedule_id() {
 
     let stream = instance.stream_id(&create_command("backup")).unwrap().unwrap();
     assert_eq!(stream, "backup");
+}
+
+#[test]
+fn run_wasm_resolves_the_first_steps_stream_id() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let mut scenario = ScenarioIr::new("resolve stream id");
+    scenario.steps.push(ScenarioStep {
+        when: WireEnvelope::from(create_command("backup")),
+        expect: ExpectedOutcome::Accepted,
+    });
+
+    let run = scenario.run_wasm(&mut instance).unwrap();
+    assert_eq!(run.stream_id, Some(StreamIdOutcome::Resolved("backup".to_string())));
+}
+
+#[test]
+fn run_wasm_reports_no_stream_id_for_an_empty_scenario() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let scenario = ScenarioIr::new("no steps");
+    let run = scenario.run_wasm(&mut instance).unwrap();
+    assert!(run.stream_id.is_none());
 }
 
 #[test]

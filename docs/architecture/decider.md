@@ -92,6 +92,7 @@ CommandExecution::new(&event_store, &command)
     .with_write_precondition(precondition)   // ignored if C::WRITE_PRECONDITION is set
     .with_headers(headers)
     .with_event_id_generator(generator)
+    .with_replay_limit(limit)                // optional cap on replayed events per command
     .with_snapshot(snapshot_store)           // moves to the snapshot-enabled type state
     .with_task_runtime(scheduler)
     .with_snapshot_failure_policy(policy)
@@ -117,11 +118,19 @@ called):
   if a bad snapshot was just discarded and overwritten with a trustworthy one; otherwise only
   when the configured `SnapshotPolicy::decide_snapshot` returns `SnapshotDecision::Take`.
 
+`with_replay_limit` (`ReplayLimit`, a non-zero event count) bounds how much history one
+command execution may replay: if a stream read returns more events than the limit, the
+command fails with `CommandError::ReplayLimitExceeded` before any folding happens, so a
+decider that forgets or misconfigures snapshotting fails loudly instead of silently growing
+per-command latency with the stream. The check runs after the read returns, so it does not
+bound the read itself; a streaming bound on `StreamRead` is possible future work. The
+default is unlimited.
+
 `CommandError<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError,
 EventTypeError, PayloadEncodeError, DecodeError>` normalizes failures by phase
 (`Decide`, `Evolve`, `ReadSnapshot`, `ReadStream`, `Append`, `EventType`, `EventEncode`,
-`DecodeEvent`, `SnapshotAheadOfStream`, `ReadAfterOverflow`) while preserving each phase's
-concrete source error type.
+`DecodeEvent`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `ReplayLimitExceeded`) while
+preserving each phase's concrete source error type.
 
 ### Snapshot policy and failure recovery
 
@@ -188,6 +197,10 @@ using three headers on the underlying JetStream messages: `Nats-Batch-Id` and
 `Nats-Batch-Sequence` on every message in the batch, `Nats-Batch-Commit` on the final
 message, and (when appending is conditional) the expected-last-subject-sequence guard on the
 first message. The final message's stream sequence becomes the returned `StreamPosition`.
+User-supplied event headers are validated against NATS's own header-name and header-value
+rules before publishing; a name NATS would reject (for example one containing `:`, a space,
+or a non-ASCII character) fails the append with a typed `PublishStreamError` instead of
+panicking inside the NATS client.
 
 ### Ordered, subject-filtered replay
 
@@ -270,7 +283,11 @@ The contract itself lives in `trogon-decider-wit`'s `wit/world.wit` (package
 `module-descriptor { name, version, commands }`; `stream-id(command)` resolves a
 `command-envelope` to its target stream; the `session` resource exposes
 `evolve(events)`, `decide(command) -> result<list<any-envelope>, decide-error>`, and
-`snapshot() -> option<list<u8>>`. `domain-error { code, message, details }` carries a stable
+`snapshot() -> option<list<u8>>`. A successful `decide` must return a non-empty event list;
+WIT cannot express that constraint, so the guest SDK preserves it by construction (`Events`
+has no empty form) and the host rejects a violating guest with
+`WasmCommandError::EmptyDecision` before the decision can be folded, snapshotted, or
+appended. `domain-error { code, message, details }` carries a stable
 code, a human-readable message, and the error's source chain as ordered key/value pairs, so
 detail that a single `Display` line would otherwise erase survives the WIT boundary.
 `trogon-decider-wit` compiles this contract for both sides: `guest` (feature `guest`, via
@@ -324,6 +341,12 @@ that command's own events. The snapshot-enabled execution path calls `decide`, t
 `take_snapshot`, in that order, so a session resumed from that snapshot ends up in the
 same state a full replay would produce. The no-snapshot path skips the fold entirely: no
 snapshot will observe that session again, so folding would only burn guest fuel for nothing.
+
+Dropping the session at the end of either path runs the guest's `session` resource
+destructor, which is real guest code: it is armed with its own fresh fuel and epoch budget
+rather than whatever the preceding `decide` or `snapshot` call left behind. A trap in it is
+counted in `decider.wasm.traps` under the `drop` guest phase and logged, but never fails
+the command, because by then the command's outcome is already decided.
 
 `WasmCommandError` distinguishes a guest call that trapped for any other reason (`Trap`) from
 one that exceeded its wall-clock epoch deadline (`DeadlineExceeded`), classified by
@@ -410,7 +433,8 @@ Four layers, from unit-level to conformance-level:
   functions the guest bridge expands into) can execute. `SimScenario` (`scenario.rs`) is the
   fluent given/when/then builder used directly against a `SimInstance`, supporting multiple
   chained steps against one open session. `assert_parity` (`parity.rs`) runs one scenario
-  through both runners and returns an error on the first divergence between their outcomes,
+  through both runners and returns an error on the first divergence between their resolved
+  stream ids or their step outcomes, including a domain error's `details` causal chain,
   catching codec, codegen, or WIT-level drift that each runner's own pass/fail would miss.
   `SimFixture` (`fixture.rs`, feature `test-support`) holds checked-in compiled `.wasm`
   fixtures for integration tests.
@@ -436,7 +460,7 @@ Attributes: `command_type`, `module_name`, `module_version`, `write_precondition
 (`any`/`stream_exists`/`no_stream`/`at`), `decision_outcome`
 (`decided`/`rejected`/`faulted`), `snapshot_outcome`
 (`hit`/`miss`/`discarded_read_failure`/`discarded_ahead_of_stream`/`failed`),
-`snapshot_write_success`, `guest_phase` (`instantiate`/`replay`/`decide`/`snapshot`), and
+`snapshot_write_success`, `guest_phase` (`instantiate`/`replay`/`decide`/`snapshot`/`drop`), and
 `trap_classification` (`deadline_exceeded`/`trap`). `stream_id` is defined once in
 `scheduler.yaml` and reused here.
 

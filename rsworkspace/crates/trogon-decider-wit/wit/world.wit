@@ -81,6 +81,11 @@ interface handler {
     evolve: func(events: list<any-envelope>) -> result<_, domain-error>;
 
     /// Evaluates a command against the current state, returning the events it produces.
+    ///
+    /// The success case must be a non-empty list: a command that decides
+    /// nothing is a domain modeling error and must be reported through
+    /// `decide-error` instead of `ok([])`. The WIT type system cannot express
+    /// this, so hosts and guests must enforce it themselves.
     decide: func(command: command-envelope) -> result<list<any-envelope>, decide-error>;
 
     /// Serializes the session's current state, or `none` if the module does not snapshot.

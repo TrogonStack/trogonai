@@ -19,7 +19,7 @@ use crate::stream::{
 };
 use crate::{
     Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
-    StreamEvent, WritePrecondition,
+    ReplayLimit, StreamEvent, WritePrecondition,
 };
 use trogon_decider::{DecisionFailure, evaluate_decision};
 use trogon_semconv::{attribute, metric, span};
@@ -410,6 +410,10 @@ pub enum CommandError<
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
     #[error("{0}")]
     ReadAfterOverflow(#[source] ReadAfterOverflow),
+    /// The stream read for this command returned more events than the
+    /// configured [`ReplayLimit`] allows to replay.
+    #[error("{0}")]
+    ReplayLimitExceeded(ReplayLimitExceeded),
 }
 
 /// Error detail for a loaded snapshot whose recorded position the stream
@@ -438,6 +442,26 @@ impl std::fmt::Display for SnapshotAheadOfStream {
                 self.snapshot_position
             ),
         }
+    }
+}
+
+/// Error detail for a command execution whose stream read returned more
+/// events than its configured [`ReplayLimit`] allowed to replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayLimitExceeded {
+    /// The replay limit configured for this execution.
+    pub limit: ReplayLimit,
+    /// The number of stream events the read returned.
+    pub replayed_event_count: u64,
+}
+
+impl std::fmt::Display for ReplayLimitExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "command replay read {} events, exceeding the configured limit of {}",
+            self.replayed_event_count, self.limit
+        )
     }
 }
 
@@ -729,6 +753,7 @@ pub struct CommandExecution<'a, E, C, S, G> {
     snapshots: S,
     headers: Headers,
     event_id_generator: G,
+    replay_limit: Option<ReplayLimit>,
 }
 
 impl<'a, E, C> CommandExecution<'a, E, C, WithoutSnapshots, UuidV7Generator>
@@ -746,6 +771,7 @@ where
             snapshots: WithoutSnapshots,
             headers: Headers::empty(),
             event_id_generator: UuidV7Generator,
+            replay_limit: None,
         }
     }
 }
@@ -784,6 +810,7 @@ where
             snapshots: snapshots.into_snapshots(),
             headers: self.headers,
             event_id_generator: self.event_id_generator,
+            replay_limit: self.replay_limit,
         }
     }
 }
@@ -807,6 +834,17 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         self
     }
 
+    /// Caps the number of stream events this execution may replay.
+    ///
+    /// Defaults to unlimited. When set, a stream read that returns more than
+    /// `replay_limit` events fails the command with
+    /// [`CommandError::ReplayLimitExceeded`] before folding any of them into
+    /// state.
+    pub fn with_replay_limit(mut self, replay_limit: ReplayLimit) -> Self {
+        self.replay_limit = Some(replay_limit);
+        self
+    }
+
     /// Replaces the generator used to assign ids to newly decided events that
     /// don't already carry one.
     pub fn with_event_id_generator<NextG>(self, event_id_generator: NextG) -> CommandExecution<'a, E, C, S, NextG>
@@ -820,6 +858,7 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
             snapshots: self.snapshots,
             headers: self.headers,
             event_id_generator,
+            replay_limit: self.replay_limit,
         }
     }
 }
@@ -896,6 +935,7 @@ impl<'a, E, S, C, P, Spawn, F, G> CommandExecution<'a, E, C, Snapshots<'a, S, P,
             snapshots: self.snapshots.schedule_snapshot_tasks_with(schedule_snapshot_task),
             headers: self.headers,
             event_id_generator: self.event_id_generator,
+            replay_limit: self.replay_limit,
         }
     }
 
@@ -915,6 +955,7 @@ impl<'a, E, S, C, P, Spawn, F, G> CommandExecution<'a, E, C, Snapshots<'a, S, P,
             snapshots: self.snapshots.with_snapshot_failure_policy(failure_policy),
             headers: self.headers,
             event_id_generator: self.event_id_generator,
+            replay_limit: self.replay_limit,
         }
     }
 }
@@ -978,7 +1019,10 @@ where
             .await
             .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
-        metrics().replay_events.add(stream_read.events.len() as u64, &[]);
+        let replayed_event_count = stream_read.events.len() as u64;
+        ensure_replay_within_limit(self.replay_limit, replayed_event_count)
+            .map_err(CommandError::ReplayLimitExceeded)?;
+        metrics().replay_events.add(replayed_event_count, &[]);
         let state = evolve_state_from_stream_events::<C>(C::initial_state(), &stream_read.events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
 
@@ -1166,9 +1210,12 @@ where
 
         record_snapshot_read_outcome(&read_snapshot_span, snapshot_outcome);
 
+        let replayed_event_count = stream_events.len() as u64;
+        ensure_replay_within_limit(self.replay_limit, replayed_event_count)
+            .map_err(CommandError::ReplayLimitExceeded)?;
+
         let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        let replayed_event_count = stream_events.len() as u64;
         metrics().replay_events.add(replayed_event_count, &[]);
 
         if discarded_bad_snapshot {
@@ -1219,6 +1266,19 @@ impl From<WritePrecondition> for StreamWritePrecondition {
 
 fn has_no_stream_write_precondition<C: Decider>(configured: Option<StreamWritePrecondition>) -> bool {
     execute_command_write_precondition::<C>(configured) == Some(StreamWritePrecondition::NoStream)
+}
+
+fn ensure_replay_within_limit(
+    replay_limit: Option<ReplayLimit>,
+    replayed_event_count: u64,
+) -> Result<(), ReplayLimitExceeded> {
+    match replay_limit {
+        Some(limit) if replayed_event_count > limit.as_u64() => Err(ReplayLimitExceeded {
+            limit,
+            replayed_event_count,
+        }),
+        _ => Ok(()),
+    }
 }
 
 fn ensure_snapshot_not_ahead(

@@ -76,6 +76,7 @@ pub mod headers;
 /// In-memory test double for stream and snapshot storage contracts.
 #[cfg(feature = "test-support")]
 pub mod memory;
+mod replay_limit;
 /// Snapshot read/write contracts and payload codec traits.
 pub mod snapshot;
 /// Stream read/write contracts shared by event store backends.
@@ -87,13 +88,14 @@ pub use execution::ImmediateSnapshotTaskScheduler;
 pub use execution::{
     CommandError, CommandExecution, CommandResult, CommandSnapshotPolicy, DecideSnapshot,
     DiscardAndReplaySnapshotFailure, DrainableSnapshotTaskScheduler, ExecutionResult, FailOnSnapshotFailure,
-    FrequencySnapshot, NoSnapshot, SnapshotAheadOfStream, SnapshotDecision, SnapshotFailure, SnapshotFailureContext,
-    SnapshotFailureDecision, SnapshotFailurePolicy, SnapshotPolicy, SnapshotTaskScheduler, Snapshots,
-    TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
+    FrequencySnapshot, NoSnapshot, ReplayLimitExceeded, SnapshotAheadOfStream, SnapshotDecision, SnapshotFailure,
+    SnapshotFailureContext, SnapshotFailureDecision, SnapshotFailurePolicy, SnapshotPolicy, SnapshotTaskScheduler,
+    Snapshots, TokioSnapshotTaskScheduler, WithoutSnapshotTaskScheduler, WithoutSnapshots,
 };
 pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, HeaderValueError, Headers};
 #[cfg(feature = "test-support")]
 pub use memory::{InMemoryStore, StreamAppendError};
+pub use replay_limit::{ReplayLimit, ReplayLimitError};
 pub use snapshot::{
     InvalidSnapshotTypeName, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
     SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotTypeName, SnapshotWrite,

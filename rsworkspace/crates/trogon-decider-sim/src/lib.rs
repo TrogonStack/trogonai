@@ -21,7 +21,10 @@ pub use fixture::SimFixture;
 
 pub use host::{SimError, SimHost, SimInstance};
 pub use import_check::{ImportCheckError, assert_zero_imports};
-pub use ir::{ExpectedOutcome, ScenarioIr, ScenarioStep, StepOutcome, WireEnvelope};
+pub use ir::{
+    DomainErrorOutcome, ExpectedOutcome, ScenarioIr, ScenarioRun, ScenarioStep, StepOutcome, StreamIdOutcome,
+    WireEnvelope,
+};
 #[cfg(feature = "test-support")]
 pub use native::{
     NativeDecideError, NativeDeciderBundle, NativeDomainError, NativeRunError, decode_native_command, native_decide,

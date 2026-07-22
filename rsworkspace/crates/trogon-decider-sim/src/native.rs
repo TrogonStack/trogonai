@@ -13,7 +13,7 @@ use trogon_decider_guest_sdk::{
     decode_command, evolve_one,
 };
 
-use crate::ir::{ScenarioIr, StepOutcome, WireEnvelope};
+use crate::ir::{DomainErrorOutcome, ScenarioIr, ScenarioRun, StepOutcome, StreamIdOutcome, WireEnvelope};
 
 impl CommandEnvelopeView for WireEnvelope {
     fn command_type(&self) -> &str {
@@ -61,6 +61,16 @@ pub struct NativeDomainError {
 
 impl From<DomainErrorParts> for NativeDomainError {
     fn from(value: DomainErrorParts) -> Self {
+        Self {
+            code: value.code,
+            message: value.message,
+            details: value.details,
+        }
+    }
+}
+
+impl From<NativeDomainError> for DomainErrorOutcome {
+    fn from(value: NativeDomainError) -> Self {
         Self {
             code: value.code,
             message: value.message,
@@ -174,13 +184,18 @@ pub enum NativeRunError {
     },
 }
 
-/// Runs a [`ScenarioIr`] against a [`NativeDeciderBundle`], capturing each step's raw
-/// [`StepOutcome`].
+/// Runs a [`ScenarioIr`] against a [`NativeDeciderBundle`], capturing the first step's resolved
+/// stream id and each step's raw [`StepOutcome`].
 ///
 /// Mirrors [`ScenarioIr::run_wasm`]'s session shape: `given` is replayed once, then each step's
 /// command is decided against the accumulated state and its emitted events (if any) are folded
 /// in before the next step, all without asserting the step's declared expectation.
-pub fn run_native<N: NativeDeciderBundle>(scenario: &ScenarioIr) -> Result<Vec<StepOutcome>, NativeRunError> {
+pub fn run_native<N: NativeDeciderBundle>(scenario: &ScenarioIr) -> Result<ScenarioRun, NativeRunError> {
+    let stream_id = scenario.first_command().map(|command| match N::stream_id(command) {
+        Ok(id) => StreamIdOutcome::Resolved(id),
+        Err(error) => StreamIdOutcome::Failed(error.into()),
+    });
+
     let mut state = N::initial_state();
     for (index, event) in scenario.given.iter().enumerate() {
         state = N::evolve(state, event).map_err(|source| NativeRunError::Given { index, source })?;
@@ -195,17 +210,14 @@ pub fn run_native<N: NativeDeciderBundle>(scenario: &ScenarioIr) -> Result<Vec<S
                 }
                 outcomes.push(StepOutcome::Events(events));
             }
-            Err(NativeDecideError::Rejected(error)) => outcomes.push(StepOutcome::Rejected {
-                code: error.code,
-                message: error.message,
-            }),
-            Err(NativeDecideError::Faulted(error)) => outcomes.push(StepOutcome::Faulted {
-                code: error.code,
-                message: error.message,
-            }),
+            Err(NativeDecideError::Rejected(error)) => outcomes.push(StepOutcome::Rejected(error.into())),
+            Err(NativeDecideError::Faulted(error)) => outcomes.push(StepOutcome::Faulted(error.into())),
         }
     }
-    Ok(outcomes)
+    Ok(ScenarioRun {
+        stream_id,
+        steps: outcomes,
+    })
 }
 
 #[cfg(test)]

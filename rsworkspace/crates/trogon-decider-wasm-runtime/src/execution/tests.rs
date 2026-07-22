@@ -174,6 +174,66 @@ fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
     assert!(matches!(error, WasmCommandError::DeadlineExceeded(_)), "{error}");
 }
 
+fn instantiated_session(
+    module: &WasmDeciderModule,
+) -> (Store<crate::engine::GuestState>, host::Decider, host::Session) {
+    let engine = module.engine();
+    let mut store = engine.new_store();
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    let context = GuestPhaseContext::new(module, &command);
+    let bindings = instantiate::<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(
+        &mut store,
+        module.decider_pre(),
+        engine,
+        &context,
+    )
+    .expect("instantiate succeeds");
+    let session = create_session::<
+        crate::engine::GuestState,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    >(&mut store, &bindings, engine, None, &context)
+    .expect("session creates");
+    (store, bindings, session)
+}
+
+#[test]
+fn dropping_a_session_without_a_fresh_budget_traps_on_an_exhausted_leftover() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+
+    // Simulate the leftover budget a prior `decide` or `snapshot` call could
+    // leave behind: exhausted fuel and an already-elapsed epoch deadline.
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error = host::drop_session(&bindings, &mut store, session)
+        .expect_err("dropping a session on an exhausted leftover budget traps");
+    assert!(error.downcast_ref::<wasmtime::Trap>().is_some(), "{error}");
+}
+
+#[test]
+fn drop_session_after_decide_recovers_from_an_exhausted_leftover_budget() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let result = drop_session_after_decide(&mut store, &bindings, module.engine(), session);
+    assert!(result.is_ok(), "{result:?}");
+}
+
 #[test]
 fn map_trap_distinguishes_epoch_deadline_from_other_traps() {
     let deadline_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
@@ -213,6 +273,32 @@ fn faulted_decide_errors_stay_faults() {
         panic!("expected faulted error");
     };
     assert_eq!(detail.code, "decode-failed");
+}
+
+#[test]
+fn an_empty_decided_events_list_is_rejected() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        ensure_decided_events_are_non_empty(Vec::new()).expect_err("an empty decision must be rejected");
+    assert!(matches!(error, WasmCommandError::EmptyDecision), "{error}");
+}
+
+#[test]
+fn a_non_empty_decided_events_list_passes_through_unchanged() {
+    let envelopes = vec![AnyEnvelope {
+        type_: "test.v1.Happened".to_string(),
+        payload: vec![1, 2, 3],
+    }];
+
+    let passed_through: Vec<AnyEnvelope> = ensure_decided_events_are_non_empty::<
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    >(envelopes)
+    .expect("a non-empty decision must pass through");
+
+    assert_eq!(passed_through.len(), 1);
+    assert_eq!(passed_through[0].type_, "test.v1.Happened");
+    assert_eq!(passed_through[0].payload, vec![1, 2, 3]);
 }
 
 #[test]

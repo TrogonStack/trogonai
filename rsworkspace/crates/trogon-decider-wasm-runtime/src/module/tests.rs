@@ -30,6 +30,23 @@ fn rejects_a_component_that_is_not_a_valid_wasm_component() {
 }
 
 #[test]
+fn rejects_a_component_that_declares_an_import() {
+    let bytes = wat::parse_str(
+        r#"
+        (component
+          (import "trogon:decider/handler" (instance
+            (export "descriptor" (func (result string)))
+          ))
+        )
+        "#,
+    )
+    .expect("component with one import parses");
+
+    let error = WasmDeciderModule::load(test_engine(), &bytes);
+    assert!(matches!(error, Err(LoadWasmDeciderError::ForbiddenImports { .. })));
+}
+
+#[test]
 fn duplicate_command_type_error_names_the_offending_type() {
     let descriptor = ModuleDescriptor {
         name: "module".to_string(),
