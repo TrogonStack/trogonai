@@ -31,27 +31,27 @@ pub enum ParityError {
         #[source]
         source: Box<ScenarioError>,
     },
-    /// The native and wasm runners resolved a different stream id for the scenario's first
-    /// command.
+    /// The native and wasm runners produced diverging stream-id outcomes for the scenario's
+    /// first command, including one runner producing an outcome the other did not.
     #[error("{scenario}: stream id mismatch: native={native:?}, wasm={wasm:?}")]
     StreamIdMismatch {
         /// The scenario's name.
         scenario: String,
-        /// The native runner's resolved stream id.
-        native: Box<StreamIdOutcome>,
-        /// The wasm runner's resolved stream id.
-        wasm: Box<StreamIdOutcome>,
+        /// The native runner's stream-id outcome, if it produced one.
+        native: Option<Box<StreamIdOutcome>>,
+        /// The wasm runner's stream-id outcome, if it produced one.
+        wasm: Option<Box<StreamIdOutcome>>,
     },
-    /// Both runners resolved the same stream id, but it did not match the scenario's declared
-    /// [`ScenarioIr::stream_id`].
-    #[error("{scenario}: declared stream id '{declared}' does not match resolved id '{resolved}'")]
+    /// Both runners agreed on a stream-id outcome, but it was not a resolution matching the
+    /// scenario's declared [`ScenarioIr::stream_id`].
+    #[error("{scenario}: declared stream id '{declared}' does not match outcome {outcome:?}")]
     StreamIdDeclaredMismatch {
         /// The scenario's name.
         scenario: String,
         /// The scenario's declared stream id.
         declared: String,
-        /// The stream id both runners resolved instead.
-        resolved: String,
+        /// The outcome both runners agreed on instead of resolving the declared id.
+        outcome: Box<StreamIdOutcome>,
     },
     /// The native and wasm runners produced a different number of step outcomes.
     #[error("{scenario}: native produced {native_len} step outcome(s), wasm produced {wasm_len}")]
@@ -105,7 +105,11 @@ pub fn assert_parity<N: NativeDeciderBundle, T>(
     compare_outcomes(&scenario.name, native.steps, wasm.steps)
 }
 
-/// Compares a native and a wasm run's resolved stream id, independent of how each was produced.
+/// Compares a native and a wasm run's stream-id outcome, independent of how each was produced.
+///
+/// One runner producing an outcome the other did not is a divergence, the same as two different
+/// outcomes. Neither runner producing one (a scenario with no commands) is the only silent case:
+/// with nothing resolved, a declared [`ScenarioIr::stream_id`] has nothing to be checked against.
 ///
 /// Kept separate from [`assert_parity`] so the comparison itself can be exercised without a real
 /// native decider or wasm component instance, the same way [`compare_outcomes`] is.
@@ -115,27 +119,29 @@ fn compare_stream_ids(
     native: Option<&StreamIdOutcome>,
     wasm: Option<&StreamIdOutcome>,
 ) -> Result<(), ParityError> {
-    let (native, wasm) = match (native, wasm) {
-        (Some(native), Some(wasm)) => (native, wasm),
-        _ => return Ok(()),
+    let outcome = match (native, wasm) {
+        (None, None) => None,
+        (Some(native), Some(wasm)) if native == wasm => Some(native),
+        (native, wasm) => {
+            return Err(ParityError::StreamIdMismatch {
+                scenario: scenario_name.to_string(),
+                native: native.cloned().map(Box::new),
+                wasm: wasm.cloned().map(Box::new),
+            });
+        }
     };
 
-    if native != wasm {
-        return Err(ParityError::StreamIdMismatch {
-            scenario: scenario_name.to_string(),
-            native: Box::new(native.clone()),
-            wasm: Box::new(wasm.clone()),
-        });
-    }
-
-    if let (Some(declared), StreamIdOutcome::Resolved(resolved)) = (declared, native)
-        && resolved != declared
-    {
-        return Err(ParityError::StreamIdDeclaredMismatch {
-            scenario: scenario_name.to_string(),
-            declared: declared.to_string(),
-            resolved: resolved.clone(),
-        });
+    if let (Some(declared), Some(outcome)) = (declared, outcome) {
+        match outcome {
+            StreamIdOutcome::Resolved(resolved) if resolved == declared => {}
+            outcome => {
+                return Err(ParityError::StreamIdDeclaredMismatch {
+                    scenario: scenario_name.to_string(),
+                    declared: declared.to_string(),
+                    outcome: Box::new(outcome.clone()),
+                });
+            }
+        }
     }
 
     Ok(())

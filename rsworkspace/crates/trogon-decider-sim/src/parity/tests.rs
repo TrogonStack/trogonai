@@ -98,3 +98,34 @@ fn compare_stream_ids_passes_when_declared_matches_both_runners() {
     let resolved = StreamIdOutcome::Resolved("backup".to_string());
     compare_stream_ids("scenario", Some("backup"), Some(&resolved), Some(&resolved)).expect("declared id matches");
 }
+
+#[test]
+fn compare_stream_ids_reports_a_one_sided_outcome_as_divergence() {
+    let resolved = StreamIdOutcome::Resolved("backup".to_string());
+
+    let error = compare_stream_ids("scenario", None, Some(&resolved), None).unwrap_err();
+    assert!(
+        matches!(&error, ParityError::StreamIdMismatch { wasm: None, .. }),
+        "{error}"
+    );
+
+    let error = compare_stream_ids("scenario", None, None, Some(&resolved)).unwrap_err();
+    assert!(
+        matches!(&error, ParityError::StreamIdMismatch { native: None, .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn compare_stream_ids_reports_a_declared_mismatch_when_both_runners_failed() {
+    let failed = StreamIdOutcome::Failed(DomainErrorOutcome {
+        code: "boom".to_string(),
+        message: "stream id resolution failed".to_string(),
+        details: Vec::new(),
+    });
+    let error = compare_stream_ids("scenario", Some("backup"), Some(&failed), Some(&failed)).unwrap_err();
+    assert!(
+        matches!(&error, ParityError::StreamIdDeclaredMismatch { .. }),
+        "{error}"
+    );
+}
