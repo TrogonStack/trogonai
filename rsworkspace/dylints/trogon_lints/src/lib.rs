@@ -8,6 +8,7 @@ extern crate rustc_session;
 extern crate rustc_span;
 
 mod error_string_comparison;
+mod error_type_naming;
 mod function_local_macro_rules;
 mod function_local_use;
 mod inline_module_block;
@@ -32,6 +33,7 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     dylint_linting::init_config(sess);
     lint_store.register_lints(&[
         ERROR_STRING_COMPARISON,
+        ERROR_TYPE_NAMING,
         FUNCTION_LOCAL_MACRO_RULES,
         FUNCTION_LOCAL_USE,
         INLINE_MODULE_BLOCK,
@@ -81,6 +83,42 @@ rustc_session::declare_lint! {
     pub ERROR_STRING_COMPARISON,
     Deny,
     "error display strings must not drive behavior",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a type that implements `std::error::Error` (whether hand-written
+    /// or derived with `thiserror`) whose name does not end in `Error`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// The `Error` suffix is the signal, readable at any call site, that a type
+    /// is a failure value. Without it a reader has to find the type's definition
+    /// to learn whether `Err(EmptySecret)` returns an error or some marker value,
+    /// and error types blend in with ordinary structs and enums. Requiring the
+    /// suffix on every type that implements `Error` makes the role legible from
+    /// the name alone. A type named exactly `Error` (the crate- or module-root
+    /// error enum) already satisfies the rule.
+    ///
+    /// ### Example
+    ///
+    /// ```rust
+    /// #[derive(Debug, thiserror::Error)]
+    /// #[error("secret must not be empty")]
+    /// pub struct EmptySecret;
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust
+    /// #[derive(Debug, thiserror::Error)]
+    /// #[error("secret must not be empty")]
+    /// pub struct EmptySecretError;
+    /// ```
+    pub ERROR_TYPE_NAMING,
+    Deny,
+    "name types that implement `std::error::Error` with an `Error` suffix",
 }
 
 rustc_session::declare_lint! {
@@ -567,6 +605,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        error_type_naming::check_item(cx, item);
         inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
         test_module_naming::check_item(cx, item);
@@ -575,6 +614,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
 rustc_session::impl_lint_pass!(TrogonLints => [
     ERROR_STRING_COMPARISON,
+    ERROR_TYPE_NAMING,
     FUNCTION_LOCAL_MACRO_RULES,
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
