@@ -17,4 +17,4 @@ go vet ./...
 
 find internal/protowit/testdata/snapshots -name '*.wit' -exec dirname {} \; \
   | sort -u \
-  | xargs -n1 -I{} wasm-tools component wit {} --wasm -o /dev/null
+  | xargs -r -I{} wasm-tools component wit {} --wasm -o /dev/null
