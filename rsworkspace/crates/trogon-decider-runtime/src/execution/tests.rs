@@ -1896,6 +1896,8 @@ fn resolves_stream_id_once() {
 
 #[test]
 fn replay_limit_exceeded_fails_before_folding_without_snapshot() {
+    // The final event fails evolution, so getting ReplayLimitExceeded instead
+    // of Evolve(BrokenEvent) proves the limit is enforced before folding.
     let runtime = FakeRuntime {
         current_position: Some(position(3)),
         stream_events: vec![
@@ -1914,9 +1916,8 @@ fn replay_limit_exceeded_fails_before_folding_without_snapshot() {
             ),
             stream_event(
                 3,
-                TestEvent::StateChanged {
+                TestEvent::Broken {
                     id: "alpha".to_string(),
-                    enabled: true,
                 },
             ),
         ],
@@ -1945,6 +1946,8 @@ fn replay_limit_exceeded_fails_before_folding_without_snapshot() {
 
 #[test]
 fn replay_limit_exceeded_fails_before_folding_with_snapshot() {
+    // The final event fails evolution, so getting ReplayLimitExceeded instead
+    // of Evolve(BrokenEvent) proves the limit is enforced before folding.
     let runtime = FakeRuntime {
         snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
         current_position: Some(position(3)),
@@ -1964,9 +1967,8 @@ fn replay_limit_exceeded_fails_before_folding_with_snapshot() {
             ),
             stream_event(
                 3,
-                TestEvent::StateChanged {
+                TestEvent::Broken {
                     id: "alpha".to_string(),
-                    enabled: true,
                 },
             ),
         ],
