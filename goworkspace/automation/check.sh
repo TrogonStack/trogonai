@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Runs the Go workspace checks: formatting, tests, vet, and WIT snapshot validation.
+set -euo pipefail
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "gofmt found unformatted files:" >&2
+  echo "$unformatted" >&2
+  exit 1
+fi
+
+go test ./...
+go vet ./...
+
+find internal/protowit/testdata/snapshots -name '*.wit' -exec dirname {} \; \
+  | sort -u \
+  | xargs -n1 wasm-tools component wit >/dev/null

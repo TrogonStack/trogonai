@@ -49,7 +49,7 @@ depends = ["check:rust", "check:go", "check:web"]
 
 [tasks."check:go"]
 dir = "goworkspace"
-run = "test -z \"$(gofmt -l .)\" && go test ./... && go vet ./... && find internal/protowit/testdata/snapshots -name '*.wit' -exec dirname {} \\; | sort -u | xargs -n1 wasm-tools component wit >/dev/null"
+run = "./automation/check.sh"
 
 [tasks."test:go:race"]
 dir = "goworkspace"
