@@ -447,20 +447,26 @@ where
         let phase_context = GuestPhaseContext::new(self.module, self.command);
         let decided_envelopes = spawn_guest(move || {
             let session = create_session(&mut store, &bindings, &engine, None, &phase_context)?;
-            replay_events(
+            // No snapshot observes this session, so the decided events are not
+            // folded back into it; folding here would only burn guest fuel.
+            let outcome = replay_and_decide(
                 &mut store,
                 &bindings,
                 &engine,
                 session,
                 &replayed_envelopes,
+                &command,
                 &phase_context,
-            )?;
-            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
-            let decided_envelopes = ensure_decided_events_are_non_empty(decided_envelopes)?;
-            // No snapshot observes this session, so the decided events are not
-            // folded back into it; folding here would only burn guest fuel.
-            drop_session_discarding_trap(&mut store, &bindings, &engine, session, &phase_context);
-            Ok(decided_envelopes)
+            );
+            conclude_session(
+                &mut store,
+                &bindings,
+                &engine,
+                session,
+                &phase_context,
+                outcome.as_ref().err(),
+            );
+            outcome
         })
         .await?;
 
@@ -549,27 +555,24 @@ where
                 snapshot_bytes.as_deref(),
                 &phase_context,
             )?;
-            replay_events(
+            let outcome = replay_decide_fold_and_snapshot(
                 &mut store,
                 &bindings,
                 &engine,
                 session,
                 &replayed_envelopes,
+                &command,
                 &phase_context,
-            )?;
-            let decided_envelopes = decide(&mut store, &bindings, &engine, session, &command, &phase_context)?;
-            let decided_envelopes = ensure_decided_events_are_non_empty(decided_envelopes)?;
-            fold_decided_events(
+            );
+            conclude_session(
                 &mut store,
                 &bindings,
                 &engine,
                 session,
-                &decided_envelopes,
                 &phase_context,
-            )?;
-            let new_snapshot_bytes = take_snapshot(&mut store, &bindings, &engine, session, &phase_context)?;
-            drop_session_discarding_trap(&mut store, &bindings, &engine, session, &phase_context);
-            Ok((decided_envelopes, new_snapshot_bytes))
+                outcome.as_ref().err(),
+            );
+            outcome
         })
         .await?;
 
@@ -1017,10 +1020,72 @@ fn take_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
     })
 }
 
+/// Runs the guest-call sequence shared by both execution paths: replay prior
+/// events, decide the command, and enforce the WIT `decide` contract's
+/// non-empty invariant.
+fn replay_and_decide<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+    replayed_envelopes: &[AnyEnvelope],
+    command: &CommandEnvelope,
+    context: &GuestPhaseContext,
+) -> Result<Vec<AnyEnvelope>, WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>> {
+    replay_events(store, bindings, engine, session, replayed_envelopes, context)?;
+    let decided_envelopes = decide(store, bindings, engine, session, command, context)?;
+    ensure_decided_events_are_non_empty(decided_envelopes)
+}
+
+/// [`replay_and_decide`], then folds the decided events back into the session
+/// and serializes its snapshot, the extra steps only the snapshot-enabled
+/// path needs.
+#[allow(
+    clippy::type_complexity,
+    reason = "the tuple mirrors what the snapshot execution path destructures"
+)]
+fn replay_decide_fold_and_snapshot<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+    replayed_envelopes: &[AnyEnvelope],
+    command: &CommandEnvelope,
+    context: &GuestPhaseContext,
+) -> Result<(Vec<AnyEnvelope>, Option<Vec<u8>>), WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>
+{
+    let decided_envelopes = replay_and_decide(store, bindings, engine, session, replayed_envelopes, command, context)?;
+    fold_decided_events(store, bindings, engine, session, &decided_envelopes, context)?;
+    let new_snapshot_bytes = take_snapshot(store, bindings, engine, session, context)?;
+    Ok((decided_envelopes, new_snapshot_bytes))
+}
+
+/// Disposes a guest session once the command's outcome is determined, whether
+/// it decided events, rejected, or faulted. The one exception is a guest that
+/// already trapped: a trapped component instance cannot be reentered, so
+/// attempting the destructor would only re-count the same trap under the
+/// `drop` phase.
+fn conclude_session<T, ReadSnapshotError, ReadStreamError, AppendStreamError>(
+    store: &mut Store<T>,
+    bindings: &host::Decider,
+    engine: &WasmDeciderEngine,
+    session: host::Session,
+    context: &GuestPhaseContext,
+    error: Option<&WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>>,
+) {
+    if matches!(
+        error,
+        Some(WasmCommandError::Trap(_) | WasmCommandError::DeadlineExceeded(_))
+    ) {
+        return;
+    }
+    drop_session_discarding_trap(store, bindings, engine, session, context);
+}
+
 /// Drops a guest session after the command outcome it belongs to is already
-/// decided: the events [`decide`] returned, and for a [`WithSnapshotStore`]
-/// execution, the state [`fold_decided_events`] folded back in and
-/// [`take_snapshot`] serialized.
+/// determined: the events [`decide`] returned or the domain error it
+/// surfaced, and for a [`WithSnapshotStore`] execution, the state
+/// [`fold_decided_events`] folded back in and [`take_snapshot`] serialized.
 ///
 /// Unlike every guest call before it in this flow, the WIT `session`
 /// resource's destructor is real guest code (per the `resource session`

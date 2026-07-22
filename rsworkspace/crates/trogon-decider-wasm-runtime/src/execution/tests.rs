@@ -174,6 +174,14 @@ fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
     assert!(matches!(error, WasmCommandError::DeadlineExceeded(_)), "{error}");
 }
 
+fn test_phase_context(module: &WasmDeciderModule) -> GuestPhaseContext {
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    GuestPhaseContext::new(module, &command)
+}
+
 fn instantiated_session(
     module: &WasmDeciderModule,
 ) -> (Store<crate::engine::GuestState>, host::Decider, host::Session) {
@@ -232,6 +240,52 @@ fn drop_session_after_decide_recovers_from_an_exhausted_leftover_budget() {
 
     let result = drop_session_after_decide(&mut store, &bindings, module.engine(), session);
     assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn conclude_session_runs_the_destructor_on_a_domain_error_outcome() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        WasmCommandError::EmptyDecision;
+    conclude_session(&mut store, &bindings, module.engine(), session, &context, Some(&error));
+
+    let remaining = store.get_fuel().expect("fuel metering is enabled");
+    assert!(
+        remaining > 0,
+        "the destructor must run on a fresh budget, got {remaining}"
+    );
+}
+
+#[test]
+fn conclude_session_skips_a_guest_that_already_trapped() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        WasmCommandError::Trap(wasmtime::Error::from(wasmtime::Trap::OutOfFuel));
+    conclude_session(&mut store, &bindings, module.engine(), session, &context, Some(&error));
+
+    let remaining = store.get_fuel().expect("fuel metering is enabled");
+    assert_eq!(
+        remaining, 0,
+        "a trapped guest must not be reentered, so no budget is armed"
+    );
 }
 
 #[test]

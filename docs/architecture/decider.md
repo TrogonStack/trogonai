@@ -342,11 +342,13 @@ that command's own events. The snapshot-enabled execution path calls `decide`, t
 same state a full replay would produce. The no-snapshot path skips the fold entirely: no
 snapshot will observe that session again, so folding would only burn guest fuel for nothing.
 
-Dropping the session at the end of either path runs the guest's `session` resource
-destructor, which is real guest code: it is armed with its own fresh fuel and epoch budget
-rather than whatever the preceding `decide` or `snapshot` call left behind. A trap in it is
-counted in `decider.wasm.traps` under the `drop` guest phase and logged, but never fails
-the command, because by then the command's outcome is already decided.
+Once the command's outcome is determined, whether it decided events, rejected, or faulted,
+the session is dropped, which runs the guest's `session` resource destructor, real guest
+code: it is armed with its own fresh fuel and epoch budget rather than whatever the
+preceding guest call left behind. A trap in it is counted in `decider.wasm.traps` under the
+`drop` guest phase and logged, but never fails the command. The only path that skips the
+destructor is a guest that already trapped: a trapped component instance cannot be
+reentered, so attempting it would re-count the same trap.
 
 `WasmCommandError` distinguishes a guest call that trapped for any other reason (`Trap`) from
 one that exceeded its wall-clock epoch deadline (`DeadlineExceeded`), classified by
