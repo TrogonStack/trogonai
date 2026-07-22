@@ -12,7 +12,7 @@ const (
 	unsupportedParameter unsupportedReason = iota + 1
 	unsupportedPackage
 	unsupportedEnum
-	unsupportedOneofShape
+	invalidOneofShape
 	unsupportedMap
 	unsupportedFieldKind
 	unsupportedMessageReference
@@ -48,8 +48,8 @@ func (r unsupportedReason) String() string {
 		return "protobuf package must contain a namespace and name"
 	case unsupportedEnum:
 		return "enums are not supported"
-	case unsupportedOneofShape:
-		return "oneof shape is not supported"
+	case invalidOneofShape:
+		return "oneof shape is invalid"
 	case unsupportedMap:
 		return "maps are not supported"
 	case unsupportedFieldKind:

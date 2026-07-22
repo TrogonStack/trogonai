@@ -477,7 +477,7 @@ func buildVariant(
 	if oneof.Fields().Len() == 0 {
 		return witVariant{}, &schemaError{
 			element: oneof.FullName(),
-			reason:  unsupportedOneofShape,
+			reason:  invalidOneofShape,
 			detail:  "oneof must contain at least one member",
 		}
 	}
@@ -498,7 +498,7 @@ func buildVariant(
 		if field.Cardinality() == protoreflect.Repeated {
 			return witVariant{}, &schemaError{
 				element: field.FullName(),
-				reason:  unsupportedOneofShape,
+				reason:  invalidOneofShape,
 				detail:  "oneof members cannot be repeated",
 			}
 		}
