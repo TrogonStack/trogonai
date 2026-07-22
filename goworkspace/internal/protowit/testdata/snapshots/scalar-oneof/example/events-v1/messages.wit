@@ -1,0 +1,13 @@
+package example:events-v1;
+
+interface messages {
+  record envelope {
+    request-id: string,
+    payload: option<envelope-payload>,
+  }
+
+  variant envelope-payload {
+    text(string),
+    sequence(s64),
+  }
+}

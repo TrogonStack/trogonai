@@ -1,0 +1,15 @@
+package example:events-v1;
+
+interface messages {
+  record first-message {
+    id: string,
+  }
+
+  record second-message {
+    id: string,
+  }
+
+  record third-message {
+    id: string,
+  }
+}
