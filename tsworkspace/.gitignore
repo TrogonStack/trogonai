@@ -1,0 +1,6 @@
+coverage
+playwright-report
+test-results
+.tanstack
+*.local
+**/routeTree.gen.ts

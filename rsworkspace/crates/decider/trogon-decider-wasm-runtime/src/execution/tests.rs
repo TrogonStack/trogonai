@@ -1,0 +1,397 @@
+use trogon_std::NowV7;
+use uuid::Uuid;
+
+use super::*;
+use crate::WasmEngineConfig;
+use crate::test_fixture::schedules_bytes;
+
+fn position(value: u64) -> StreamPosition {
+    StreamPosition::try_new(value).expect("test stream position must be non-zero")
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FixedUuidGenerator(Uuid);
+
+impl NowV7 for FixedUuidGenerator {
+    fn now_v7(&self) -> Uuid {
+        self.0
+    }
+}
+
+#[test]
+fn spec_precondition_wins_over_override_and_position() {
+    let resolved = resolve_write_precondition(
+        Some(host::WritePrecondition::NoStream),
+        Some(StreamWritePrecondition::Any),
+        Some(position(7)),
+    );
+    assert_eq!(resolved, StreamWritePrecondition::NoStream);
+}
+
+#[test]
+fn override_wins_over_observed_position() {
+    let resolved = resolve_write_precondition(None, Some(StreamWritePrecondition::StreamExists), Some(position(7)));
+    assert_eq!(resolved, StreamWritePrecondition::StreamExists);
+}
+
+#[test]
+fn observed_position_is_the_fallback() {
+    let resolved = resolve_write_precondition(None, None, Some(position(7)));
+    assert_eq!(resolved, StreamWritePrecondition::At(position(7)));
+}
+
+#[test]
+fn missing_position_falls_back_to_no_stream() {
+    let resolved = resolve_write_precondition(None, None, None);
+    assert_eq!(resolved, StreamWritePrecondition::NoStream);
+}
+
+#[test]
+fn configured_no_stream_uses_the_fast_path() {
+    assert!(has_no_stream_write_precondition(
+        Some(host::WritePrecondition::NoStream),
+        None
+    ));
+    assert!(has_no_stream_write_precondition(
+        None,
+        Some(StreamWritePrecondition::NoStream)
+    ));
+    assert!(!has_no_stream_write_precondition(
+        Some(host::WritePrecondition::Any),
+        Some(StreamWritePrecondition::NoStream)
+    ));
+    assert!(!has_no_stream_write_precondition(None, None));
+}
+
+#[test]
+fn wit_preconditions_map_onto_stream_preconditions() {
+    assert_eq!(
+        to_stream_write_precondition(host::WritePrecondition::Any),
+        StreamWritePrecondition::Any
+    );
+    assert_eq!(
+        to_stream_write_precondition(host::WritePrecondition::StreamExists),
+        StreamWritePrecondition::StreamExists
+    );
+    assert_eq!(
+        to_stream_write_precondition(host::WritePrecondition::NoStream),
+        StreamWritePrecondition::NoStream
+    );
+}
+
+#[test]
+fn snapshot_at_or_behind_stream_is_accepted() {
+    assert!(ensure_snapshot_not_ahead(position(3), Some(position(3))).is_ok());
+    assert!(ensure_snapshot_not_ahead(position(3), Some(position(9))).is_ok());
+}
+
+#[test]
+fn snapshot_ahead_of_stream_is_rejected() {
+    let Err(error) = ensure_snapshot_not_ahead(position(9), Some(position(3))) else {
+        panic!("expected snapshot ahead of stream error");
+    };
+    assert_eq!(error.snapshot_position, position(9));
+    assert_eq!(error.stream_position, Some(position(3)));
+
+    assert!(ensure_snapshot_not_ahead(position(1), None).is_err());
+}
+
+#[test]
+fn encode_events_assigns_host_ids_and_headers() {
+    let id = Uuid::now_v7();
+    let headers = Headers::empty();
+    let envelopes = vec![AnyEnvelope {
+        type_: "test.v1.Happened".to_string(),
+        payload: vec![1, 2, 3],
+    }];
+
+    let events = encode_events(envelopes, &headers, &FixedUuidGenerator(id));
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].id, EventId::new(id));
+    assert_eq!(events[0].r#type, "test.v1.Happened");
+    assert_eq!(events[0].content, vec![1, 2, 3]);
+    assert_eq!(events[0].headers, headers);
+}
+
+#[test]
+fn replay_fuel_scales_linearly_with_event_count() {
+    assert_eq!(replay_fuel(10, 1), 10);
+    assert_eq!(replay_fuel(10, 250), 2_500);
+}
+
+#[test]
+fn replay_fuel_saturates_instead_of_overflowing() {
+    assert_eq!(replay_fuel(u64::MAX, 2), u64::MAX);
+    assert_eq!(replay_fuel(u64::MAX, usize::MAX), u64::MAX);
+}
+
+#[test]
+fn replay_epoch_ticks_scales_linearly_with_event_count() {
+    assert_eq!(replay_epoch_ticks(10, 1), 10);
+    assert_eq!(replay_epoch_ticks(10, 250), 2_500);
+}
+
+#[test]
+fn replay_epoch_ticks_saturates_instead_of_overflowing() {
+    assert_eq!(replay_epoch_ticks(u64::MAX, 2), u64::MAX);
+    assert_eq!(replay_epoch_ticks(u64::MAX, usize::MAX), u64::MAX);
+}
+
+#[test]
+fn a_zero_tick_epoch_deadline_traps_as_deadline_exceeded() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+
+    let engine = module.engine();
+    let mut store = engine.new_store();
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    let context = GuestPhaseContext::new(&module, &command);
+    let bindings = instantiate::<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(
+        &mut store,
+        module.decider_pre(),
+        engine,
+        &context,
+    )
+    .expect("instantiate succeeds");
+
+    // Arm the deadline directly and call the raw wit binding rather than the
+    // `call_stream_id` wrapper above: the wrapper re-arms the deadline from
+    // `engine.config().epoch_ticks_per_call()` immediately before its guest
+    // call, which would silently clobber the zero-tick deadline this test
+    // needs to force a trap.
+    engine
+        .arm_guest_call(&mut store, engine.config().fuel_per_call(), 0)
+        .expect("arming a zero-tick deadline succeeds");
+    let wasmtime_error =
+        host::call_stream_id(&bindings, &mut store, &command).expect_err("a zero-tick deadline is already elapsed");
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime_error, WasmCommandError::Trap);
+
+    assert!(matches!(error, WasmCommandError::DeadlineExceeded(_)), "{error}");
+}
+
+fn test_phase_context(module: &WasmDeciderModule) -> GuestPhaseContext {
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    GuestPhaseContext::new(module, &command)
+}
+
+fn instantiated_session(
+    module: &WasmDeciderModule,
+) -> (Store<crate::engine::GuestState>, host::Decider, host::Session) {
+    let engine = module.engine();
+    let mut store = engine.new_store();
+    let command = CommandEnvelope {
+        type_: "test.v1.DoesNotMatter".to_string(),
+        payload: Vec::new(),
+    };
+    let context = GuestPhaseContext::new(module, &command);
+    let bindings = instantiate::<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible>(
+        &mut store,
+        module.decider_pre(),
+        engine,
+        &context,
+    )
+    .expect("instantiate succeeds");
+    let session = create_session::<
+        crate::engine::GuestState,
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    >(&mut store, &bindings, engine, None, &context)
+    .expect("session creates");
+    (store, bindings, session)
+}
+
+#[test]
+fn dropping_a_session_without_a_fresh_budget_traps_on_an_exhausted_leftover() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+
+    // Simulate the leftover budget a prior `decide` or `snapshot` call could
+    // leave behind: exhausted fuel and an already-elapsed epoch deadline.
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error = host::drop_session(&bindings, &mut store, session)
+        .expect_err("dropping a session on an exhausted leftover budget traps");
+    assert!(error.downcast_ref::<wasmtime::Trap>().is_some(), "{error}");
+}
+
+#[test]
+fn drop_session_after_decide_recovers_from_an_exhausted_leftover_budget() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let result = drop_session_after_decide(&mut store, &bindings, module.engine(), session);
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn conclude_session_runs_the_destructor_on_a_domain_error_outcome() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        WasmCommandError::EmptyDecision;
+    conclude_session(&mut store, &bindings, module.engine(), session, &context, Some(&error));
+
+    let remaining = store.get_fuel().expect("fuel metering is enabled");
+    assert!(
+        remaining > 0,
+        "the destructor must run on a fresh budget, got {remaining}"
+    );
+}
+
+#[test]
+fn conclude_session_skips_a_guest_that_already_trapped() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        WasmCommandError::Trap(wasmtime::Error::from(wasmtime::Trap::OutOfFuel));
+    conclude_session(&mut store, &bindings, module.engine(), session, &context, Some(&error));
+
+    let remaining = store.get_fuel().expect("fuel metering is enabled");
+    assert_eq!(
+        remaining, 0,
+        "a trapped guest must not be reentered, so no budget is armed"
+    );
+}
+
+#[test]
+fn drop_session_discarding_trap_swallows_a_destructor_failure() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+    host::drop_session(&bindings, &mut store, session)
+        .expect_err("dropping a session on an exhausted leftover budget traps");
+
+    // The trap left the instance unenterable, so this second drop attempt
+    // fails; the wrapper must record and discard that failure, not panic or
+    // propagate it.
+    drop_session_discarding_trap(&mut store, &bindings, module.engine(), session, &context);
+}
+
+#[test]
+fn map_trap_distinguishes_epoch_deadline_from_other_traps() {
+    let deadline_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime::Error::from(wasmtime::Trap::Interrupt), WasmCommandError::Trap);
+    assert!(matches!(deadline_error, WasmCommandError::DeadlineExceeded(_)));
+
+    let other_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_trap(wasmtime::Error::from(wasmtime::Trap::OutOfFuel), WasmCommandError::Trap);
+    assert!(matches!(other_error, WasmCommandError::Trap(_)));
+}
+
+#[test]
+fn rejected_decide_errors_stay_rejections() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_decide_error(DecideError::Rejected(host::DomainError {
+            code: "already-exists".to_string(),
+            message: "schedule already exists".to_string(),
+            details: Vec::new(),
+        }));
+
+    let WasmCommandError::Rejected(detail) = error else {
+        panic!("expected rejected error");
+    };
+    assert_eq!(detail.code, "already-exists");
+}
+
+#[test]
+fn faulted_decide_errors_stay_faults() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        map_decide_error(DecideError::Faulted(host::DomainError {
+            code: "decode-failed".to_string(),
+            message: "payload did not decode".to_string(),
+            details: Vec::new(),
+        }));
+
+    let WasmCommandError::Faulted(detail) = error else {
+        panic!("expected faulted error");
+    };
+    assert_eq!(detail.code, "decode-failed");
+}
+
+#[test]
+fn an_empty_decided_events_list_is_rejected() {
+    let error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
+        ensure_decided_events_are_non_empty(Vec::new()).expect_err("an empty decision must be rejected");
+    assert!(matches!(error, WasmCommandError::EmptyDecision), "{error}");
+}
+
+#[test]
+fn a_non_empty_decided_events_list_passes_through_unchanged() {
+    let envelopes = vec![AnyEnvelope {
+        type_: "test.v1.Happened".to_string(),
+        payload: vec![1, 2, 3],
+    }];
+
+    let passed_through: Vec<AnyEnvelope> = ensure_decided_events_are_non_empty::<
+        std::convert::Infallible,
+        std::convert::Infallible,
+        std::convert::Infallible,
+    >(envelopes)
+    .expect("a non-empty decision must pass through");
+
+    assert_eq!(passed_through.len(), 1);
+    assert_eq!(passed_through[0].type_, "test.v1.Happened");
+    assert_eq!(passed_through[0].payload, vec![1, 2, 3]);
+}
+
+#[test]
+fn stream_events_project_onto_guest_envelopes() {
+    let stream_event = trogon_decider_runtime::StreamEvent {
+        stream_id: "backup".to_string(),
+        event: Event {
+            id: EventId::new(Uuid::now_v7()),
+            r#type: "test.v1.Happened".to_string(),
+            content: vec![4, 5, 6],
+            headers: Headers::empty(),
+        },
+        stream_position: position(1),
+        recorded_at: chrono::Utc::now(),
+    };
+
+    let envelopes = to_any_envelopes(vec![stream_event]);
+
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].type_, "test.v1.Happened");
+    assert_eq!(envelopes[0].payload, vec![4, 5, 6]);
+}

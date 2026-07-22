@@ -5,26 +5,27 @@ status: accepted
 date: 2026-07-04
 ---
 
-# ADR 0016: Protocol Buffers RPC over NATS micro Binding
+# ADR#0016: Protocol Buffers RPC over NATS micro Binding
 
 ## Context
 
-[ADR 0009](./0009-protocol-buffers-wire-contracts.md) makes Protocol Buffers the
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md) makes Protocol Buffers the
 wire contract for first-party owned service and message contracts.
-[ADR 0011](./0011-jsonrpc-over-nats-binding.md) defines how the JSON-RPC family
-(ACP, MCP, A2A) is carried over the NATS backbone, but it is explicitly scoped to
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md) defines how the [JSON-RPC](../glossary/json-rpc) family
+([ACP](../glossary/acp), [MCP](../glossary/mcp), [A2A](../glossary/a2a)) is carried over the [NATS](../glossary/nats) backbone, but it is explicitly scoped to
 JSON-RPC. There is no equivalent rule for how a first-party **protobuf** service
 is carried over NATS, so any such service would have to invent its own subject
-scheme, success/error signaling, and discovery. ADR 0011 exists because three
-JSON-RPC mappings diverged and lost errors; a protobuf service on NATS is exposed
-to the same class of drift with no governing rule.
+scheme, success/error signaling, and discovery.
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md) exists because three JSON-RPC
+mappings diverged and lost errors; a protobuf service on NATS is exposed to the
+same class of drift with no governing rule.
 
 `trogon-proto` already ships
 [`trogon.nats.micro.v1alpha1`](https://github.com/TrogonStack/trogon-proto/blob/main/proto/trogon/nats/micro/v1alpha1/options.proto),
 a protocol-neutral set of options that attach NATS Services metadata to any
 protobuf `service` (`ServiceOptions`: `version`, `description`, `metadata`,
 `content_type`) and `rpc` method (`MethodOptions`: endpoint `metadata`). Its own
-example is a generic `OrderService`. This shared mechanism has no ADR governing
+example is a generic `OrderService`. This shared mechanism has no [ADR](../glossary/adr) governing
 what it means on the wire.
 
 NATS Services (NATS micro,
@@ -33,12 +34,13 @@ already provides the RPC substrate a protobuf service needs: request/reply,
 queue-group load balancing, discovery (`$SRV.PING|INFO|STATS`), versioning,
 per-endpoint stats, and a standard error channel (`Nats-Service-Error`,
 `Nats-Service-Error-Code`). This ADR binds annotated protobuf services to that
-substrate as one shared rule, the protobuf-family sibling of ADR 0011.
+substrate as one shared rule, the protobuf-family sibling of
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md).
 
 This is a naming binding, not a protocol tunnel. It borrows gRPC's *idiom*
 (method-in-path routing, canonical status semantics) so the shape is familiar. It
 does not run gRPC: there is no HTTP/2, no gRPC framing, and no gRPC library on the
-path. The transport is core NATS; the RPC semantics are NATS micro.
+path. The [transport](../glossary/transport) is core NATS; the RPC semantics are NATS micro.
 
 ## Decision
 
@@ -91,7 +93,8 @@ them; the fields stay in the body so the payload is self-contained:
 
 The duplication is deliberate. The headers exist so middleware can route on the
 subject and meter on the error header without decoding the body, exactly as
-ADR 0011 requires for `Jsonrpc-Error-Code`; the body exists so a client, a log
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md) requires for `Jsonrpc-Error-Code`;
+the body exists so a client, a log
 pipeline, or a dead-letter inspector holding only the payload still has the whole
 error. The shared binding layer builds the headers and the body from one `Status`
 value, so they agree by construction; on any disagreement the headers are
@@ -115,7 +118,7 @@ over this rule.
 `CONTENT_TYPE_JSON` restrict it. JSON is `google.protobuf.Any`-style canonical
 JSON handled at the host edge (transcoded to and from protobuf via a
 `FileDescriptorSet`); the authoritative contract remains protobuf, consistent with
-[ADR 0009](./0009-protocol-buffers-wire-contracts.md).
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md).
 
 ### 5. Discovery, versioning, and scaling come from micro
 
@@ -150,21 +153,23 @@ messages, the subject prefix, and any outcome taxonomy layered on the error rule
 
 ## Alternatives Considered
 
-### Carry protobuf services over the JSON-RPC binding (ADR 0011)
+### Carry protobuf services over the JSON-RPC binding ([ADR#0011](./0011-jsonrpc-over-nats-binding.md))
 
 Rejected: protobuf services are not JSON-RPC, so 0011's codec (envelope fields,
-`Jsonrpc-*` headers, `id` semantics) does not apply. ADR 0011 is scoped to the
+`Jsonrpc-*` headers, `id` semantics) does not apply.
+[ADR#0011](./0011-jsonrpc-over-nats-binding.md) is scoped to the
 JSON-RPC family by its own terms.
 
 ### Let each protobuf service invent its own NATS mapping
 
-Rejected for the reason ADR 0011 exists: independent mappings diverge, disagree on
+Rejected for the reason [ADR#0011](./0011-jsonrpc-over-nats-binding.md) exists:
+independent mappings diverge, disagree on
 success-versus-error, and lose structured errors. A single shared rule over the
 shared options proto prevents that.
 
 ### Run real gRPC (HTTP/2) tunneled over NATS
 
-Rejected: NATS is the transport under [ADR 0003](./0003-ai-protocol-transport-taxonomy.md),
+Rejected: NATS is the transport under [ADR#0003](./0003-ai-protocol-transport-taxonomy.md),
 and NATS micro already supplies request/reply, discovery, and error semantics.
 Tunneling a second transport inside NATS adds framing and a dependency for no
 gain. gRPC is referenced only as a naming idiom.
@@ -187,6 +192,6 @@ gain. gRPC is referenced only as a naming idiom.
 - [`google.rpc.Status`](https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto),
   [`google.rpc.Code`](https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto),
   and [`google.rpc` error details](https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto)
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
-- [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)

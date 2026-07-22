@@ -1,0 +1,719 @@
+#![cfg_attr(coverage, feature(coverage_attribute))]
+//! `trogon-acp` — ACP server that routes prompts through NATS to `trogon-acp-runner`.
+//!
+//! ## Architecture
+//!
+//! ```text
+//! ACP client (Zed / editor)
+//!        ↓ stdio (newline-delimited JSON-RPC)
+//!   trogon-acp  [this binary]
+//!     TrogonAcpAgent
+//!       ├─ initialize / authenticate / new_session / set_session_mode
+//!       │    handled locally (no NATS round-trip)
+//!       ├─ load_session
+//!       │    loads history from NATS KV, replays as session notifications
+//!       └─ prompt / cancel
+//!            Bridge<NatsClient>   ← acp-nats
+//!               ↓↑ NATS request-reply
+//!         TrogonAgent (Agent trait impl)   ← trogon-acp-runner (same process)
+//!           AgentSideNatsConnection        ← acp-nats-agent
+//!              ↓
+//!         Anthropic API (via trogon-secret-proxy)
+//! ```
+//!
+//! ## Environment variables
+//!
+//! | Variable           | Default                  | Description                        |
+//! |--------------------|--------------------------|-------------------------------------|
+//! | `NATS_URL`         | `nats://localhost:4222`  | NATS server URL                    |
+//! | `ACP_PREFIX`       | `acp`                    | NATS subject prefix for ACP        |
+//! | `PROXY_URL`        | `http://localhost:8080`  | trogon-secret-proxy base URL       |
+//! | `ANTHROPIC_TOKEN`  | —                        | Proxy token for Anthropic API      |
+//! | `AGENT_MODEL`      | `claude-opus-4-6`        | Claude model ID                    |
+//! | `AGENT_MAX_ITERATIONS` | `10`                 | Max loop iterations per prompt     |
+
+mod agent;
+mod multi_runner;
+
+use std::sync::Arc;
+
+use acp_nats::boundary::{BoundaryExit, ConnectionClient, connect_agent_boundary};
+use acp_nats::jetstream::provision::provision_streams;
+use acp_nats::{AcpPrefix, Bridge, ClientHandler, Config};
+use agent_client_protocol::schema::v1::{
+    PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest, SessionId,
+    SessionNotification, ToolCallUpdate, ToolCallUpdateFields,
+};
+use async_nats::jetstream;
+use tokio::sync::mpsc;
+use tokio::task::LocalSet;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tracing::info;
+
+use acp_nats_agent::AgentSideNatsConnection;
+use trogon_acp_runner::{
+    GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionStore, TrogonAgent,
+};
+use trogon_agent_core::agent_loop::AgentLoop;
+use trogon_agent_core::tools::ToolContext;
+use trogon_nats::NatsConfig;
+
+#[cfg_attr(coverage, coverage(off))]
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "trogon_acp=info,acp_nats=info,trogon_acp_runner=info".into()),
+        )
+        .with_writer(std::io::stderr) // keep stdout clean for ACP protocol
+        .init();
+
+    // ── Config from environment ───────────────────────────────────────────────
+
+    let nats_url = std::env::var("NATS_URL").unwrap_or_else(|_| "nats://localhost:4222".to_string());
+    let acp_prefix = std::env::var("ACP_PREFIX").unwrap_or_else(|_| "acp".to_string());
+    let proxy_url = std::env::var("PROXY_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let anthropic_token = std::env::var("ANTHROPIC_TOKEN").unwrap_or_default();
+    let model = std::env::var("AGENT_MODEL").unwrap_or_else(|_| "claude-opus-4-6".to_string());
+    let max_iterations: u32 = std::env::var("AGENT_MAX_ITERATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+
+    // ── NATS connection ───────────────────────────────────────────────────────
+
+    let nats = async_nats::connect(&nats_url).await?;
+    info!(url = %nats_url, "connected to NATS");
+
+    let js = jetstream::new(nats.clone());
+
+    // ── JetStream streams for the embedded-Claude bridge ─────────────────────
+    // The TrogonAcpAgent bridge uses JetStream (COMMANDS / RESPONSES / NOTIFICATIONS
+    // streams) to communicate with the embedded TrogonAgent for Claude sessions.
+    // Without these streams the bridge's prompt::handle fails with
+    // "get notifications stream: stream not found" — same provision call every
+    // standalone runner (xai, openrouter, acp-runner) already makes at startup.
+    let acp_prefix_typed = AcpPrefix::new(&acp_prefix)?;
+    let js_for_provision = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
+    provision_streams(&js_for_provision, &acp_prefix_typed)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to provision JetStream streams: {e}"))?;
+
+    // ── AgentLoop ─────────────────────────────────────────────────────────────
+
+    let http_client = reqwest::Client::new();
+    let cwd = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let tool_context = Arc::new(ToolContext {
+        proxy_url: proxy_url.clone(),
+        cwd,
+        http_client: http_client.clone(),
+        web_search_api_key: None,
+        web_search_endpoint: None,
+    });
+
+    let mut agent_loop = AgentLoop {
+        http_client,
+        proxy_url,
+        anthropic_token,
+        anthropic_base_url: None,
+        anthropic_extra_headers: vec![],
+        model: model.clone(),
+        max_iterations,
+        tool_context,
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        permission_checker: None,
+        elicitation_provider: None,
+        post_tool_observer: None,
+        thinking_budget: None,
+        streaming_client: None,
+    };
+
+    let thinking_budget: Option<u32> = std::env::var("MAX_THINKING_TOKENS").ok().and_then(|v| v.parse().ok());
+    if let Some(budget) = thinking_budget {
+        agent_loop.thinking_budget = Some(budget);
+    }
+
+    // ── Permission gate channel ───────────────────────────────────────────────
+    // TrogonAgent sends PermissionReq over this channel; the LocalSet task below
+    // handles each request by calling conn.request_permission() on the ACP connection.
+
+    let (perm_tx, mut perm_rx) = mpsc::channel::<PermissionReq>(32);
+
+    // ── Shared gateway config (set by authenticate(), consumed by TrogonAgent) ─
+
+    let gateway_config = std::sync::Arc::new(tokio::sync::RwLock::new(None::<GatewayConfig>));
+
+    // ── Session store ─────────────────────────────────────────────────────────
+
+    let store = NatsSessionStore::open(&js).await?;
+
+    // ── TrogonAgent (NATS subscriber + agent) ────────────────────────────────
+
+    let ta = TrogonAgent::new(
+        NatsSessionNotifier::new(nats.clone()),
+        store.clone(),
+        agent_loop,
+        acp_prefix.clone(),
+        model.clone(),
+        Some(perm_tx),
+        None,
+        gateway_config.clone(),
+    );
+    let (_, runner_io_task) = AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix_typed.clone(), |fut| {
+        tokio::task::spawn_local(fut);
+    });
+
+    // ── Bridge (ACP prompt/cancel ↔ NATS) ────────────────────────────────────
+
+    let (notification_tx, mut notification_rx) = mpsc::channel::<SessionNotification>(64);
+
+    let nats_config = NatsConfig {
+        servers: vec![nats_url],
+        auth: trogon_nats::NatsAuth::None,
+    };
+    let config = Config::new(AcpPrefix::new(acp_prefix.clone())?, nats_config);
+    let base_config = config.clone();
+
+    let meter = opentelemetry::global::meter("trogon-acp");
+    let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js.clone());
+    let bridge = Bridge::new(
+        nats.clone(),
+        js_client,
+        trogon_std::time::SystemClock,
+        &meter,
+        config,
+        notification_tx.clone(),
+    );
+
+    // ── TrogonAcpAgent (embedded Claude; lifecycle local, prompt/cancel via Bridge) ──
+
+    let embedded_prefix = acp_prefix.clone();
+    let mut acp_agent_inner = agent::TrogonAcpAgent::new(
+        bridge,
+        store.clone(),
+        NatsSessionNotifier::new(nats.clone()),
+        acp_prefix,
+        notification_tx.clone(),
+        model.clone(),
+        gateway_config,
+    );
+    if let Ok(catalog) =
+        trogonai_catalog_client::open(&js, trogonai_catalog_client::CatalogClientConfig::default()).await
+    {
+        acp_agent_inner = acp_agent_inner.with_catalog(catalog);
+    }
+
+    // ── MultiRunnerAgent (ADDITIVE: routes sessions whose model resolves to an external
+    //     runner prefix to a per-runner Bridge pool; Claude sessions delegate to the
+    //     embedded agent unchanged). The registry is the shared KV the runners register into. ──
+    let reg_store = trogon_registry::provision(&js)
+        .await
+        .map_err(|e| anyhow::anyhow!("registry provisioning failed: {e}"))?;
+    let registry = trogon_registry::Registry::new(reg_store);
+    // Clones for the permission relay pool below (the wrapper consumes the originals).
+    let registry_relay = registry.clone();
+    let base_config_relay = base_config.clone();
+    let embedded_prefix_relay = embedded_prefix.clone();
+
+    let kernel_flags = trogonai_session_kernel::SessionKernelFeatureFlags::default();
+    let kernel_policies = trogonai_session_kernel::SessionKernelOperationalPolicy::default();
+    let kernel_stack = if kernel_flags.session_kernel_enabled || kernel_flags.event_log_shadow_mode {
+        match trogon_cli::session_kernel::SessionKernelStack::provision(
+            nats.clone(),
+            kernel_flags.clone(),
+            kernel_policies,
+        )
+        .await
+        {
+            Ok(stack) => Some(stack),
+            Err(err) if kernel_flags.session_kernel_enabled => {
+                return Err(anyhow::anyhow!("session kernel provisioning failed: {err}"));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "session kernel shadow provisioning failed — continuing without shadow sync"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let canonical_switcher = kernel_stack.map(|stack| {
+        trogon_cli::CrossRunnerSwitcher::new(nats.clone(), base_config.clone(), registry.clone())
+            .with_kernel_stack(stack)
+    });
+
+    let mut acp_agent = multi_runner::MultiRunnerAgent::new(
+        acp_agent_inner,
+        store.clone(), // for post_prompt_sync_kv (Gap 2)
+        nats.clone(),
+        trogon_nats::jetstream::NatsJetStreamClient::new(js.clone()),
+        trogon_std::time::SystemClock,
+        base_config,
+        registry,
+        notification_tx.clone(),
+        embedded_prefix,
+    );
+    if let Some(switcher) = canonical_switcher {
+        acp_agent = acp_agent.with_canonical_switcher(switcher);
+    }
+    let id_remap = acp_agent.id_remap_handle();
+
+    // ── ACP connection over stdio ─────────────────────────────────────────────
+
+    let local = LocalSet::new();
+
+    local
+        .run_until(async move {
+            // AgentSideNatsConnection uses spawn_local internally — must run within a LocalSet.
+            tokio::task::spawn_local(runner_io_task);
+
+            let stdin = tokio::io::stdin().compat();
+            let stdout = tokio::io::stdout().compat_write();
+
+            let boundary_result = connect_agent_boundary(Arc::new(acp_agent), stdout, stdin, async move |cx| {
+                let client = ConnectionClient::new(cx.clone());
+
+                // ── Permission relay pool ─────────────────────────────────────────────
+                // One `client::run` per external runner prefix registered at startup. Each
+                // relays the runner's client-bound requests (request_permission, elicitation,
+                // terminal) to the IDE connection, wrapped in `RemappingClient` so the runner's
+                // session id is rewritten to the acp session id the IDE knows. The embedded
+                // Claude keeps its own local `perm_tx` path (handled in the select loop below).
+                // Limitation: only runners registered when trogon-acp starts are covered.
+                let relay_client = std::rc::Rc::new(acp_nats::RemappingClient::new(
+                    Arc::new(client.clone()),
+                    id_remap.clone(),
+                ));
+                let caps = registry_relay.list_all().await.unwrap_or_default();
+                let mut relay_prefixes = std::collections::HashSet::new();
+                for cap in caps {
+                    let Some(prefix) = cap
+                        .metadata
+                        .get("acp_prefix")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                    else {
+                        continue;
+                    };
+                    if prefix == embedded_prefix_relay || !relay_prefixes.insert(prefix.clone()) {
+                        continue;
+                    }
+                    let Ok(acp_prefix) = AcpPrefix::new(&prefix) else {
+                        continue;
+                    };
+                    let cfg = base_config_relay.for_prefix(acp_prefix);
+                    let bridge = Arc::new(Bridge::new(
+                        nats.clone(),
+                        trogon_nats::jetstream::NatsJetStreamClient::new(js.clone()),
+                        trogon_std::time::SystemClock,
+                        &opentelemetry::global::meter("trogon-acp-perm-relay"),
+                        cfg,
+                        notification_tx.clone(),
+                    ));
+                    let nats_run = nats.clone();
+                    let client_run = relay_client.clone();
+                    tracing::info!(prefix = %prefix, "trogon-acp: permission relay listening for external runner");
+                    tokio::task::spawn_local(async move {
+                        acp_nats::client::run(nats_run, client_run, bridge).await;
+                    });
+                }
+
+                // Forward session notifications and handle the embedded Claude's permission
+                // requests in a single task so `client` stays on this task.
+                let perm_store = store.clone();
+                let perm_notif_tx = notification_tx.clone();
+                let notif_client = client.clone();
+                tokio::task::spawn_local(async move {
+                    loop {
+                        tokio::select! {
+                            maybe_notification = notification_rx.recv() => {
+                                match maybe_notification {
+                                    Some(mut notification) => {
+                                        // Remap runner_sid → acp_sid so the IDE recognizes the session
+                                        // (external-runner notifications arrive tagged with the runner's id).
+                                        let remapped = id_remap
+                                            .lock()
+                                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                            .get(notification.session_id.0.as_ref())
+                                            .cloned();
+                                        if let Some(acp_sid) = remapped {
+                                            notification.session_id = SessionId::from(acp_sid);
+                                        }
+                                        if let Err(e) = notif_client.session_notification(notification).await {
+                                            tracing::warn!(error = %e, "failed to forward session notification");
+                                        }
+                                    }
+                                    None => break,
+                                }
+                            }
+                            maybe_perm = perm_rx.recv() => {
+                                if let Some(req) = maybe_perm {
+                                    handle_permission_request(&notif_client, req, &perm_store, &perm_notif_tx, &model).await;
+                                }
+                                // perm channel closing doesn't stop the loop
+                            }
+                        }
+                    }
+                });
+
+                std::future::pending::<()>().await;
+                Ok(())
+            })
+            .await;
+
+            match boundary_result {
+                Ok(BoundaryExit::Main(())) => Ok(()),
+                Ok(BoundaryExit::TransportClosed) => {
+                    tracing::info!("ACP bridge stdin closed; shutting down");
+                    Ok(())
+                }
+                Err(e) => Err(anyhow::anyhow!("{e}")),
+            }
+        })
+        .await
+}
+
+/// Returns `true` if `bypassPermissions` mode may be offered to the user.
+/// Mirrors the TS `ALLOW_BYPASS = !IS_ROOT` constant: denied when running as root or sudo.
+#[cfg_attr(coverage, coverage(off))]
+fn allow_bypass() -> bool {
+    if std::env::var("SUDO_UID").is_ok() || std::env::var("SUDO_USER").is_ok() {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if let Some(rest) = line.strip_prefix("Uid:\t")
+                    && let Some(uid) = rest.split_whitespace().next()
+                {
+                    return uid != "0";
+                }
+            }
+        }
+    }
+    true
+}
+
+fn exit_plan_mode_options(bypass: bool) -> Vec<PermissionOption> {
+    let mut options = Vec::new();
+    if bypass {
+        options.push(PermissionOption::new(
+            "bypassPermissions",
+            "Yes, and bypass permissions",
+            PermissionOptionKind::AllowAlways,
+        ));
+    }
+    options.push(PermissionOption::new(
+        "acceptEdits",
+        "Yes, and auto-accept edits",
+        PermissionOptionKind::AllowAlways,
+    ));
+    options.push(PermissionOption::new(
+        "default",
+        "Yes, and manually approve edits",
+        PermissionOptionKind::AllowOnce,
+    ));
+    options.push(PermissionOption::new(
+        "plan",
+        "No, keep planning",
+        PermissionOptionKind::RejectOnce,
+    ));
+    options
+}
+
+fn parse_exit_plan_mode_outcome(outcome: RequestPermissionOutcome) -> (bool, Option<String>) {
+    match outcome {
+        RequestPermissionOutcome::Selected(sel) => {
+            let id = sel.option_id.0.as_ref();
+            if id == "plan" {
+                (false, None)
+            } else {
+                (true, Some(id.to_string()))
+            }
+        }
+        _ => (false, None),
+    }
+}
+
+fn parse_tool_permission_outcome(outcome: RequestPermissionOutcome) -> (bool, bool) {
+    match outcome {
+        RequestPermissionOutcome::Selected(sel) => {
+            let id = sel.option_id.0.as_ref();
+            (id == "allow" || id == "allow_always", id == "allow_always")
+        }
+        _ => (false, false),
+    }
+}
+
+/// Call `conn.request_permission` for a tool and send the allow/deny result
+/// back to the Runner via the oneshot channel embedded in `req`.
+///
+/// Special cases:
+/// - `ExitPlanMode`: presents mode-selection options instead of allow/deny.
+/// - `allow_always`: saves the tool name to `allowed_tools` in the session store.
+#[cfg_attr(coverage, coverage(off))]
+async fn handle_permission_request<S: SessionStore>(
+    conn: &impl ClientHandler,
+    req: PermissionReq,
+    store: &S,
+    notification_tx: &mpsc::Sender<SessionNotification>,
+    default_model: &str,
+) {
+    // ── ExitPlanMode: let the user choose which mode to switch to ─────────────
+    if req.tool_name == "ExitPlanMode" {
+        let options = exit_plan_mode_options(allow_bypass());
+
+        let fields = ToolCallUpdateFields::new().title("Exit Plan Mode".to_string());
+        let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
+        let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
+
+        let (allowed, new_mode) = match conn.request_permission(perm_req).await {
+            Ok(resp) => parse_exit_plan_mode_outcome(resp.outcome),
+            Err(e) => {
+                tracing::warn!(error = %e, "ExitPlanMode permission request failed");
+                (false, None)
+            }
+        };
+
+        // Persist the mode change and notify the client
+        if let Some(mode) = new_mode {
+            use agent_client_protocol::schema::v1::{ConfigOptionUpdate, CurrentModeUpdate, SessionUpdate};
+            if let Ok(mut state) = store.load(&req.session_id).await {
+                state.mode = mode.clone();
+                if let Err(e) = store.save(&req.session_id, &state).await {
+                    tracing::warn!(error = %e, "failed to save session mode after ExitPlanMode");
+                }
+                let current_model = state.model.as_deref().unwrap_or(default_model);
+                let config_options = agent::TrogonAcpAgent::<
+                    async_nats::Client,
+                    trogon_std::time::SystemClock,
+                    trogon_nats::jetstream::NatsJetStreamClient,
+                    NatsSessionStore,
+                    NatsSessionNotifier,
+                >::build_config_options_with_catalog(
+                    &mode,
+                    current_model,
+                    allow_bypass(),
+                    state.compactor_provider.as_deref(),
+                    state.compactor_model.as_deref(),
+                    agent::ConfigCatalogCtx {
+                        catalog: None,
+                        callable_providers: None,
+                        margin: trogonai_catalog_client::CatalogClientConfig::default().margin,
+                    },
+                );
+                let config_n = SessionNotification::new(
+                    req.session_id.clone(),
+                    SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(config_options)),
+                );
+                let _ = notification_tx.send(config_n).await;
+            }
+            let mode_n = SessionNotification::new(
+                req.session_id.clone(),
+                SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(mode)),
+            );
+            let _ = notification_tx.send(mode_n).await;
+        }
+
+        let _ = req.response_tx.send(allowed);
+        return;
+    }
+
+    // ── Standard tool permission request ──────────────────────────────────────
+    let options = vec![
+        PermissionOption::new("allow_always", "Always Allow", PermissionOptionKind::AllowAlways),
+        PermissionOption::new("allow", "Allow", PermissionOptionKind::AllowOnce),
+        PermissionOption::new("reject", "Reject", PermissionOptionKind::RejectOnce),
+    ];
+
+    let fields = ToolCallUpdateFields::new()
+        .title(req.tool_name.clone())
+        .raw_input(req.tool_input.clone());
+    let tool_call = ToolCallUpdate::new(req.tool_call_id.clone(), fields);
+
+    let perm_req = RequestPermissionRequest::new(req.session_id.clone(), tool_call, options);
+
+    let outcome = conn.request_permission(perm_req).await;
+
+    let (allowed, save_always) = match outcome {
+        Ok(resp) => parse_tool_permission_outcome(resp.outcome),
+        Err(e) => {
+            tracing::warn!(error = %e, tool = %req.tool_name, "permission request failed — denying");
+            (false, false)
+        }
+    };
+
+    // Persist allow-always decision so ChannelPermissionChecker can auto-approve
+    // future calls to this tool within the session.
+    if save_always
+        && let Ok(mut state) = store.load(&req.session_id).await
+        && !state.allowed_tools.contains(&req.tool_name)
+    {
+        state.allowed_tools.push(req.tool_name.clone());
+        if let Err(e) = store.save(&req.session_id, &state).await {
+            tracing::warn!(error = %e, tool = %req.tool_name, "failed to save allowed_tools");
+        }
+    }
+
+    let _ = req.response_tx.send(allowed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::SelectedPermissionOutcome;
+
+    // Serialize env-var tests — they mutate global process state.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn allow_bypass_false_when_sudo_uid_set() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_USER") };
+        unsafe { std::env::set_var("SUDO_UID", "1000") };
+        let result = allow_bypass();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        assert!(!result, "allow_bypass must return false when SUDO_UID is set");
+    }
+
+    #[test]
+    fn allow_bypass_false_when_sudo_user_set() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::set_var("SUDO_USER", "jorge") };
+        let result = allow_bypass();
+        unsafe { std::env::remove_var("SUDO_USER") };
+        assert!(!result, "allow_bypass must return false when SUDO_USER is set");
+    }
+
+    // ── exit_plan_mode_options ──────────────────────────────────────────────────
+
+    #[test]
+    fn exit_plan_mode_options_includes_bypass_when_allowed() {
+        let opts = exit_plan_mode_options(true);
+        assert_eq!(opts.len(), 4, "must have 4 options when bypass=true");
+        assert!(
+            opts.iter().any(|o| o.option_id.0.as_ref() == "bypassPermissions"),
+            "bypassPermissions must be present"
+        );
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "plan"));
+    }
+
+    #[test]
+    fn exit_plan_mode_options_excludes_bypass_when_disallowed() {
+        let opts = exit_plan_mode_options(false);
+        assert_eq!(opts.len(), 3, "must have 3 options when bypass=false");
+        assert!(
+            opts.iter().all(|o| o.option_id.0.as_ref() != "bypassPermissions"),
+            "bypassPermissions must be absent"
+        );
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "acceptEdits"));
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "default"));
+        assert!(opts.iter().any(|o| o.option_id.0.as_ref() == "plan"));
+    }
+
+    // ── parse_exit_plan_mode_outcome ────────────────────────────────────────────
+
+    #[test]
+    fn parse_exit_plan_mode_plan_denies_with_no_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("plan"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(!allowed, "plan must deny");
+        assert!(mode.is_none(), "plan must return no mode change");
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_bypass_allows_and_returns_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("bypassPermissions"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(allowed, "bypassPermissions must allow");
+        assert_eq!(mode.as_deref(), Some("bypassPermissions"));
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_accept_edits_allows_and_returns_mode() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("acceptEdits"));
+        let (allowed, mode) = parse_exit_plan_mode_outcome(outcome);
+        assert!(allowed);
+        assert_eq!(mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn parse_exit_plan_mode_cancelled_denies() {
+        let (allowed, mode) = parse_exit_plan_mode_outcome(RequestPermissionOutcome::Cancelled);
+        assert!(!allowed, "Cancelled must deny");
+        assert!(mode.is_none());
+    }
+
+    // ── parse_tool_permission_outcome ───────────────────────────────────────────
+
+    #[test]
+    fn parse_tool_permission_allow_always_allows_and_saves() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("allow_always"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(allowed);
+        assert!(save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_allow_once_allows_without_saving() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("allow"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(allowed);
+        assert!(!save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_reject_denies() {
+        let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new("reject"));
+        let (allowed, save_always) = parse_tool_permission_outcome(outcome);
+        assert!(!allowed);
+        assert!(!save_always);
+    }
+
+    #[test]
+    fn parse_tool_permission_cancelled_denies() {
+        let (allowed, save_always) = parse_tool_permission_outcome(RequestPermissionOutcome::Cancelled);
+        assert!(!allowed);
+        assert!(!save_always);
+    }
+
+    // ── allow_bypass ────────────────────────────────────────────────────────────
+
+    #[cfg_attr(coverage, coverage(off))]
+    #[test]
+    fn allow_bypass_true_when_no_sudo_vars_and_not_root() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::remove_var("SUDO_USER") };
+        // Skip if actually running as root (uid 0)
+        let running_as_root = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("Uid:\t"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .map(|uid| uid == "0")
+            })
+            .unwrap_or(false);
+        if running_as_root {
+            return;
+        }
+        assert!(
+            allow_bypass(),
+            "allow_bypass must return true for a normal (non-root) user"
+        );
+    }
+}

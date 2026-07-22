@@ -1,0 +1,47 @@
+[package]
+name = "trogon-acp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+acp-nats          = { path = "../acp-nats" }
+acp-nats-agent    = { path = "../acp-nats-agent" }
+agent-client-protocol = { workspace = true }
+anyhow            = "1"
+async-nats        = { workspace = true, features = ["jetstream", "kv"] }
+bytes             = { workspace = true }
+async-trait       = "0.1"
+opentelemetry     = { workspace = true }
+reqwest           = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde_json        = "1"
+tokio             = { version = "1.49.0", features = ["full"] }
+tokio-util        = { version = "0.7", features = ["compat"] }
+tracing           = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+trogon-agent-core = { path = "../../runner/trogon-agent-core" }
+trogon-acp-runner = { path = "../../runner/trogon-acp-runner", features = [] }
+trogon-cli        = { path = "../../platform/trogon-cli" }
+trogon-nats       = { path = "../../platform/trogon-nats" }
+trogon-registry      = { workspace = true }
+trogon-runner-tools  = { path = "../../runner/trogon-runner-tools" }
+trogon-tools         = { path = "../../runner/trogon-tools" }
+trogonai-catalog-client = { path = "../../catalog/trogonai-catalog-client" }
+trogonai-session-kernel = { workspace = true }
+trogon-std        = { path = "../../platform/trogon-std" }
+uuid              = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+trogon-acp-runner = { path = "../../runner/trogon-acp-runner", features = ["test-helpers"] }
+trogon-nats = { path = "../../platform/trogon-nats", features = ["test-support"] }
+trogon-registry = { workspace = true, features = ["test-support"] }
+testcontainers-modules = { workspace = true }
+
+[[bin]]
+name = "trogon-acp"
+path = "src/main.rs"

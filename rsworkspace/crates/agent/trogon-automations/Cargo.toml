@@ -1,0 +1,31 @@
+[package]
+name = "trogon-automations"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+axum         = "0.8"
+bytes        = "1"
+futures-util = "0.3"
+serde        = { version = "1.0.228", features = ["derive"] }
+serde_json   = "1.0.149"
+tokio        = { version = "1.49.0", features = ["full"] }
+tracing      = "0.1.44"
+uuid         = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+httpmock               = "0.7"
+reqwest                = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+testcontainers-modules = { workspace = true }
+trogon-std             = { path = "../../platform/trogon-std", features = ["test-support"] }
+trogon-nats            = { path = "../../platform/trogon-nats" }
+tokio                  = { version = "1.49.0", features = ["full"] }
+tower                  = "0.5"

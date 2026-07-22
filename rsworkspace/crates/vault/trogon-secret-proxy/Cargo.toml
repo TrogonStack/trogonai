@@ -1,0 +1,48 @@
+[package]
+name = "trogon-secret-proxy"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[features]
+test-helpers = []
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+axum = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+trogon-nats = { path = "../../platform/trogon-nats" }
+trogon-std = { path = "../../platform/trogon-std" }
+trogon-vault          = { path = "../trogon-vault",          features = ["hashicorp-vault", "infisical"] }
+trogon-vault-nats     = { path = "../trogon-vault-nats" }
+trogon-vault-approvals = { path = "../trogon-vault-approvals", features = ["slack"] }
+trogonai-catalog-proto = { workspace = true }
+buffa = "=0.7.0"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+httpmock = "0.7"
+testcontainers-modules = { workspace = true }
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+trogon-agent-core = { path = "../../runner/trogon-agent-core" }
+
+[[bin]]
+name = "proxy"
+path = "src/bin/proxy.rs"
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
+
+[[bin]]
+name = "approvals"
+path = "src/bin/approvals.rs"

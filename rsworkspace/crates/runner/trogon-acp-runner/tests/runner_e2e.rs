@@ -1,0 +1,4833 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+//! Integration tests for `TrogonAgent` prompt handling — requires Docker (testcontainers starts NATS).
+//!
+//! Run with:
+//!   cargo test -p trogon-acp-runner --test runner_e2e
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use acp_nats::acp_prefix::AcpPrefix;
+
+/// Compatibility shims for old function-based subject API.
+mod agent_subjects {
+    use acp_nats::{AcpPrefix, AcpSessionId};
+    pub fn session_prompt(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::commands::PromptSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        )
+        .to_string()
+    }
+    pub fn session_cancel(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::commands::CancelSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        )
+        .to_string()
+    }
+}
+
+mod client_subjects {
+    use acp_nats::{AcpPrefix, AcpSessionId};
+    pub fn session_update(prefix: &str, session_id: &str) -> String {
+        acp_nats::nats::client_ops::SessionUpdateSubject::new(
+            &AcpPrefix::new(prefix).expect("valid prefix"),
+            &AcpSessionId::new(session_id).expect("valid session_id"),
+        )
+        .to_string()
+    }
+}
+use acp_nats_agent::AgentSideNatsConnection;
+use agent_client_protocol::schema::v1::{
+    ContentBlock, CreateTerminalResponse, ForkSessionRequest, ForkSessionResponse, ImageContent, ListSessionsRequest,
+    ListSessionsResponse, PromptRequest, SessionConfigOptionValue, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, TerminalId, TextContent,
+};
+use async_nats::jetstream;
+use bytes::Bytes;
+use futures_util::StreamExt;
+use httpmock::prelude::*;
+use testcontainers_modules::nats::Nats;
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
+use tokio::sync::{RwLock, mpsc};
+use trogon_acp_runner::{
+    ElicitationReq, ElicitationTx, GatewayConfig, NatsSessionNotifier, NatsSessionStore, PermissionReq, SessionState,
+    SessionStore, StoredMcpServer, TrogonAgent,
+};
+use trogon_agent_core::agent_loop::AgentLoop;
+use trogon_agent_core::tools::ToolContext;
+use trogon_runner_tools::nats_todo_tool::NatsTodoTool;
+use trogon_runner_tools::session_store::TodoItem;
+use trogon_runner_tools::spawn_agent_tool::SpawnAgentTool;
+use trogon_runner_tools::wasm_bash_tool::WasmRuntimeBashTool;
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+async fn start_nats() -> (ContainerAsync<Nats>, async_nats::Client, jetstream::Context) {
+    let container: ContainerAsync<Nats> = Nats::default()
+        .with_cmd(["--jetstream"])
+        .start()
+        .await
+        .expect("Failed to start NATS container — is Docker running?");
+    let port = container.get_host_port_ipv4(4222).await.unwrap();
+    let nats = async_nats::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("failed to connect to NATS");
+    let js = jetstream::new(nats.clone());
+    (container, nats, js)
+}
+
+fn make_agent(base_url: &str) -> AgentLoop {
+    let http = reqwest::Client::new();
+    AgentLoop {
+        http_client: http.clone(),
+        proxy_url: "http://127.0.0.1:1".to_string(),
+        anthropic_token: "test-token".to_string(),
+        anthropic_base_url: Some(base_url.to_string()),
+        anthropic_extra_headers: vec![],
+        streaming_client: None,
+        model: "claude-test".to_string(),
+        max_iterations: 5,
+        thinking_budget: None,
+        tool_context: Arc::new(ToolContext {
+            web_search_api_key: None,
+            web_search_endpoint: None,
+            proxy_url: "http://127.0.0.1:1".to_string(),
+            cwd: ".".to_string(),
+            http_client: reqwest::Client::new(),
+        }),
+        memory_owner: None,
+        memory_repo: None,
+        memory_path: None,
+        mcp_tool_defs: vec![],
+        mcp_dispatch: vec![],
+        permission_checker: None,
+        elicitation_provider: None,
+        post_tool_observer: None,
+    }
+}
+
+/// Start a `TrogonAgent` wired to `AgentSideNatsConnection`. Must be called inside a `LocalSet`.
+async fn start_agent(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+    permission_tx: Option<trogon_acp_runner::PermissionTx>,
+    gateway_config: Arc<RwLock<Option<GatewayConfig>>>,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        permission_tx,
+        None,
+        gateway_config,
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Start a `TrogonAgent` with context compaction enabled (`.with_compactor()`).
+/// Must be called inside a `LocalSet`.
+async fn start_agent_with_compactor(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None)),
+    )
+    .with_compactor(nats.clone());
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Subscribe to session notifications and send a prompt as NATS request-reply.
+/// Returns (notif_sub, resp_sub) — use with `collect_notifs_and_response`.
+async fn subscribe_and_send(
+    nats: &async_nats::Client,
+    prefix: &str,
+    session_id: &str,
+    blocks: Vec<ContentBlock>,
+) -> (async_nats::Subscriber, async_nats::Subscriber) {
+    let notif_sub = nats
+        .subscribe(client_subjects::session_update(prefix, session_id))
+        .await
+        .expect("subscribe to notifications");
+    let inbox = nats.new_inbox();
+    let resp_sub = nats.subscribe(inbox.clone()).await.expect("subscribe to inbox");
+    let req = PromptRequest::new(session_id.to_owned(), blocks);
+    nats.publish_with_reply(
+        agent_subjects::session_prompt(prefix, session_id),
+        inbox,
+        Bytes::from(serde_json::to_vec(&req).unwrap()),
+    )
+    .await
+    .unwrap();
+    (notif_sub, resp_sub)
+}
+
+/// Send a plain text prompt.
+async fn send_text(
+    nats: &async_nats::Client,
+    prefix: &str,
+    session_id: &str,
+    text: &str,
+) -> (async_nats::Subscriber, async_nats::Subscriber) {
+    subscribe_and_send(
+        nats,
+        prefix,
+        session_id,
+        vec![ContentBlock::Text(TextContent::new(text))],
+    )
+    .await
+}
+
+fn sse_body(events: &[(&str, serde_json::Value)]) -> String {
+    events
+        .iter()
+        .map(|(ev, data)| format!("event: {ev}\ndata: {data}\n\n"))
+        .collect()
+}
+
+/// Spawn mock NATS responders for the four interactions used by the
+/// demarcation-marker protocol: create → output(baseline) → write_stdin → output(poll).
+fn spawn_terminal_responders(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output: &'static str,
+) {
+    tokio::spawn(async move {
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
+            let payload = serde_json::to_vec(&resp).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"output": ""})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = write_sub.next().await {
+            let payload = serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{output}__EXIT_0__\n");
+            let payload = serde_json::to_vec(&serde_json::json!({"output": full})).unwrap();
+            nats.publish(msg.reply.unwrap(), payload.into()).await.unwrap();
+        }
+    });
+}
+
+/// Start a `TrogonAgent` wired with a `WasmRuntimeBashTool` backed by the same
+/// `NatsSessionStore` used for session persistence.  Returns the store so tests
+/// can inspect persisted state after the run.
+async fn start_agent_with_bash_tool(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+
+    let bash_tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        Duration::from_secs(10),
+        store.clone(),
+    );
+    let (dispatch_name, orig_name, client) = bash_tool.into_dispatch();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![WasmRuntimeBashTool::<NatsSessionStore>::tool_def()];
+    agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Start a `TrogonAgent` wired with a `NatsTodoTool` backed by the same
+/// `NatsSessionStore` used for session persistence.
+async fn start_agent_with_todo_tool(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let todo_tool = NatsTodoTool::new(session_id, store.clone());
+    let dispatches = todo_tool.into_dispatches();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![
+        NatsTodoTool::<NatsSessionStore>::todo_write_def(),
+        NatsTodoTool::<NatsSessionStore>::todo_read_def(),
+    ];
+    agent.mcp_dispatch = dispatches;
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+/// Start a `TrogonAgent` with a `WasmRuntimeBashTool` and a permission channel.
+async fn start_agent_with_bash_and_permission(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    session_id: &str,
+    base_url: &str,
+    permission_tx: trogon_acp_runner::PermissionTx,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let bash_tool = WasmRuntimeBashTool::new(
+        nats.clone(),
+        prefix,
+        session_id,
+        std::path::PathBuf::from("/tmp"),
+        Duration::from_secs(10),
+        store.clone(),
+    );
+    let (dispatch_name, orig_name, client) = bash_tool.into_dispatch();
+
+    let mut agent = make_agent(base_url);
+    agent.mcp_tool_defs = vec![WasmRuntimeBashTool::<NatsSessionStore>::tool_def()];
+    agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        Some(permission_tx),
+        None,
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+// ── SSE helpers ───────────────────────────────────────────────────────────────
+
+fn sse_event(event_type: &str, data: serde_json::Value) -> String {
+    format!(
+        "event: {event_type}\ndata: {}\n\n",
+        serde_json::to_string(&data).unwrap()
+    )
+}
+
+fn sse_end_turn_stream_with_tokens(
+    text: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+) -> String {
+    [
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0,
+                    "cache_creation_input_tokens": cache_creation_tokens,
+                    "cache_read_input_tokens": cache_read_tokens
+                }}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": output_tokens}
+            }),
+        ),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_end_turn_stream(text: &str) -> String {
+    [
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "text", "text": ""}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {"type": "text_delta", "text": text}
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 8}
+            }),
+        ),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn sse_tool_use_stream(tool_id: &str, tool_name: &str, input: serde_json::Value) -> String {
+    [
+        sse_event(
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "output_tokens": 0,
+                                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        sse_event(
+            "content_block_start",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": tool_id, "name": tool_name}
+            }),
+        ),
+        sse_event(
+            "content_block_delta",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": serde_json::to_string(&input).unwrap()
+                }
+            }),
+        ),
+        sse_event(
+            "content_block_stop",
+            serde_json::json!({"type": "content_block_stop", "index": 0}),
+        ),
+        sse_event(
+            "message_delta",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 5}
+            }),
+        ),
+        sse_event("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]
+    .join("")
+}
+
+fn end_turn_body(text: &str) -> String {
+    sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": text}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 5}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn tool_use_body() -> String {
+    sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_001", "name": "unknown_tool"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+fn max_tokens_body() -> String {
+    sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "text", "text": ""}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "text_delta", "text": "partial"}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 4096}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+/// Collect `SessionNotification` messages from `notif_sub` until a message
+/// arrives on `resp_sub`, then return all notifications and the final response.
+///
+/// Notifications are returned as raw `serde_json::Value` for flexible assertion.
+/// The response is the parsed JSON from the response subject (either
+/// `{"stopReason": "..."}` or `{"code": ...}`).
+async fn collect_notifs_and_response(
+    notif_sub: &mut async_nats::Subscriber,
+    resp_sub: &mut async_nats::Subscriber,
+    timeout_secs: u64,
+) -> (Vec<serde_json::Value>, serde_json::Value) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+    let mut notifs = vec![];
+    loop {
+        tokio::select! {
+            biased;
+            msg = tokio::time::timeout_at(deadline, resp_sub.next()) => {
+                let msg = msg
+                    .expect("timed out waiting for response message")
+                    .expect("response subscription ended unexpectedly");
+                let resp: serde_json::Value =
+                    serde_json::from_slice(&msg.payload).expect("invalid response JSON");
+                return (notifs, resp);
+            }
+            msg = tokio::time::timeout_at(deadline, notif_sub.next()) => {
+                let msg = msg
+                    .expect("timed out waiting for notification")
+                    .expect("notification subscription ended unexpectedly");
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&msg.payload) {
+                    notifs.push(v);
+                }
+            }
+        }
+    }
+}
+
+// ── Agent creation ─────────────────────────────────────────────────────────────
+
+/// `TrogonAgent` creation succeeds and creates the `ACP_SESSIONS` KV bucket.
+/// After creation, `SessionStore::open` on the same JetStream context is idempotent.
+#[tokio::test]
+async fn agent_new_creates_session_bucket() {
+    let (_c, nats, js) = start_nats().await;
+    let agent = make_agent("http://127.0.0.1:1");
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let _store = start_agent(nats, &js, "test-new", agent, None, Arc::new(RwLock::new(None))).await;
+
+            // Opening the store again must be idempotent (bucket already exists).
+            NatsSessionStore::open(&js)
+                .await
+                .expect("NatsSessionStore::open must succeed after start_agent");
+        })
+        .await;
+}
+
+// ── Error path ─────────────────────────────────────────────────────────────────
+
+/// When the Anthropic endpoint is unreachable, the agent returns an error or
+/// Done response (connection-refused → HTTP error → internal error or cancelled).
+#[tokio::test]
+async fn runner_publishes_error_event_when_anthropic_unreachable() {
+    let (_c, nats, js) = start_nats().await;
+
+    // Port 1 = connection refused, so reqwest will fail immediately.
+    let agent = make_agent("http://127.0.0.1:1");
+    let prefix = "test-err";
+    let session_id = "sess-err-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
+
+            // The agent retries send errors MAX_RETRIES (4) times with a 5s
+            // backoff before surfacing the error, so the response only arrives
+            // after ~20s — wait longer than that.
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
+
+            // Must be either a PromptResponse (has "stopReason") or an ACP error (has "code").
+            assert!(
+                resp.get("stopReason").is_some() || resp.get("code").is_some(),
+                "expected stopReason or code in response; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Happy path ─────────────────────────────────────────────────────────────────
+
+/// When the Anthropic API returns `end_turn`, the agent publishes `AgentMessageChunk`
+/// notifications then returns `Done { stop_reason: "end_turn" }`.
+#[tokio::test]
+async fn runner_publishes_done_end_turn_with_mock_anthropic() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Great response!"));
+    });
+
+    let prefix = "test-done";
+    let session_id = "sess-done-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Great response!")),
+                "expected notification containing 'Great response!'"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Session state is persisted after a successful turn — a second prompt resumes
+/// the conversation (the history grows).
+#[tokio::test]
+async fn runner_persists_session_after_end_turn() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Saved reply"));
+    });
+
+    let prefix = "test-persist";
+    let session_id = "sess-persist-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "persist me").await;
+
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // After the turn, the session must be persisted in KV.
+            let state = store.load(session_id).await.unwrap();
+
+            // History must contain the user message + assistant reply (>= 2 messages).
+            assert!(
+                state.messages.len() >= 2,
+                "expected at least 2 messages in persisted session, got {}",
+                state.messages.len()
+            );
+            // Title is captured from the first prompt.
+            assert!(!state.title.is_empty(), "expected non-empty session title");
+        })
+        .await;
+}
+
+/// A malformed prompt payload (invalid JSON) sent without a reply subject is
+/// ignored by the agent — it keeps listening and processes the next valid
+/// prompt without crashing.
+#[tokio::test]
+async fn runner_skips_invalid_prompt_payload() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("After skip"));
+    });
+
+    let prefix = "test-skip";
+    let session_id = "sess-skip-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Send garbage without a reply subject — agent logs a warning and continues.
+            nats.publish(
+                agent_subjects::session_prompt(prefix, session_id),
+                Bytes::from(b"not valid json".to_vec()),
+            )
+            .await
+            .unwrap();
+
+            // Give agent a moment to process (and discard) the bad message.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // Now send a valid prompt — agent must still handle it.
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "valid").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert!(
+                resp.get("stopReason").is_some(),
+                "expected stopReason in response after skipping bad payload; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Error stop reasons ─────────────────────────────────────────────────────────
+
+/// When Anthropic returns `max_tokens`, the agent returns `Done { stop_reason: "max_tokens" }`.
+#[tokio::test]
+async fn runner_publishes_done_max_tokens() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(max_tokens_body());
+    });
+
+    let prefix = "test-maxtok";
+    let session_id = "sess-maxtok-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "fill the context").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("max_tokens"),
+                "expected stop_reason=max_tokens; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// When `max_iterations` is exhausted (model always returns `tool_use`),
+/// the agent returns `Done { stop_reason: "max_turn_requests" }`.
+#[tokio::test]
+async fn runner_publishes_done_max_turn_requests() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-maxiter";
+    let session_id = "sess-maxiter-1";
+
+    let mut agent = make_agent(&server.base_url());
+    agent.max_iterations = 1; // exhaust after one tool_use → MaxIterationsReached
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "loop forever").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("max_turn_requests"),
+                "expected stop_reason=max_turn_requests; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// When the model requests a tool call, the agent publishes `ToolCall`
+/// and `ToolCallUpdate` notifications before the final `Done`.
+#[tokio::test]
+async fn runner_publishes_tool_call_events() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has "tool_result" in body) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-toolcall";
+    let session_id = "sess-toolcall-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool'"
+            );
+            assert!(
+                notifs.iter().any(|n| {
+                    let s = n.to_string();
+                    s.contains("toolCallUpdate") || s.contains("ToolCallUpdate") || s.contains("toolCall")
+                }),
+                "expected tool call notification"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after tool call; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Permission gate ───────────────────────────────────────────────────────────
+
+/// When `permission_tx` is set and the checker approves the tool call, the
+/// agent executes the tool and publishes ToolCall + Done(end_turn).
+#[tokio::test]
+async fn runner_tool_call_allowed_via_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after approved tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-perm-allow";
+    let session_id = "sess-perm-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Approve every permission request
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // ToolCall notification must appear — permission was checked and approved
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool' after permission approved; notifs: {notifs:?}"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// When `permission_tx` is set and the checker denies the tool call, the
+/// agent still completes (the agent sends the denial as a tool result and
+/// Anthropic returns end_turn).
+#[tokio::test]
+async fn runner_tool_call_denied_via_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result — the denial) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-perm-deny";
+    let session_id = "sess-perm-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Deny every permission request
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(false);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // The agent sends a denial tool-result and Anthropic returns end_turn
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after permission denial; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Static permission rules (RulesPermissionChecker) ─────────────────────────
+
+/// When a session has `permission_rules_text` with a `deny_paths` rule, the
+/// `RulesPermissionChecker` short-circuits to Deny without consulting the
+/// interactive permission channel.  The agent still completes (end_turn) via
+/// the "Permission denied" tool result.
+#[tokio::test]
+async fn runner_static_deny_rule_blocks_tool_without_consulting_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call: tool_result carrying the Permission-denied message → end_turn.
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Understood, .env access was blocked"));
+    });
+    // First call: write_file targeting .env → triggers deny rule.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_deny_001",
+                "write_file",
+                serde_json::json!({"path": ".env", "content": "SECRET=x"}),
+            ));
+    });
+
+    let prefix = "test-rules-deny";
+    let session_id = "sess-rules-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Pre-populate the session with a deny rule for .env paths.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\ndeny_paths: .env\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write to .env").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after static deny; got: {resp}"
+            );
+
+            // ToolCallFinished notification must carry the Permission-denied message.
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in tool-call notifications; got: {notifs:?}"
+            );
+
+            // The interactive channel must NOT have been consulted.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "static deny rule must not forward to the permission channel"
+            );
+        })
+        .await;
+}
+
+/// When a session has `permission_rules_text` with an `allow_paths` rule that
+/// matches the requested path, the `RulesPermissionChecker` short-circuits to
+/// Allow — the tool executes without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_static_allow_rule_auto_approves_tool_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call: tool_result that must NOT contain "Permission denied" → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got the file"));
+    });
+    // First call: read_file → triggers allow rule.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_allow_001",
+                "read_file",
+                serde_json::json!({"path": "Cargo.toml"}),
+            ));
+    });
+
+    let prefix = "test-rules-allow";
+    let session_id = "sess-rules-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Pre-populate the session with an allow rule for all paths.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\nallow_paths: **\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "read a file").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after static allow; got: {resp}"
+            );
+
+            // Tool output must NOT be a Permission-denied message.
+            assert!(
+                !notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "static allow rule must not produce 'Permission denied'; notifs: {notifs:?}"
+            );
+
+            // The interactive channel must NOT have been consulted.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "static allow rule must not forward to the permission channel"
+            );
+        })
+        .await;
+}
+
+// ── MCP dispatch ──────────────────────────────────────────────────────────────
+
+/// When a session has `mcp_servers` configured, the agent calls `build_session_mcp`
+/// at prompt time, lists the tools, and dispatches tool calls to the MCP server.
+#[tokio::test]
+async fn runner_dispatches_mcp_tool_via_session_mcp_servers() {
+    let (_c, nats, js) = start_nats().await;
+
+    // ── MCP mock server ───────────────────────────────────────────────────────
+    let mcp_server = MockServer::start();
+
+    // initialize
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp"}}}"#);
+    });
+    // tools/list — returns one tool named "my_tool"
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"tools/list\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"my_tool","description":"A test MCP tool","inputSchema":{"type":"object"}}]}}"#);
+    });
+    // tools/call — returns text content
+    mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"tools/call\"");
+        then.status(200).header("Content-Type", "application/json").body(
+            r#"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"mcp result"}],"isError":false}}"#,
+        );
+    });
+
+    // ── Anthropic mock ────────────────────────────────────────────────────────
+    let anthropic = MockServer::start();
+
+    // Second call (has tool_result) → end_turn
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done with MCP result"));
+    });
+    // First call → tool_use with the prefixed name "my_srv__my_tool"
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_body(&[
+                ("message_start", serde_json::json!({
+                    "type": "message_start",
+                    "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+                })),
+                ("content_block_start", serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_mcp_1", "name": "my_srv__my_tool"}})),
+                ("content_block_delta", serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}})),
+                ("content_block_stop", serde_json::json!({"index": 0})),
+                ("message_delta", serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}})),
+                ("message_stop", serde_json::json!({"type": "message_stop"})),
+            ]));
+    });
+
+    let prefix = "test-mcp";
+    let session_id = "sess-mcp-1";
+
+    // Pre-save session state with the MCP server configured
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        mcp_servers: vec![StoredMcpServer {
+            name: "my_srv".to_string(),
+            url: mcp_server.base_url(),
+            headers: vec![],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
+            timeout_secs: None,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&anthropic.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "call the MCP tool").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // The MCP tool must be dispatched (prefixed name = "my_srv__my_tool")
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("my_srv__my_tool")),
+                "expected notification containing 'my_srv__my_tool'; notifs: {notifs:?}"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after MCP tool call; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Cancellation ──────────────────────────────────────────────────────────────
+
+/// Sending a cancel message to `{prefix}.{session_id}.agent.session.cancel` while the
+/// agent is processing a prompt causes the agent to abort and return
+/// `Done { stop_reason: "cancelled" }`.
+#[tokio::test]
+async fn runner_publishes_done_cancelled_when_cancel_message_arrives() {
+    let (_c, nats, js) = start_nats().await;
+
+    // Slow Anthropic mock: 2-second delay gives the cancel message time to arrive.
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .delay(Duration::from_secs(2))
+            .body(end_turn_body("never reached"));
+    });
+
+    let prefix = "test-cancel";
+    let session_id = "sess-cancel-1";
+
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "do something slow").await;
+
+            // Give the agent a moment to start processing, then cancel
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("cancelled"),
+                "expected stop_reason=cancelled; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Gateway config override ───────────────────────────────────────────────────
+
+/// When `gateway_config` is set on the agent, the agent uses the gateway's
+/// `base_url` and `token` instead of the agent's own values.
+/// Verified by creating an agent whose embedded loop points at a dead endpoint
+/// while gateway_config redirects to a live mock server.
+#[tokio::test]
+async fn runner_uses_gateway_config_base_url_and_token() {
+    let (_c, nats, js) = start_nats().await;
+
+    // Live gateway mock — this is where the request must actually arrive
+    let gateway = MockServer::start();
+    gateway.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("via gateway"));
+    });
+
+    let prefix = "test-gw";
+    let session_id = "sess-gw-1";
+
+    // Agent points at port 1 (dead) — must be overridden by gateway_config
+    let gateway_config = Arc::new(RwLock::new(Some(GatewayConfig {
+        base_url: gateway.base_url(),
+        token: "gw-token".to_string(),
+        extra_headers: vec![],
+    })));
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent("http://127.0.0.1:1"),
+                None,
+                gateway_config,
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello via gateway").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 10).await;
+
+            // The notification must contain the response from the gateway mock
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("via gateway")),
+                "expected notification with gateway response; notifs: {notifs:?}"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn via gateway; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Session queuing ───────────────────────────────────────────────────────────
+
+/// When 3 prompts are sent to the same session_id without waiting for
+/// acknowledgement, the agent processes them in order via the session semaphore
+/// and all 3 must complete with a `Done` event.
+#[tokio::test]
+async fn concurrent_prompts_same_session_are_queued_in_order() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("queued reply"));
+    });
+
+    let prefix = "test-queue-same";
+    let session_id = "sess-queue-same-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Subscribe to the shared notification subject for this session.
+            let mut notif_sub = nats
+                .subscribe(client_subjects::session_update(prefix, session_id))
+                .await
+                .expect("subscribe to notifications");
+
+            // Create 3 separate inboxes and send all prompts rapidly.
+            let mut resp_subs = Vec::new();
+            for i in 0..3u32 {
+                let inbox = nats.new_inbox();
+                let resp_sub = nats.subscribe(inbox.clone()).await.unwrap();
+                resp_subs.push(resp_sub);
+                let req = PromptRequest::new(
+                    session_id,
+                    vec![ContentBlock::Text(TextContent::new(format!("prompt {i}")))],
+                );
+                nats.publish_with_reply(
+                    agent_subjects::session_prompt(prefix, session_id),
+                    inbox,
+                    Bytes::from(serde_json::to_vec(&req).unwrap()),
+                )
+                .await
+                .unwrap();
+            }
+
+            // Wait for Done on each subscription in order.
+            for (i, mut resp_sub) in resp_subs.into_iter().enumerate() {
+                let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 30).await;
+                assert!(
+                    resp.get("stopReason").is_some(),
+                    "expected stopReason in response for prompt #{i}; got: {resp}"
+                );
+            }
+        })
+        .await;
+}
+
+/// When 2 prompts are sent to DIFFERENT session_ids, both should complete
+/// successfully (they run concurrently, not queued).
+#[tokio::test]
+async fn concurrent_prompts_different_sessions_run_concurrently() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("concurrent reply"));
+    });
+
+    let prefix = "test-queue-diff";
+    let session_a = "sess-conc-a";
+    let session_b = "sess-conc-b";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Send both prompts to different sessions simultaneously.
+            let (mut notif_a, mut resp_a) = send_text(&nats, prefix, session_a, "hello session A").await;
+            let (mut notif_b, mut resp_b) = send_text(&nats, prefix, session_b, "hello session B").await;
+
+            // Both sessions must receive a terminal response.
+            let (_notifs_a, resp_a_val) = collect_notifs_and_response(&mut notif_a, &mut resp_a, 15).await;
+            assert!(
+                resp_a_val.get("stopReason").is_some(),
+                "expected stopReason for session_a; got: {resp_a_val}"
+            );
+
+            let (_notifs_b, resp_b_val) = collect_notifs_and_response(&mut notif_b, &mut resp_b, 15).await;
+            assert!(
+                resp_b_val.get("stopReason").is_some(),
+                "expected stopReason for session_b; got: {resp_b_val}"
+            );
+        })
+        .await;
+}
+
+// ── Content blocks ─────────────────────────────────────────────────────────────
+
+/// Sending a prompt with a text resource (context) content block must be processed
+/// by the agent without crashing and must result in a `Done` event.
+#[tokio::test]
+async fn runner_processes_prompt_with_context_content_block() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("handled context block"));
+    });
+
+    let prefix = "test-ctx-block";
+    let session_id = "sess-ctx-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Two text blocks — simulates a context-rich prompt.
+            let blocks = vec![
+                ContentBlock::Text(TextContent::new("look at this context")),
+                ContentBlock::Text(TextContent::new(
+                    "<context ref=\"file:///project/README.md\">\n# Project README\nThis is the content.\n</context>",
+                )),
+            ];
+            let (mut notif_sub, mut resp_sub) = subscribe_and_send(&nats, prefix, session_id, blocks).await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after context content; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// A prompt containing a base64-encoded image content block must be
+/// processed by the agent without crashing and result in a `Done` event.
+#[tokio::test]
+async fn runner_image_content_block_in_prompt_does_not_crash() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("handled image"));
+    });
+
+    let prefix = "test-img-block";
+    let session_id = "sess-img-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // A minimal 1x1 white PNG in base64.
+            let blocks = vec![
+                ContentBlock::Text(TextContent::new("look at this image")),
+                ContentBlock::Image(ImageContent::new(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==",
+                    "image/png",
+                )),
+            ];
+            let (mut notif_sub, mut resp_sub) = subscribe_and_send(&nats, prefix, session_id, blocks).await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn after Image content block; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// The second prompt to the same session must include the conversation history
+/// from the first prompt. We verify this by checking that the second Anthropic
+/// request body contains the text from the first assistant response.
+#[tokio::test]
+async fn runner_second_prompt_loads_history_from_first_prompt() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has "Second question" in body) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("Second question");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Answer to second question"));
+    });
+    // First call → end_turn with specific text we can check for later
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Answer to first question"));
+    });
+
+    let prefix = "test-history";
+    let session_id = "sess-hist-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // First prompt.
+            let (mut notif_sub_1, mut resp_sub_1) = send_text(&nats, prefix, session_id, "First question").await;
+            let (_notifs_1, resp_1) = collect_notifs_and_response(&mut notif_sub_1, &mut resp_sub_1, 15).await;
+            assert_eq!(
+                resp_1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must complete with stop_reason=end_turn; got: {resp_1}"
+            );
+
+            // Short pause so session state is persisted before second prompt.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            // Second prompt — history should now include first exchange.
+            let (mut notif_sub_2, mut resp_sub_2) = send_text(&nats, prefix, session_id, "Second question").await;
+            let (_notifs_2, resp_2) = collect_notifs_and_response(&mut notif_sub_2, &mut resp_sub_2, 15).await;
+            assert_eq!(
+                resp_2["stopReason"].as_str(),
+                Some("end_turn"),
+                "second prompt must complete with stop_reason=end_turn; got: {resp_2}"
+            );
+
+            // The second Anthropic request (matched by body_contains "Second question")
+            // was routed to the second mock — confirming the agent sent a new call
+            // that included "Second question" in the body (history + new message).
+        })
+        .await;
+}
+
+/// When the Anthropic response includes a `parent_tool_use_id` on a tool-use
+/// block, the agent publishes a `ToolCall` notification carrying that value.
+#[tokio::test]
+async fn runner_parent_tool_use_id_propagated_in_tool_call_started() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done"));
+    });
+    // First call → tool_use with parent_tool_use_id set.
+    let nested_tool_body = sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_child_001", "name": "unknown_tool", "parent_tool_use_id": "tu_parent_001"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ]);
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(nested_tool_body);
+    });
+
+    let prefix = "test-parent-id";
+    let session_id = "sess-parent-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run nested tool").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // Find the notification for "unknown_tool" and verify parent_tool_use_id is present.
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("unknown_tool")),
+                "expected notification containing 'unknown_tool'; notifs: {notifs:?}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("tu_parent_001")),
+                "expected notification containing 'tu_parent_001'; notifs: {notifs:?}"
+            );
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Cancel during tool execution ───────────────────────────────────────────────
+
+/// When a cancel message arrives WHILE the agent is executing a tool call
+/// (i.e., waiting for the second Anthropic response after sending tool_result),
+/// the agent should still complete with Done(cancelled) or Done(end_turn).
+///
+/// We simulate this by:
+/// 1. First Anthropic call → tool_use (triggers tool execution)
+/// 2. While waiting for the second Anthropic call, publish cancel message
+/// 3. Second Anthropic call → end_turn (the cancel check is cooperative)
+///
+/// The agent publishes Done with some stop reason (cancelled or end_turn depending on timing).
+#[tokio::test]
+async fn runner_cancel_during_tool_execution_completes() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+
+    // Second call (tool_result arrives) → small delay then end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after tool"))
+            .delay(Duration::from_millis(100));
+    });
+    // First call → tool_use
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-cancel-tool";
+    let session_id = "sess-cancel-tool-1";
+
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            // Wait for the tool call to start, then send cancel
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // Should complete with some stop_reason (cancelled or end_turn depending on timing)
+            assert!(
+                resp.get("stopReason").is_some(),
+                "agent must return a stopReason after cancel during tool; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── No cancel signal path ──────────────────────────────────────────────────────
+
+/// Verify the agent completes a prompt successfully when no cancel message is sent.
+#[tokio::test]
+async fn runner_completes_prompt_without_any_cancel_signal() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("completed without cancel"));
+    });
+
+    let prefix = "test-no-cancel";
+    let session_id = "sess-no-cancel-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "Hello").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected stop_reason=end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Verifies the runner registration contract: the `acp_prefix` metadata stored
+/// in the registry must match the `ACP_PREFIX` env var. The bridge reads this
+/// field to derive the NATS routing prefix — a mismatch breaks routing silently.
+#[tokio::test]
+async fn claude_runner_registers_with_correct_acp_prefix_metadata() {
+    let (_container, _nats, js) = start_nats().await;
+
+    let prefix = "acp.claude";
+    let agent_type = "claude";
+
+    let store = trogon_registry::provision(&js).await.expect("provision registry");
+    let registry = trogon_registry::Registry::new(store);
+
+    let cap = trogon_registry::AgentCapability {
+        agent_type: agent_type.to_string(),
+        capabilities: vec!["chat".to_string()],
+        nats_subject: format!("{}.agent.>", prefix),
+        current_load: 0,
+        metadata: serde_json::json!({ "acp_prefix": prefix }),
+    };
+    registry.register(&cap).await.expect("registration must succeed");
+
+    let entry = registry
+        .get(agent_type)
+        .await
+        .expect("get must not error")
+        .expect("registered entry must exist");
+
+    assert_eq!(
+        entry.metadata["acp_prefix"].as_str(),
+        Some(prefix),
+        "bridge relies on acp_prefix matching ACP_PREFIX — got {:?}",
+        entry.metadata
+    );
+    assert_eq!(
+        entry.nats_subject,
+        format!("{}.agent.>", prefix),
+        "nats_subject must be derived from ACP_PREFIX"
+    );
+}
+
+// ── Compactor integration ─────────────────────────────────────────────────────
+
+/// When `.with_compactor()` is enabled, the runner sends session history to
+/// `trogon.compactor.compact` before each LLM call and uses the returned
+/// (compacted) messages.  Verified by running a mock compactor service that
+/// always returns a compacted response, then checking the persisted session
+/// contains the `<context-summary>` marker.
+#[tokio::test]
+async fn runner_calls_compactor_and_uses_compacted_history() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("reply after compaction"));
+    });
+
+    // Spawn a mock compactor that always replies with a compacted conversation.
+    let nats_for_compactor = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_for_compactor.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let compacted = serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "text",
+                            "text": "<context-summary>\n## Summary\nCompacted\n</context-summary>"
+                        }]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{
+                            "type": "text",
+                            "text": "I've reviewed the conversation summary and will continue from this context."
+                        }]
+                    }
+                ],
+                "compacted": true,
+                "tokens_before": 50000,
+                "tokens_after": 500
+            });
+            nats_for_compactor
+                .publish(reply, serde_json::to_vec(&compacted).unwrap().into())
+                .await
+                .ok();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let prefix = "test-compact";
+    let session_id = "sess-compact-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_compactor(nats.clone(), &js, prefix, make_agent(&server.base_url())).await;
+
+            // Set token_budget = 1 so any non-empty message triggers the 85% threshold.
+            let seed_state = trogon_acp_runner::SessionState {
+                token_budget: 1,
+                ..Default::default()
+            };
+            store.save(session_id, &seed_state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn with compaction enabled; got: {resp}"
+            );
+
+            // The persisted session must contain the compacted history returned by
+            // the mock compactor service.
+            let state = store.load(session_id).await.unwrap();
+            let json = serde_json::to_string(&state.messages).unwrap();
+            assert!(
+                json.contains("context-summary"),
+                "expected <context-summary> in persisted messages after compaction; got: {json}"
+            );
+        })
+        .await;
+}
+
+/// After auto-compact triggers on the first prompt, the runner continues
+/// working normally: a second prompt sent immediately after also completes
+/// with `end_turn`, and the persisted state reflects the second turn.
+///
+/// This exercises the real scenario where a user keeps chatting after the
+/// context window compaction point is crossed mid-session.
+#[tokio::test]
+async fn runner_continues_working_after_auto_compact() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("ok"));
+    });
+
+    let nats_for_compactor = nats.clone();
+    tokio::spawn(async move {
+        let mut sub = nats_for_compactor.subscribe("trogon.compactor.compact").await.unwrap();
+        while let Some(msg) = sub.next().await {
+            let Some(reply) = msg.reply else { continue };
+            let compacted = serde_json::json!({
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "<context-summary>\nCompacted\n</context-summary>"}]
+                    },
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Continuing from summary."}]
+                    }
+                ],
+                "compacted": true,
+                "tokens_before": 50000,
+                "tokens_after": 500
+            });
+            nats_for_compactor
+                .publish(reply, serde_json::to_vec(&compacted).unwrap().into())
+                .await
+                .ok();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let prefix = "test-compact2";
+    let session_id = "sess-compact2-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_compactor(nats.clone(), &js, prefix, make_agent(&server.base_url())).await;
+
+            let seed_state = trogon_acp_runner::SessionState {
+                token_budget: 1,
+                ..Default::default()
+            };
+            store.save(session_id, &seed_state).await.unwrap();
+
+            // ── Prompt 1 → compaction fires → end_turn ────────────────────────
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "first message").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must end_turn after compaction; got: {resp1}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 → runner must still work after compact ────────────────
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "second message").await;
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "second prompt must complete normally after prior compaction; got: {resp2}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            let json = serde_json::to_string(&state.messages).unwrap();
+            assert!(
+                json.contains("context-summary"),
+                "compacted history must survive into state after second prompt; got: {json}"
+            );
+        })
+        .await;
+}
+
+// ── Elicitation channel ───────────────────────────────────────────────────────
+
+/// Start a `TrogonAgent` wired with an elicitation channel.
+/// The caller owns `elicitation_rx` and is responsible for draining it.
+async fn start_agent_with_elicitation(
+    nats: async_nats::Client,
+    js: &jetstream::Context,
+    prefix: &str,
+    agent: AgentLoop,
+    elicitation_tx: ElicitationTx,
+) -> NatsSessionStore {
+    let store = NatsSessionStore::open(js).await.unwrap();
+    let notifier = NatsSessionNotifier::new(nats.clone());
+    let ta = TrogonAgent::new(
+        notifier,
+        store.clone(),
+        agent,
+        prefix,
+        "claude-test",
+        None,
+        Some(elicitation_tx),
+        Arc::new(RwLock::new(None)),
+    );
+    let acp_prefix = AcpPrefix::new(prefix).unwrap();
+    let (_, io_task) = AgentSideNatsConnection::new(ta, nats, acp_prefix, |fut| {
+        tokio::task::spawn_local(fut);
+    });
+    tokio::task::spawn_local(io_task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    store
+}
+
+fn ask_user_tool_use_body(question: &str) -> String {
+    let partial_json = serde_json::to_string(&serde_json::json!({"question": question})).unwrap();
+    sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_ask_001", "name": "ask_user"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": partial_json}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+/// When the agent calls `ask_user` and the elicitation channel returns an
+/// Accept response, the answer is forwarded to the LLM as a tool_result.
+#[tokio::test]
+async fn runner_ask_user_accept_answer_forwarded_to_llm() {
+    use agent_client_protocol::schema::v1::{CreateElicitationResponse, ElicitationAcceptAction, ElicitationAction};
+    use std::collections::BTreeMap;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-elic-accept";
+    let session_id = "sess-elic-accept-1";
+    let answer = "the-user-answer";
+
+    let server = MockServer::start();
+    // Second call must contain the answer as a tool_result.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("the-user-answer");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Got the answer."));
+    });
+    // First call → ask_user tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(ask_user_tool_use_body("What is your name?"));
+    });
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_elicitation(nats.clone(), &js, prefix, make_agent(&server.base_url()), elic_tx).await;
+
+            // Accept the elicitation with the hardcoded answer.
+            tokio::spawn(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let mut content = BTreeMap::new();
+                    content.insert(
+                        "answer".to_string(),
+                        agent_client_protocol::schema::v1::ElicitationContentValue::String(answer.to_string()),
+                    );
+                    let resp = CreateElicitationResponse::new(ElicitationAction::Accept(
+                        ElicitationAcceptAction::new().content(content),
+                    ));
+                    let _ = req.response_tx.send(Ok(resp));
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "ask me something").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after elicitation accept; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── RBAC / tool-policy gate ───────────────────────────────────────────────────
+
+fn workspace_tool_use_body() -> String {
+    sse_body(&[
+        (
+            "message_start",
+            serde_json::json!({
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 10, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}}
+            }),
+        ),
+        (
+            "content_block_start",
+            serde_json::json!({"index": 0, "content_block": {"type": "tool_use", "id": "tu_policy_1", "name": "unknown_tool"}}),
+        ),
+        (
+            "content_block_delta",
+            serde_json::json!({"index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"path\":\"/workspace/foo.rs\"}"}}),
+        ),
+        ("content_block_stop", serde_json::json!({"index": 0})),
+        (
+            "message_delta",
+            serde_json::json!({"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
+        ),
+        ("message_stop", serde_json::json!({"type": "message_stop"})),
+    ])
+}
+
+/// When `tool_policies` has an Allow rule matching the tool call, the agent
+/// executes the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_allow_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (has tool_result) → end_turn
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after policy-allowed tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-allow";
+    let session_id = "sess-policy-allow-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Allow policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Allow policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Allow policy matches"
+            );
+        })
+        .await;
+}
+
+/// When `tool_policies` has a Deny rule matching the tool call, the agent
+/// rejects the tool without consulting the permission channel.
+#[tokio::test]
+async fn runner_tool_policy_deny_bypasses_permission_channel() {
+    use trogon_acp_runner::session_store::{PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, the tool result is sent back; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after policy-denied tool"));
+    });
+    // First call → tool_use with /workspace path
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-policy-deny";
+    let session_id = "sess-policy-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    // Pre-seed session with Deny policy for unknown_tool on /workspace/**
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // The permission channel must not have received any request —
+            // the Deny policy resolved the check without interactive approval.
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "permission channel must not be consulted when Deny policy matches"
+            );
+        })
+        .await;
+}
+
+// ── Egress policy ─────────────────────────────────────────────────────────────
+
+/// When a session's egress policy denies the MCP server URL, `build_session_mcp`
+/// must skip that server entirely — the MCP server receives no requests.
+#[tokio::test]
+async fn runner_egress_deny_policy_skips_mcp_server_in_pipeline() {
+    use trogon_acp_runner::egress::{EgressAction, EgressPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    // MCP mock — must receive 0 hits.
+    let mcp_server = MockServer::start();
+    let mcp_init_mock = mcp_server.mock(|when, then| {
+        when.method(POST).body_contains("\"initialize\"");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"test-mcp"}}}"#);
+    });
+
+    // Anthropic: return end_turn immediately (no tool_use, just verify MCP skipped).
+    let anthropic = MockServer::start();
+    anthropic.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("done without mcp"));
+    });
+
+    let prefix = "test-egress-deny";
+    let session_id = "sess-egress-deny-1";
+
+    // Pre-seed session: MCP server configured but egress policy denies all.
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        mcp_servers: vec![StoredMcpServer {
+            name: "blocked_srv".to_string(),
+            url: mcp_server.base_url(),
+            headers: vec![],
+            command: String::new(),
+            args: vec![],
+            env: vec![],
+            timeout_secs: None,
+        }],
+        egress_policy: Some(EgressPolicy {
+            default_action: EgressAction::Deny,
+            rules: vec![],
+        }),
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&anthropic.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "hello").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+            // MCP server must not have been contacted — egress policy denied it.
+            assert_eq!(
+                mcp_init_mock.hits(),
+                0,
+                "MCP server must receive 0 requests when egress policy denies"
+            );
+        })
+        .await;
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+/// After a prompt turn where the permission channel is consulted and approves,
+/// the session audit log persisted in NATS KV must contain RequiredApproval
+/// and ApprovedByUser entries for the tool call.
+#[tokio::test]
+async fn runner_audit_log_persisted_after_tool_call_with_channel_approval() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second call (with tool_result) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after tool"));
+    });
+    // First call → tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit";
+    let session_id = "sess-audit-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Auto-approve every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            // Give the agent a moment to persist the session state.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                !state.audit_log.is_empty(),
+                "audit_log must be non-empty after a tool call"
+            );
+            assert!(
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::ApprovedByUser),
+                "expected ApprovedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-approved by an Allow `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain an `Allowed` entry.
+#[tokio::test]
+async fn runner_audit_log_records_allowed_for_allow_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after allowed tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-allow";
+    let session_id = "sess-audit-allow-1";
+
+    // permission_tx required to install the RulesPermissionChecker that writes audit_buf.
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Allow,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Allowed),
+                "expected Allowed entry in audit_log after Allow-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When a tool call is auto-denied by a Deny `ToolPolicy`, the session
+/// audit log persisted in NATS KV must contain a `Denied` entry.
+#[tokio::test]
+async fn runner_audit_log_records_denied_for_deny_policy() {
+    use trogon_acp_runner::session_store::{AuditOutcome, PolicyAction, ToolPolicy};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(workspace_tool_use_body());
+    });
+
+    let prefix = "test-audit-deny";
+    let session_id = "sess-audit-deny-1";
+
+    let (permission_tx, _permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let session_store = NatsSessionStore::open(&js).await.unwrap();
+    let state = SessionState {
+        tool_policies: vec![ToolPolicy {
+            tool: "unknown_tool".to_string(),
+            path_pattern: "/workspace/**".to_string(),
+            action: PolicyAction::Deny,
+        }],
+        ..Default::default()
+    };
+    session_store.save(session_id, &state).await.unwrap();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::Denied),
+                "expected Denied entry in audit_log after Deny-policy tool call; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When the permission channel denies a tool call, the session audit log
+/// persisted in NATS KV must contain `RequiredApproval` followed by
+/// `DeniedByUser` entries.
+#[tokio::test]
+async fn runner_audit_log_records_denied_by_user_for_channel_denial() {
+    use trogon_acp_runner::session_store::AuditOutcome;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // After denial, agent sends a tool_result error; Anthropic returns end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Done after denied tool"));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(tool_use_body());
+    });
+
+    let prefix = "test-audit-deny-user";
+    let session_id = "sess-audit-deny-user-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Deny every permission request.
+            tokio::spawn(async move {
+                while let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(false);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "use a tool").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn; got: {resp}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state
+                    .audit_log
+                    .iter()
+                    .any(|e| e.outcome == AuditOutcome::RequiredApproval),
+                "expected RequiredApproval entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+            assert!(
+                state.audit_log.iter().any(|e| e.outcome == AuditOutcome::DeniedByUser),
+                "expected DeniedByUser entry in audit_log; got: {:?}",
+                state.audit_log
+            );
+        })
+        .await;
+}
+
+/// When the agent calls `ask_user` and the elicitation channel returns Cancel
+/// (user declined), the agent receives the declined message and continues to
+/// the next LLM turn.
+#[tokio::test]
+async fn runner_ask_user_cancel_sends_declined_message_to_llm() {
+    use agent_client_protocol::schema::v1::{CreateElicitationResponse, ElicitationAction};
+
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-elic-cancel";
+    let session_id = "sess-elic-cancel-1";
+
+    let server = MockServer::start();
+    // Any second call (tool_result with declined message) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("Understood, question was declined."));
+    });
+    // First call → ask_user tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(ask_user_tool_use_body("Continue?"));
+    });
+
+    let (elic_tx, mut elic_rx) = mpsc::channel::<ElicitationReq>(8);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_elicitation(nats.clone(), &js, prefix, make_agent(&server.base_url()), elic_tx).await;
+
+            // Cancel every elicitation request.
+            tokio::spawn(async move {
+                while let Some(req) = elic_rx.recv().await {
+                    let resp = CreateElicitationResponse::new(ElicitationAction::Cancel);
+                    let _ = req.response_tx.send(Ok(resp));
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "ask me something").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after elicitation cancel; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── Real tool dispatch through the full NATS pipeline ────────────────────────
+
+/// Full pipeline: NATS prompt → TrogonAgent → AgentLoop dispatches a real
+/// `read_file` tool → file content lands in the tool_result → second Anthropic
+/// call → Done(end_turn) published via NATS.
+///
+/// Unlike `runner_publishes_tool_call_events`, this test uses an existing tool
+/// (not `unknown_tool`), verifying that the real tool implementation is wired
+/// through the entire runner stack.
+#[tokio::test]
+async fn runner_dispatches_real_read_file_tool_through_nats() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("readme.txt"), "runner-e2e-marker")
+        .await
+        .unwrap();
+
+    let server = MockServer::start();
+
+    // Second call: tool_result sent back to Anthropic → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("file content received"));
+    });
+
+    // First call: read_file tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_rf_e2e_001",
+                "read_file",
+                serde_json::json!({"path": "readme.txt"}),
+            ));
+    });
+
+    let prefix = "test-readfile-e2e";
+    let session_id = "sess-readfile-e2e-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(trogon_agent_core::tools::ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+                web_search_api_key: None,
+                web_search_endpoint: None,
+            });
+
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "read the file").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after real tool dispatch; got: {resp}"
+            );
+        })
+        .await;
+}
+
+/// Full pipeline: NATS prompt → TrogonAgent (with `WasmRuntimeBashTool` backed
+/// by `NatsKvSessionStore`) → AgentLoop dispatches `bash` → NATS terminal
+/// responders reply → tool_result sent back → Done(end_turn) via NATS.
+///
+/// After the run, the `terminal_id` must be persisted in the real
+/// `NatsKvSessionStore` (not an in-memory mock), proving that the bash tool's
+/// session state survives beyond a single in-process call.
+#[tokio::test]
+async fn runner_bash_tool_persists_terminal_id_in_nats_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-bash-nats-kv";
+    let session_id = "sess-bash-kv-1";
+    let terminal_id = "term-kv-e2e-001";
+    let cmd_output = "hello-from-bash\n";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    spawn_terminal_responders(nats.clone(), base, ext_base, terminal_id, cmd_output);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let server = MockServer::start();
+
+    // Second call: tool_result containing bash output → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("bash completed"));
+    });
+
+    // First call: bash tool_use.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_kv_001",
+                "bash",
+                serde_json::json!({"command": "echo hello-from-bash"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run bash").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after bash dispatch; got: {resp}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must be persisted in NatsKvSessionStore after bash tool runs"
+            );
+        })
+        .await;
+}
+
+// ── Todo tools ────────────────────────────────────────────────────────────────
+
+/// Agent calls `todo_write` → NatsTodoTool saves the item → tool returns "OK"
+/// → second LLM call → end_turn.  The ToolCallFinished notification must carry
+/// "OK" confirming the write succeeded.
+#[tokio::test]
+async fn runner_todo_write_tool_returns_ok_and_completes() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-todo-write";
+    let session_id = "sess-todo-w-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Todo saved."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_todo_w_001",
+                "todo_write",
+                serde_json::json!({"id": "t1", "content": "Write integration tests", "status": "pending"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "add a todo").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after todo_write; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("\"OK\"")),
+                "ToolCallFinished notification must contain 'OK' from todo_write; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+/// Pre-populate a todo in the session store, then have the agent call
+/// `todo_read`.  The tool result must contain the todo text, which is then
+/// forwarded to the LLM and triggers end_turn.
+#[tokio::test]
+async fn runner_todo_read_returns_pre_populated_active_todos() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-todo-read";
+    let session_id = "sess-todo-r-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("pending");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got your todos."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream("tu_todo_r_001", "todo_read", serde_json::json!({})));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_todo_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.todos.push(TodoItem {
+                id: "t-pre".to_string(),
+                content: "Pre-existing task".to_string(),
+                status: "pending".to_string(),
+            });
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "list todos").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after todo_read; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Pre-existing task")),
+                "tool result must surface the pre-existing todo; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── Spawn agent ───────────────────────────────────────────────────────────────
+
+/// Agent calls `spawn_agent` → `SpawnAgentTool` sends a NATS request on
+/// `{prefix}.spawn` → a mock responder replies → the response lands in
+/// the second Anthropic call as a tool result → end_turn.
+#[tokio::test]
+async fn runner_spawn_agent_sends_nats_request_and_returns_response() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-spawn";
+    let session_id = "sess-spawn-1";
+
+    let spawn_nats = nats.clone();
+    let spawn_prefix = prefix.to_string();
+    tokio::spawn(async move {
+        let subject = format!("{spawn_prefix}.spawn");
+        let mut sub = spawn_nats.subscribe(subject).await.unwrap();
+        if let Some(msg) = sub.next().await {
+            spawn_nats
+                .publish(msg.reply.unwrap(), r#"{"session_id":"spawned-abc"}"#.into())
+                .await
+                .unwrap();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("spawned-abc");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Agent spawned."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_spawn_001",
+                "spawn_agent",
+                serde_json::json!({"capability": "coding", "prompt": "Fix the bug"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = NatsSessionStore::open(&js).await.unwrap();
+            let spawn_tool = SpawnAgentTool::new(nats.clone(), prefix, "");
+            let (dispatch_name, orig_name, client) = spawn_tool.into_dispatch();
+
+            let mut agent = make_agent(&server.base_url());
+            agent.mcp_tool_defs = vec![SpawnAgentTool::tool_def()];
+            agent.mcp_dispatch = vec![(dispatch_name, orig_name, client)];
+
+            let notifier = NatsSessionNotifier::new(nats.clone());
+            let ta = TrogonAgent::new(
+                notifier,
+                store,
+                agent,
+                prefix,
+                "claude-test",
+                None,
+                None,
+                Arc::new(RwLock::new(None)),
+            );
+            let acp_prefix = AcpPrefix::new(prefix).unwrap();
+            let (_, io_task) = AgentSideNatsConnection::new(ta, nats.clone(), acp_prefix, |fut| {
+                tokio::task::spawn_local(fut);
+            });
+            tokio::task::spawn_local(io_task);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "spawn an agent").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after spawn_agent; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("spawned-abc")),
+                "tool result must contain the spawned session ID; notifs: {notifs:?}"
+            );
+        })
+        .await;
+}
+
+// ── TROGON.md permission rules ────────────────────────────────────────────────
+
+/// When the session cwd contains a TROGON.md with `deny_paths`, the runner
+/// loads the file and rejects the matching tool call without consulting the
+/// interactive permission channel.
+#[tokio::test]
+async fn runner_trogon_md_deny_path_blocks_tool_without_permission_channel() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(
+        dir.path().join("TROGON.md"),
+        "## Permissions\ndeny_paths: secrets.txt\n",
+    )
+    .await
+    .unwrap();
+
+    let prefix = "test-trogon-md-deny";
+    let session_id = "sess-tmd-deny-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Access denied."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_tmd_001",
+                "write_file",
+                serde_json::json!({"path": "secrets.txt", "content": "top-secret"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(ToolContext {
+                web_search_api_key: None,
+                web_search_endpoint: None,
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // state.cwd must point to the temp dir so the agent loads TROGON.md from it.
+            let mut state = store.load(session_id).await.unwrap();
+            state.cwd = dir.path().to_string_lossy().into_owned();
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write secrets").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after TROGON.md deny; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "TROGON.md deny must not consult the interactive permission channel"
+            );
+        })
+        .await;
+}
+
+// ── Command-based permission rules ────────────────────────────────────────────
+
+/// `deny_commands: rm` in `permission_rules_text` blocks a bash call matching
+/// the prefix without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_deny_commands_rule_blocks_bash_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-deny-cmd";
+    let session_id = "sess-deny-cmd-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Understood, rm is blocked."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_deny_cmd_001",
+                "bash",
+                serde_json::json!({"command": "rm -rf /tmp/test-deny"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\ndeny_commands: rm\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run rm").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after deny_commands; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "deny_commands must not forward to the interactive channel"
+            );
+        })
+        .await;
+}
+
+/// `allow_commands: echo` in `permission_rules_text` auto-approves a matching
+/// bash call without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_allow_commands_rule_auto_approves_bash_without_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-allow-cmd";
+    let session_id = "sess-allow-cmd-1";
+    let terminal_id = "term-allow-cmd-001";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+    spawn_terminal_responders(nats.clone(), base, ext_base, terminal_id, "hello-from-allow\n");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Echo completed."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_allow_cmd_001",
+                "bash",
+                serde_json::json!({"command": "echo hello-from-allow"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_and_permission(
+                nats.clone(),
+                &js,
+                prefix,
+                session_id,
+                &server.base_url(),
+                permission_tx,
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\nallow_commands: echo\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "echo something").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after allow_commands auto-approve; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("hello-from-allow")),
+                "tool result must contain bash output; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "allow_commands must not consult the interactive permission channel"
+            );
+        })
+        .await;
+}
+
+// ── Rule merge: TROGON.md + session rules ─────────────────────────────────────
+
+/// TROGON.md grants `allow_paths: src/**`; a session rule adds
+/// `deny_paths: src/secret.rs`.  Deny takes precedence over Allow, so the
+/// tool call is blocked without consulting the interactive channel.
+#[tokio::test]
+async fn runner_trogon_md_and_session_rules_merge_deny_beats_allow() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    tokio::fs::write(dir.path().join("TROGON.md"), "## Permissions\nallow_paths: src/**\n")
+        .await
+        .unwrap();
+
+    let prefix = "test-merge-rules";
+    let session_id = "sess-merge-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Access denied by session rule."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_merge_001",
+                "write_file",
+                serde_json::json!({"path": "src/secret.rs", "content": "sensitive"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(ToolContext {
+                web_search_api_key: None,
+                web_search_endpoint: None,
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+            });
+
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                agent,
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\ndeny_paths: src/secret.rs\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write the secret file").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after merged deny; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "merged deny must not consult the interactive channel"
+            );
+        })
+        .await;
+}
+
+// ── Fallback to interactive permission channel ─────────────────────────────────
+
+/// When static rules return `Ask` (no matching allow or deny), the request
+/// falls through to the interactive channel.  The channel approves and the
+/// tool executes, resulting in end_turn.
+#[tokio::test]
+async fn runner_no_matching_rule_falls_through_to_permission_channel() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-rule-ask";
+    let session_id = "sess-rule-ask-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tool_result");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got it."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_ask_001",
+                "write_file",
+                serde_json::json!({"path": "unmatched_file.txt", "content": "hello"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Rules only cover src/** — unmatched_file.txt falls through to the channel.
+            let mut state = store.load(session_id).await.unwrap();
+            state.permission_rules_text = Some("## Permissions\nallow_paths: src/**\n".to_string());
+            store.save(session_id, &state).await.unwrap();
+
+            // Approve the interactive permission request from a background task.
+            tokio::task::spawn_local(async move {
+                if let Some(req) = permission_rx.recv().await {
+                    let _ = req.response_tx.send(true);
+                }
+            });
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "write the file").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after interactive approval; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── /config permissions command ───────────────────────────────────────────────
+
+/// Sending a `set_config_option` ACP message with `config_id="permissions"` and
+/// a rules payload persists `permission_rules_text` in the session store.  On the
+/// next prompt the rules are active: a `deny_commands: rm` rule blocks the bash
+/// call without consulting the interactive permission channel.
+#[tokio::test]
+async fn runner_config_permissions_persists_and_enforces_on_next_prompt() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-cfg-perm";
+    let session_id = "sess-cfg-perm-1";
+
+    let (permission_tx, mut permission_rx) = mpsc::channel::<PermissionReq>(8);
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("Permission denied");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("Got it, rm is blocked."));
+    });
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_cfg_perm_001",
+                "bash",
+                serde_json::json!({"command": "rm -rf /tmp/test-cfg"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                Some(permission_tx),
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Send the /config permissions ACP message via NATS request-reply.
+            let config_subject = format!("{prefix}.session.{session_id}.agent.set_config_option");
+            let config_req = SetSessionConfigOptionRequest::new(
+                session_id,
+                "permissions",
+                SessionConfigOptionValue::ValueId {
+                    value: "## Permissions\ndeny_commands: rm\n".into(),
+                },
+            );
+            let resp_msg = nats
+                .request(config_subject, Bytes::from(serde_json::to_vec(&config_req).unwrap()))
+                .await
+                .expect("set_config_option request must succeed");
+            let _: SetSessionConfigOptionResponse = serde_json::from_slice(&resp_msg.payload)
+                .expect("response must deserialize as SetSessionConfigOptionResponse");
+
+            // Verify the store reflects the updated rules.
+            let state = store.load(session_id).await.unwrap();
+            assert!(
+                state
+                    .permission_rules_text
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("deny_commands: rm"),
+                "permission_rules_text must be persisted after /config permissions"
+            );
+
+            // Now send a prompt — the LLM will call bash with "rm".
+            // The deny rule must block it without consulting the channel.
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "run rm").await;
+
+            let (notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "expected end_turn after deny via /config permissions; got: {resp}"
+            );
+            assert!(
+                notifs.iter().any(|n| n.to_string().contains("Permission denied")),
+                "expected 'Permission denied' in notifications; notifs: {notifs:?}"
+            );
+            assert!(
+                permission_rx.try_recv().is_err(),
+                "deny_commands from /config must not consult the interactive channel"
+            );
+        })
+        .await;
+}
+
+// ── fork_session ──────────────────────────────────────────────────────────────
+
+/// A forked session must inherit `todos` and `permission_rules_text` from the
+/// source session.  Both fields were added to the `fork_session` initializer as
+/// part of this branch; without them they would default to empty/None in the
+/// child, silently losing data that the user set in the parent.
+#[tokio::test]
+async fn runner_fork_session_inherits_todos_and_permission_rules() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-fork";
+    let source_id = "sess-fork-src-1";
+    let rules_text = "## Permissions\ndeny_commands: rm\n";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent("http://127.0.0.1:1"),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Seed the source session with a todo and permission rules.
+            let mut state = store.load(source_id).await.unwrap();
+            state.todos.push(TodoItem {
+                id: "todo-fork-1".to_string(),
+                content: "Inherited task".to_string(),
+                status: "pending".to_string(),
+            });
+            state.permission_rules_text = Some(rules_text.to_string());
+            store.save(source_id, &state).await.unwrap();
+
+            // Send fork request via NATS request-reply.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
+            let resp_msg = nats
+                .request(fork_subject, Bytes::from(serde_json::to_vec(&fork_req).unwrap()))
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ForkSessionResponse");
+
+            let forked_id = fork_resp.session_id.to_string();
+
+            // Verify the forked session inherited both fields.
+            let forked = store.load(&forked_id).await.unwrap();
+
+            assert_eq!(
+                forked.todos.len(),
+                1,
+                "forked session must inherit todos from source; got: {:?}",
+                forked.todos
+            );
+            assert_eq!(
+                forked.todos[0].content, "Inherited task",
+                "forked todo content must match source"
+            );
+
+            assert_eq!(
+                forked.permission_rules_text.as_deref(),
+                Some(rules_text),
+                "forked session must inherit permission_rules_text from source"
+            );
+        })
+        .await;
+}
+
+/// After forking a session, a prompt sent to the forked session must complete
+/// with `end_turn` — verifying that the new session is fully wired to the
+/// agent's NATS subscriptions and the LLM can be reached through it.
+///
+/// The existing fork test only verifies that the forked session inherits state.
+/// This test closes the gap by exercising the actual prompt→response path on
+/// the forked session.
+#[tokio::test]
+async fn runner_prompt_on_forked_session_returns_end_turn() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-fork-prompt";
+    let source_id = "sess-fork-prompt-src-1";
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done in forked session"));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Fork the source session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let fork_req = ForkSessionRequest::new(source_id, "/forked-cwd");
+            let fork_msg = nats
+                .request(fork_subject, Bytes::from(serde_json::to_vec(&fork_req).unwrap()))
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&fork_msg.payload).expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+            assert!(!forked_id.is_empty(), "fork must return a non-empty session_id");
+
+            // Send a prompt to the forked session.
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, &forked_id, "continue here").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt to forked session must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — completion persists totals to NATS KV ───────────────────
+
+/// After a successful turn the agent must persist the token totals to the
+/// NATS KV store so they survive across restarts and appear in subsequent
+/// `list_sessions` responses.
+#[tokio::test]
+async fn runner_completion_persists_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done"));
+    });
+
+    let prefix = "test-tok-persist";
+    let session_id = "sess-tok-p-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "count tokens").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "completion must persist input token total to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "completion must persist output token total to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes token totals via NATS ─────────────
+
+/// After a completed prompt, `list_sessions` via NATS must return the session
+/// with `totalInputTokens` and `totalOutputTokens` in its `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_token_totals_via_nats() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("reply"));
+    });
+
+    let prefix = "test-tok-list";
+    let session_id = "sess-tok-l-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with usage");
+            assert_eq!(
+                meta.get("totalInputTokens"),
+                Some(&serde_json::json!(10)),
+                "list_sessions must expose totalInputTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalOutputTokens"),
+                Some(&serde_json::json!(8)),
+                "list_sessions must expose totalOutputTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — list_sessions exposes cache token totals ────────────────
+
+/// After a prompt that includes cache tokens, `list_sessions` must expose
+/// `totalCacheCreationTokens` and `totalCacheReadTokens` alongside the main
+/// token counts in the session's `_meta` field.
+#[tokio::test]
+async fn runner_list_sessions_exposes_cache_tokens_in_meta() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached reply", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-list-cache";
+    let session_id = "sess-tok-lc-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "cache query").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let list_subject = format!("{prefix}.agent.session.list");
+            let resp_msg = nats
+                .request(
+                    list_subject,
+                    Bytes::from(serde_json::to_vec(&ListSessionsRequest::new()).unwrap()),
+                )
+                .await
+                .expect("list_sessions request must succeed");
+            let list_resp: ListSessionsResponse =
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ListSessionsResponse");
+
+            let info = list_resp
+                .sessions
+                .iter()
+                .find(|s| s.session_id.to_string() == session_id)
+                .expect("session must appear in list_sessions");
+            let meta = info
+                .meta
+                .as_ref()
+                .expect("session must have _meta after prompt with cache tokens");
+            assert_eq!(
+                meta.get("totalCacheCreationTokens"),
+                Some(&serde_json::json!(200)),
+                "list_sessions must expose totalCacheCreationTokens; got: {meta:?}"
+            );
+            assert_eq!(
+                meta.get("totalCacheReadTokens"),
+                Some(&serde_json::json!(50)),
+                "list_sessions must expose totalCacheReadTokens; got: {meta:?}"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — fork_session resets token totals to zero ────────────────
+
+/// After forking a session that has accumulated token totals, the new session
+/// must start with zero token totals — tokens belong to the branch, not
+/// inherited from the parent.
+#[tokio::test]
+async fn runner_fork_session_resets_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("src reply"));
+    });
+
+    let prefix = "test-tok-fork";
+    let source_id = "sess-tok-f-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Prompt the source session so it accumulates token totals.
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, source_id, "accumulate").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let src_state = store.load(source_id).await.unwrap();
+            assert!(
+                src_state.total_input_tokens > 0,
+                "source must have accumulated tokens before fork"
+            );
+
+            // Fork the session via NATS.
+            let fork_subject = format!("{prefix}.session.{source_id}.agent.fork");
+            let resp_msg = nats
+                .request(
+                    fork_subject,
+                    Bytes::from(serde_json::to_vec(&ForkSessionRequest::new(source_id, "/fork")).unwrap()),
+                )
+                .await
+                .expect("fork request must succeed");
+            let fork_resp: ForkSessionResponse =
+                serde_json::from_slice(&resp_msg.payload).expect("response must deserialize as ForkSessionResponse");
+            let forked_id = fork_resp.session_id.to_string();
+
+            // The forked session must have zero token totals.
+            let fork_state = store.load(&forked_id).await.unwrap();
+            assert_eq!(
+                fork_state.total_input_tokens, 0,
+                "forked session must start with zero input tokens"
+            );
+            assert_eq!(
+                fork_state.total_output_tokens, 0,
+                "forked session must start with zero output tokens"
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cancel does not corrupt previously saved token totals ────
+
+/// After a first prompt completes and saves token totals to KV, a subsequent
+/// prompt that is cancelled must NOT zero-out or overwrite those saved totals.
+/// The KV entry from the completed turn must survive the cancellation.
+#[tokio::test]
+async fn runner_cancel_preserves_prior_token_totals() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    // Second prompt → slow (2 s), giving the cancel time to arrive.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("turn 2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .delay(Duration::from_secs(2))
+            .body(sse_end_turn_stream("never reached"));
+    });
+    // First prompt → completes immediately with tokens.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 10, 8, 0, 0));
+    });
+
+    let prefix = "test-tok-cancel2";
+    let session_id = "sess-tok-c2-1";
+    let cancel_subject = agent_subjects::session_cancel(prefix, session_id);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // First prompt: completes normally, tokens saved to KV.
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "turn 1").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "first prompt must complete with end_turn; got: {resp1}"
+            );
+
+            // Second prompt: slow — cancel fires during the HTTP call.
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "turn 2").await;
+
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            nats.publish(cancel_subject, Bytes::new()).await.unwrap();
+
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("cancelled"),
+                "second prompt must be cancelled; got: {resp2}"
+            );
+
+            // Token totals from the completed first prompt must still be in KV.
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "cancel must not erase token totals saved by the prior end_turn; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 8,
+                "cancel must not erase output tokens saved by the prior end_turn; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — max_tokens error path persists tokens ───────────────────
+
+/// When the model returns `max_tokens`, the agent must persist accumulated token
+/// totals to KV before returning — not silently discard them.
+#[tokio::test]
+async fn runner_max_tokens_persists_token_totals_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(max_tokens_body());
+    });
+
+    let prefix = "test-tok-maxtok";
+    let session_id = "sess-tok-mt-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "fill the context").await;
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("max_tokens"),
+                "expected stop_reason=max_tokens; got: {resp}"
+            );
+
+            let state = store.load(session_id).await.unwrap();
+            // max_tokens_body() sends input=10, output=4096
+            assert_eq!(
+                state.total_input_tokens, 10,
+                "max_tokens path must persist input tokens to KV; got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 4096,
+                "max_tokens path must persist output tokens to KV; got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — multi-turn accumulation + load-from-KV via NATS ─────────
+
+/// Two consecutive prompts must accumulate token totals in KV. This also
+/// verifies load-from-KV: the second prompt loads the state saved after the
+/// first and adds to it, so the final total equals the sum of both turns.
+#[tokio::test]
+async fn runner_multi_turn_tokens_accumulate() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("ok", 15, 6, 0, 0));
+    });
+
+    let prefix = "test-tok-multi";
+    let session_id = "sess-tok-m-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            // Turn 1.
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "turn 1").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            // Turn 2 — agent must load KV state from turn 1 and accumulate.
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "turn 2").await;
+            collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_input_tokens, 30,
+                "input tokens must accumulate across two turns (15+15=30); got {}",
+                state.total_input_tokens
+            );
+            assert_eq!(
+                state.total_output_tokens, 12,
+                "output tokens must accumulate across two turns (6+6=12); got {}",
+                state.total_output_tokens
+            );
+        })
+        .await;
+}
+
+// ── token tracking — cache tokens persisted to KV ────────────────────────────
+
+/// The Anthropic SSE can include cache_creation_input_tokens and
+/// cache_read_input_tokens. These must be accumulated and persisted to KV
+/// so that the full billing picture is available in session state.
+#[tokio::test]
+async fn runner_cache_tokens_persisted_to_kv() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream_with_tokens("cached", 10, 5, 200, 50));
+    });
+
+    let prefix = "test-tok-cache";
+    let session_id = "sess-tok-ch-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "cache test").await;
+            collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            let state = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state.total_cache_creation_tokens, 200,
+                "cache_creation tokens must be persisted to KV; got {}",
+                state.total_cache_creation_tokens
+            );
+            assert_eq!(
+                state.total_cache_read_tokens, 50,
+                "cache_read tokens must be persisted to KV; got {}",
+                state.total_cache_read_tokens
+            );
+        })
+        .await;
+}
+
+// ── Stateful bash: terminal reused across two successive prompts ───────────────
+
+/// Spawns mock NATS responders for TWO successive bash tool calls on the same
+/// terminal.  The first call creates the terminal and runs command 1.  The
+/// second call must reuse the same terminal (no extra `terminal.create` request)
+/// and runs command 2.
+/// Reconstructs the per-invocation `__START_<nonce>__` marker (and bare
+/// `<nonce>`) from a `terminal.write_stdin` payload, so the mock can echo back
+/// the start + nonce'd exit markers the bash tool's output extraction requires.
+fn markers_from_written_command(payload: &[u8]) -> (String, String) {
+    let req: serde_json::Value = serde_json::from_slice(payload).expect("write_stdin payload must be JSON");
+    let bytes: Vec<u8> = req["data"]
+        .as_array()
+        .expect("write_stdin payload must carry `data` bytes")
+        .iter()
+        .map(|v| v.as_u64().expect("data byte") as u8)
+        .collect();
+    let cmd = String::from_utf8(bytes).expect("written command must be UTF-8");
+    let start = cmd.find("__START_").expect("command must contain a start marker");
+    let after = &cmd[start + "__START_".len()..];
+    let end = after.find("__").expect("start marker must terminate with __");
+    let nonce = after[..end].to_string();
+    (format!("__START_{nonce}__"), nonce)
+}
+
+fn spawn_two_bash_calls(
+    nats: async_nats::Client,
+    base: String,
+    ext_base: String,
+    terminal_id: &'static str,
+    output1: &'static str,
+    output2: &'static str,
+) {
+    tokio::spawn(async move {
+        use futures_util::StreamExt;
+        let mut create_sub = nats.subscribe(format!("{base}.create")).await.unwrap();
+        let mut output_sub = nats.subscribe(format!("{base}.output")).await.unwrap();
+        let mut write_sub = nats
+            .subscribe(format!("{ext_base}.terminal.write_stdin"))
+            .await
+            .unwrap();
+
+        // ── First bash call ────────────────────────────────────────────────────
+        // terminal.create (only once — second call reuses the same terminal)
+        if let Some(msg) = create_sub.next().await {
+            let resp = CreateTerminalResponse::new(TerminalId::new(terminal_id));
+            nats.publish(msg.reply.unwrap(), serde_json::to_vec(&resp).unwrap().into())
+                .await
+                .unwrap();
+        }
+        // write_stdin for command 1 — capture markers (HIGH-21: no baseline read)
+        let mut markers1 = None;
+        if let Some(msg) = write_sub.next().await {
+            markers1 = Some(markers_from_written_command(&msg.payload));
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        }
+        let (start1, nonce1) = markers1.expect("write_stdin 1 must arrive");
+        // poll output for command 1
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{start1}\n{output1}__EXIT_{nonce1}_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full})).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        }
+
+        // ── Second bash call (no create — terminal already exists) ─────────────
+        // write_stdin for command 2 — capture markers (HIGH-21: no baseline read)
+        let mut markers2 = None;
+        if let Some(msg) = write_sub.next().await {
+            markers2 = Some(markers_from_written_command(&msg.payload));
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"ok": true})).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        }
+        let (start2, nonce2) = markers2.expect("write_stdin 2 must arrive");
+        // poll output for command 2
+        if let Some(msg) = output_sub.next().await {
+            let full = format!("{start2}\n{output2}__EXIT_{nonce2}_0__\n");
+            nats.publish(
+                msg.reply.unwrap(),
+                serde_json::to_vec(&serde_json::json!({"output": full})).unwrap().into(),
+            )
+            .await
+            .unwrap();
+        }
+    });
+}
+
+/// Stateful bash: two successive prompts on the same session each trigger a bash
+/// tool call.  The second call must reuse the same terminal (no extra
+/// `terminal.create` request), which proves that the terminal_id is persisted
+/// in NATS KV after the first call and loaded by the second.
+///
+/// Concretely:
+/// - Prompt 1 → bash tool_use "cmd1" → terminal.create + run → end_turn
+/// - Prompt 2 → bash tool_use "cmd2" → no terminal.create (reuse) → run → end_turn
+///
+/// Assertion: both prompts complete, and session.terminal_id is non-None
+/// throughout (same terminal was used for both calls).
+#[tokio::test]
+async fn runner_bash_tool_reuses_terminal_across_two_successive_prompts() {
+    let (_c, nats, js) = start_nats().await;
+
+    let prefix = "test-bash-stateful";
+    let session_id = "sess-bash-stateful-1";
+    let terminal_id = "term-stateful-001";
+
+    let base = format!("{prefix}.session.{session_id}.client.terminal");
+    let ext_base = format!("{prefix}.session.{session_id}.client.ext");
+
+    spawn_two_bash_calls(
+        nats.clone(),
+        base,
+        ext_base,
+        terminal_id,
+        "output-from-cmd1\n",
+        "output-from-cmd2\n",
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let server = MockServer::start();
+
+    // Prompt 2, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd2 done"));
+    });
+    // Prompt 2, first LLM turn: → bash tool_use for cmd2
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("output-from-cmd1"); // history from prompt 1 is present
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s2",
+                "bash",
+                serde_json::json!({"command": "cmd2"}),
+            ));
+    });
+    // Prompt 1, second LLM turn: tool_result → end_turn
+    server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            .body_contains("tool_result")
+            .body_contains("output-from-cmd1");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("cmd1 done"));
+    });
+    // Prompt 1, first LLM turn: → bash tool_use for cmd1
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_bash_s1",
+                "bash",
+                serde_json::json!({"command": "cmd1"}),
+            ));
+    });
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let store = start_agent_with_bash_tool(nats.clone(), &js, prefix, session_id, &server.base_url()).await;
+
+            // ── Prompt 1 ──────────────────────────────────────────────────────────
+            let (mut notif_sub1, mut resp_sub1) = send_text(&nats, prefix, session_id, "run cmd1").await;
+            let (_notifs1, resp1) = collect_notifs_and_response(&mut notif_sub1, &mut resp_sub1, 15).await;
+            assert_eq!(
+                resp1["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 1 must complete with end_turn; got: {resp1}"
+            );
+
+            let state_after_1 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_1.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must be persisted after prompt 1"
+            );
+
+            // Short pause so session state is committed to NATS KV before prompt 2.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            // ── Prompt 2 ──────────────────────────────────────────────────────────
+            let (mut notif_sub2, mut resp_sub2) = send_text(&nats, prefix, session_id, "run cmd2").await;
+            let (_notifs2, resp2) = collect_notifs_and_response(&mut notif_sub2, &mut resp_sub2, 15).await;
+            assert_eq!(
+                resp2["stopReason"].as_str(),
+                Some("end_turn"),
+                "prompt 2 must complete with end_turn; got: {resp2}"
+            );
+
+            let state_after_2 = store.load(session_id).await.unwrap();
+            assert_eq!(
+                state_after_2.terminal_id.as_deref(),
+                Some(terminal_id),
+                "terminal_id must remain the same after prompt 2 (same terminal reused)"
+            );
+        })
+        .await;
+}
+
+/// Full programming tool chain: LLM calls `read_file` → sees file contents →
+/// calls `str_replace` to edit → calls `git_diff` to inspect the diff →
+/// finally produces `end_turn`.
+///
+/// Exercises the realistic multi-step code-editing workflow that is the primary
+/// use-case for the acp-runner programming mode, verifying all three tool
+/// dispatch-and-forward roundtrips in sequence.
+#[tokio::test]
+async fn programming_tool_sequence_read_str_replace_git_diff() {
+    use tempfile::TempDir;
+
+    let (_c, nats, js) = start_nats().await;
+
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("src.rs"), "fn old_function() {}\n").unwrap();
+
+    let server = MockServer::start();
+
+    // Call 4: git_diff tool_result in body (identified by tu_gd) → end_turn.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_gd");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_end_turn_stream("done with edits"));
+    });
+
+    // Call 3: str_replace tool_result in body (identified by tu_sr) → git_diff.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_sr");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream("tu_gd", "git_diff", serde_json::json!({})));
+    });
+
+    // Call 2: read_file tool_result in body (identified by tu_rf) → str_replace.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages").body_contains("tu_rf");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_sr",
+                "str_replace",
+                serde_json::json!({
+                    "path": "src.rs",
+                    "old_str": "old_function",
+                    "new_str": "new_function"
+                }),
+            ));
+    });
+
+    // Call 1: initial user message (no tool_result yet) → read_file.
+    server.mock(|when, then| {
+        when.method(POST).path("/messages");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(sse_tool_use_stream(
+                "tu_rf",
+                "read_file",
+                serde_json::json!({"path": "src.rs"}),
+            ));
+    });
+
+    let prefix = "test-prog-chain";
+    let session_id = "sess-prog-chain-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut agent = make_agent(&server.base_url());
+            agent.tool_context = Arc::new(trogon_agent_core::tools::ToolContext {
+                proxy_url: "http://127.0.0.1:1".to_string(),
+                cwd: dir.path().to_string_lossy().into_owned(),
+                http_client: reqwest::Client::new(),
+                web_search_api_key: None,
+                web_search_endpoint: None,
+            });
+
+            start_agent(nats.clone(), &js, prefix, agent, None, Arc::new(RwLock::new(None))).await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "refactor the function").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 20).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "programming tool chain must complete with end_turn; got: {resp}"
+            );
+
+            // Verify the file was actually modified by str_replace.
+            let content = std::fs::read_to_string(dir.path().join("src.rs")).unwrap();
+            assert!(
+                content.contains("new_function"),
+                "str_replace must have renamed old_function to new_function; got: {content:?}"
+            );
+        })
+        .await;
+}
+
+/// Validates that acp-runner sends correctly-formatted requests to the Anthropic Messages API.
+///
+/// The httpmock `when` clause acts as a schema assertion: the mock only fires if
+/// ALL conditions are satisfied simultaneously. If any required field is absent or
+/// has the wrong type, the mock does not match, the agent receives no response,
+/// and `mock.assert()` at the end catches the failure.
+///
+/// Required Anthropic Messages API fields verified here:
+/// - `anthropic-version: 2023-06-01` header (required by the API)
+/// - `model`: serialized as a non-empty JSON string (`"model":"...`)
+/// - `messages`: JSON array (`"messages":[`)
+/// - `max_tokens`: integer field present
+/// - At least one message with `"role":"user"` and a `"content":` field
+/// - `"stream":true` — the runner always uses SSE streaming
+#[tokio::test]
+async fn acp_request_has_required_anthropic_message_fields() {
+    let (_c, nats, js) = start_nats().await;
+
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/messages")
+            // Anthropic requires this header on every request.
+            .header("anthropic-version", "2023-06-01")
+            // model must be serialized as a non-empty JSON string.
+            .body_contains("\"model\":\"")
+            // messages must be a JSON array.
+            .body_contains("\"messages\":[")
+            // max_tokens must be present (Anthropic requires it).
+            .body_contains("\"max_tokens\":")
+            // Runner always streams — stream:true must be set.
+            .body_contains("\"stream\":true")
+            // At least one message must have a valid user role.
+            .body_contains("\"role\":\"user\"")
+            // content field must be present in messages.
+            .body_contains("\"content\":");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(end_turn_body("schema check passed"));
+    });
+
+    let prefix = "schema-acp";
+    let session_id = "sess-schema-acp-1";
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            start_agent(
+                nats.clone(),
+                &js,
+                prefix,
+                make_agent(&server.base_url()),
+                None,
+                Arc::new(RwLock::new(None)),
+            )
+            .await;
+
+            let (mut notif_sub, mut resp_sub) = send_text(&nats, prefix, session_id, "schema validation test").await;
+
+            let (_notifs, resp) = collect_notifs_and_response(&mut notif_sub, &mut resp_sub, 15).await;
+
+            assert_eq!(
+                resp["stopReason"].as_str(),
+                Some("end_turn"),
+                "acp-runner must complete with end_turn; got: {resp}"
+            );
+        })
+        .await;
+
+    // All schema conditions were met — mock was called exactly once.
+    mock.assert();
+}

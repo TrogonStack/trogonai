@@ -5,14 +5,14 @@ status: accepted
 date: 2026-07-01
 ---
 
-# ADR 0015: Rust TLS Library
+# ADR#0015: Rust TLS Library
 
 ## Context
 
 First-party Rust code needs one default TLS implementation for both the client
 side (outbound HTTP, WebSocket, and other network clients) and the server side
 (in-process HTTPS listeners). Without one default, TLS choices drift across
-crates: some link [OpenSSL](https://openssl-library.org/) through
+[crates](../glossary/crate): some link [OpenSSL](https://openssl-library.org/) through
 [`native-tls`](https://crates.io/crates/native-tls), others link
 [rustls](https://github.com/rustls/rustls), and a single process can end up with
 two independent TLS stacks, two certificate-trust models, and two sets of
@@ -49,10 +49,10 @@ workspace dependencies. No first-party crate depends on
 [`native-tls`](https://crates.io/crates/native-tls) or
 [`openssl`](https://crates.io/crates/openssl).
 
-[ADR 0002](./0002-rust-crate-boundaries.md) makes shared cross-cutting concerns
+[ADR#0002](./0002-rust-crate-boundaries.md) makes shared cross-cutting concerns
 the responsibility of dedicated reusable packages, and
-[ADR 0007](./0007-configuration-sources.md) and
-[ADR 0008](./0008-opentelemetry-observability.md) establish the pattern of
+[ADR#0007](./0007-configuration-sources.md) and
+[ADR#0008](./0008-opentelemetry-observability.md) establish the pattern of
 naming one default technology and treating anything else as a documented
 exception.
 
@@ -135,9 +135,9 @@ boundary. Do not let it become the default for unrelated code.
 
 ## References
 
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
-- [ADR 0007: Configuration Sources](./0007-configuration-sources.md)
-- [ADR 0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0007: Configuration Sources](./0007-configuration-sources.md)
+- [ADR#0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)
 - [rustls](https://github.com/rustls/rustls)
 - [ISRG Prossimo: rustls initiative](https://www.memorysafety.org/initiative/rustls/)
 - [Internet Security Research Group (ISRG)](https://www.abetterinternet.org/)

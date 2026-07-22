@@ -1,4 +1,4 @@
-mod codec;
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -7,10 +7,9 @@ use std::process;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use serde::Deserialize;
-use trogon_decider_sim::{SimHost, SimScenario};
-
-use crate::codec::{any_type_url, json_any_to_command, json_any_to_envelope};
+use trogon_decider_sim::{SimHost, SimInstance};
+use trogon_decider_test::codec::{any_type_url, normalize_type_url};
+use trogon_decider_test::{Scenario, Suite, Then};
 
 #[derive(Parser)]
 #[command(
@@ -21,6 +20,12 @@ struct Args {
     /// Output format (`human` or `tap`)
     #[arg(long, default_value = "human")]
     format: String,
+
+    /// Downgrade zero-coverage declared commands/events from a failure to a
+    /// warning. By default a declared command or event with no coverage
+    /// across every scenario fails the run.
+    #[arg(long)]
+    no_strict: bool,
 
     /// Compiled decider component
     wasm: PathBuf,
@@ -36,56 +41,6 @@ enum OutputFormat {
     Tap,
 }
 
-#[derive(Debug, Deserialize)]
-struct Suite {
-    suite: String,
-    scenarios: Vec<Scenario>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Scenario {
-    name: String,
-    #[serde(default)]
-    given: Vec<serde_json::Value>,
-    when: serde_json::Value,
-    then: Then,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-#[allow(dead_code)]
-enum Then {
-    Events { events: Vec<serde_json::Value> },
-    Error { error: ErrorExpectation },
-    Rejected { rejected: bool },
-}
-
-/// `then.error` accepts either a bare string or the documented `{ code, message }`
-/// object; both are matched against the domain error's code or message.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ErrorExpectation {
-    Structured {
-        #[serde(default)]
-        code: Option<String>,
-        #[serde(default)]
-        message: Option<String>,
-    },
-    Plain(String),
-}
-
-impl ErrorExpectation {
-    fn expected(&self) -> Result<String> {
-        match self {
-            Self::Plain(value) => Ok(value.clone()),
-            Self::Structured { code, message } => code
-                .clone()
-                .or_else(|| message.clone())
-                .context("then.error requires a code or message"),
-        }
-    }
-}
-
 fn main() {
     if let Err(error) = run() {
         eprintln!("error: {error:#}");
@@ -97,26 +52,43 @@ fn run() -> Result<()> {
     let args = Args::parse();
     let output_format = parse_output_format(&args.format)?;
     let wasm_bytes = fs::read(&args.wasm).with_context(|| format!("read {}", args.wasm.display()))?;
-    let suite: Suite = serde_yaml::from_str(
-        &fs::read_to_string(&args.suite).with_context(|| format!("read {}", args.suite.display()))?,
-    )?;
+    let suite =
+        Suite::from_yaml(&fs::read_to_string(&args.suite).with_context(|| format!("read {}", args.suite.display()))?)?;
 
     let host = SimHost::load(&wasm_bytes)?;
-    let declared = host
+    let declared_commands = host
         .instantiate(())?
         .descriptor()?
         .commands
         .into_iter()
         .map(|spec| spec.command_type)
         .collect::<BTreeSet<_>>();
-    let mut exercised = BTreeSet::new();
+    let declared_events = suite
+        .events
+        .iter()
+        .map(|type_url| normalize_type_url(type_url))
+        .collect::<BTreeSet<_>>();
 
+    let mut exercised_commands = BTreeSet::new();
+    let mut exercised_events = BTreeSet::new();
     let mut failures = 0usize;
+
     for scenario in &suite.scenarios {
-        // Fresh component per scenario so guest-global state cannot leak between runs.
         let mut instance = host.instantiate(())?;
-        let when_type = any_type_url(&scenario.when)?;
-        exercised.insert(when_type.clone());
+        let steps = scenario.steps()?;
+
+        for value in &scenario.given {
+            exercised_events.insert(any_type_url(value)?);
+        }
+        for (when, then) in &steps {
+            exercised_commands.insert(any_type_url(when)?);
+            if let Then::Events { events } = then {
+                for value in events {
+                    exercised_events.insert(any_type_url(value)?);
+                }
+            }
+        }
+
         match run_scenario(&mut instance, scenario) {
             Ok(()) => {
                 if matches!(output_format, OutputFormat::Tap) {
@@ -136,8 +108,10 @@ fn run() -> Result<()> {
         }
     }
 
-    for command_type in declared.difference(&exercised) {
-        eprintln!("warning: declared command never exercised as when: {command_type}");
+    let command_gaps = report_coverage_gaps(&declared_commands, &exercised_commands, "command", args.no_strict);
+    let event_gaps = report_coverage_gaps(&declared_events, &exercised_events, "event", args.no_strict);
+    if !args.no_strict && (command_gaps > 0 || event_gaps > 0) {
+        bail!("{command_gaps} declared command(s) and {event_gaps} declared event(s) have zero scenario coverage");
     }
 
     if failures > 0 {
@@ -146,40 +120,28 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn run_scenario(instance: &mut trogon_decider_sim::SimInstance<()>, scenario: &Scenario) -> Result<()> {
-    let given = scenario
-        .given
-        .iter()
-        .map(json_any_to_envelope)
-        .collect::<Result<Vec<_>>>()?;
-    let when = json_any_to_command(&scenario.when)?;
-
-    match &scenario.then {
-        Then::Events { events } => {
-            let expected = events.iter().map(json_any_to_envelope).collect::<Result<Vec<_>>>()?;
-            SimScenario::new()
-                .given(given)
-                .when(when)
-                .then_events(expected)
-                .run(instance)
-                .map_err(anyhow::Error::new)
-        }
-        Then::Rejected { rejected } => {
-            let scenario = SimScenario::new().given(given).when(when);
-            let scenario = if *rejected {
-                scenario.then_rejected()
-            } else {
-                scenario.then_accepted()
-            };
-            scenario.run(instance).map_err(anyhow::Error::new)
-        }
-        Then::Error { error } => SimScenario::new()
-            .given(given)
-            .when(when)
-            .then_error(error.expected()?)
-            .run(instance)
-            .map_err(anyhow::Error::new),
+/// Reports every `declared` type with zero coverage in `exercised`, at
+/// `warning` level under `--no-strict` and `error` level otherwise, and
+/// returns how many gaps were found. The caller decides whether a nonzero
+/// strict-mode count fails the run, so both the command and event checks
+/// always run and report in full before the run bails.
+fn report_coverage_gaps(
+    declared: &BTreeSet<String>,
+    exercised: &BTreeSet<String>,
+    kind: &str,
+    no_strict: bool,
+) -> usize {
+    let gaps: Vec<&String> = declared.difference(exercised).collect();
+    let level = if no_strict { "warning" } else { "error" };
+    for gap in &gaps {
+        eprintln!("{level}: declared {kind} never exercised in any scenario: {gap}");
     }
+    gaps.len()
+}
+
+fn run_scenario(instance: &mut SimInstance<()>, scenario: &Scenario) -> Result<()> {
+    let ir = scenario.to_ir()?;
+    ir.to_sim_scenario().run(instance).map_err(anyhow::Error::new)
 }
 
 fn parse_output_format(raw: &str) -> Result<OutputFormat> {

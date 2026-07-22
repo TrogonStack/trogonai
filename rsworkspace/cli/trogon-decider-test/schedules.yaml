@@ -1,4 +1,9 @@
 suite: scheduler.schedules
+events:
+  - trogonai.scheduler.schedules.v1.ScheduleCreated
+  - trogonai.scheduler.schedules.v1.SchedulePaused
+  - trogonai.scheduler.schedules.v1.ScheduleResumed
+  - trogonai.scheduler.schedules.v1.ScheduleRemoved
 scenarios:
   - name: create schedule from initial state
     given: []
@@ -9,13 +14,14 @@ scenarios:
         scheduled: {}
       schedule:
         every:
-          seconds: 30
+          every: 30s
       delivery:
-        subject: agent.run
+        nats_message:
+          subject: agent.run
       message:
         content:
           content_type: application/json
-          data: '{"kind":"heartbeat"}'
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
@@ -24,13 +30,14 @@ scenarios:
             scheduled: {}
           schedule:
             every:
-              seconds: 30
+              every: 30s
           delivery:
-            subject: agent.run
+            nats_message:
+              subject: agent.run
           message:
             content:
               content_type: application/json
-              data: '{"kind":"heartbeat"}'
+              data: { utf8: '{"kind":"heartbeat"}' }
 
   - name: reject create when schedule already exists
     given:
@@ -40,13 +47,14 @@ scenarios:
           scheduled: {}
         schedule:
           every:
-            seconds: 30
+            every: 30s
         delivery:
-          subject: agent.run
+          nats_message:
+            subject: agent.run
         message:
           content:
             content_type: application/json
-            data: '{"kind":"heartbeat"}'
+            data: { utf8: '{"kind":"heartbeat"}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
       schedule_id: backup
@@ -54,13 +62,14 @@ scenarios:
         scheduled: {}
       schedule:
         every:
-          seconds: 30
+          every: 30s
       delivery:
-        subject: agent.run
+        nats_message:
+          subject: agent.run
       message:
         content:
           content_type: application/json
-          data: '{"kind":"heartbeat"}'
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       rejected: true
 
@@ -72,13 +81,14 @@ scenarios:
           scheduled: {}
         schedule:
           every:
-            seconds: 30
+            every: 30s
         delivery:
-          subject: agent.run
+          nats_message:
+            subject: agent.run
         message:
           content:
             content_type: application/json
-            data: '{}'
+            data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
       schedule_id: backup
@@ -103,13 +113,14 @@ scenarios:
           scheduled: {}
         schedule:
           every:
-            seconds: 30
+            every: 30s
         delivery:
-          subject: agent.run
+          nats_message:
+            subject: agent.run
         message:
           content:
             content_type: application/json
-            data: '{}'
+            data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
         schedule_id: backup
     when:
@@ -128,13 +139,14 @@ scenarios:
           scheduled: {}
         schedule:
           every:
-            seconds: 30
+            every: 30s
         delivery:
-          subject: agent.run
+          nats_message:
+            subject: agent.run
         message:
           content:
             content_type: application/json
-            data: '{}'
+            data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveSchedule
       schedule_id: backup
@@ -151,13 +163,14 @@ scenarios:
           scheduled: {}
         schedule:
           every:
-            seconds: 30
+            every: 30s
         delivery:
-          subject: agent.run
+          nats_message:
+            subject: agent.run
         message:
           content:
             content_type: application/json
-            data: '{}'
+            data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
         schedule_id: backup
     when:
@@ -167,12 +180,61 @@ scenarios:
         scheduled: {}
       schedule:
         every:
-          seconds: 30
+          every: 30s
       delivery:
-        subject: agent.run
+        nats_message:
+          subject: agent.run
       message:
         content:
           content_type: application/json
-          data: '{"kind":"heartbeat"}'
+          data: { utf8: '{"kind":"heartbeat"}' }
     then:
       rejected: true
+
+  - name: create, pause, then resume a schedule across one session
+    steps:
+      - when:
+          '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
+          schedule_id: backup
+          status:
+            scheduled: {}
+          schedule:
+            every:
+              every: 30s
+          delivery:
+            nats_message:
+              subject: agent.run
+          message:
+            content:
+              content_type: application/json
+              data: { utf8: '{"kind":"heartbeat"}' }
+        then:
+          events:
+            - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
+              schedule_id: backup
+              status:
+                scheduled: {}
+              schedule:
+                every:
+                  every: 30s
+              delivery:
+                nats_message:
+                  subject: agent.run
+              message:
+                content:
+                  content_type: application/json
+                  data: { utf8: '{"kind":"heartbeat"}' }
+      - when:
+          '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
+          schedule_id: backup
+        then:
+          events:
+            - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
+              schedule_id: backup
+      - when:
+          '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeSchedule
+          schedule_id: backup
+        then:
+          events:
+            - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleResumed
+              schedule_id: backup

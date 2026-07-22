@@ -1,0 +1,817 @@
+use std::collections::{HashMap, HashSet};
+
+use acp_nats::prompt_event::PromptEvent;
+use agent_client_protocol::schema::v1::{
+    ConfigOptionUpdate, ContentBlock, ContentChunk, CurrentModeUpdate, Plan, PlanEntry, PlanEntryPriority,
+    PlanEntryStatus, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, SessionModeId,
+    SessionNotification, SessionUpdate, ToolCall, ToolCallContent, ToolCallId, ToolCallLocation, ToolCallStatus,
+    ToolCallUpdate, ToolCallUpdateFields, ToolKind, UsageUpdate,
+};
+
+/// Fallback context-window size (tokens) used when the runner does not report one.
+/// Matches the default Claude context window.
+const DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
+
+/// Available permission modes exposed in `ConfigOptionUpdate` after a mode change.
+const MODE_OPTIONS: &[(&str, &str)] = &[
+    ("default", "Default"),
+    ("acceptEdits", "Accept Edits"),
+    ("plan", "Plan Mode"),
+    ("dontAsk", "Don't Ask"),
+];
+
+/// Available models exposed in `ConfigOptionUpdate` after a mode change.
+const MODEL_OPTIONS: &[(&str, &str)] = &[
+    ("claude-opus-4-6", "Claude Opus 4"),
+    ("claude-sonnet-4-6", "Claude Sonnet 4"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+];
+
+/// Final outcome of a prompt run published to `ext_session_prompt_response`.
+pub enum PromptOutcome {
+    /// The turn finished normally.
+    Done { stop_reason: String },
+    /// The runner encountered an unrecoverable error.
+    Error { message: String },
+}
+
+/// Converts a sequence of `PromptEvent`s (runner wire format) into
+/// `SessionNotification`s (ACP wire format) and a final `PromptOutcome`.
+///
+/// Maintains stateful caches for tool deduplication and tool name/input lookups.
+pub struct PromptEventConverter {
+    session_id: String,
+    /// id → (name, input) for tools that have started but not yet finished.
+    tool_cache: HashMap<String, (String, serde_json::Value)>,
+    /// IDs of TodoWrite tool calls (finished event is silent).
+    todo_ids: HashSet<String>,
+    /// IDs we have already emitted a ToolCall notification for (dedup).
+    seen_tool_ids: HashSet<String>,
+}
+
+impl PromptEventConverter {
+    #[cfg_attr(coverage, coverage(off))]
+    pub fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            tool_cache: HashMap::new(),
+            todo_ids: HashSet::new(),
+            seen_tool_ids: HashSet::new(),
+        }
+    }
+
+    /// Convert one `PromptEvent` into notifications and an optional final outcome.
+    ///
+    /// Returns `(notifications, outcome)`. When `outcome` is `Some`, this is the
+    /// last event and no more events should be processed.
+    #[cfg_attr(coverage, coverage(off))]
+    pub fn convert(&mut self, event: PromptEvent) -> (Vec<SessionNotification>, Option<PromptOutcome>) {
+        match event {
+            PromptEvent::TextDelta { text } => {
+                let notif = self.notif(SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(
+                    text,
+                ))));
+                (vec![notif], None)
+            }
+
+            PromptEvent::ThinkingDelta { text } => {
+                let notif = self.notif(SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from(
+                    text,
+                ))));
+                (vec![notif], None)
+            }
+
+            PromptEvent::Done { stop_reason } => (vec![], Some(PromptOutcome::Done { stop_reason })),
+
+            PromptEvent::Error { message } => (vec![], Some(PromptOutcome::Error { message })),
+
+            PromptEvent::UsageUpdate {
+                input_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+                output_tokens,
+                context_window,
+                ..
+            } => {
+                let used = input_tokens as u64
+                    + cache_creation_tokens as u64
+                    + cache_read_tokens as u64
+                    + output_tokens as u64;
+                let size = context_window.unwrap_or(DEFAULT_CONTEXT_WINDOW);
+                let notif = self.notif(SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)));
+                (vec![notif], None)
+            }
+
+            PromptEvent::ModeChanged { mode, model } => {
+                let mode_notif = self.notif(SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(
+                    SessionModeId::from(mode.clone()),
+                )));
+                let cfg_notif = self.notif(SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(
+                    build_plan_mode_config_options(&mode, &model),
+                )));
+                (vec![mode_notif, cfg_notif], None)
+            }
+
+            PromptEvent::SystemStatus { message } => {
+                let text = system_status_to_text(&message);
+                match text {
+                    Some(t) => {
+                        let notif = self.notif(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                            ContentBlock::from(t),
+                        )));
+                        (vec![notif], None)
+                    }
+                    None => (vec![], None),
+                }
+            }
+
+            PromptEvent::ToolCallStarted {
+                id,
+                name,
+                input,
+                parent_tool_use_id,
+            } => {
+                // Deduplicate: skip if we've already emitted a ToolCall for this ID.
+                if !self.seen_tool_ids.insert(id.clone()) {
+                    return (vec![], None);
+                }
+
+                if name == "TodoWrite" {
+                    self.todo_ids.insert(id.clone());
+                    let entries = todo_write_to_plan_entries(&input).unwrap_or_default();
+                    let notif = self.notif(SessionUpdate::Plan(Plan::new(entries)));
+                    return (vec![notif], None);
+                }
+
+                self.tool_cache.insert(id.clone(), (name.clone(), input.clone()));
+
+                let kind = tool_kind_for(&name);
+                let locations = tool_locations_from_input(&name, &input);
+                let meta = build_tool_call_meta(&name, parent_tool_use_id.as_deref());
+
+                let tool_call = ToolCall::new(ToolCallId::new(id), &name)
+                    .kind(kind)
+                    .status(ToolCallStatus::InProgress)
+                    .locations(locations)
+                    .raw_input(input)
+                    .meta(meta);
+
+                let notif = self.notif(SessionUpdate::ToolCall(tool_call));
+                (vec![notif], None)
+            }
+
+            PromptEvent::ToolCallFinished {
+                id,
+                output,
+                exit_code,
+                signal,
+            } => {
+                // TodoWrite finish is silent.
+                if self.todo_ids.contains(&id) {
+                    return (vec![], None);
+                }
+
+                let status = if exit_code == Some(0) || (exit_code.is_none() && signal.is_none()) {
+                    ToolCallStatus::Completed
+                } else {
+                    ToolCallStatus::Failed
+                };
+
+                let Some((name, input)) = self.tool_cache.get(&id) else {
+                    // Unknown tool ID — no cached context to build a meaningful update from.
+                    // Skip emitting rather than sending an empty-content notification.
+                    tracing::warn!(tool_id = %id, "ToolCallFinished for unknown tool ID; skipping update");
+                    return (vec![], None);
+                };
+
+                let (content, locations) = tool_result_content(name, input, &output, status);
+                let meta = build_tool_call_meta(name, None);
+
+                let fields = ToolCallUpdateFields::new()
+                    .status(status)
+                    .content(if content.is_empty() { None } else { Some(content) })
+                    .locations(if locations.is_empty() { None } else { Some(locations) })
+                    .raw_output(serde_json::Value::String(output));
+
+                let update = ToolCallUpdate::new(ToolCallId::new(id), fields).meta(meta);
+                let notif = self.notif(SessionUpdate::ToolCallUpdate(update));
+                (vec![notif], None)
+            }
+        }
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    fn notif(&self, update: SessionUpdate) -> SessionNotification {
+        SessionNotification::new(self.session_id.clone(), update)
+    }
+}
+
+// ── Helper functions ──────────────────────────────────────────────────────────
+
+#[cfg_attr(coverage, coverage(off))]
+fn system_status_to_text(message: &str) -> Option<String> {
+    let lower = message.to_lowercase();
+    if lower.contains("compact complete") || lower.contains("compacting complete") {
+        Some("\n\nCompacting completed.".to_string())
+    } else if lower.contains("compact") {
+        Some("Compacting...".to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn tool_kind_for(name: &str) -> ToolKind {
+    match name {
+        "Read" | "LS" => ToolKind::Read,
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ToolKind::Edit,
+        "Bash" => ToolKind::Execute,
+        "Glob" | "Grep" => ToolKind::Search,
+        "WebSearch" | "WebFetch" => ToolKind::Fetch,
+        "Think" => ToolKind::Think,
+        "ExitPlanMode" | "EnterPlanMode" => ToolKind::SwitchMode,
+        _ => ToolKind::Other,
+    }
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn tool_locations_from_input(name: &str, input: &serde_json::Value) -> Vec<ToolCallLocation> {
+    let path_key = match name {
+        "Read" | "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => "file_path",
+        "Glob" | "Grep" => "path",
+        _ => return vec![],
+    };
+    if let Some(p) = input.get(path_key).and_then(|v| v.as_str()) {
+        vec![ToolCallLocation::new(p)]
+    } else {
+        vec![]
+    }
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn build_tool_call_meta(
+    tool_name: &str,
+    parent_tool_use_id: Option<&str>,
+) -> Option<agent_client_protocol::schema::v1::Meta> {
+    let mut claude_code = serde_json::Map::new();
+    claude_code.insert("toolName".to_string(), serde_json::Value::String(tool_name.to_string()));
+    if let Some(parent_id) = parent_tool_use_id {
+        claude_code.insert(
+            "parentToolUseId".to_string(),
+            serde_json::Value::String(parent_id.to_string()),
+        );
+    }
+    let mut meta = serde_json::Map::new();
+    meta.insert("claudeCode".to_string(), serde_json::Value::Object(claude_code));
+    Some(meta)
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn todo_write_to_plan_entries(input: &serde_json::Value) -> Option<Vec<PlanEntry>> {
+    let todos = input.get("todos")?.as_array()?;
+    let entries: Vec<PlanEntry> = todos
+        .iter()
+        .filter_map(|todo| {
+            let content = todo.get("content")?.as_str()?.to_string();
+            let status = match todo.get("status").and_then(|v| v.as_str()) {
+                Some("in_progress") => PlanEntryStatus::InProgress,
+                Some("completed") => PlanEntryStatus::Completed,
+                _ => PlanEntryStatus::Pending,
+            };
+            let priority = match todo.get("priority").and_then(|v| v.as_str()) {
+                Some("medium") => PlanEntryPriority::Medium,
+                Some("low") => PlanEntryPriority::Low,
+                _ => PlanEntryPriority::High,
+            };
+            Some(PlanEntry::new(content, priority, status))
+        })
+        .collect();
+    if entries.is_empty() { None } else { Some(entries) }
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn build_plan_mode_config_options(mode: &str, model: &str) -> Vec<SessionConfigOption> {
+    let mode_options: Vec<SessionConfigSelectOption> = MODE_OPTIONS
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption::new(*value, *name))
+        .collect();
+    let model_options: Vec<SessionConfigSelectOption> = MODEL_OPTIONS
+        .iter()
+        .map(|(value, name)| SessionConfigSelectOption::new(*value, *name))
+        .collect();
+    vec![
+        SessionConfigOption::select("mode", "Mode", mode.to_string(), mode_options)
+            .category(SessionConfigOptionCategory::Mode),
+        SessionConfigOption::select("model", "Model", model.to_string(), model_options)
+            .category(SessionConfigOptionCategory::Model),
+    ]
+}
+
+/// Wrap text in a fenced code block.
+#[cfg_attr(coverage, coverage(off))]
+fn markdown_fence(text: &str) -> String {
+    let mut fence = "```".to_string();
+    for cap in text.lines().filter(|l| l.starts_with("```")) {
+        while cap.len() >= fence.len() {
+            fence.push('`');
+        }
+    }
+    format!(
+        "{fence}\n{}{}\n{fence}",
+        text,
+        if text.ends_with('\n') { "" } else { "\n" }
+    )
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn tool_result_content(
+    tool_name: &str,
+    input: &serde_json::Value,
+    output: &str,
+    status: ToolCallStatus,
+) -> (Vec<ToolCallContent>, Vec<ToolCallLocation>) {
+    match tool_name {
+        "Edit" | "MultiEdit" => {
+            let file_path = input.get("file_path").and_then(|v| v.as_str());
+            let Some(file_path) = file_path else {
+                return (vec![], vec![]);
+            };
+            // Collect (old, new) pairs
+            let pairs: Vec<(Option<&str>, &str)> = if tool_name == "MultiEdit" {
+                input
+                    .get("edits")
+                    .and_then(|v| v.as_array())
+                    .map(|edits| {
+                        edits
+                            .iter()
+                            .filter_map(|e| {
+                                let new = e.get("new_string")?.as_str()?;
+                                let old = e.get("old_string").and_then(|v| v.as_str());
+                                Some((old, new))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                let new = input.get("new_string").and_then(|v| v.as_str());
+                let old = input.get("old_string").and_then(|v| v.as_str());
+                match new {
+                    Some(n) => vec![(old, n)],
+                    None => vec![],
+                }
+            };
+
+            if pairs.is_empty() {
+                return (vec![], vec![]);
+            }
+
+            let content: Vec<ToolCallContent> = if status == ToolCallStatus::Completed {
+                pairs
+                    .into_iter()
+                    .map(|(old, new)| {
+                        let mut diff = agent_client_protocol::schema::v1::Diff::new(file_path, new);
+                        if let Some(old_text) = old {
+                            diff = diff.old_text(old_text.to_string());
+                        }
+                        ToolCallContent::from(diff)
+                    })
+                    .collect()
+            } else {
+                vec![]
+            };
+            let locations = vec![ToolCallLocation::new(file_path)];
+            (content, locations)
+        }
+
+        "Write" => {
+            let file_path = input.get("file_path").and_then(|v| v.as_str());
+            let Some(file_path) = file_path else {
+                return (vec![], vec![]);
+            };
+            let content: Vec<ToolCallContent> = if status == ToolCallStatus::Completed {
+                let new_text = input.get("content").and_then(|v| v.as_str()).unwrap_or(output);
+                vec![ToolCallContent::from(agent_client_protocol::schema::v1::Diff::new(
+                    file_path, new_text,
+                ))]
+            } else {
+                vec![]
+            };
+            let locations = vec![ToolCallLocation::new(file_path)];
+            (content, locations)
+        }
+
+        "Read" => {
+            let content = if status == ToolCallStatus::Completed {
+                let fenced = markdown_fence(output);
+                vec![ToolCallContent::from(ContentBlock::from(fenced))]
+            } else {
+                vec![]
+            };
+            let locations = tool_locations_from_input(tool_name, input);
+            (content, locations)
+        }
+
+        _ => (vec![], vec![]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::SessionConfigKind;
+
+    // ── system_status_to_text ─────────────────────────────────────────────────
+
+    #[test]
+    fn system_status_to_text_compact_complete_returns_completed() {
+        assert_eq!(
+            system_status_to_text("compact complete"),
+            Some("\n\nCompacting completed.".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_compacting_complete_uppercase_returns_completed() {
+        assert_eq!(
+            system_status_to_text("Compacting Complete"),
+            Some("\n\nCompacting completed.".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_compact_in_progress_returns_compacting() {
+        assert_eq!(
+            system_status_to_text("compact starting"),
+            Some("Compacting...".to_string())
+        );
+    }
+
+    #[test]
+    fn system_status_to_text_other_returns_none() {
+        assert_eq!(system_status_to_text("indexing files"), None);
+        assert_eq!(system_status_to_text(""), None);
+    }
+
+    // ── build_tool_call_meta ──────────────────────────────────────────────────
+
+    #[test]
+    fn build_tool_call_meta_without_parent() {
+        let meta = build_tool_call_meta("Edit", None).unwrap();
+        let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
+        assert_eq!(cc.get("toolName").and_then(|v| v.as_str()), Some("Edit"));
+        assert!(cc.get("parentToolUseId").is_none());
+    }
+
+    #[test]
+    fn build_tool_call_meta_with_parent() {
+        let meta = build_tool_call_meta("Read", Some("parent-id-42")).unwrap();
+        let cc = meta.get("claudeCode").unwrap().as_object().unwrap();
+        assert_eq!(cc.get("toolName").and_then(|v| v.as_str()), Some("Read"));
+        assert_eq!(cc.get("parentToolUseId").and_then(|v| v.as_str()), Some("parent-id-42"));
+    }
+
+    // ── todo_write_to_plan_entries ────────────────────────────────────────────
+
+    #[test]
+    fn todo_write_to_plan_entries_missing_todos_key_returns_none() {
+        assert!(todo_write_to_plan_entries(&serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_empty_array_returns_none() {
+        assert!(todo_write_to_plan_entries(&serde_json::json!({"todos": []})).is_none());
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_basic_entry() {
+        let input =
+            serde_json::json!({"todos": [{"content": "do something", "status": "pending", "priority": "high"}]});
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content, "do something");
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_status_variants() {
+        let input = serde_json::json!({
+            "todos": [
+                {"content": "a", "status": "in_progress", "priority": "high"},
+                {"content": "b", "status": "completed", "priority": "high"},
+                {"content": "c", "status": "other", "priority": "high"},
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert!(matches!(entries[0].status, PlanEntryStatus::InProgress));
+        assert!(matches!(entries[1].status, PlanEntryStatus::Completed));
+        assert!(matches!(entries[2].status, PlanEntryStatus::Pending));
+    }
+
+    #[test]
+    fn todo_write_to_plan_entries_priority_variants() {
+        let input = serde_json::json!({
+            "todos": [
+                {"content": "a", "status": "pending", "priority": "medium"},
+                {"content": "b", "status": "pending", "priority": "low"},
+                {"content": "c", "status": "pending", "priority": "other"},
+            ]
+        });
+        let entries = todo_write_to_plan_entries(&input).unwrap();
+        assert!(matches!(entries[0].priority, PlanEntryPriority::Medium));
+        assert!(matches!(entries[1].priority, PlanEntryPriority::Low));
+        assert!(matches!(entries[2].priority, PlanEntryPriority::High));
+    }
+
+    // ── build_plan_mode_config_options ────────────────────────────────────────
+
+    #[test]
+    fn build_plan_mode_config_options_returns_two_options() {
+        let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
+        assert_eq!(opts.len(), 2);
+    }
+
+    #[test]
+    fn build_plan_mode_config_options_mode_has_correct_current_value() {
+        let opts = build_plan_mode_config_options("plan", "claude-sonnet-4-6");
+        assert_eq!(opts[0].id.0.as_ref(), "mode");
+        if let SessionConfigKind::Select(s) = &opts[0].kind {
+            assert_eq!(s.current_value.0.as_ref(), "plan");
+        } else {
+            panic!("expected Select kind for mode option");
+        }
+    }
+
+    #[test]
+    fn build_plan_mode_config_options_model_has_correct_current_value() {
+        let opts = build_plan_mode_config_options("default", "claude-opus-4-6");
+        assert_eq!(opts[1].id.0.as_ref(), "model");
+        if let SessionConfigKind::Select(s) = &opts[1].kind {
+            assert_eq!(s.current_value.0.as_ref(), "claude-opus-4-6");
+        } else {
+            panic!("expected Select kind for model option");
+        }
+    }
+
+    // ── tool_result_content ───────────────────────────────────────────────────
+
+    #[test]
+    fn tool_result_content_edit_completed_returns_diff_and_location() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old", "new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/foo.rs");
+    }
+
+    #[test]
+    fn tool_result_content_edit_pending_returns_empty_content_but_location() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old", "new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_edit_missing_file_path_returns_empty() {
+        let input = serde_json::json!({"new_string": "new"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_edit_missing_new_string_returns_empty() {
+        let input = serde_json::json!({"file_path": "/src/foo.rs", "old_string": "old"});
+        let (content, locs) = tool_result_content("Edit", &input, "", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
+
+    #[test]
+    fn tool_result_content_multiedit_completed_returns_one_diff_per_edit() {
+        let input = serde_json::json!({
+            "file_path": "/src/bar.rs",
+            "edits": [
+                {"old_string": "a", "new_string": "x"},
+                {"old_string": "b", "new_string": "y"},
+            ]
+        });
+        let (content, locs) = tool_result_content("MultiEdit", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 2);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/bar.rs");
+    }
+
+    #[test]
+    fn tool_result_content_write_completed_returns_diff_and_location() {
+        let input = serde_json::json!({"file_path": "/out/file.txt", "content": "hello"});
+        let (content, locs) = tool_result_content("Write", &input, "", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/out/file.txt");
+    }
+
+    #[test]
+    fn tool_result_content_write_pending_returns_location_only() {
+        let input = serde_json::json!({"file_path": "/out/file.txt"});
+        let (content, locs) = tool_result_content("Write", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_write_uses_output_when_no_content_field() {
+        let input = serde_json::json!({"file_path": "/out/file.txt"});
+        let (content, locs) = tool_result_content("Write", &input, "fallback output", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_read_completed_returns_fenced_content_and_location() {
+        let input = serde_json::json!({"file_path": "/src/lib.rs"});
+        let (content, locs) = tool_result_content("Read", &input, "fn main() {}", ToolCallStatus::Completed);
+        assert_eq!(content.len(), 1);
+        assert_eq!(locs.len(), 1);
+        assert_eq!(locs[0].path.to_str().unwrap(), "/src/lib.rs");
+    }
+
+    #[test]
+    fn tool_result_content_read_pending_returns_empty_content_with_location() {
+        let input = serde_json::json!({"file_path": "/src/lib.rs"});
+        let (content, locs) = tool_result_content("Read", &input, "", ToolCallStatus::Pending);
+        assert!(content.is_empty());
+        assert_eq!(locs.len(), 1);
+    }
+
+    #[test]
+    fn tool_result_content_default_tool_returns_empty() {
+        let input = serde_json::json!({});
+        let (content, locs) = tool_result_content("Bash", &input, "output", ToolCallStatus::Completed);
+        assert!(content.is_empty());
+        assert!(locs.is_empty());
+    }
+
+    // ── tool_kind_for ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn tool_kind_for_read_tools() {
+        assert!(matches!(tool_kind_for("Read"), ToolKind::Read));
+        assert!(matches!(tool_kind_for("LS"), ToolKind::Read));
+    }
+
+    #[test]
+    fn tool_kind_for_edit_tools() {
+        assert!(matches!(tool_kind_for("Edit"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("MultiEdit"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("Write"), ToolKind::Edit));
+        assert!(matches!(tool_kind_for("NotebookEdit"), ToolKind::Edit));
+    }
+
+    #[test]
+    fn tool_kind_for_bash_is_execute() {
+        assert!(matches!(tool_kind_for("Bash"), ToolKind::Execute));
+    }
+
+    // ── tool_locations_from_input ─────────────────────────────────────────────
+
+    #[test]
+    fn tool_locations_from_input_returns_location_for_file_path_tools() {
+        let input = serde_json::json!({"file_path": "/src/main.rs"});
+        for tool in &["Read", "Edit", "MultiEdit", "Write", "NotebookEdit"] {
+            let locs = tool_locations_from_input(tool, &input);
+            assert_eq!(locs.len(), 1, "expected 1 location for {tool}");
+        }
+    }
+
+    #[test]
+    fn tool_locations_from_input_returns_location_for_glob_and_grep() {
+        let input = serde_json::json!({"path": "/src"});
+        assert_eq!(tool_locations_from_input("Glob", &input).len(), 1);
+        assert_eq!(tool_locations_from_input("Grep", &input).len(), 1);
+    }
+
+    #[test]
+    fn tool_locations_from_input_returns_empty_for_unknown_tool() {
+        let input = serde_json::json!({"file_path": "/src/main.rs"});
+        let locs = tool_locations_from_input("Bash", &input);
+        assert!(locs.is_empty(), "Bash has no location extraction");
+    }
+
+    // ── markdown_fence ────────────────────────────────────────────────────────
+
+    #[test]
+    fn markdown_fence_plain_text_uses_triple_backtick() {
+        let fenced = markdown_fence("hello world");
+        assert!(fenced.starts_with("```\n"), "expected ```, got: {fenced}");
+        assert!(fenced.ends_with("\n```"), "expected trailing ```, got: {fenced}");
+        assert!(fenced.contains("hello world"));
+    }
+
+    #[test]
+    fn markdown_fence_text_ending_with_newline_no_triple_newline() {
+        let fenced = markdown_fence("line\n");
+        assert!(
+            !fenced.contains("\n\n\n```"),
+            "should not triple-newline when text ends with newline, got: {fenced:?}"
+        );
+        assert!(
+            fenced.ends_with("\n```"),
+            "must end with closing fence, got: {fenced:?}"
+        );
+    }
+
+    // ── PromptEventConverter::convert — UsageUpdate ───────────────────────────
+
+    fn make_converter() -> PromptEventConverter {
+        PromptEventConverter::new("sess-test")
+    }
+
+    fn extract_usage(notifs: Vec<SessionNotification>) -> UsageUpdate {
+        for n in notifs {
+            if let SessionUpdate::UsageUpdate(u) = n.update {
+                return u;
+            }
+        }
+        panic!("no UsageUpdate notification found");
+    }
+
+    /// Token sums widen to u64 before adding so large counts cannot wrap in u32.
+    #[test]
+    fn usage_update_sums_token_counts_in_u64() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: u32::MAX - 5,
+            output_tokens: 3,
+            cache_creation_tokens: 2,
+            cache_read_tokens: 4,
+            context_window: Some(200_000),
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(
+            u.used,
+            (u32::MAX - 5) as u64 + 3 + 2 + 4,
+            "used must be computed at u64 width"
+        );
+    }
+
+    /// `used` is the sum of all four token types.
+    #[test]
+    fn usage_update_calculates_used_as_sum_of_all_token_types() {
+        let mut c = make_converter();
+        let (notifs, outcome) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 20,
+            cache_read_tokens: 10,
+            context_window: Some(200_000),
+        });
+        assert!(outcome.is_none());
+        let u = extract_usage(notifs);
+        assert_eq!(u.used, 180, "used must equal 100 + 50 + 20 + 10");
+    }
+
+    /// When `context_window` is `None`, the DEFAULT_CONTEXT_WINDOW is used.
+    #[test]
+    fn usage_update_uses_default_context_window_when_none() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: None,
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(u.size, DEFAULT_CONTEXT_WINDOW, "size must equal DEFAULT_CONTEXT_WINDOW");
+    }
+
+    /// When `context_window` is `Some(n)`, that value is used as the window size.
+    #[test]
+    fn usage_update_uses_provided_context_window() {
+        let mut c = make_converter();
+        let (notifs, _) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: Some(100_000),
+        });
+        let u = extract_usage(notifs);
+        assert_eq!(u.size, 100_000, "size must equal the provided context_window value");
+    }
+
+    /// A `UsageUpdate` event produces exactly one notification and no outcome.
+    #[test]
+    fn usage_update_produces_one_notification_and_no_outcome() {
+        let mut c = make_converter();
+        let (notifs, outcome) = c.convert(PromptEvent::UsageUpdate {
+            input_tokens: 5,
+            output_tokens: 3,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            context_window: Some(200_000),
+        });
+        assert_eq!(notifs.len(), 1, "must produce exactly one notification");
+        assert!(outcome.is_none(), "UsageUpdate must not produce a final outcome");
+    }
+}

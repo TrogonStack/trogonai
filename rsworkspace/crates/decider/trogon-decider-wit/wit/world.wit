@@ -1,0 +1,99 @@
+// 0.2.0: `domain-error` gained `details`, changing the record's ABI layout. Guest and host
+// bindings must be regenerated from the same WIT version; this is not wire-compatible with 0.1.0.
+package trogon:decider@0.2.0;
+
+/// Contract every compiled Trogon decider component exports.
+interface handler {
+  /// A stored event envelope: its persistent type name plus the encoded domain event payload.
+  record any-envelope {
+    /// Persistent event type name stored alongside the payload.
+    %type: string,
+    /// Encoded domain event payload.
+    payload: list<u8>,
+  }
+
+  /// An incoming command envelope: its command type plus the encoded command payload.
+  record command-envelope {
+    /// Persistent command type name stored alongside the payload.
+    %type: string,
+    /// Encoded domain command payload.
+    payload: list<u8>,
+  }
+
+  /// A structured guest-side error surfaced to the host.
+  record domain-error {
+    /// Stable, machine-readable rejection code (see `Decider::decide-error-code` on the guest).
+    code: string,
+    /// Human-readable description of the failure.
+    message: string,
+    /// Ordered key/value pairs carrying the error's source chain, most specific cause last.
+    details: list<tuple<string, string>>,
+  }
+
+  /// Optimistic concurrency precondition a command's emitted events must satisfy on append.
+  variant write-precondition {
+    /// Append without checking the stream's current position.
+    any,
+    /// Append only if the stream already has at least one event.
+    stream-exists,
+    /// Append only if the stream has no events.
+    no-stream,
+  }
+
+  /// One command type a decider module handles, plus the write precondition it requires.
+  record command-spec {
+    /// Persistent command type name this spec covers.
+    command-type: string,
+    /// Write precondition required for this command's events, or none for no constraint.
+    write-precondition: option<write-precondition>,
+  }
+
+  /// Static identity and command coverage of a compiled decider module, returned by `descriptor`.
+  record module-descriptor {
+    /// Module name. Combined with `version`, identifies the module for snapshot routing.
+    name: string,
+    /// Module version. Opaque to the runtime; used only for identity, not ordering.
+    version: string,
+    /// Command types this module handles.
+    commands: list<command-spec>,
+  }
+
+  /// Outcome of a failed `session.decide` call.
+  variant decide-error {
+    /// The command was understood but rejected by domain rules.
+    rejected(domain-error),
+    /// The guest could not evaluate the command (e.g. a decode failure).
+    faulted(domain-error),
+  }
+
+  /// Returns this module's static identity and the commands it handles.
+  descriptor: func() -> module-descriptor;
+
+  /// Resolves the stream identifier a command targets, without evaluating it.
+  stream-id: func(command: command-envelope) -> result<string, domain-error>;
+
+  /// One command's execution lifecycle: replay prior events, decide, then snapshot.
+  resource session {
+    /// Creates a session, optionally resuming from a previously taken snapshot.
+    constructor(snapshot: option<list<u8>>);
+
+    /// Applies one stored event to the session's in-guest state.
+    evolve: func(events: list<any-envelope>) -> result<_, domain-error>;
+
+    /// Evaluates a command against the current state, returning the events it produces.
+    ///
+    /// The success case must be a non-empty list: a command that decides
+    /// nothing is a domain modeling error and must be reported through
+    /// `decide-error` instead of `ok([])`. The WIT type system cannot express
+    /// this, so hosts and guests must enforce it themselves.
+    decide: func(command: command-envelope) -> result<list<any-envelope>, decide-error>;
+
+    /// Serializes the session's current state, or `none` if the module does not snapshot.
+    snapshot: func() -> option<list<u8>>;
+  }
+}
+
+/// The world every compiled Trogon decider component implements.
+world decider {
+  export handler;
+}

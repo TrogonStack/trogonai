@@ -5,13 +5,13 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0003: AI Protocol Transport Taxonomy
+# ADR#0003: AI Protocol Transport Taxonomy
 
 ## Context
 
-AI protocols such as MCP and ACP separate protocol semantics from the transport
-used to carry protocol messages. The same JSON-RPC lifecycle can run over a
-local subprocess, a network endpoint, or an internal message bus bridge. Without
+AI protocols such as [MCP](../glossary/mcp) and [ACP](../glossary/acp) separate protocol semantics from the transport
+used to carry protocol messages. The same [JSON-RPC](../glossary/json-rpc) lifecycle can run over a
+local subprocess, a network endpoint, or an internal message bus [bridge](../glossary/bridge). Without
 strict vocabulary, names such as `stdio`, `server`, `remote`, `http`,
 `websocket`, `bridge`, and `nats` become interchangeable.
 
@@ -33,8 +33,8 @@ Use these meanings:
 | Connectivity profile | A concrete remote connection shape on the same endpoint, such as Streamable HTTP or WebSocket. |
 | Bridge | A process or library that translates between transports while preserving the same protocol semantics. |
 | Gateway | A production edge component that accepts external traffic and routes it inward. A gateway may contain bridges, but the name implies operational edge ownership. |
-| Backbone | An internal routing substrate such as NATS. It is not automatically the public protocol transport. |
-| API style | The shape of an externally exposed API, such as ConnectRPC, gRPC, REST-like HTTP, or GraphQL. |
+| Backbone | An internal routing substrate such as [NATS](../glossary/nats). It is not automatically the public protocol transport. |
+| API style | The shape of an externally exposed API, such as [ConnectRPC](../glossary/connectrpc), gRPC, REST-like HTTP, or GraphQL. |
 | API description | A machine-readable contract for an API surface, such as an OpenAPI document. |
 
 Protocol names and transport names should not be mixed. For example, ACP is the
@@ -57,8 +57,8 @@ Choose the narrowest boundary that satisfies the integration:
 2. Use a first-party service API only when a caller needs an explicit API surface,
    generated client/server contract, browser-compatible HTTP access, network edge
    exposure, or compatibility boundary that should not depend on NATS.
-3. For first-party service APIs, prefer ConnectRPC over direct gRPC when Protocol
-   Buffers and generated clients are viable.
+3. For first-party service APIs, prefer ConnectRPC over direct gRPC when [Protocol
+   Buffers](../glossary/protocol-buffers) and generated clients are viable.
 4. Use direct gRPC when ConnectRPC cannot satisfy the integration requirement or
    when a caller/runtime specifically requires native gRPC semantics.
 

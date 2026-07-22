@@ -1,0 +1,21 @@
+[package]
+name = "jsonrpc-nats"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "JSON-RPC 2.0 over NATS content-mode codec (ADR#0011)"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+trogon-nats = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"

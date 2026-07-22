@@ -30,7 +30,7 @@ otel/semconv/
     registry/rust/   # Rust target (weaver.yaml + attribute/metric/span *.j2)
 ```
 
-The generated `trogon-semconv` crate under `rsworkspace/crates/trogon-semconv/src/gen/`
+The generated `trogon-semconv` crate under `rsworkspace/crates/platform/trogon-semconv/src/gen/`
 holds the Rust bindings emitted from this registry. Runtime telemetry call sites
 import constants from that crate; do not edit `gen/` by hand. When the registry
 changes, run `mise run semconv:generate` and commit the updated output.

@@ -5,12 +5,12 @@ status: accepted
 date: 2026-06-28
 ---
 
-# ADR 0012: ARD-Compatible Discovery Catalog
+# ADR#0012: ARD-Compatible Discovery Catalog
 
 ## Context
 
 The Agent Resource Discovery specification defines an HTTP and JSON discovery
-surface for cataloging agentic resources such as A2A agent cards, MCP server
+surface for cataloging agentic resources such as [A2A](../glossary/a2a) agent cards, [MCP](../glossary/mcp) server
 cards, catalogs, registries, and other callable resources. The current upstream
 snapshot used by this repository is `ards-project/ard-spec`
 `832347bda6af4ce3b61bd250c14a8e899d3ff942`.
@@ -24,10 +24,10 @@ The current ARD snapshot uses:
 - a registry HTTP surface where `POST /search` is mandatory and `GET /agents`
   and `POST /explore` are optional
 
-Trogon already uses NATS as its internal backbone under
-[ADR 0003](./0003-ai-protocol-transport-taxonomy.md). ACP, MCP, and A2A remain
-the execution protocols reached through their own protocol and transport
-packages under [ADR 0004](./0004-protocol-and-transport-layering.md).
+Trogon already uses [NATS](../glossary/nats) as its internal backbone under
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md). [ACP](../glossary/acp), MCP, and A2A remain
+the execution [protocols](../glossary/protocol) reached through their own protocol and [transport](../glossary/transport)
+packages under [ADR#0004](./0004-protocol-and-transport-layering.md).
 
 The design question is whether ARD should become part of the internal routing
 model, or whether it should be treated as an external discovery compatibility
@@ -44,8 +44,8 @@ calls, or replace ACP, MCP, A2A, or the NATS backbone.
 NATS remains the internal backbone for first-party routing, events, queueing,
 durable catalog updates, indexing work, and storage adapters. ARD HTTP and JSON
 are accepted as an external compatibility exception under
-[ADR 0003](./0003-ai-protocol-transport-taxonomy.md) and
-[ADR 0009](./0009-protocol-buffers-wire-contracts.md) because ARD itself defines
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md) and
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md) because ARD itself defines
 the public interoperability surface.
 
 Use this package shape as the implementation grows:
@@ -55,7 +55,7 @@ Use this package shape as the implementation grows:
   dependency.
 - `ard-registry` owns the future ARD HTTP registry runtime only once a live
   registry API is implemented.
-- `ard-nats` owns future NATS, JetStream, and KV adapters only once catalog
+- `ard-nats` owns future NATS, [JetStream](../glossary/jetstream), and KV adapters only once catalog
   persistence or eventing is implemented.
 
 The first implementation slice should prove the catalog model and static
@@ -79,8 +79,8 @@ enforcement.
 - ARD media type strings round-trip unless a boundary explicitly rejects them.
 - `trustManifest` metadata is preserved but does not imply runtime
   authentication or authorization.
-- First-party internal catalog events and schemaless persistence records prefer
-  Protocol Buffers unless the stored value is intentionally the ARD JSON
+- First-party internal catalog [events](../glossary/event) and schemaless persistence records prefer
+  [Protocol Buffers](../glossary/protocol-buffers) unless the stored value is intentionally the ARD JSON
   artifact.
 
 ## Design Rules
@@ -95,7 +95,7 @@ domain. A2A agent cards can be exported as ARD catalog entries with media type
 `application/a2a-agent-card+json`, but the neutral catalog model should not be
 A2A-shaped.
 
-Do not expose NATS subjects, stream names, KV bucket names, or derived storage
+Do not expose NATS subjects, [stream](../glossary/stream) names, [KV bucket](../glossary/kv-bucket) names, or derived storage
 keys through the public ARD API. The registry edge reconstructs ARD-compatible
 JSON from validated catalog data.
 
@@ -119,7 +119,7 @@ packages.
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
-- [ADR 0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)

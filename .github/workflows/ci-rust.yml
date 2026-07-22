@@ -48,7 +48,7 @@ jobs:
       - name: Enforce crate licenses
         uses: ./.github/actions/enforce-cargo-license
 
-      - name: Enforce TLS policy (ADR 0015)
+      - name: Enforce TLS policy (ADR#0015)
         run: cargo deny check bans
         working-directory: rsworkspace
 
@@ -65,16 +65,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Test repo Rust policy lints
-        run: |
-          dylint_toolchain="$(python - <<'PY'
-          import tomllib
-
-          with open("rust-toolchain.toml", "rb") as toolchain_file:
-              print(tomllib.load(toolchain_file)["toolchain"]["channel"])
-          PY
-          )"
-          rustup run "$dylint_toolchain" cargo test
-        working-directory: rsworkspace/dylints/trogon_lints
+        run: mise run github-actions:dylint-tests
 
       - name: Run repo Rust policy lints
         run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
@@ -115,8 +106,7 @@ jobs:
           tool: cargo-llvm-cov,nextest
 
       - name: Build decider components for sim fixtures
-        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
-        working-directory: rsworkspace
+        run: mise run artifacts:wasm-components
 
       - name: Run documentation tests
         run: cargo test --doc
@@ -189,28 +179,14 @@ jobs:
           workspaces: rsworkspace -> target
           save-if: always
 
-      - name: Build schedules decider component
-        run: cargo component build -p trogon-schedules-decider --target wasm32-unknown-unknown --release
-        working-directory: rsworkspace
+      - name: Build decider components
+        run: mise run artifacts:wasm-components
 
       - name: Assert zero imports and validate
-        run: |
-          for WASM in rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm; do
-            wasm-tools component wit "$WASM" | tee /tmp/wit.txt
-            if grep -E '^[[:space:]]*import ' /tmp/wit.txt; then
-              echo "component declares imports: $WASM"
-              exit 1
-            fi
-            wasm-tools validate "$WASM"
-          done
+        run: mise run github-actions:wasm-validate
 
       - name: Run decider-test suites
-        run: |
-          cd rsworkspace
-          cargo test -p trogon-decider-sim --test schedules --features test-support
-          cargo test -p trogon-decider-guest-macros --test compile_fail
-          cargo build -p trogon-decider-test --release
-          ./target/release/decider-test target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm cli/trogon-decider-test/schedules.yaml
+        run: mise run github-actions:decider-test-suites
 
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime

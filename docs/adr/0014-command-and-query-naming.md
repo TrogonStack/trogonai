@@ -5,11 +5,11 @@ status: accepted
 date: 2026-06-30
 ---
 
-# ADR 0014: Command and Query Naming
+# ADR#0014: Command and Query Naming
 
 ## Context
 
-The scheduler crate organizes its write side as commands and its read side as
+The scheduler [crate](../glossary/crate) organizes its write side as commands and its read side as
 queries. The command modules already read as verb + noun
 (`create_schedule`, `pause_schedule`, `resume_schedule`, `remove_schedule`,
 `record_schedule_occurrence`, `schedule_next_occurrence`), so the file name
@@ -52,5 +52,5 @@ Do not name a command or query by the bare verb (`get`, `list`, `create`,
 
 ## References
 
-- [ADR 0006: Helpers Naming](./0006-helpers-naming.md)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0006: Helpers Naming](./0006-helpers-naming.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)

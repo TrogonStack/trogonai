@@ -5,13 +5,13 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0004: Protocol and Transport Layering
+# ADR#0004: Protocol and Transport Layering
 
 ## Context
 
-The repository will contain many protocol role SDKs, transport adapters, bridges,
-gateways, and application services. Without a strict layering rule, ACP, MCP,
-NATS, HTTP, stdio, and callback SDK types can leak into every crate and make
+The repository will contain many [protocol](../glossary/protocol) role SDKs, transport adapters, [bridges](../glossary/bridge),
+gateways, and application services. Without a strict layering rule, [ACP](../glossary/acp), [MCP](../glossary/mcp),
+[NATS](../glossary/nats), HTTP, stdio, and callback SDK types can leak into every crate and make
 domain code depend on whichever protocol or transport happened to arrive first.
 
 This decision defines when protocol concepts are allowed to enter a component and
@@ -46,9 +46,9 @@ that protocol:
 - bridges that translate one protocol transport to another
 - gateways whose public product boundary is the protocol
 
-Do not inject protocol types into domain code by default. Domain types, deciders,
-application services, and reusable workflow crates should use domain commands,
-domain events, value objects, and ports. Convert protocol requests and responses
+Do not inject protocol types into domain code by default. Domain types, [deciders](../glossary/decider),
+application services, and reusable workflow crates should use domain [commands](../glossary/command),
+domain [events](../glossary/event), value objects, and ports. Convert protocol requests and responses
 at the application boundary.
 
 Protocol types may cross deeper only when that type is the explicit contract of
@@ -111,7 +111,7 @@ Runtime configuration decides which transports start. Cargo features may make
 optional adapters available at compile time, but configuration decides what runs.
 
 Combining multiple transports in one binary is valid only when the binary is one
-operated workload, as defined in [ADR 0003](./0003-ai-protocol-transport-taxonomy.md).
+operated workload, as defined in [ADR#0003](./0003-ai-protocol-transport-taxonomy.md).
 
 ## Package Boundary Rules
 
@@ -177,6 +177,6 @@ currently used to reach it.
 
 ## References
 
-- [ADR 0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0001: Workspace Runtime Taxonomy](./0001-workspace-runtime-taxonomy.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)

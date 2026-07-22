@@ -5,11 +5,11 @@ status: accepted
 date: 2026-06-08
 ---
 
-# ADR 0006: Helpers Naming
+# ADR#0006: Helpers Naming
 
 ## Context
 
-Straw Hat has an approved organization-wide ADR for the long-running `Helper`
+Straw Hat has an approved organization-wide [ADR](../glossary/adr) for the long-running `Helper`
 versus `Util` naming debate. TrogonAI should not reopen that choice locally or
 let language-specific habits create inconsistent names across the monorepo.
 
@@ -44,4 +44,4 @@ decision to justify vague package, module, file, type, or function names.
 ## References
 
 - [Straw Hat ADR 1146361044: Helper vs Util](https://straw-hat-team.github.io/adr/adrs/1146361044/README.html)
-- [ADR 0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)
+- [ADR#0002: Rust Crate Boundaries](./0002-rust-crate-boundaries.md)

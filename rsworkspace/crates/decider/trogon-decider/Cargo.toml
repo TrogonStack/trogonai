@@ -1,0 +1,32 @@
+[package]
+name = "trogon-decider"
+version = "0.1.0"
+edition = "2024"
+description = "Typed decider primitives for Trogon event-sourced workflows"
+license = "Apache-2.0"
+repository = "https://github.com/TrogonStack/trogonai"
+
+[features]
+test-support = []
+
+[lints.rust]
+missing_docs = "warn"
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(dylint_lib, values(any()))'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1"
+
+[[test]]
+name = "trybuild"
+path = "tests/trybuild.rs"
+required-features = ["test-support"]

@@ -46,8 +46,8 @@ Think in terms of information flow:
   codes, or protobuf fields stable when required, but convert to richer domain
   types inside the owning package.
 - Respect local architecture. In Rust, keep value objects inside the owning
-  crate unless ADR 0002 justifies a package boundary. For wire and persistence
-  contracts, follow ADR 0009.
+  crate unless [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md) justifies a package boundary. For wire and persistence
+  contracts, follow [ADR#0009](../../../docs/adr/0009-protocol-buffers-wire-contracts.md).
 
 ## Key Examples
 
@@ -81,11 +81,11 @@ of control flow.
 
 Local examples to learn from:
 
-- `rsworkspace/crates/a2a-auth-callout/src/denial_category.rs` classifies
+- `rsworkspace/crates/a2a/a2a-auth-callout/src/denial_category.rs` classifies
   `CredentialVerification(String)` with `msg.contains(...)`. The category
   decision belongs in typed credential or domain errors that map directly to
   `DenialCategory`.
-- `rsworkspace/crates/a2a-auth-callout/src/account_resolver.rs` converts
+- `rsworkspace/crates/a2a/a2a-auth-callout/src/account_resolver.rs` converts
   `AccountResolverError` through `value.to_string()`. The resolver already knows
   whether the problem is `EmptyRequest` or `Unknown`; that distinction should
   survive until category mapping.

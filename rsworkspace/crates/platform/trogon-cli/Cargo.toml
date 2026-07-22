@@ -1,0 +1,63 @@
+[package]
+name = "trogon-cli"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[[bin]]
+name = "trogon"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+acp-nats               = { workspace = true }
+agent-client-protocol = { workspace = true }
+anyhow                 = "1"
+async-nats             = { workspace = true, features = ["jetstream", "kv"] }
+axum                   = { workspace = true }
+async-trait            = { workspace = true }
+base64                 = "0.22"
+bytes                  = { workspace = true }
+clap                   = { workspace = true, features = ["env"] }
+futures                = { workspace = true }
+libc                   = "0.2"
+opentelemetry          = { workspace = true }
+rand                   = "0.8"
+reqwest                = { workspace = true }
+rustyline              = "14"
+serde                  = { workspace = true }
+serde_json             = { workspace = true }
+serde_yaml             = "0.9"
+sha2                   = "0.10"
+shlex                  = "1"
+tokio                  = { workspace = true, features = ["full"] }
+tracing                = { workspace = true }
+tracing-subscriber     = { workspace = true, features = ["env-filter"] }
+trogon-mcp             = { path = "../../mcp/trogon-mcp" }
+trogon-memory          = { path = "../../actor/trogon-memory" }
+trogon-nats            = { workspace = true }
+trogon-registry        = { workspace = true }
+trogon-runner-tools    = { path = "../../runner/trogon-runner-tools" }
+trogonai-capabilities  = { workspace = true }
+trogonai-session-contracts = { workspace = true }
+trogonai-session-kernel = { workspace = true }
+trogonai-session-projection = { workspace = true }
+trogonai-switching     = { workspace = true }
+trogonai-catalog-client = { workspace = true }
+trogon-tools           = { path = "../../runner/trogon-tools" }
+trogon-std             = { workspace = true }
+trogon-telemetry       = { workspace = true }
+time                   = { workspace = true }
+uuid                   = { workspace = true }
+
+[dev-dependencies]
+futures                = { workspace = true }
+httpmock               = "0.7"
+reqwest                = { workspace = true }
+tempfile               = { workspace = true }
+testcontainers-modules = { workspace = true, features = ["nats"] }
+tokio                  = { workspace = true, features = ["test-util"] }
+trogon-nats            = { workspace = true }
+trogon-registry        = { workspace = true, features = ["test-support"] }

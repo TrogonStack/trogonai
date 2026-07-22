@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "wasm-components/*", "cli/trogon-decider-test"]
-default-members = ["crates/*", "cli/trogon-decider-test"]
+members = ["crates/*/*", "wasm-components/*", "cli/trogon-decider-test"]
+default-members = ["crates/*/*", "cli/trogon-decider-test"]
 exclude = [
-    "crates/trogon-source-discord",
-    "crates/trogon-source-github",
-    "crates/trogon-source-gitlab",
-    "crates/trogon-source-incidentio",
-    "crates/trogon-source-notion",
-    "crates/trogon-source-sentry",
-    "crates/trogon-source-slack",
-    "crates/trogon-source-telegram",
-    "crates/trogon-source-twitter",
+    "crates/source/trogon-source-discord",
+    "crates/source/trogon-source-github",
+    "crates/source/trogon-source-gitlab",
+    "crates/source/trogon-source-incidentio",
+    "crates/source/trogon-source-notion",
+    "crates/source/trogon-source-sentry",
+    "crates/source/trogon-source-slack",
+    "crates/source/trogon-source-telegram",
+    "crates/source/trogon-source-twitter",
 ]
 
 [workspace.lints.rust]
@@ -26,52 +26,52 @@ unwrap_used = "deny"
 
 [workspace.dependencies]
 # Internal crates
-a2a-auth-callout = { path = "crates/a2a-auth-callout" }
-a2a-bridge = { path = "crates/a2a-bridge" }
-a2a-identity-types = { path = "crates/a2a-identity-types" }
-a2a-nats = { path = "crates/a2a-nats" }
-a2a-pack = { path = "crates/a2a-pack" }
-ard-catalog = { path = "crates/ard-catalog" }
-ard-nats = { path = "crates/ard-nats" }
-ard-registry = { path = "crates/ard-registry" }
-a2a-redaction = { path = "crates/a2a-redaction" }
-acp-nats = { path = "crates/acp-nats" }
-trogon-telemetry = { path = "crates/trogon-telemetry" }
-mcp-nats = { path = "crates/mcp-nats" }
-mcp-nats-server = { path = "crates/mcp-nats-server" }
-mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
-jsonrpc-nats = { path = "crates/jsonrpc-nats" }
-trogon-nats = { path = "crates/trogon-nats" }
-trogon-aauth-sdk = { path = "crates/trogon-aauth-sdk" }
-trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
-trogon-decider = { path = "crates/trogon-decider" }
-trogon-decider-nats = { path = "crates/trogon-decider-nats" }
-trogon-decider-wit = { path = "crates/trogon-decider-wit" }
-trogon-decider-guest-macros = { path = "crates/trogon-decider-guest-macros" }
-trogon-decider-guest-sdk = { path = "crates/trogon-decider-guest-sdk" }
-trogon-decider-sim = { path = "crates/trogon-decider-sim" }
-trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
-trogon-decider-wasm-runtime = { path = "crates/trogon-decider-wasm-runtime" }
-trogon-identity-types = { path = "crates/trogon-identity-types" }
-trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
-trogon-semconv = { path = "crates/trogon-semconv" }
-trogon-service-config = { path = "crates/trogon-service-config" }
-trogon-std = { path = "crates/trogon-std" }
-trogon-actor = { path = "crates/trogon-actor" }
-trogon-router = { path = "crates/trogon-router" }
-trogon-registry = { path = "crates/trogon-registry" }
-trogon-transcript = { path = "crates/trogon-transcript" }
-trogonai-catalog-proto = { path = "crates/trogonai-catalog-proto" }
-trogonai-compactor-proto = { path = "crates/trogonai-compactor-proto" }
-trogonai-session-proto = { path = "crates/trogonai-session-proto" }
-trogonai-session-contracts = { path = "crates/trogonai-session-contracts" }
-trogonai-session-kernel = { path = "crates/trogonai-session-kernel" }
-trogonai-artifacts = { path = "crates/trogonai-artifacts" }
-trogonai-capabilities = { path = "crates/trogonai-capabilities" }
-trogonai-session-projection = { path = "crates/trogonai-session-projection" }
-trogonai-switching = { path = "crates/trogonai-switching" }
-trogonai-catalog-client = { path = "crates/trogonai-catalog-client" }
-trogonai-proto = { path = "crates/trogonai-proto" }
+a2a-auth-callout = { path = "crates/a2a/a2a-auth-callout" }
+a2a-bridge = { path = "crates/a2a/a2a-bridge" }
+a2a-identity-types = { path = "crates/a2a/a2a-identity-types" }
+a2a-nats = { path = "crates/a2a/a2a-nats" }
+a2a-pack = { path = "crates/a2a/a2a-pack" }
+a2a-redaction = { path = "crates/a2a/a2a-redaction" }
+acp-nats = { path = "crates/acp/acp-nats" }
+ard-catalog = { path = "crates/ard/ard-catalog" }
+ard-nats = { path = "crates/ard/ard-nats" }
+ard-registry = { path = "crates/ard/ard-registry" }
+jsonrpc-nats = { path = "crates/platform/jsonrpc-nats" }
+mcp-nats = { path = "crates/mcp/mcp-nats" }
+mcp-nats-server = { path = "crates/mcp/mcp-nats-server" }
+mcp-nats-stdio = { path = "crates/mcp/mcp-nats-stdio" }
+trogon-aauth-sdk = { path = "crates/aauth/trogon-aauth-sdk" }
+trogon-aauth-verify = { path = "crates/aauth/trogon-aauth-verify" }
+trogon-actor = { path = "crates/actor/trogon-actor" }
+trogon-decider = { path = "crates/decider/trogon-decider" }
+trogon-decider-guest-macros = { path = "crates/decider/trogon-decider-guest-macros" }
+trogon-decider-guest-sdk = { path = "crates/decider/trogon-decider-guest-sdk" }
+trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
+trogon-decider-runtime = { path = "crates/decider/trogon-decider-runtime" }
+trogon-decider-sim = { path = "crates/decider/trogon-decider-sim" }
+trogon-decider-wasm-runtime = { path = "crates/decider/trogon-decider-wasm-runtime" }
+trogon-decider-wit = { path = "crates/decider/trogon-decider-wit" }
+trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
+trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
+trogon-nats = { path = "crates/platform/trogon-nats" }
+trogon-registry = { path = "crates/platform/trogon-registry" }
+trogon-router = { path = "crates/actor/trogon-router" }
+trogon-semconv = { path = "crates/platform/trogon-semconv" }
+trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-std = { path = "crates/platform/trogon-std" }
+trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
+trogon-transcript = { path = "crates/actor/trogon-transcript" }
+trogonai-artifacts = { path = "crates/session/trogonai-artifacts" }
+trogonai-capabilities = { path = "crates/session/trogonai-capabilities" }
+trogonai-catalog-client = { path = "crates/catalog/trogonai-catalog-client" }
+trogonai-catalog-proto = { path = "crates/catalog/trogonai-catalog-proto" }
+trogonai-compactor-proto = { path = "crates/compactor/trogonai-compactor-proto" }
+trogonai-proto = { path = "crates/platform/trogonai-proto" }
+trogonai-session-contracts = { path = "crates/session/trogonai-session-contracts" }
+trogonai-session-kernel = { path = "crates/session/trogonai-session-kernel" }
+trogonai-session-projection = { path = "crates/session/trogonai-session-projection" }
+trogonai-session-proto = { path = "crates/session/trogonai-session-proto" }
+trogonai-switching = { path = "crates/session/trogonai-switching" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
@@ -80,7 +80,22 @@ a2a = { package = "a2a-lf", version = "=0.3.0" }
 cel-interpreter = "=0.10.0"
 
 # ACP
-agent-client-protocol = { version = "=0.10.4", features = ["unstable_logout"] }
+# Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
+# Unstable flags are enabled ahead of stabilization by policy (protocol v2 is watch-only).
+agent-client-protocol = { version = "=1.2.0", features = [
+    "unstable_auth_methods",
+    "unstable_elicitation",
+    "unstable_end_turn_token_usage",
+    "unstable_mcp_over_acp",
+    "unstable_session_fork",
+] }
+# Direct schema dependency exists solely to enable schema-level unstable flags the
+# SDK facade does not forward (cargo feature unification applies them to the SDK's re-exports).
+agent-client-protocol-schema = { version = "=1.4.0", features = [
+    "unstable_llm_providers",
+    "unstable_nes",
+    "unstable_plan_operations",
+] }
 
 # MCP
 rmcp = { version = "2.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
@@ -147,12 +162,12 @@ http = "=1.4.2"
 rrule = "=0.14.0"
 sha2 = "=0.11.0"
 wiremock = "=0.6.5"
+testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
 time = "=0.3.53"
 url = "=2.5.8"
 uuid = { version = "=1.23.4", features = ["v4", "v7"] }
-testcontainers-modules = { version = "0.15", features = ["nats"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=46.0.1"

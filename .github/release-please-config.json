@@ -13,7 +13,7 @@
     }
   ],
   "packages": {
-    "rsworkspace/crates/acp-nats-stdio": {
+    "rsworkspace/crates/acp/acp-nats-stdio": {
       "component": "acp-nats-stdio"
     }
   },

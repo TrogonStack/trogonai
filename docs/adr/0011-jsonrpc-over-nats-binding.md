@@ -5,15 +5,15 @@ status: accepted
 date: 2026-06-23
 ---
 
-# ADR 0011: JSON-RPC over NATS Binding
+# ADR#0011: JSON-RPC over NATS Binding
 
 ## Context
 
-Several first-party protocols are JSON-RPC 2.0 protocols carried over the NATS
-backbone ([ADR 0003](./0003-ai-protocol-transport-taxonomy.md)): ACP, MCP, and
-A2A. [ADR 0003](./0003-ai-protocol-transport-taxonomy.md) states that the same
+Several first-party [protocols](../glossary/protocol) are JSON-RPC 2.0 protocols carried over the [NATS](../glossary/nats)
+backbone ([ADR#0003](./0003-ai-protocol-transport-taxonomy.md)): [ACP](../glossary/acp), [MCP](../glossary/mcp), and
+[A2A](../glossary/a2a). [ADR#0003](./0003-ai-protocol-transport-taxonomy.md) states that the same
 JSON-RPC lifecycle can run over stdio, a remote endpoint, or the internal
-backbone, and [ADR 0004](./0004-protocol-and-transport-layering.md) places
+backbone, and [ADR#0004](./0004-protocol-and-transport-layering.md) places
 request/response mapping, notifications, and protocol error semantics in the
 protocol-dispatcher layer rather than in domain code.
 
@@ -22,7 +22,7 @@ within one protocol:
 
 - The ACP command path (client to agent) strips the JSON-RPC envelope. The NATS
   body is the bare params struct, the method is the subject, and correlation rides
-  in a transport header. The reply is a bare result struct.
+  in a transport [header](../glossary/headers). The reply is a bare result struct.
 - The ACP callback path (agent to client) keeps the full JSON-RPC envelope in the
   body.
 - MCP over NATS keeps the full JSON-RPC envelope in the body end to end.
@@ -30,7 +30,7 @@ within one protocol:
 Because the command path has no envelope and no explicit discriminator, success
 and failure are told apart by attempting to deserialize the body as the success
 type and, on failure, re-attempting as a JSON-RPC error. This is centralized on
-the JetStream paths but absent on the core request/reply command handlers, where
+the [JetStream](../glossary/jetstream) paths but absent on the core request/reply command handlers, where
 the reply is typed only as the success type. A structured protocol error there
 fails to deserialize and collapses into a generic internal error, discarding the
 originating code and message. Authentication rejection is the clearest casualty:
@@ -66,8 +66,8 @@ of the message, not a different message.
 | `error.code` | header `Jsonrpc-Error-Code` | Integer. Present only on errors; its presence is the success/error discriminator. |
 | `error.message`, `error.data` | body | Human-readable and structured error detail. |
 
-Correlation and routing metadata are a separate, protocol-agnostic transport
-concern under [ADR 0004](./0004-protocol-and-transport-layering.md), not part of
+Correlation and routing metadata are a separate, protocol-agnostic [transport](../glossary/transport)
+concern under [ADR#0004](./0004-protocol-and-transport-layering.md), not part of
 this mapping.
 
 Requests and notifications are addressed by the method subject. A response carries
@@ -87,7 +87,7 @@ correlation key: it is client-chosen and unique only per connection (so it
 collides across clients before a session exists at `initialize`), arbitrary string
 ids are not subject-safe, and notifications and null-id responses have no usable
 id. Correlation is a separate transport concern
-([ADR 0004](./0004-protocol-and-transport-layering.md)) and is out of scope here.
+([ADR#0004](./0004-protocol-and-transport-layering.md)) and is out of scope here.
 
 ### 3. Preserve `id` type with a JSON-literal header
 
@@ -118,7 +118,7 @@ numeric-looking strings, large integers, null, unicode string ids, results,
 errors, notifications).
 
 Canonical JSON-RPC is reconstructed only at protocol edges — the remote
-HTTP/WebSocket/SSE listeners and the stdio bridges. The on-NATS encoding is an
+HTTP/WebSocket/SSE listeners and the stdio [bridges](../glossary/bridge). The on-NATS encoding is an
 internal wire format; nothing external consumes the raw stream as JSON-RPC. The
 edge holds the original typed `id` while awaiting the reply (correlated by the
 transport), so live request/reply type fidelity holds independent of the header
@@ -142,13 +142,13 @@ packages (`acp-nats`, `mcp-nats`, A2A) inject what is domain-specific: subject
 routing (method plus context to subject), transport selection (core request/reply
 versus JetStream durable), and typed params and results.
 
-Per [ADR 0004](./0004-protocol-and-transport-layering.md), this is the
+Per [ADR#0004](./0004-protocol-and-transport-layering.md), this is the
 protocol-dispatcher and transport seam. This is governed by the JSON-RPC exception
-in [ADR 0009](./0009-protocol-buffers-wire-contracts.md): ACP, MCP, and JSON-RPC
+in [ADR#0009](./0009-protocol-buffers-wire-contracts.md): ACP, MCP, and JSON-RPC
 have protocol-defined JSON contracts and are not re-encoded as Protocol Buffers.
 Working name for the package is `jsonrpc-nats`, following the
 `<protocol>-<backbone>` pattern in
-[ADR 0003](./0003-ai-protocol-transport-taxonomy.md) with JSON-RPC as the
+[ADR#0003](./0003-ai-protocol-transport-taxonomy.md) with JSON-RPC as the
 protocol.
 
 ## Invariants
@@ -279,7 +279,7 @@ These are now resolved by the `jsonrpc-nats` transport seam:
 
 ## References
 
-- [ADR 0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
-- [ADR 0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
-- [ADR 0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
+- [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)

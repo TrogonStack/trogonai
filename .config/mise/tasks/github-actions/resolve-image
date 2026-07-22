@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Resolve the canary container image name and short SHA into GITHUB_OUTPUT"
+set -euo pipefail
+
+: "${IMAGE_OWNER:?IMAGE_OWNER is required}"
+: "${SERVICE_IMAGE:?SERVICE_IMAGE is required}"
+: "${GITHUB_SHA:?GITHUB_SHA is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+owner_lower="$(tr '[:upper:]' '[:lower:]' <<<"$IMAGE_OWNER")"
+echo "name=ghcr.io/${owner_lower}/${SERVICE_IMAGE}" >>"$GITHUB_OUTPUT"
+echo "short_sha=${GITHUB_SHA:0:7}" >>"$GITHUB_OUTPUT"

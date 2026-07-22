@@ -1,0 +1,52 @@
+[package]
+name = "trogon-agent"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+base64      = "0.22"
+bytes       = "1"
+futures-util = "0.3"
+reqwest     = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+serde       = { version = "1.0.228", features = ["derive"] }
+serde_json  = "1.0.149"
+tokio       = { version = "1.49.0", features = ["full"] }
+tracing     = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sha2               = "0.10"
+axum         = "0.8"
+trogon-automations = { path = "../trogon-automations" }
+uuid               = { version = "1", features = ["v4"] }
+trogon-agent-core = { path = "../../runner/trogon-agent-core" }
+tokio-stream       = "0.1"
+trogon-mcp     = { path = "../../mcp/trogon-mcp" }
+trogon-nats    = { path = "../../platform/trogon-nats" }
+trogon-splitio = { path = "../../platform/trogon-splitio" }
+trogon-std     = { path = "../../platform/trogon-std" }
+
+[dev-dependencies]
+trogon-std          = { path = "../../platform/trogon-std", features = ["test-support"] }
+trogon-automations  = { path = "../trogon-automations", features = ["test-support"] }
+trogon-secret-proxy = { path = "../../vault/trogon-secret-proxy" }
+trogon-vault        = { path = "../../vault/trogon-vault", features = ["hashicorp-vault"] }
+trogon-github       = { path = "../../webhooks/trogon-github" }
+trogon-linear       = { path = "../../webhooks/trogon-linear" }
+trogon-datadog      = { path = "../../webhooks/trogon-datadog" }
+trogon-incidentio   = { path = "../../webhooks/trogon-incidentio" }
+httpmock            = "0.7"
+tokio               = { version = "1.49.0", features = ["full"] }
+testcontainers-modules = { workspace = true }
+axum                = "0.8"
+reqwest             = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+hmac                = "0.12"
+hex                 = "0.4"
+tower               = "0.5"
+
+[[bin]]
+name = "agent"
+path = "src/bin/agent.rs"

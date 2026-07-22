@@ -1,0 +1,36 @@
+[package]
+name = "trogon-nats"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+async-nats = { workspace = true, features = ["ring", "nkeys", "jetstream", "kv", "object-store", "server_2_11", "server_2_12"] }
+bytes = { workspace = true }
+futures = { workspace = true }
+opentelemetry = { workspace = true }
+trogon-semconv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["time", "io-util"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+testcontainers-modules = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+testcontainers-modules = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }
+
+[features]
+default = []
+test-support = ["dep:testcontainers-modules"]
