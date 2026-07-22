@@ -1,6 +1,6 @@
 # trogon-decider-wasm-runtime
 
-The `-runtime` suffix (per [ADR#0002](../../../docs/adr/0002-rust-crate-boundaries.md)) marks
+The `-runtime` suffix (per [ADR#0002](../../../../docs/adr/0002-rust-crate-boundaries.md)) marks
 execution machinery, here for deciders compiled to WASM components rather than linked in
 natively. `WasmDeciderModule::load` compiles a component, structurally enforces it declares
 zero imports (by instantiating it against an empty `wasmtime::component::Linker`), and probes
@@ -17,5 +17,5 @@ version swap never has to migrate or invalidate a prior version's snapshots.
 This crate reuses `trogon-decider-runtime`'s storage-neutral ports (`StreamRead`,
 `StreamAppend`, `SnapshotRead`, `SnapshotWrite`) rather than depending on any specific backend.
 
-See [Decider Platform](../../../docs/architecture/decider.md) for the exact engine budget
+See [Decider Platform](../../../../docs/architecture/decider.md) for the exact engine budget
 values, the decide/fold/snapshot call ordering, and registry rollout semantics in full.

@@ -4,5 +4,5 @@ HTTPS ↔ NATS A2A sidecar foundation: typed caller identity value objects and t
 
 ## Related
 
-- [A2A bridge sketch (`docs/a2a/explanation/bridge-sketch.md`)](../../../docs/a2a/explanation/bridge-sketch.md)
-- [Gateway roadmap — bridge identity & policy](../../../docs/a2a/explanation/gateway-roadmap.md)
+- [A2A bridge sketch (`docs/a2a/explanation/bridge-sketch.md`)](../../../../docs/a2a/explanation/bridge-sketch.md)
+- [Gateway roadmap — bridge identity & policy](../../../../docs/a2a/explanation/gateway-roadmap.md)

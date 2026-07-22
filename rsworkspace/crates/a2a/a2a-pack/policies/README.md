@@ -26,4 +26,4 @@ SpiceDB Tier-1 (`A2A_GATEWAY_TIER1_SPICEDB_ENABLED`) remains the authz floor; de
 - Effects: `allow`, `deny`
 - Deny returns JSON-RPC `-32801` on ingress
 
-See [`docs/a2a/reference/policy/tier1-declarative.md`](../../../../docs/a2a/reference/policy/tier1-declarative.md).
+See [`docs/a2a/reference/policy/tier1-declarative.md`](../../../../../docs/a2a/reference/policy/tier1-declarative.md).

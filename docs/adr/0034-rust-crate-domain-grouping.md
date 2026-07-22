@@ -58,7 +58,7 @@ is not part of a multi-crate domain family lives in `platform/`.
 bans vague *package* names such as `core`, `common`, `shared`, and `utils`; that
 rule is unchanged and no crate may be named after its group. The label is
 `platform/` rather than `core/` to stay clear of that banned vocabulary while
-matching how ADR#0002 already describes `trogon-*` as first-party platform
+matching how [ADR#0002](./0002-rust-crate-boundaries.md) already describes `trogon-*` as first-party platform
 crates.
 
 ### What does not change
