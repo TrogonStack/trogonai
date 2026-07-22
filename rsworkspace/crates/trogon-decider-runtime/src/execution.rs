@@ -1220,10 +1220,10 @@ where
             ensure_replay_within_limit(self.replay_limit, replayed_event_count)
                 .map_err(CommandError::ReplayLimitExceeded)?;
         }
+        metrics().replay_events.add(replayed_event_count, &[]);
 
         let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;
-        metrics().replay_events.add(replayed_event_count, &[]);
 
         if discarded_bad_snapshot {
             // The discarded snapshot is still sitting in the store at this
