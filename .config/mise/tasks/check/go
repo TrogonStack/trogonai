@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Runs the Go workspace checks: formatting, tests, vet, and WIT snapshot validation.
+#MISE description="Check the Go workspace: formatting, tests, vet, and WIT snapshots"
 set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/goworkspace"
 
 unformatted="$(gofmt -l .)"
 if [ -n "$unformatted" ]; then

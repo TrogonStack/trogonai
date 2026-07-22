@@ -47,10 +47,6 @@ run = "cargo build"
 description = "Check workspaces"
 depends = ["check:rust", "check:go", "check:web"]
 
-[tasks."check:go"]
-dir = "goworkspace"
-run = "./automation/check.sh"
-
 [tasks."test:go:race"]
 dir = "goworkspace"
 run = "go test -race ./..."
