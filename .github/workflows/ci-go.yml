@@ -16,6 +16,7 @@ on:
       - 'buf.lock'
       - 'buf.yaml'
       - '.mise.toml'
+      - '.config/mise/tasks/**'
       - '.github/workflows/ci-go.yml'
 
 concurrency:
