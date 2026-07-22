@@ -38,7 +38,7 @@ jobs:
       - name: Install Go tooling via mise
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
-          install_args: go buf cargo:wasm-tools
+          install_args: go buf rust cargo:wasm-tools
 
       - name: Check Go workspace
         run: mise run --skip-tools check:go
