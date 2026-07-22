@@ -6790,6 +6790,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogonai-agents-domain"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "thiserror 2.0.18",
+ "trogon-decider",
+ "trogonai-proto",
+]
+
+[[package]]
 name = "trogonai-proto"
 version = "0.1.0"
 dependencies = [

@@ -14,6 +14,7 @@ chrono = ["dep:buffa-types", "dep:chrono"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
+agents = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider"]
 
 [dependencies]
 thiserror = { workspace = true }

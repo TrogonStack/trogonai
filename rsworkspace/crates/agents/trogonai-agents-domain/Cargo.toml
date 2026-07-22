@@ -1,0 +1,18 @@
+[package]
+name = "trogonai-agents-domain"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+buffa = { workspace = true }
+thiserror = { workspace = true }
+trogon-decider = { workspace = true }
+trogonai-proto = { path = "../../platform/trogonai-proto", default-features = false, features = ["agents"] }
+
+[dev-dependencies]
+trogon-decider = { workspace = true, features = ["test-support"] }
