@@ -33,9 +33,12 @@ func render(schema witSchema) string {
 		for _, variantCase := range variant.cases {
 			output.WriteString("    ")
 			output.WriteString(string(variantCase.name))
-			output.WriteByte('(')
-			output.WriteString(string(variantCase.typeID))
-			output.WriteString("),\n")
+			if variantCase.typeID != "" {
+				output.WriteByte('(')
+				output.WriteString(string(variantCase.typeID))
+				output.WriteByte(')')
+			}
+			output.WriteString(",\n")
 		}
 		output.WriteString("  }\n")
 	}

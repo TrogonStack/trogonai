@@ -5,14 +5,8 @@ interface messages {
     body: option<envelope-body>,
   }
 
-  record envelope-created {
-  }
-
-  record envelope-deleted {
-  }
-
   variant envelope-body {
-    created(envelope-created),
-    deleted(envelope-deleted),
+    created,
+    deleted,
   }
 }

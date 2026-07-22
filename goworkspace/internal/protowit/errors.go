@@ -21,6 +21,7 @@ const (
 	unsupportedService
 	unsupportedIdentifier
 	unsupportedNameCollision
+	unsupportedEmptyMessage
 )
 
 type schemaError struct {
@@ -66,6 +67,8 @@ func (r unsupportedReason) String() string {
 		return "protobuf identifier cannot be represented in WIT"
 	case unsupportedNameCollision:
 		return "normalized WIT name collision"
+	case unsupportedEmptyMessage:
+		return "messages without fields can only be represented as oneof members"
 	default:
 		return "unsupported schema"
 	}

@@ -219,8 +219,18 @@ func buildSchema(files []protoreflect.FileDescriptor) (witSchema, error) {
 		variants = append(variants, variant)
 		variantsByFullName[variant.fullName] = variant
 	}
+	emptyOneofMembers := emptyOneofMemberNames(oneofDefinitions)
 	records := make([]witRecord, 0, len(definitions))
 	for _, definition := range definitions {
+		if isEmptyMessage(definition.descriptor) {
+			if _, found := emptyOneofMembers[definition.descriptor.FullName()]; found {
+				continue
+			}
+			return witSchema{}, &schemaError{
+				element: definition.descriptor.FullName(),
+				reason:  unsupportedEmptyMessage,
+			}
+		}
 		record, err := buildRecord(definition, namesByFullName, variantsByFullName)
 		if err != nil {
 			return witSchema{}, err
@@ -514,6 +524,10 @@ func buildVariant(
 			}
 		}
 		caseNames[name] = field.FullName()
+		if field.Kind() == protoreflect.MessageKind && isEmptyMessage(field.Message()) {
+			cases = append(cases, witVariantCase{name: name})
+			continue
+		}
 		typeID, messageTarget, err := baseFieldType(field, namesByFullName)
 		if err != nil {
 			return witVariant{}, err
@@ -535,6 +549,13 @@ func buildField(
 	if err != nil {
 		return witField{}, &schemaError{element: field.FullName(), reason: unsupportedIdentifier, detail: err.Error()}
 	}
+	if field.Kind() == protoreflect.MessageKind && isEmptyMessage(field.Message()) {
+		return witField{}, &schemaError{
+			element: field.FullName(),
+			reason:  unsupportedEmptyMessage,
+			detail:  string(field.Message().FullName()),
+		}
+	}
 	typeID, messageTarget, err := baseFieldType(field, namesByFullName)
 	if err != nil {
 		return witField{}, err
@@ -554,6 +575,24 @@ func buildField(
 			return []protoreflect.FullName{messageTarget}
 		}(),
 	}, nil
+}
+
+func isEmptyMessage(message protoreflect.MessageDescriptor) bool {
+	return message.Fields().Len() == 0
+}
+
+func emptyOneofMemberNames(definitions []oneofDefinition) map[protoreflect.FullName]struct{} {
+	names := make(map[protoreflect.FullName]struct{})
+	for _, definition := range definitions {
+		fields := definition.descriptor.Fields()
+		for index := 0; index < fields.Len(); index++ {
+			field := fields.Get(index)
+			if field.Kind() == protoreflect.MessageKind && isEmptyMessage(field.Message()) {
+				names[field.Message().FullName()] = struct{}{}
+			}
+		}
+	}
+	return names
 }
 
 func baseFieldType(

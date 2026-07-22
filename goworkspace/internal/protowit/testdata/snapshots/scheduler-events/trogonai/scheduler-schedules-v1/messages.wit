@@ -22,14 +22,8 @@ interface messages {
     kind: option<schedule-status-kind>,
   }
 
-  record schedule-status-paused {
-  }
-
-  record schedule-status-scheduled {
-  }
-
   variant schedule-status-kind {
-    scheduled(schedule-status-scheduled),
-    paused(schedule-status-paused),
+    scheduled,
+    paused,
   }
 }

@@ -24,7 +24,7 @@ func TestScalarOneofGeneratesVariantSnapshot(t *testing.T) {
 	requireGeneratedSnapshot(t, "scalar-oneof", runRequest(t, scalarOneofRequest()))
 }
 
-func TestMessageOneofPreservesEmptyPayloadRecords(t *testing.T) {
+func TestMessageOneofEmptyPayloadsBecomePayloadlessCases(t *testing.T) {
 	requireGeneratedSnapshot(t, "message-oneof", runRequest(t, messageOneofRequest()))
 }
 
@@ -538,6 +538,39 @@ func TestEmptyOneofIsRejected(t *testing.T) {
 		"message oneof \"example.events.v1.Envelope.payload\" must contain at least one field declaration",
 	)
 	require.Empty(t, response.GetFile(), "empty oneofs must not produce invalid WIT variants")
+}
+
+func TestStandaloneEmptyMessageIsRejected(t *testing.T) {
+	message := &descriptorpb.DescriptorProto{Name: proto.String("Heartbeat")}
+	response := runRequest(t, requestForFiles(syntheticFile("empty.proto", "example.events.v1", message)))
+	require.Equal(
+		t,
+		"example.events.v1.Heartbeat: messages without fields can only be represented as oneof members",
+		response.GetError(),
+	)
+	require.Empty(t, response.GetFile(), "empty messages must not produce invalid WIT records")
+}
+
+func TestEmptyMessageFieldIsRejected(t *testing.T) {
+	container := &descriptorpb.DescriptorProto{
+		Name:       proto.String("Envelope"),
+		NestedType: []*descriptorpb.DescriptorProto{{Name: proto.String("Marker")}},
+		Field: []*descriptorpb.FieldDescriptorProto{
+			messageField(
+				"marker",
+				1,
+				".example.events.v1.Envelope.Marker",
+				descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL,
+			),
+		},
+	}
+	response := runRequest(t, requestForFiles(syntheticFile("empty.proto", "example.events.v1", container)))
+	require.Equal(
+		t,
+		"example.events.v1.Envelope.marker: messages without fields can only be represented as oneof members: example.events.v1.Envelope.Marker",
+		response.GetError(),
+	)
+	require.Empty(t, response.GetFile(), "empty message fields must not produce invalid WIT records")
 }
 
 func TestRecursiveMessageThroughOneofIsRejected(t *testing.T) {
