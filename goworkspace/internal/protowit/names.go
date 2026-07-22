@@ -24,7 +24,10 @@ func (p witPackageID) outputDirectory() string {
 func packageID(protobufPackage string) (witPackageID, error) {
 	parts := strings.Split(protobufPackage, ".")
 	if len(parts) < 2 {
-		return witPackageID{}, &schemaError{reason: unsupportedPackage, detail: protobufPackage}
+		return witPackageID{}, &schemaError{
+			reason: unsupportedPackage,
+			detail: fmt.Sprintf("%q must contain a namespace and a name", protobufPackage),
+		}
 	}
 	namespace, err := encodePackageSegment(parts[0])
 	if err != nil {

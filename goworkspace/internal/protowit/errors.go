@@ -46,7 +46,7 @@ func (r unsupportedReason) String() string {
 	case unsupportedParameter:
 		return "plugin parameters are not supported"
 	case unsupportedPackage:
-		return "protobuf package must contain a namespace and name"
+		return "protobuf package cannot be represented in WIT"
 	case unsupportedEnum:
 		return "enums are not supported"
 	case invalidOneofShape:
