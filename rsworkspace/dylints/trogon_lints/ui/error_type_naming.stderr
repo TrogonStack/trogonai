@@ -1,0 +1,27 @@
+error: type implementing `std::error::Error` is not named with an `Error` suffix
+  --> $DIR/error_type_naming.rs:10:1
+   |
+LL | struct EmptySecret;
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = help: give `EmptySecret` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
+   = note: `#[deny(error_type_naming)]` on by default
+
+error: type implementing `std::error::Error` is not named with an `Error` suffix
+  --> $DIR/error_type_naming.rs:23:1
+   |
+LL | enum Decode {
+   | ^^^^^^^^^^^
+   |
+   = help: give `Decode` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
+
+error: type implementing `std::error::Error` is not named with an `Error` suffix
+  --> $DIR/error_type_naming.rs:45:1
+   |
+LL | struct MacroSecret;
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = help: give `MacroSecret` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
+
+error: aborting due to 3 previous errors
+

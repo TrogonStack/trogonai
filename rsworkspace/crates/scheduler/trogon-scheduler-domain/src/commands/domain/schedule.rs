@@ -549,7 +549,7 @@ pub enum DeliveryRouteError {
     Invalid {
         route: String,
         #[source]
-        source: crate::subject::SubjectTokenViolation,
+        source: crate::subject::SubjectTokenViolationError,
     },
 }
 
@@ -598,7 +598,7 @@ pub enum SamplingSubjectError {
     Invalid {
         subject: String,
         #[source]
-        source: crate::subject::SubjectTokenViolation,
+        source: crate::subject::SubjectTokenViolationError,
     },
 }
 

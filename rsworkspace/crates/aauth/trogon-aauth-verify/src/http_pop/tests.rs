@@ -425,7 +425,7 @@ async fn verify_rejects_auth_presenter_with_structurally_incomplete_cnf_jwk() {
     let err = verifier.verify(&req).await.unwrap_err();
     assert!(matches!(
         err,
-        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::StructurallyIncomplete(_))
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::StructurallyIncomplete(_))
     ));
 }
 
@@ -623,7 +623,7 @@ fn verify_signature_with_jwk_rejects_undeserializable_jwk() {
     let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
-        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(_))
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(_))
     ));
 }
 
@@ -638,7 +638,7 @@ fn verify_signature_with_jwk_rejects_unsupported_curve() {
     let err = verify_signature_with_jwk(&jwk_val, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
-        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::UnsupportedAlgorithm)
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::UnsupportedAlgorithm)
     ));
 }
 

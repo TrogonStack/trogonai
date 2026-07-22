@@ -84,6 +84,6 @@ async fn zero_poll_interval_does_not_busy_loop() {
 
 #[test]
 fn timeout_error_displays_duration() {
-    let err = ServerInfoTimeout(Duration::from_secs(10));
+    let err = ServerInfoTimeoutError(Duration::from_secs(10));
     assert_eq!(err.to_string(), "timed out after 10s waiting for NATS server INFO");
 }

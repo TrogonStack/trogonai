@@ -8,7 +8,7 @@
 
 use a2a_redaction::SkillId;
 use serde::{Deserialize, Deserializer, Serialize};
-use trogon_nats::{NatsToken, SubjectTokenViolation};
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
 use crate::policy::per_skill::PerSkillDecision;
 
@@ -224,7 +224,7 @@ pub enum IngressAuditSubjectError {
     /// closed here rather than emitting a subject the publisher
     /// would later reject.
     #[error("encoded skill segment is not a valid NATS token: {0}")]
-    InvalidSkillSegment(#[source] SubjectTokenViolation),
+    InvalidSkillSegment(#[source] SubjectTokenViolationError),
 }
 
 /// Build the audit publish subject for an outcome + skill.

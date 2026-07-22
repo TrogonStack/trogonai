@@ -52,10 +52,10 @@ impl SentryResource {
 
 #[derive(Debug, thiserror::Error)]
 #[error("unsupported Sentry webhook resource")]
-struct InvalidSentryResource;
+struct InvalidSentryResourceError;
 
 impl FromStr for SentryResource {
-    type Err = InvalidSentryResource;
+    type Err = InvalidSentryResourceError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim() {
@@ -66,7 +66,7 @@ impl FromStr for SentryResource {
             "error" => Ok(Self::Error),
             "comment" => Ok(Self::Comment),
             "seer" => Ok(Self::Seer),
-            _ => Err(InvalidSentryResource),
+            _ => Err(InvalidSentryResourceError),
         }
     }
 }

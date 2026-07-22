@@ -5,19 +5,19 @@ pub struct NonZeroDuration(Duration);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("duration must not be zero")]
-pub struct ZeroDuration;
+pub struct ZeroDurationError;
 
 impl NonZeroDuration {
-    pub fn from_secs(secs: u64) -> Result<Self, ZeroDuration> {
+    pub fn from_secs(secs: u64) -> Result<Self, ZeroDurationError> {
         if secs == 0 {
-            return Err(ZeroDuration);
+            return Err(ZeroDurationError);
         }
         Ok(Self(Duration::from_secs(secs)))
     }
 
-    pub fn from_millis(millis: u64) -> Result<Self, ZeroDuration> {
+    pub fn from_millis(millis: u64) -> Result<Self, ZeroDurationError> {
         if millis == 0 {
-            return Err(ZeroDuration);
+            return Err(ZeroDurationError);
         }
         Ok(Self(Duration::from_millis(millis)))
     }

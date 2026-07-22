@@ -1554,12 +1554,12 @@ fn config_error_display_load() {
 
 #[test]
 fn config_error_display_validation() {
-    let err = ConfigError::Validation(ValidationErrors(vec![
-        ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDuration),
+    let err = ConfigError::Validation(AggregateValidationError(vec![
+        ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDurationError),
         ConfigValidationError::invalid_subject_token(
             "discord",
             "subject_prefix",
-            SubjectTokenViolation::InvalidCharacter('.'),
+            SubjectTokenViolationError::InvalidCharacter('.'),
         ),
     ]));
     let display = format!("{err}");
@@ -1600,7 +1600,7 @@ fn config_validation_error_invalid_subject_token_has_no_source() {
         "incidentio",
         &id,
         "subject_prefix",
-        SubjectTokenViolation::InvalidCharacter('.'),
+        SubjectTokenViolationError::InvalidCharacter('.'),
     );
 
     assert_eq!(
@@ -1621,17 +1621,17 @@ fn config_validation_error_missing_field_has_no_source() {
 
 #[test]
 fn duration_too_long_display_uses_plural_for_values_above_one_second() {
-    let err = DurationTooLong::new(2);
+    let err = DurationTooLongError::new(2);
 
     assert_eq!(err.to_string(), "must not exceed 2 seconds");
 }
 
 #[test]
 fn config_error_is_std_error() {
-    let err = ConfigError::Validation(ValidationErrors(vec![ConfigValidationError::invalid(
+    let err = ConfigError::Validation(AggregateValidationError(vec![ConfigValidationError::invalid(
         "discord",
         "stream_max_age_secs",
-        ZeroDuration,
+        ZeroDurationError,
     )]));
     let _: &dyn std::error::Error = &err;
 }

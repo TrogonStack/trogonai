@@ -241,9 +241,9 @@ fn act_rejection_matches_native_evaluation() {
     let native_failure =
         evaluate_decision::<OpenAndFund>(state, &command).expect_err("first step should reject natively");
     match native_failure {
-        trogon_decider::DecisionFailure::Decide(error) => {
+        trogon_decider::DecisionError::Decide(error) => {
             assert_eq!(error, FixtureDecideError::AlreadyOpen);
         }
-        trogon_decider::DecisionFailure::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
+        trogon_decider::DecisionError::Evolve(_) => panic!("expected a decide rejection, not an evolve failure"),
     }
 }

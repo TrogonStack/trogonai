@@ -19,7 +19,7 @@ use async_nats::{
 use chrono::{DateTime, Utc};
 use std::{fmt, future::IntoFuture};
 use trogon_decider_runtime::{
-    Event, EventId, FromEntriesError, Headers, InvalidStreamPosition, StreamEvent, StreamPosition,
+    Event, EventId, FromEntriesError, Headers, InvalidStreamPositionError, StreamEvent, StreamPosition,
 };
 use trogon_nats::jetstream::{JetStreamLastRawMessageBySubject, JetStreamPublishMessage};
 use trogon_std::{NowV7, UuidV7Generator};
@@ -111,7 +111,7 @@ pub enum ReadStreamError {
     #[error("failed to read latest subject position: {source}")]
     ReadLatestSubjectPosition {
         #[source]
-        source: InvalidStreamPosition,
+        source: InvalidStreamPositionError,
     },
     #[error("failed to read latest subject message: {source}")]
     ReadLatestSubjectMessage {
@@ -128,7 +128,7 @@ pub enum ReadStreamError {
     #[error("failed to read stream message position: {source}")]
     ReadMessagePosition {
         #[source]
-        source: InvalidStreamPosition,
+        source: InvalidStreamPositionError,
     },
     #[error("failed to read stream message event headers: event header '{header_name}' must have exactly one value")]
     InvalidEventHeaderValueCount { header_name: String },
@@ -189,7 +189,7 @@ pub enum PublishStreamError {
     #[error("failed to read stream append position: {source}")]
     ReadAppendPosition {
         #[source]
-        source: InvalidStreamPosition,
+        source: InvalidStreamPositionError,
     },
     #[error("failed to encode event header name '{header_name}': {source}")]
     InvalidEventHeaderName {

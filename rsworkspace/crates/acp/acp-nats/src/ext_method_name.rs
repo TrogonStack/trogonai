@@ -6,7 +6,7 @@
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.
 
 use trogon_nats::DottedNatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 /// Error returned when [`ExtMethodName`] validation fails.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -19,12 +19,12 @@ pub enum ExtMethodNameError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for ExtMethodNameError {
-    fn from(v: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for ExtMethodNameError {
+    fn from(v: SubjectTokenViolationError) -> Self {
         match v {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

@@ -25,7 +25,7 @@ use trogon_aauth_verify::nats_pop::content_digest_sha256;
 use trogon_identity_types::aauth::{Cnf, DWK_AGENT, DWK_RESOURCE, NatsSignatureEnvelope, TYP_AGENT, TYP_AUTH, headers};
 
 use a2a_gateway::aauth::{
-    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
+    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReasonError, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
     NonNegativeSecs, PersonServerAudience, ResourceIssuer, StaticJwks,
 };
 
@@ -341,7 +341,7 @@ async fn resolve_nats_rejects_auth_token_bound_to_different_agent() {
         .await
         .expect_err("agent mismatch denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::AuthAgentMismatch { .. }));
+    assert!(matches!(err.reason, AAuthDenyReasonError::AuthAgentMismatch { .. }));
     // Challenge IS issued because the PoP-verified agent had a jkt to bind to.
     assert!(err.challenge.is_some(), "expected challenge bound to verified agent");
 }
@@ -405,7 +405,7 @@ async fn resolve_nats_enforce_mode_denies_scope_not_covering_method() {
         .await
         .expect_err("uncovered scope denies in enforce mode");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::ScopeNotCovered { .. }));
+    assert!(matches!(err.reason, AAuthDenyReasonError::ScopeNotCovered { .. }));
     assert!(err.challenge.is_some(), "expected fresh auth-token challenge");
 }
 
@@ -539,7 +539,7 @@ async fn resolve_nats_denies_mission_claim_without_header() {
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
     assert!(matches!(
         err.reason,
-        AAuthDenyReason::MissionHeaderMissing { ref approver } if approver == "approver-1"
+        AAuthDenyReasonError::MissionHeaderMissing { ref approver } if approver == "approver-1"
     ));
 }
 
@@ -610,7 +610,7 @@ async fn resolve_nats_denies_malformed_mission_claim() {
         .await
         .expect_err("malformed mission claim denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::MissionMismatch(_)));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -689,7 +689,7 @@ async fn resolve_nats_denies_expired_auth_token_with_valid_pop() {
         .await
         .expect_err("expired auth token denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::Auth(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::Auth(_)));
     // Challenge IS issued because PoP already verified the presenting agent.
     assert!(err.challenge.is_some(), "expected challenge bound to verified agent");
 }
@@ -763,7 +763,7 @@ async fn resolve_nats_denies_mission_header_mismatching_claim() {
         .await
         .expect_err("mismatched mission header denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
-    assert!(matches!(err.reason, AAuthDenyReason::MissionMismatch(_)));
+    assert!(matches!(err.reason, AAuthDenyReasonError::MissionMismatch(_)));
 }
 
 const _: () = {

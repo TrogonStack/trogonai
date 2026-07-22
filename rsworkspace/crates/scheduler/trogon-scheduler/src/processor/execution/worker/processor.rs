@@ -118,7 +118,7 @@ enum SaveStep {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum PoisonReason {
+pub(super) enum PoisonReasonError {
     #[error("event could not be decoded: {source}")]
     EventDecode {
         #[source]
@@ -154,7 +154,7 @@ pub(super) enum PoisonReason {
 /// A transient failure: the record reached no durable outcome and must be
 /// retried (negative-acknowledged or left to `ack_wait`), never acknowledged.
 #[derive(Debug, thiserror::Error)]
-pub enum RetrySignal {
+pub enum RetryableError {
     /// A KV checkpoint operation failed transiently.
     #[error("transient checkpoint failure: {source}")]
     Checkpoint {
@@ -226,7 +226,7 @@ where
     /// Processes one persisted record, reaching a durable outcome before the
     /// caller acks. `now` is injected so past-due `At` reconciliation is
     /// deterministic in tests.
-    pub async fn process(&self, stream_event: &StreamEvent, now: DateTime<Utc>) -> Result<Processed, RetrySignal> {
+    pub async fn process(&self, stream_event: &StreamEvent, now: DateTime<Utc>) -> Result<Processed, RetryableError> {
         self.process_decoded(stream_event, DecodedScheduleEvent::Undecoded, now)
             .await
     }
@@ -238,7 +238,7 @@ where
         stream_event: &StreamEvent,
         decoded: DecodedScheduleEvent,
         now: DateTime<Utc>,
-    ) -> Result<Processed, RetrySignal> {
+    ) -> Result<Processed, RetryableError> {
         let span = tracing::info_span!(
             trogon_semconv::span::SCHEDULER_PROCESS_SCHEDULE_EVENT,
             stream_id = %stream_event.stream_id,
@@ -267,7 +267,7 @@ where
         stream_event: &StreamEvent,
         decoded: DecodedScheduleEvent,
         now: DateTime<Utc>,
-    ) -> Result<Processed, RetrySignal> {
+    ) -> Result<Processed, RetryableError> {
         // Phase 1 is synchronous and converts any non-`Send` domain error into a
         // `Send` poison reason; phase 2 awaits the poison write. Non-`Send`
         // errors must not be held across an await so the dispatcher future stays
@@ -281,7 +281,7 @@ where
                 Ok(Some(change)) => DecodeStep::Change(change),
                 Ok(None) => DecodeStep::SkippedForeign,
                 Err(source) => {
-                    let failure = self.failure_record(stream_event, PoisonReason::EventDecode { source });
+                    let failure = self.failure_record(stream_event, PoisonReasonError::EventDecode { source });
                     DecodeStep::Poison(failure)
                 }
             },
@@ -296,7 +296,7 @@ where
             return self
                 .poison_failure(self.failure_record(
                     stream_event,
-                    PoisonReason::EventDecode {
+                    PoisonReasonError::EventDecode {
                         source: ScheduleEventDecodeError::StreamRoutingMismatch {
                             stream_id: stream_event.stream_id.clone(),
                             schedule_id: change.schedule_id().as_str().to_string(),
@@ -314,7 +314,7 @@ where
 
         let load_step = match self.checkpoints.load(&key).await {
             Ok(loaded) => CheckpointLoadStep::Loaded(loaded),
-            Err(error) if error.is_transient() => return Err(RetrySignal::Checkpoint { source: error }),
+            Err(error) if error.is_transient() => return Err(RetryableError::Checkpoint { source: error }),
             Err(error) => {
                 // A matching event id proves this exact event was already
                 // applied, but the stored record is still undecodable: only a
@@ -349,10 +349,10 @@ where
                     Ok(None)
                     | Err(ReconcileError::MissingCheckpoint { .. })
                     | Err(ReconcileError::UnrecoverableCheckpoint { .. }) => CheckpointLoadStep::Poison(
-                        self.failure_record(stream_event, PoisonReason::CheckpointRead { source: error }),
+                        self.failure_record(stream_event, PoisonReasonError::CheckpointRead { source: error }),
                     ),
                     Err(ReconcileError::ScheduleRequest { source }) => CheckpointLoadStep::Poison(
-                        self.failure_record(stream_event, PoisonReason::ScheduleRequest { source }),
+                        self.failure_record(stream_event, PoisonReasonError::ScheduleRequest { source }),
                     ),
                 }
             }
@@ -381,15 +381,17 @@ where
             Ok(reconciliation) => ReconcileStep::Reconciled(Box::new(reconciliation)),
             Err(ReconcileError::MissingCheckpoint { schedule_id }) => ReconcileStep::RetryMissing { schedule_id },
             Err(ReconcileError::UnrecoverableCheckpoint { schedule_id }) => ReconcileStep::Poison(
-                self.failure_record(stream_event, PoisonReason::UnrecoverableCheckpoint { schedule_id }),
+                self.failure_record(stream_event, PoisonReasonError::UnrecoverableCheckpoint { schedule_id }),
             ),
             Err(ReconcileError::ScheduleRequest { source }) => {
-                ReconcileStep::Poison(self.failure_record(stream_event, PoisonReason::ScheduleRequest { source }))
+                ReconcileStep::Poison(self.failure_record(stream_event, PoisonReasonError::ScheduleRequest { source }))
             }
         };
         let reconciliation = match reconcile_step {
             ReconcileStep::Reconciled(reconciliation) => *reconciliation,
-            ReconcileStep::RetryMissing { schedule_id } => return Err(RetrySignal::MissingCheckpoint { schedule_id }),
+            ReconcileStep::RetryMissing { schedule_id } => {
+                return Err(RetryableError::MissingCheckpoint { schedule_id });
+            }
             ReconcileStep::Poison(failure) => return self.poison_failure(failure).await,
         };
 
@@ -417,7 +419,7 @@ where
         event_id: &str,
         reconciliation: Reconciliation,
         revision: Option<u64>,
-    ) -> Result<Processed, RetrySignal> {
+    ) -> Result<Processed, RetryableError> {
         // A duplicate or stale record is already applied: ack without touching
         // the execution schedule or the checkpoint record.
         if reconciliation.next_checkpoint.last_outcome == ReconcileOutcome::DuplicateStale {
@@ -433,9 +435,9 @@ where
         let save_step = match self.checkpoints.save(&reconciliation.next_checkpoint, revision).await {
             Ok(_) => SaveStep::Saved,
             Err(CheckpointStoreError::Conflict) => SaveStep::Conflict,
-            Err(error) if error.is_transient() => return Err(RetrySignal::Checkpoint { source: error }),
+            Err(error) if error.is_transient() => return Err(RetryableError::Checkpoint { source: error }),
             Err(source) => {
-                SaveStep::Poison(self.failure_record(stream_event, PoisonReason::CheckpointWrite { source }))
+                SaveStep::Poison(self.failure_record(stream_event, PoisonReasonError::CheckpointWrite { source }))
             }
         };
         match save_step {
@@ -462,29 +464,29 @@ where
         action: &ReconcileAction,
         event_id: &str,
         trace_headers: &HeaderMap,
-    ) -> Result<(), RetrySignal> {
+    ) -> Result<(), RetryableError> {
         match action {
             ReconcileAction::Publish(request) => self
                 .execution_schedules
                 .upsert(request, event_id, trace_headers)
                 .await
-                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
+                .map_err(|source| RetryableError::ExecutionSchedule { source }),
             ReconcileAction::Dispatch(request) => self
                 .execution_schedules
                 .dispatch(request, event_id, trace_headers)
                 .await
-                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
+                .map_err(|source| RetryableError::ExecutionSchedule { source }),
             ReconcileAction::Purge(subject) => self
                 .execution_schedules
                 .purge(subject)
                 .await
-                .map_err(|source| RetrySignal::ExecutionSchedule { source }),
+                .map_err(|source| RetryableError::ExecutionSchedule { source }),
             ReconcileAction::ArmNext { schedule_id, now } => self.arm_next_occurrence(schedule_id, *now).await,
             ReconcileAction::CheckpointOnly => Ok(()),
         }
     }
 
-    async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetrySignal> {
+    async fn arm_next_occurrence(&self, schedule_id: &ScheduleId, now: DateTime<Utc>) -> Result<(), RetryableError> {
         let command = ScheduleNextOccurrence::new(schedule_id.clone(), now);
         match CommandExecution::new(&self.event_store, &command).execute().await {
             Ok(_) => Ok(()),
@@ -492,11 +494,11 @@ where
                 ScheduleNextOccurrenceError::AlreadyArmed { .. }
                 | ScheduleNextOccurrenceError::AlreadyCompleted { .. }
                 | ScheduleNextOccurrenceError::SchedulePaused { .. } => Ok(()),
-                other => Err(RetrySignal::ArmSchedule {
+                other => Err(RetryableError::ArmSchedule {
                     source: Box::new(other),
                 }),
             },
-            Err(error) => Err(RetrySignal::ArmSchedule {
+            Err(error) => Err(RetryableError::ArmSchedule {
                 source: Box::new(error),
             }),
         }
@@ -520,20 +522,20 @@ where
     async fn resolve_save_conflict(
         &self,
         next_checkpoint: &ScheduleCheckpointRecord,
-    ) -> Result<Processed, RetrySignal> {
+    ) -> Result<Processed, RetryableError> {
         match self.checkpoints.load(&next_checkpoint.key()).await {
             Ok(Some(loaded))
                 if loaded.record.last_applied_stream_position >= next_checkpoint.last_applied_stream_position =>
             {
                 Ok(self.ack(ProcessedOutcome::DuplicateStale))
             }
-            Ok(Some(_)) => Err(RetrySignal::Checkpoint {
+            Ok(Some(_)) => Err(RetryableError::Checkpoint {
                 source: CheckpointStoreError::Conflict,
             }),
-            Ok(None) => Err(RetrySignal::MissingCheckpoint {
+            Ok(None) => Err(RetryableError::MissingCheckpoint {
                 schedule_id: next_checkpoint.schedule_id.clone(),
             }),
-            Err(source) => Err(RetrySignal::Checkpoint { source }),
+            Err(source) => Err(RetryableError::Checkpoint { source }),
         }
     }
 
@@ -547,7 +549,11 @@ where
     /// Writes a durable processing-failure record, then terminates the message.
     /// If recording the failure itself fails transiently the record is retried
     /// so the failure is durable before any ack.
-    pub(super) fn failure_record(&self, stream_event: &StreamEvent, reason: PoisonReason) -> ProcessingFailureRecord {
+    pub(super) fn failure_record(
+        &self,
+        stream_event: &StreamEvent,
+        reason: PoisonReasonError,
+    ) -> ProcessingFailureRecord {
         ProcessingFailureRecord::new(
             self.event_stream_name.clone(),
             stream_event.stream_position,
@@ -557,11 +563,11 @@ where
         )
     }
 
-    pub(super) async fn poison_failure(&self, failure: ProcessingFailureRecord) -> Result<Processed, RetrySignal> {
+    pub(super) async fn poison_failure(&self, failure: ProcessingFailureRecord) -> Result<Processed, RetryableError> {
         self.checkpoints
             .record_failure(&failure)
             .await
-            .map_err(|source| RetrySignal::Checkpoint { source })?;
+            .map_err(|source| RetryableError::Checkpoint { source })?;
         Ok(Processed {
             outcome: ProcessedOutcome::DurableFailure,
             ack: AckAction::Term,

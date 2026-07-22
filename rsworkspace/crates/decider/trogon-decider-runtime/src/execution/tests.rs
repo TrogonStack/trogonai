@@ -11,8 +11,8 @@ use uuid::Uuid;
 use super::*;
 use crate::{
     Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventType,
-    InvalidSnapshotTypeName, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName, StreamEvent,
-    WriteSnapshotResponse,
+    InvalidSnapshotTypeNameError, ReadSnapshotResponse, ReadStreamResponse, SnapshotType, SnapshotTypeName,
+    StreamEvent, WriteSnapshotResponse,
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -79,7 +79,7 @@ enum TestState {
 }
 
 impl SnapshotType for TestState {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("test.command.v1.State")

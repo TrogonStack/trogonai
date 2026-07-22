@@ -5,7 +5,7 @@
 //! UUIDs; we accept any single NATS token to remain transport-agnostic.
 
 use trogon_nats::NatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum TaskIdError {
@@ -17,12 +17,12 @@ pub enum TaskIdError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for TaskIdError {
-    fn from(violation: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for TaskIdError {
+    fn from(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

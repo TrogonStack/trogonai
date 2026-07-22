@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use trogon_std::{NonZeroDuration, ZeroDuration};
+use trogon_std::{NonZeroDuration, ZeroDurationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LeaseTtl(NonZeroDuration);
@@ -23,12 +23,12 @@ impl LeaseTtl {
     }
 
     pub fn from_secs(secs: u64) -> Result<Self, LeaseTtlError> {
-        let ttl = NonZeroDuration::from_secs(secs).map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
+        let ttl = NonZeroDuration::from_secs(secs).map_err(|_: ZeroDurationError| LeaseTtlError::ZeroDuration)?;
         Self::new(ttl)
     }
 
     pub fn from_millis(millis: u64) -> Result<Self, LeaseTtlError> {
-        let ttl = NonZeroDuration::from_millis(millis).map_err(|_: ZeroDuration| LeaseTtlError::ZeroDuration)?;
+        let ttl = NonZeroDuration::from_millis(millis).map_err(|_: ZeroDurationError| LeaseTtlError::ZeroDuration)?;
         Self::new(ttl)
     }
 

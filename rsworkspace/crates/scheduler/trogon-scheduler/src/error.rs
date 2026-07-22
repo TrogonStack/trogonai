@@ -43,7 +43,7 @@ pub enum ScheduleSpecError {
     #[error("schedule id '{id}' is invalid: {source:?}")]
     InvalidId {
         id: String,
-        source: trogon_nats::SubjectTokenViolation,
+        source: trogon_nats::SubjectTokenViolationError,
     },
     #[error("every_sec must be >= 1")]
     EverySecondsMustBePositive,
@@ -64,12 +64,12 @@ pub enum ScheduleSpecError {
     #[error("route '{route}' is invalid: {source:?}")]
     InvalidRoute {
         route: String,
-        source: trogon_nats::SubjectTokenViolation,
+        source: trogon_nats::SubjectTokenViolationError,
     },
     #[error("sampling source '{subject}' is invalid: {source:?}")]
     InvalidSamplingSource {
         subject: String,
-        source: trogon_nats::SubjectTokenViolation,
+        source: trogon_nats::SubjectTokenViolationError,
     },
     #[error("ttl_sec must be >= 1")]
     TtlMustBePositive,

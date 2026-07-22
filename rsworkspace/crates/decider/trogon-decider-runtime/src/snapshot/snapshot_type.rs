@@ -8,13 +8,13 @@ pub struct SnapshotTypeName(String);
 
 impl SnapshotTypeName {
     /// Creates a snapshot type name after rejecting invalid input.
-    pub fn new(value: impl Into<String>) -> Result<Self, InvalidSnapshotTypeName> {
+    pub fn new(value: impl Into<String>) -> Result<Self, InvalidSnapshotTypeNameError> {
         let value = value.into();
         if value.is_empty() {
-            return Err(InvalidSnapshotTypeName::Empty);
+            return Err(InvalidSnapshotTypeNameError::Empty);
         }
         if value.chars().any(char::is_control) {
-            return Err(InvalidSnapshotTypeName::ContainsControlCharacter);
+            return Err(InvalidSnapshotTypeNameError::ContainsControlCharacter);
         }
         Ok(Self(value))
     }
@@ -26,7 +26,7 @@ impl SnapshotTypeName {
 }
 
 impl FromStr for SnapshotTypeName {
-    type Err = InvalidSnapshotTypeName;
+    type Err = InvalidSnapshotTypeNameError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value)
@@ -34,7 +34,7 @@ impl FromStr for SnapshotTypeName {
 }
 
 impl TryFrom<String> for SnapshotTypeName {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -42,7 +42,7 @@ impl TryFrom<String> for SnapshotTypeName {
 }
 
 impl TryFrom<&str> for SnapshotTypeName {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for SnapshotTypeName {
 
 /// Error returned when constructing an invalid [`SnapshotTypeName`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum InvalidSnapshotTypeName {
+pub enum InvalidSnapshotTypeNameError {
     /// Snapshot type names cannot be empty.
     #[error("snapshot type name cannot be empty")]
     Empty,
