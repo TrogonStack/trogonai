@@ -127,7 +127,7 @@
 //!     .then_error(AccountError::AlreadyOpen);
 //! ```
 
-use std::{fmt::Debug, marker::PhantomData, mem::ManuallyDrop, ptr};
+use std::{fmt::Debug, marker::PhantomData};
 
 use crate::{Decider, DecisionFailure, Events, evaluate_decision};
 
@@ -431,7 +431,7 @@ type StateAssertion<State> = Box<dyn FnOnce(&State)>;
 #[must_use = "test cases must be completed with .then(...) or .then_error(...)"]
 pub struct TestCase<C, Stage = Start> {
     marker: PhantomData<fn() -> C>,
-    stage: Stage,
+    stage: Option<Stage>,
     completed: bool,
 }
 
@@ -440,7 +440,7 @@ impl<C> TestCase<C, Start> {
     pub const fn new() -> Self {
         Self {
             marker: PhantomData,
-            stage: Start,
+            stage: Some(Start),
             completed: false,
         }
     }
@@ -455,8 +455,11 @@ impl<C> Default for TestCase<C, Start> {
 impl<C, Stage> TestCase<C, Stage> {
     fn complete_into_stage(mut self) -> Stage {
         self.completed = true;
-        let this = ManuallyDrop::new(self);
-        unsafe { ptr::read(&this.stage) }
+        self.stage.take().expect("TestCase stage was already taken")
+    }
+
+    fn stage_mut(&mut self) -> &mut Stage {
+        self.stage.as_mut().expect("TestCase stage was already taken")
     }
 }
 
@@ -469,7 +472,7 @@ where
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: NoHistory,
+            stage: Some(NoHistory),
             completed: false,
         }
     }
@@ -483,9 +486,9 @@ where
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: Given {
+            stage: Some(Given {
                 history: History::from_events(events),
-            },
+            }),
             completed: false,
         }
     }
@@ -501,7 +504,7 @@ where
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: GivenState { state },
+            stage: Some(GivenState { state }),
             completed: false,
         }
     }
@@ -516,12 +519,12 @@ where
         let GivenState { state } = self.complete_into_stage();
         TestCase {
             marker: PhantomData,
-            stage: When {
+            stage: Some(When {
                 history: History::new(),
                 state,
                 expected_state: None,
                 command,
-            },
+            }),
             completed: false,
         }
     }
@@ -537,7 +540,7 @@ where
         I: IntoIterator<Item = E>,
         E: Into<C::Event>,
     {
-        self.stage.history.extend(events);
+        self.stage_mut().history.extend(events);
         self
     }
 }
@@ -553,12 +556,12 @@ where
         self.completed = true;
         TestCase {
             marker: PhantomData,
-            stage: When {
+            stage: Some(When {
                 history: History::new(),
                 state: C::initial_state(),
                 expected_state: None,
                 command,
-            },
+            }),
             completed: false,
         }
     }
@@ -580,7 +583,7 @@ where
     pub fn when(mut self, command: C) -> TestCase<C, When<C::Event, C::State, C>> {
         self.completed = true;
         let mut state = C::initial_state();
-        let history = std::mem::take(&mut self.stage.history);
+        let history = std::mem::take(&mut self.stage_mut().history);
 
         for (index, event) in history.iter().enumerate() {
             state = match C::evolve(state, event) {
@@ -596,12 +599,12 @@ where
 
         TestCase {
             marker: PhantomData,
-            stage: When {
+            stage: Some(When {
                 history,
                 state,
                 expected_state: None,
                 command,
-            },
+            }),
             completed: false,
         }
     }
@@ -620,7 +623,7 @@ where
     where
         C::State: PartialEq + Debug + 'static,
     {
-        self.stage.expected_state = Some(Box::new(move |actual| {
+        self.stage_mut().expected_state = Some(Box::new(move |actual| {
             assert_eq!(
                 actual, &expected_state,
                 "state(...) replayed state did not match expectation"

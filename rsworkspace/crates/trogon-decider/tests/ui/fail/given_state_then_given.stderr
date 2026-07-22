@@ -1,0 +1,13 @@
+error[E0599]: no method named `given` found for struct `TestCase<TestCommand, trogon_decider::testing::GivenState<TestState>>` in the current scope
+  --> tests/ui/fail/given_state_then_given.rs:11:10
+   |
+ 9 | /     TestCase::<TestCommand>::new()
+10 | |         .given_state(TestState::Missing)
+11 | |         .given([TestEvent::Registered]);
+   | |         -^^^^^ method not found in `TestCase<TestCommand, trogon_decider::testing::GivenState<TestState>>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `TestCase<C, trogon_decider::testing::Given<<C as Decider>::Event>>`
+           - `TestCase<C>`

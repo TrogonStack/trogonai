@@ -703,6 +703,14 @@ fn command_errors_preserve_display_and_sources() {
             read_after_overflow_message,
             true,
         ),
+        (
+            CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+                limit: ReplayLimit::try_new(2).unwrap(),
+                replayed_event_count: 5,
+            }),
+            "command replay read 5 events, exceeding the configured limit of 2".to_string(),
+            false,
+        ),
     ];
 
     for (error, message, has_source) in cases {
@@ -1034,6 +1042,49 @@ fn discard_and_replay_recovers_from_snapshot_ahead_of_stream() {
     assert_eq!(
         runtime.written_snapshots.lock().unwrap().as_slice(),
         &[Snapshot::new(position(3), TestState::Missing)]
+    );
+}
+
+#[test]
+fn discard_and_replay_recovery_is_exempt_from_the_replay_limit() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+        current_position: Some(position(2)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            ),
+        ],
+        stream_position: position(3),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+    let limit = ReplayLimit::try_new(1).unwrap();
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(
+        runtime.written_snapshots.lock().unwrap().as_slice(),
+        &[Snapshot::new(position(3), TestState::Missing)],
+        "the recovery snapshot write must land so the bad snapshot cannot wedge later commands"
     );
 }
 
@@ -1841,4 +1892,176 @@ fn resolves_stream_id_once() {
 
     assert_eq!(command.stream_id_calls(), 1);
     assert!(runtime.loaded_stream_ids.lock().unwrap().is_empty());
+}
+
+#[test]
+fn replay_limit_exceeded_fails_before_folding_without_snapshot() {
+    // The final event fails evolution, so getting ReplayLimitExceeded instead
+    // of Evolve(BrokenEvent) proves the limit is enforced before folding.
+    let runtime = FakeRuntime {
+        current_position: Some(position(3)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ),
+            stream_event(
+                3,
+                TestEvent::Broken {
+                    id: "alpha".to_string(),
+                },
+            ),
+        ],
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let limit = ReplayLimit::try_new(2).unwrap();
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+            limit: error_limit,
+            replayed_event_count: 3,
+        }) if error_limit == limit
+    ));
+    assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn replay_limit_exceeded_fails_before_folding_with_snapshot() {
+    // The final event fails evolution, so getting ReplayLimitExceeded instead
+    // of Evolve(BrokenEvent) proves the limit is enforced before folding.
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(1), TestState::Present { enabled: true })),
+        current_position: Some(position(3)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ),
+            stream_event(
+                3,
+                TestEvent::Broken {
+                    id: "alpha".to_string(),
+                },
+            ),
+        ],
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Disable);
+    let limit = ReplayLimit::try_new(1).unwrap();
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_replay_limit(limit)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+            limit: error_limit,
+            replayed_event_count: 2,
+        }) if error_limit == limit
+    ));
+    assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
+    assert!(runtime.appended_events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn replay_limit_exactly_at_boundary_succeeds() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(2)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::Removed {
+                    id: "alpha".to_string(),
+                },
+            ),
+        ],
+        stream_position: position(3),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let limit = ReplayLimit::try_new(2).unwrap();
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Present { enabled: true });
+}
+
+#[test]
+fn replay_limit_defaults_to_unlimited() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(3)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ),
+            stream_event(
+                3,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            ),
+        ],
+        stream_position: position(4),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Disable);
+
+    let result = block_on(CommandExecution::new(&runtime, &command).execute()).unwrap();
+
+    assert_eq!(result.state, TestState::Present { enabled: false });
 }

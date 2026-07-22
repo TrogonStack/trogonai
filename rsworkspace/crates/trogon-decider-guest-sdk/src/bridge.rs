@@ -243,11 +243,9 @@ where
     let (_, events) = evaluate_decision::<C>(state.clone(), command)
         .map_err(|failure| into_decide_error(map_decision_failure::<C>(failure)))?;
 
-    events
-        .into_vec()
-        .into_iter()
-        .map(encode_event_envelope::<C::Event, A, D>)
-        .collect()
+    // `Events::try_map` preserves the non-empty guarantee the WIT `decide`
+    // contract requires, so the returned list is non-empty by construction.
+    Ok(events.try_map(encode_event_envelope::<C::Event, A, D>)?.into_vec())
 }
 
 fn encode_event_envelope<E, A, D>(event: E) -> Result<A, D>

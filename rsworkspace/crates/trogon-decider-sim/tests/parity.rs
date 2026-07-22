@@ -6,8 +6,8 @@ use std::fs;
 
 use trogon_decider::Decider;
 use trogon_decider_sim::{
-    NativeDecideError, NativeDeciderBundle, NativeDomainError, SimFixture, SimHost, WireEnvelope, assert_parity,
-    decode_native_command, native_decide, native_evolve_one,
+    NativeDecideError, NativeDeciderBundle, NativeDomainError, ParityError, ScenarioIr, SimFixture, SimHost,
+    WireEnvelope, assert_parity, decode_native_command, native_decide, native_evolve_one,
 };
 use trogon_decider_test::Suite;
 use trogon_scheduler_domain::{CreateSchedule, PauseSchedule, RemoveSchedule, ResumeSchedule};
@@ -134,4 +134,45 @@ fn schedules_yaml_scenarios_have_native_wasm_parity() {
         assert_parity::<SchedulesBundle, _>(scenario, &mut instance)
             .unwrap_or_else(|error| panic!("scenario '{}' diverged: {error}", scenario.name));
     }
+}
+
+fn create_backup_scenario() -> ScenarioIr {
+    let suite = schedules_suite();
+    suite
+        .to_ir()
+        .expect("schedules.yaml converts to ir")
+        .into_iter()
+        .find(|scenario| scenario.name == "create schedule from initial state")
+        .expect("schedules.yaml declares the initial-state create scenario")
+}
+
+/// `assert_parity` resolves the scenario's first command's stream id through both runners and,
+/// when the scenario declares one, checks the resolved id matches it too.
+#[test]
+fn assert_parity_passes_when_declared_stream_id_matches_both_runners() {
+    let mut scenario = create_backup_scenario();
+    scenario.stream_id = Some("backup".to_string());
+
+    let wasm = SimFixture::schedules().bytes().to_vec();
+    let host = SimHost::load(&wasm).expect("load schedules wasm component");
+    let mut instance = host.instantiate(()).expect("instantiate schedules component");
+
+    assert_parity::<SchedulesBundle, _>(&scenario, &mut instance)
+        .expect("declared stream id must match both runners' resolved id");
+}
+
+#[test]
+fn assert_parity_reports_a_declared_stream_id_mismatch() {
+    let mut scenario = create_backup_scenario();
+    scenario.stream_id = Some("not-backup".to_string());
+
+    let wasm = SimFixture::schedules().bytes().to_vec();
+    let host = SimHost::load(&wasm).expect("load schedules wasm component");
+    let mut instance = host.instantiate(()).expect("instantiate schedules component");
+
+    let error = assert_parity::<SchedulesBundle, _>(&scenario, &mut instance).unwrap_err();
+    assert!(
+        matches!(&error, ParityError::StreamIdDeclaredMismatch { .. }),
+        "{error}"
+    );
 }

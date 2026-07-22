@@ -6565,6 +6565,7 @@ dependencies = [
  "trogonai-proto",
  "uuid",
  "wasmtime",
+ "wat",
 ]
 
 [[package]]

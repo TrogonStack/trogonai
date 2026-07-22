@@ -162,10 +162,10 @@ fn run_native_accepts_and_folds_events_across_steps() {
         expect: ExpectedOutcome::Accepted,
     });
 
-    let outcomes = run_native::<CounterBundle>(&scenario).expect("scenario runs");
-    assert_eq!(outcomes.len(), 2);
-    assert_eq!(outcomes[0], StepOutcome::Events(vec![incremented_envelope(10)]));
-    assert_eq!(outcomes[1], StepOutcome::Events(vec![incremented_envelope(20)]));
+    let run = run_native::<CounterBundle>(&scenario).expect("scenario runs");
+    assert_eq!(run.steps.len(), 2);
+    assert_eq!(run.steps[0], StepOutcome::Events(vec![incremented_envelope(10)]));
+    assert_eq!(run.steps[1], StepOutcome::Events(vec![incremented_envelope(20)]));
 }
 
 #[test]
@@ -180,9 +180,9 @@ fn run_native_reports_rejection_once_ceiling_is_exceeded() {
         expect: ExpectedOutcome::Rejected,
     });
 
-    let outcomes = run_native::<CounterBundle>(&scenario).expect("scenario runs");
-    assert_eq!(outcomes.len(), 2);
-    assert!(matches!(&outcomes[1], StepOutcome::Rejected { code, .. } if code == "rejected"));
+    let run = run_native::<CounterBundle>(&scenario).expect("scenario runs");
+    assert_eq!(run.steps.len(), 2);
+    assert!(matches!(&run.steps[1], StepOutcome::Rejected(outcome) if outcome.code == "rejected"));
 }
 
 #[test]
@@ -194,7 +194,27 @@ fn run_native_replays_given_history_before_the_first_step() {
         expect: ExpectedOutcome::Rejected,
     });
 
-    let outcomes = run_native::<CounterBundle>(&scenario).expect("scenario runs");
-    assert_eq!(outcomes.len(), 1);
-    assert!(matches!(&outcomes[0], StepOutcome::Rejected { .. }));
+    let run = run_native::<CounterBundle>(&scenario).expect("scenario runs");
+    assert_eq!(run.steps.len(), 1);
+    assert!(matches!(&run.steps[0], StepOutcome::Rejected(_)));
+}
+
+#[test]
+fn run_native_resolves_the_first_steps_stream_id() {
+    let mut scenario = ScenarioIr::new("stream id resolves");
+    scenario.steps.push(ScenarioStep {
+        when: increment_envelope(10),
+        expect: ExpectedOutcome::Accepted,
+    });
+
+    let run = run_native::<CounterBundle>(&scenario).expect("scenario runs");
+    assert_eq!(run.stream_id, Some(StreamIdOutcome::Resolved("counter".to_string())));
+}
+
+#[test]
+fn run_native_reports_no_stream_id_for_an_empty_scenario() {
+    let scenario = ScenarioIr::new("no steps");
+
+    let run = run_native::<CounterBundle>(&scenario).expect("scenario runs");
+    assert!(run.stream_id.is_none());
 }

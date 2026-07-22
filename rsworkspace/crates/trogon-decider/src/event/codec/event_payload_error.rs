@@ -1,4 +1,4 @@
-/// Payload-level failure used by generated or enum-backed event decoders.
+/// Payload-level failure used by generated or enum-backed event codecs.
 ///
 /// This type keeps a strict boundary between envelope routing and payload
 /// validity. Unknown event types can be reported separately from payloads that
@@ -9,7 +9,15 @@ pub enum EventPayloadError<Source> {
     /// The source serializer failed after the event type was accepted.
     #[error("{0}")]
     Decode(#[source] Source),
-    /// The decoded payload did not contain the concrete event case.
+    /// The value has no concrete event case to work with.
+    ///
+    /// A generated or enum-backed codec returns this when a domain event value
+    /// has no concrete case set, for example an unset oneof, so
+    /// [`EventEncode::encode`](crate::EventEncode::encode) cannot serialize it
+    /// and [`EventType::event_type`](crate::EventType::event_type) cannot name
+    /// it. The same variant also covers the symmetric decode-time failure: a
+    /// stored payload whose event type matched, but whose concrete case is
+    /// absent once deserialized.
     #[error("event payload is missing its concrete event case")]
     MissingEvent,
     /// The envelope event type is not recognized by this payload decoder.

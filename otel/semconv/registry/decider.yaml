@@ -111,6 +111,10 @@ groups:
               value: "snapshot"
               brief: Reading or writing the guest session's snapshot.
               stability: development
+            - id: drop
+              value: "drop"
+              brief: Running the guest session resource's destructor.
+              stability: development
         stability: development
         brief: Phase of WASM guest command execution.
         examples: ["instantiate", "decide"]

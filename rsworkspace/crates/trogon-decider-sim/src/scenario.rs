@@ -34,6 +34,13 @@ pub enum ScenarioError {
         #[source]
         source: wasmtime::Error,
     },
+    /// Resolving a command's stream id failed at the host-call level.
+    #[error("failed to call stream-id")]
+    StreamIdCall {
+        /// The underlying wasmtime error.
+        #[source]
+        source: wasmtime::Error,
+    },
     /// Folding `given` or a step's forwarded events was rejected by the decider's domain logic.
     #[error("evolve failed: {code}: {message}")]
     Evolve {
@@ -195,6 +202,32 @@ impl PendingStep {
             steps.push(ScenarioStep { when, expectation });
         }
     }
+
+    /// Flushes a completed pending step into `steps` and starts a new one with `command`,
+    /// panicking if the pending step already has a `when` that was never paired with a
+    /// `.then_*(...)` call.
+    fn begin(&mut self, command: host::CommandEnvelope, steps: &mut Vec<ScenarioStep>) {
+        assert!(
+            self.when.is_none() || self.expectation.is_some(),
+            "SimScenario::when(...) called again before the previous when(...) was completed with a then_*(...) call"
+        );
+        self.flush_into(steps);
+        self.when = Some(command);
+    }
+
+    /// Sets this pending step's expectation, panicking if no `.when(...)` call opened the step
+    /// or if a `.then_*(...)` call already set one for the same `.when(...)`.
+    fn set_expectation(&mut self, expectation: Expectation) {
+        assert!(
+            self.when.is_some(),
+            "SimScenario::then_*(...) called without a preceding when(...) call"
+        );
+        assert!(
+            self.expectation.is_none(),
+            "SimScenario::then_*(...) called twice for the same when(...) call"
+        );
+        self.expectation = Some(expectation);
+    }
 }
 
 /// Fluent given/when/then helper over a loaded WASM decider component.
@@ -235,37 +268,63 @@ impl SimScenario {
     /// starts the next one, building an ordered multi-step scenario. A single
     /// `.when(...)` call followed by exactly one `.then_*(...)` call behaves
     /// exactly as it always has.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the preceding `.when(...)` was never completed with a `.then_*(...)` call: this
+    /// is builder misuse, not a runnable scenario, so it fails loudly instead of silently
+    /// dropping the preceding step.
     pub fn when(mut self, command: host::CommandEnvelope) -> Self {
-        self.current.flush_into(&mut self.steps);
-        self.current.when = Some(command);
+        self.current.begin(command, &mut self.steps);
         self
     }
 
     /// Sets the current step's expectation to a specific ordered list of events, completing the
     /// step once paired with a preceding `.when(...)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_events(mut self, events: impl IntoIterator<Item = host::AnyEnvelope>) -> Self {
-        self.current.expectation = Some(Expectation::Events(events.into_iter().collect()));
+        self.current
+            .set_expectation(Expectation::Events(events.into_iter().collect()));
         self
     }
 
     /// Sets the current step's expectation to a rejection, without asserting its code or
     /// message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_rejected(mut self) -> Self {
-        self.current.expectation = Some(Expectation::Rejected);
+        self.current.set_expectation(Expectation::Rejected);
         self
     }
 
     /// Expect the command to be accepted (decide returns events), without
     /// asserting which events. Used for scenarios that only assert "not rejected".
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_accepted(mut self) -> Self {
-        self.current.expectation = Some(Expectation::Accepted);
+        self.current.set_expectation(Expectation::Accepted);
         self
     }
 
     /// Expect the command to error (rejected or faulted) with the given code or
     /// message. Matches the decode/decide outcome's `code` or `message` exactly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_error(mut self, expected: impl Into<String>) -> Self {
-        self.current.expectation = Some(Expectation::Error(expected.into()));
+        self.current.set_expectation(Expectation::Error(expected.into()));
         self
     }
 
