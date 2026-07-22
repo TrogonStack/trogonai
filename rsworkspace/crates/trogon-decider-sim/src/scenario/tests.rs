@@ -50,7 +50,7 @@ fn then_before_any_when_panics() {
 }
 
 #[test]
-fn when_then_when_then_builds_two_steps_without_panicking() {
+fn when_then_when_then_flushes_the_first_step_and_buffers_the_second() {
     let scenario = SimScenario::new()
         .when(command("a"))
         .then_accepted()
