@@ -75,11 +75,13 @@ func normalizeIdentifier(input string) (witIdentifier, error) {
 	}
 
 	var output strings.Builder
+	var lastByte byte
 	for index := 0; index < len(input); index++ {
 		current := input[index]
 		if current == '_' || current == '-' || current == '.' {
-			if output.Len() > 0 && output.String()[output.Len()-1] != '-' {
+			if output.Len() > 0 && lastByte != '-' {
 				output.WriteByte('-')
+				lastByte = '-'
 			}
 			continue
 		}
@@ -89,12 +91,13 @@ func normalizeIdentifier(input string) (witIdentifier, error) {
 		if isASCIIUpper(current) {
 			previousIsLowerOrDigit := index > 0 && (isASCIILower(input[index-1]) || isASCIIDigit(input[index-1]))
 			nextIsLower := index+1 < len(input) && isASCIILower(input[index+1])
-			if output.Len() > 0 && output.String()[output.Len()-1] != '-' && (previousIsLowerOrDigit || nextIsLower) {
+			if output.Len() > 0 && lastByte != '-' && (previousIsLowerOrDigit || nextIsLower) {
 				output.WriteByte('-')
 			}
 			current += 'a' - 'A'
 		}
 		output.WriteByte(current)
+		lastByte = current
 	}
 
 	normalized := strings.Trim(output.String(), "-")
