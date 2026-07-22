@@ -590,6 +590,49 @@ func TestRecursiveMessageThroughOneofIsRejected(t *testing.T) {
 	require.Empty(t, response.GetFile(), "recursive oneof schemas must not produce files")
 }
 
+func TestTransitiveSamePackageFileConstructsAreValidated(t *testing.T) {
+	requested := &descriptorpb.FileDescriptorProto{
+		Name:       proto.String("envelope.proto"),
+		Package:    proto.String("example.events.v1"),
+		Syntax:     proto.String("proto3"),
+		Dependency: []string{"other.proto"},
+		MessageType: []*descriptorpb.DescriptorProto{
+			{
+				Name: proto.String("Envelope"),
+				Field: []*descriptorpb.FieldDescriptorProto{
+					messageField(
+						"other",
+						1,
+						".example.events.v1.Other",
+						descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL,
+					),
+				},
+			},
+		},
+	}
+	referenced := &descriptorpb.FileDescriptorProto{
+		Name:        proto.String("other.proto"),
+		Package:     proto.String("example.events.v1"),
+		Syntax:      proto.String("proto3"),
+		MessageType: []*descriptorpb.DescriptorProto{messageWithID("Other")},
+		EnumType: []*descriptorpb.EnumDescriptorProto{
+			{
+				Name: proto.String("Color"),
+				Value: []*descriptorpb.EnumValueDescriptorProto{
+					{Name: proto.String("COLOR_UNSPECIFIED"), Number: proto.Int32(0)},
+				},
+			},
+		},
+	}
+	request := &pluginpb.CodeGeneratorRequest{
+		FileToGenerate: []string{"envelope.proto"},
+		ProtoFile:      []*descriptorpb.FileDescriptorProto{requested, referenced},
+	}
+	response := runRequest(t, request)
+	require.Equal(t, "example.events.v1.Color: enums are not supported", response.GetError())
+	require.Empty(t, response.GetFile(), "unsupported constructs in transitively referenced files must be rejected")
+}
+
 func TestSchedulerEventProtosGenerateSnapshots(t *testing.T) {
 	request := schedulerEventRequest(t, repositoryRoot(t))
 

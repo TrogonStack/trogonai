@@ -157,6 +157,7 @@ func buildSchema(files []protoreflect.FileDescriptor) (witSchema, error) {
 	namesByIdentifier := make(map[witIdentifier]protoreflect.FullName)
 	namesByFullName := make(map[protoreflect.FullName]witIdentifier)
 	requestedMessages := make([]protoreflect.MessageDescriptor, 0)
+	checkedFiles := make(map[string]struct{})
 	for _, file := range orderedFiles {
 		if file.Package() != protoPackage {
 			return witSchema{}, fmt.Errorf(
@@ -166,15 +167,10 @@ func buildSchema(files []protoreflect.FileDescriptor) (witSchema, error) {
 				file.Package(),
 			)
 		}
-		if file.Services().Len() > 0 {
-			return witSchema{}, &schemaError{element: file.Package(), reason: unsupportedService}
+		if err := checkFileConstructs(file); err != nil {
+			return witSchema{}, err
 		}
-		if file.Extensions().Len() > 0 {
-			return witSchema{}, &schemaError{element: file.Package(), reason: unsupportedExtension}
-		}
-		if file.Enums().Len() > 0 {
-			return witSchema{}, &schemaError{element: file.Enums().Get(0).FullName(), reason: unsupportedEnum}
-		}
+		checkedFiles[file.Path()] = struct{}{}
 		for index := 0; index < file.Messages().Len(); index++ {
 			requestedMessages = append(requestedMessages, file.Messages().Get(index))
 		}
@@ -199,6 +195,9 @@ func buildSchema(files []protoreflect.FileDescriptor) (witSchema, error) {
 		namesByIdentifier,
 		namesByFullName,
 	); err != nil {
+		return witSchema{}, err
+	}
+	if err := checkContributingFiles(definitions, checkedFiles); err != nil {
 		return witSchema{}, err
 	}
 
@@ -248,6 +247,43 @@ func buildSchema(files []protoreflect.FileDescriptor) (witSchema, error) {
 		records:      records,
 		variants:     variants,
 	}, nil
+}
+
+func checkFileConstructs(file protoreflect.FileDescriptor) error {
+	if file.Services().Len() > 0 {
+		return &schemaError{element: file.Package(), reason: unsupportedService}
+	}
+	if file.Extensions().Len() > 0 {
+		return &schemaError{element: file.Package(), reason: unsupportedExtension}
+	}
+	if file.Enums().Len() > 0 {
+		return &schemaError{element: file.Enums().Get(0).FullName(), reason: unsupportedEnum}
+	}
+	return nil
+}
+
+func checkContributingFiles(definitions []messageDefinition, checkedFiles map[string]struct{}) error {
+	pending := make(map[string]protoreflect.FileDescriptor)
+	for _, definition := range definitions {
+		file := definition.descriptor.ParentFile()
+		if _, done := checkedFiles[file.Path()]; done {
+			continue
+		}
+		pending[file.Path()] = file
+	}
+
+	paths := make([]string, 0, len(pending))
+	for path := range pending {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := checkFileConstructs(pending[path]); err != nil {
+			return err
+		}
+		checkedFiles[path] = struct{}{}
+	}
+	return nil
 }
 
 func collectMessageDefinitions(
