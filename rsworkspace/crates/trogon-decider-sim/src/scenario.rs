@@ -215,9 +215,13 @@ impl PendingStep {
         self.when = Some(command);
     }
 
-    /// Sets this pending step's expectation, panicking if a `.then_*(...)` call already set one
-    /// for the same `.when(...)`.
+    /// Sets this pending step's expectation, panicking if no `.when(...)` call opened the step
+    /// or if a `.then_*(...)` call already set one for the same `.when(...)`.
     fn set_expectation(&mut self, expectation: Expectation) {
+        assert!(
+            self.when.is_some(),
+            "SimScenario::then_*(...) called without a preceding when(...) call"
+        );
         assert!(
             self.expectation.is_none(),
             "SimScenario::then_*(...) called twice for the same when(...) call"
@@ -280,7 +284,8 @@ impl SimScenario {
     ///
     /// # Panics
     ///
-    /// Panics if a `.then_*(...)` call already set an expectation for the current `.when(...)`.
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_events(mut self, events: impl IntoIterator<Item = host::AnyEnvelope>) -> Self {
         self.current
             .set_expectation(Expectation::Events(events.into_iter().collect()));
@@ -292,7 +297,8 @@ impl SimScenario {
     ///
     /// # Panics
     ///
-    /// Panics if a `.then_*(...)` call already set an expectation for the current `.when(...)`.
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_rejected(mut self) -> Self {
         self.current.set_expectation(Expectation::Rejected);
         self
@@ -303,7 +309,8 @@ impl SimScenario {
     ///
     /// # Panics
     ///
-    /// Panics if a `.then_*(...)` call already set an expectation for the current `.when(...)`.
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_accepted(mut self) -> Self {
         self.current.set_expectation(Expectation::Accepted);
         self
@@ -314,7 +321,8 @@ impl SimScenario {
     ///
     /// # Panics
     ///
-    /// Panics if a `.then_*(...)` call already set an expectation for the current `.when(...)`.
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
     pub fn then_error(mut self, expected: impl Into<String>) -> Self {
         self.current.set_expectation(Expectation::Error(expected.into()));
         self

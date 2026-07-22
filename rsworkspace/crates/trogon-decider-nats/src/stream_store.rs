@@ -250,24 +250,23 @@ where
     let batch_id = UuidV7Generator.now_v7().to_string();
     let mut batch_ack = None;
 
-    // Building every message first surfaces a header-validation failure
-    // before any batch member reaches the server.
-    let publishes = events
-        .iter()
-        .enumerate()
-        .map(|(index, event)| {
-            build_publish_message(
-                event,
-                event.content.clone(),
-                expected_last_subject_sequence,
-                batch_id.as_str(),
-                index,
-                events.len(),
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    // Validating every event's headers first surfaces a failure before any
+    // batch member reaches the server, without keeping the whole batch's
+    // built messages resident.
+    for event in events {
+        validate_event_headers(event)?;
+    }
 
-    for (index, publish) in publishes.into_iter().enumerate() {
+    for (index, event) in events.iter().enumerate() {
+        let publish = build_publish_message(
+            event,
+            event.content.clone(),
+            expected_last_subject_sequence,
+            batch_id.as_str(),
+            index,
+            events.len(),
+        )?;
+
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
             .await
@@ -472,6 +471,14 @@ pub fn record_stream_message(
         stream_position,
         recorded_at,
     })
+}
+
+fn validate_event_headers(event: &Event) -> Result<(), PublishStreamError> {
+    for (name, value) in event.headers.iter() {
+        let header_name = event_header_name(name.as_str())?;
+        event_header_value(&header_name, value.as_str())?;
+    }
+    Ok(())
 }
 
 fn event_header_name(name: &str) -> Result<HeaderName, PublishStreamError> {

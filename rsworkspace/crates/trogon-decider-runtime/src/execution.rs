@@ -1211,8 +1211,15 @@ where
         record_snapshot_read_outcome(&read_snapshot_span, snapshot_outcome);
 
         let replayed_event_count = stream_events.len() as u64;
-        ensure_replay_within_limit(self.replay_limit, replayed_event_count)
-            .map_err(CommandError::ReplayLimitExceeded)?;
+        // A discard-and-replay recovery deliberately replays the full stream
+        // and ends by overwriting the discarded snapshot; failing it on a
+        // limit sized for post-snapshot deltas would leave the bad snapshot
+        // in place and wedge every later command in the same
+        // discard-replay-fail loop.
+        if !discarded_bad_snapshot {
+            ensure_replay_within_limit(self.replay_limit, replayed_event_count)
+                .map_err(CommandError::ReplayLimitExceeded)?;
+        }
 
         let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
         let (append_outcome, events, state) = self.append_decision(current_position, stream_id, state).await?;

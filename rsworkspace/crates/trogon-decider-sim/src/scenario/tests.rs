@@ -44,6 +44,12 @@ fn then_twice_after_one_when_panics() {
 }
 
 #[test]
+#[should_panic(expected = "SimScenario::then_*(...) called without a preceding when(...) call")]
+fn then_before_any_when_panics() {
+    let _ = SimScenario::new().then_accepted();
+}
+
+#[test]
 fn when_then_when_then_builds_two_steps_without_panicking() {
     let scenario = SimScenario::new()
         .when(command("a"))

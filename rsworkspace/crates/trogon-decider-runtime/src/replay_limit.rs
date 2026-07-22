@@ -11,6 +11,11 @@ use std::num::NonZeroU64;
 /// stream read returns more events than the limit, before any folding
 /// happens. The check runs after the read, so it makes the misconfiguration
 /// fail loudly rather than bounding the read itself.
+///
+/// A discard-and-replay snapshot recovery is exempt: its full replay is a
+/// deliberate one-off that ends by overwriting the discarded snapshot, and
+/// failing it would leave the bad snapshot in place for every later command
+/// to trip over again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ReplayLimit(NonZeroU64);
 

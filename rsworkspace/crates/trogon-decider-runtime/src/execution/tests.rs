@@ -1046,6 +1046,49 @@ fn discard_and_replay_recovers_from_snapshot_ahead_of_stream() {
 }
 
 #[test]
+fn discard_and_replay_recovery_is_exempt_from_the_replay_limit() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+        current_position: Some(position(2)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            ),
+        ],
+        stream_position: position(3),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Remove);
+    let limit = ReplayLimit::try_new(1).unwrap();
+
+    let result = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+            .execute(),
+    )
+    .unwrap();
+
+    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(
+        runtime.written_snapshots.lock().unwrap().as_slice(),
+        &[Snapshot::new(position(3), TestState::Missing)],
+        "the recovery snapshot write must land so the bad snapshot cannot wedge later commands"
+    );
+}
+
+#[test]
 fn discard_and_replay_recovers_from_snapshot_read_failure() {
     let runtime = FakeRuntime {
         fail_read_snapshot: true,

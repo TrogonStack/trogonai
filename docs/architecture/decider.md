@@ -123,8 +123,10 @@ command execution may replay: if a stream read returns more events than the limi
 command fails with `CommandError::ReplayLimitExceeded` before any folding happens, so a
 decider that forgets or misconfigures snapshotting fails loudly instead of silently growing
 per-command latency with the stream. The check runs after the read returns, so it does not
-bound the read itself; a streaming bound on `StreamRead` is possible future work. The
-default is unlimited.
+bound the read itself; a streaming bound on `StreamRead` is possible future work. A
+discard-and-replay snapshot recovery is exempt from the limit: its full replay is a
+deliberate one-off that ends by overwriting the discarded snapshot, and failing it would
+leave the bad snapshot in place to wedge every later command. The default is unlimited.
 
 `CommandError<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError,
 EventTypeError, PayloadEncodeError, DecodeError>` normalizes failures by phase
