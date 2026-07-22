@@ -53,8 +53,8 @@ pub(crate) fn check_item<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         "type implementing `std::error::Error` is not named with an `Error` suffix",
         |diag| {
             diag.help(format!(
-                "rename `{name}` to `{name}Error` so every type that implements `std::error::Error` is \
-                 recognizable as one by name"
+                "give `{name}` a name ending in `Error` so every type that implements `std::error::Error` \
+                 is recognizable as one by name"
             ));
         },
     );

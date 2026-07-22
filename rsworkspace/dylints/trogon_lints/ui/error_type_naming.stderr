@@ -4,7 +4,7 @@ error: type implementing `std::error::Error` is not named with an `Error` suffix
 LL | struct EmptySecret;
    | ^^^^^^^^^^^^^^^^^^
    |
-   = help: rename `EmptySecret` to `EmptySecretError` so every type that implements `std::error::Error` is recognizable as one by name
+   = help: give `EmptySecret` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
    = note: `#[deny(error_type_naming)]` on by default
 
 error: type implementing `std::error::Error` is not named with an `Error` suffix
@@ -13,7 +13,7 @@ error: type implementing `std::error::Error` is not named with an `Error` suffix
 LL | enum Decode {
    | ^^^^^^^^^^^
    |
-   = help: rename `Decode` to `DecodeError` so every type that implements `std::error::Error` is recognizable as one by name
+   = help: give `Decode` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
 
 error: type implementing `std::error::Error` is not named with an `Error` suffix
   --> $DIR/error_type_naming.rs:45:1
@@ -21,7 +21,7 @@ error: type implementing `std::error::Error` is not named with an `Error` suffix
 LL | struct MacroSecret;
    | ^^^^^^^^^^^^^^^^^^
    |
-   = help: rename `MacroSecret` to `MacroSecretError` so every type that implements `std::error::Error` is recognizable as one by name
+   = help: give `MacroSecret` a name ending in `Error` so every type that implements `std::error::Error` is recognizable as one by name
 
 error: aborting due to 3 previous errors
 
