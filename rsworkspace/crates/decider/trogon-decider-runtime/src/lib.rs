@@ -60,7 +60,7 @@
 //! let observed = StreamPosition::try_new(1)?;
 //! let precondition = StreamWritePrecondition::At(observed);
 //! # let _ = (event, precondition);
-//! # Ok::<(), trogon_decider_runtime::InvalidStreamPosition>(())
+//! # Ok::<(), trogon_decider_runtime::InvalidStreamPositionError>(())
 //! ```
 #![cfg_attr(
     any(test, feature = "test-support"),
@@ -97,13 +97,13 @@ pub use headers::{FromEntriesError, HeaderName, HeaderNameError, HeaderValue, He
 pub use memory::{InMemoryStore, StreamAppendError};
 pub use replay_limit::{ReplayLimit, ReplayLimitError};
 pub use snapshot::{
-    InvalidSnapshotTypeName, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
+    InvalidSnapshotTypeNameError, ReadSnapshotRequest, ReadSnapshotResponse, Snapshot, SnapshotPayloadData,
     SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotRead, SnapshotType, SnapshotTypeName, SnapshotWrite,
     WriteSnapshotRequest, WriteSnapshotResponse,
 };
 pub use stream::{
-    AppendStreamRequest, AppendStreamResponse, InvalidStreamPosition, ReadAfterOverflow, ReadFrom, ReadStreamRequest,
-    ReadStreamResponse, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, InvalidStreamPositionError, ReadAfterOverflowError, ReadFrom,
+    ReadStreamRequest, ReadStreamResponse, StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 #[cfg(feature = "test-support")]
 pub use trogon_decider::testing;

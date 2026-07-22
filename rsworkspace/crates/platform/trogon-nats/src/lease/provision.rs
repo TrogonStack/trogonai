@@ -8,7 +8,7 @@ use async_nats::jetstream::{
 use crate::jetstream::is_create_key_value_already_exists;
 use crate::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamKeyValueStatus};
 
-use super::{IncompatibleLeaseBucketConfig, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig};
+use super::{IncompatibleLeaseBucketConfigError, LeaseError, LeaseProvisionError, NatsKvLease, NatsKvLeaseConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(coverage, allow(dead_code))]
@@ -106,7 +106,7 @@ pub(super) fn validate_bucket_settings(
 
     if settings != expected {
         return Err(LeaseError::IncompatibleBucketConfig {
-            source: IncompatibleLeaseBucketConfig {
+            source: IncompatibleLeaseBucketConfigError {
                 expected_history: expected.history,
                 actual_history: settings.history,
                 expected_max_age: expected.max_age,

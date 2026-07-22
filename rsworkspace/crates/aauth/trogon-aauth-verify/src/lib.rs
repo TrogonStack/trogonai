@@ -39,8 +39,8 @@ pub use nats_pop::{NatsHeaders, NatsPopError, NatsPopVerifier, NatsRequest};
 pub use replay::{InMemoryReplayStore, ReplayStore};
 pub use time_source::{SystemTimeSource, TimeSource};
 pub use token::{
-    InvalidKeyMaterialSource, RequestContextError, RequestSigningContext, TokenError, TokenVerifier, VerifiedAgent,
-    VerifiedAuth, VerifiedResource,
+    InvalidKeyMaterialSourceError, RequestContextError, RequestSigningContext, TokenError, TokenVerifier,
+    VerifiedAgent, VerifiedAuth, VerifiedResource,
 };
 pub use upstream::{UpstreamTokenError, UpstreamTokenRequest, UpstreamVerification, verify_upstream_token};
 

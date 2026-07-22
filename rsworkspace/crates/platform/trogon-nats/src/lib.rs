@@ -65,7 +65,7 @@ pub use client::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use connect::{ConnectError, connect};
 pub use constants::REQ_ID_HEADER;
 pub use lease::{
-    EnsureLeaderError, IncompatibleLeaseBucketConfig, LeaderElection, LeaseBucket, LeaseConfigError, LeaseError,
+    EnsureLeaderError, IncompatibleLeaseBucketConfigError, LeaderElection, LeaseBucket, LeaseConfigError, LeaseError,
     LeaseKey, LeaseProvisionError, LeaseRenewInterval, LeaseRenewIntervalError, LeaseTiming, LeaseTtl, LeaseTtlError,
     NatsKvLease, NatsKvLeaseConfig, ReleaseLease, RenewLease, TryAcquireLease,
 };
@@ -74,8 +74,8 @@ pub use messaging::{
     build_request_headers, headers_with_trace_context, inject_trace_context, publish, request, request_with_timeout,
 };
 pub use nats_token::{DottedNatsToken, NatsToken};
-pub use server_info::{ServerInfoSource, ServerInfoTimeout, wait_for_server_info};
-pub use subject_token_violation::SubjectTokenViolation;
+pub use server_info::{ServerInfoSource, ServerInfoTimeoutError, wait_for_server_info};
+pub use subject_token_violation::SubjectTokenViolationError;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use mocks::{AdvancedMockNatsClient, MockNatsClient};

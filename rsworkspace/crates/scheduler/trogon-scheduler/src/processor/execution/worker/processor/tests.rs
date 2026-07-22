@@ -537,7 +537,7 @@ async fn arm_is_idempotent_when_completion_was_appended_before_checkpoint_save()
     let created = harness.event_store.events(id);
     harness.kv.fail_next_create();
     let retry = harness.processor.process(&created[0], recorded_at()).await.unwrap_err();
-    assert!(matches!(retry, RetrySignal::Checkpoint { .. }));
+    assert!(matches!(retry, RetrySignalError::Checkpoint { .. }));
     assert_eq!(harness.event_store.events(id).len(), 2);
 
     let processed = harness.process_stream(&created[0]).await;
@@ -565,7 +565,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(missing, RetrySignal::ArmSchedule { .. }));
+    assert!(matches!(missing, RetrySignalError::ArmSchedule { .. }));
 
     CommandExecution::new(
         &harness.event_store,
@@ -600,7 +600,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(deleted, RetrySignal::ArmSchedule { .. }));
+    assert!(matches!(deleted, RetrySignalError::ArmSchedule { .. }));
 }
 
 #[tokio::test]
@@ -748,7 +748,7 @@ async fn rrule_occurrence_event_reports_missing_checkpoints() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, RetrySignal::MissingCheckpoint { .. }));
+    assert!(matches!(error, RetrySignalError::MissingCheckpoint { .. }));
 }
 
 #[tokio::test]
@@ -882,7 +882,7 @@ async fn crash_after_execution_schedule_write_before_checkpoint_write_retries_an
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, RetrySignal::Checkpoint { .. }));
+    assert!(matches!(error, RetrySignalError::Checkpoint { .. }));
     assert!(!harness.kv.contains(&harness.checkpoint_key(id)));
 
     // Redelivery: purge-then-publish converges to exactly one schedule and
@@ -910,7 +910,7 @@ async fn transient_execution_schedule_failure_does_not_advance_checkpoint() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, RetrySignal::ExecutionSchedule { .. }));
+    assert!(matches!(error, RetrySignalError::ExecutionSchedule { .. }));
     assert!(!harness.kv.contains(&harness.checkpoint_key(id)));
 }
 
@@ -969,7 +969,7 @@ async fn schedule_change_without_checkpoint_is_a_transient_retry_not_a_poison() 
         .await
         .unwrap_err();
 
-    assert!(matches!(error, RetrySignal::MissingCheckpoint { .. }));
+    assert!(matches!(error, RetrySignalError::MissingCheckpoint { .. }));
     assert_eq!(
         error.to_string(),
         "no checkpoint yet for schedule 'orders/created', retrying"
@@ -1147,7 +1147,7 @@ async fn transient_load_failure_is_retried() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, RetrySignal::Checkpoint { .. }));
+    assert!(matches!(error, RetrySignalError::Checkpoint { .. }));
     assert_eq!(
         error.to_string(),
         "transient checkpoint failure: scheduler checkpoint backend failed: failed getting entry"
@@ -1168,7 +1168,7 @@ async fn transient_purge_failure_is_retried() {
         .process(&stream_event(&paused(id), id, 2), now())
         .await
         .unwrap_err();
-    assert!(matches!(error, RetrySignal::ExecutionSchedule { .. }));
+    assert!(matches!(error, RetrySignalError::ExecutionSchedule { .. }));
     assert_eq!(
         error.to_string(),
         "transient execution schedule failure: execution subject purge failed: simulated purge failure"
@@ -1217,7 +1217,7 @@ async fn checkpoint_update_cas_loss_retries_and_converges() {
         .unwrap_err();
     assert!(matches!(
         error,
-        RetrySignal::Checkpoint {
+        RetrySignalError::Checkpoint {
             source: CheckpointStoreError::Conflict
         }
     ));
@@ -1244,7 +1244,7 @@ async fn transient_checkpoint_update_failure_is_retried() {
         .process(&stream_event(&removed(id), id, 2), now())
         .await
         .unwrap_err();
-    assert!(matches!(error, RetrySignal::Checkpoint { .. }));
+    assert!(matches!(error, RetrySignalError::Checkpoint { .. }));
 }
 
 #[tokio::test]

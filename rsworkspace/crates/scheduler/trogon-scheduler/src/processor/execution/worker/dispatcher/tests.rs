@@ -674,7 +674,7 @@ async fn poison_failure_panic_falls_back_to_retry() {
 
     let failure = processor.failure_record(
         &malformed_stream_event(9),
-        PoisonReason::ProcessorPanic {
+        PoisonReasonError::ProcessorPanic {
             stream_position: StreamPosition::try_new(9).unwrap(),
         },
     );

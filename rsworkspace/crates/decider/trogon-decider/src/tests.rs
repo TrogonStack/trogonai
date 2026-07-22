@@ -85,7 +85,7 @@ fn act_propagates_decide_errors() {
 
     assert_eq!(
         decision.unwrap().handle(0, &TestCommand),
-        Err(DecisionFailure::Decide(TestError::Decide))
+        Err(DecisionFailureError::Decide(TestError::Decide))
     );
 }
 
@@ -97,7 +97,7 @@ fn act_propagates_evolve_errors() {
 
     assert_eq!(
         decision.unwrap().handle(0, &TestCommand),
-        Err(DecisionFailure::Evolve(TestError::Evolve))
+        Err(DecisionFailureError::Evolve(TestError::Evolve))
     );
 }
 
@@ -166,14 +166,14 @@ fn decision_events_direct_path_propagates_evolve_errors() {
     let decision = Decision::<TestCommand>::event("broken");
     assert_eq!(
         decision.handle(0, &TestCommand),
-        Err(DecisionFailure::Evolve(TestError::Evolve))
+        Err(DecisionFailureError::Evolve(TestError::Evolve))
     );
 }
 
 #[test]
 fn decision_failure_exposes_display_and_source() {
-    let decide = DecisionFailure::<TestError, TestError>::Decide(TestError::Decide);
-    let evolve = DecisionFailure::<TestError, TestError>::Evolve(TestError::Evolve);
+    let decide = DecisionFailureError::<TestError, TestError>::Decide(TestError::Decide);
+    let evolve = DecisionFailureError::<TestError, TestError>::Evolve(TestError::Evolve);
 
     assert_eq!(decide.to_string(), "decide failed: test decide error");
     assert_eq!(evolve.to_string(), "evolve failed: test evolve error");

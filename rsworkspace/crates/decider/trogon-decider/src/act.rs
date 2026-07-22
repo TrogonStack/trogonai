@@ -1,6 +1,6 @@
 use std::{fmt, marker::PhantomData};
 
-use super::{Decider, Decision, DecisionFailure, DecisionResult};
+use super::{Decider, Decision, DecisionFailureError, DecisionResult};
 
 /// Builder for a multi-step [`Decision::Act`].
 ///
@@ -191,7 +191,7 @@ where
 {
     fn run(self, state: C::State, command: &C) -> DecisionResult<C> {
         let result: Result<Decision<C>, C::DecideError> = (self.step)(&state, command).into();
-        let decision = result.map_err(DecisionFailure::Decide)?;
+        let decision = result.map_err(DecisionFailureError::Decide)?;
         decision.handle(state, command)
     }
 }
@@ -212,7 +212,7 @@ where
     fn run(self, state: C::State, command: &C) -> DecisionResult<C> {
         let (state, mut events) = self.prev.run(state, command)?;
         let result: Result<Decision<C>, C::DecideError> = (self.step)(&state, command).into();
-        let decision = result.map_err(DecisionFailure::Decide)?;
+        let decision = result.map_err(DecisionFailureError::Decide)?;
         let (state, new_events) = decision.handle(state, command)?;
         events.extend(new_events);
         Ok((state, events))

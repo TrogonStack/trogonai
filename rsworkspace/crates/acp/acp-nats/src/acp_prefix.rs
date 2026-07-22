@@ -8,7 +8,7 @@
 //! construction.
 
 use trogon_nats::DottedNatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 /// Error returned when [`AcpPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -21,12 +21,12 @@ pub enum AcpPrefixError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for AcpPrefixError {
-    fn from(v: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for AcpPrefixError {
+    fn from(v: SubjectTokenViolationError) -> Self {
         match v {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

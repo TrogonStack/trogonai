@@ -17,7 +17,7 @@ pub enum VerificationTokenError {
     #[error("verification request payload is missing verification_token")]
     MissingVerificationToken,
     #[error("verification_token must not be empty")]
-    InvalidVerificationToken(#[source] trogon_std::EmptySecret),
+    InvalidVerificationToken(#[source] trogon_std::EmptySecretError),
     #[error("failed to open Notion JetStream stream")]
     Stream(#[source] GetStreamError),
     #[error("failed to read latest Notion verification request")]

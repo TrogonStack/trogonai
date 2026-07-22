@@ -33,7 +33,9 @@ use crate::commands::domain::ScheduleId;
 use crate::processor::execution::checkpoints::ProcessingFailureRecord;
 use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleKey, lane_route_from_stream_event};
 
-use super::processor::{AckAction, PoisonReason, Processed, ProcessedOutcome, RetrySignal, ScheduleProcessor};
+use super::processor::{
+    AckAction, PoisonReasonError, Processed, ProcessedOutcome, RetrySignalError, ScheduleProcessor,
+};
 
 /// A delivered NATS message the dispatcher settles after a durable outcome.
 pub trait DeliveredMessage: Send + 'static {
@@ -280,13 +282,13 @@ where
     }
 
     // Reduce the process result to `Send`-only values before any settlement
-    // await: a transient `RetrySignal` can wrap a non-`Send` domain error, so it
+    // await: a transient `RetrySignalError` can wrap a non-`Send` domain error, so it
     // must not survive across `message.*().await`.
     let step = match AssertUnwindSafe(processor.process_decoded(&event, decoded, now))
         .catch_unwind()
         .await
     {
-        Ok(Err(RetrySignal::MissingCheckpoint { schedule_id }))
+        Ok(Err(RetrySignalError::MissingCheckpoint { schedule_id }))
             if message.delivery_count() >= MISSING_CHECKPOINT_DELIVERY_CEILING =>
         {
             ProcessStep::MissingExhausted { schedule_id }
@@ -300,7 +302,7 @@ where
         ProcessStep::MissingExhausted { schedule_id } => {
             let failure = processor.failure_record(
                 &event,
-                PoisonReason::MissingCheckpointExhausted {
+                PoisonReasonError::MissingCheckpointExhausted {
                     schedule_id,
                     deliveries: message.delivery_count(),
                 },
@@ -308,7 +310,7 @@ where
             return poison_record(processor, message, lane, stream_position, failure).await;
         }
         ProcessStep::Panic(stream_position) => {
-            let failure = processor.failure_record(&event, PoisonReason::ProcessorPanic { stream_position });
+            let failure = processor.failure_record(&event, PoisonReasonError::ProcessorPanic { stream_position });
             return poison_record(processor, message, lane, stream_position, failure).await;
         }
     };
@@ -328,7 +330,7 @@ enum ProcessStep {
     Panic(StreamPosition),
 }
 
-fn reduce_processed(processed: Result<Processed, RetrySignal>) -> (Settle, Result<ProcessedOutcome, String>) {
+fn reduce_processed(processed: Result<Processed, RetrySignalError>) -> (Settle, Result<ProcessedOutcome, String>) {
     match processed {
         Ok(processed) => (Settle::from(processed.ack), Ok(processed.outcome)),
         Err(retry) => (Settle::Retry, Err(retry.to_string())),
@@ -357,7 +359,7 @@ where
 {
     let (settlement, result) = match AssertUnwindSafe(processor.poison_failure(failure)).catch_unwind().await {
         Ok(processed) => reduce_processed(processed),
-        Err(_) => (Settle::Retry, Err(PoisonReason::FailureRecordPanic.to_string())),
+        Err(_) => (Settle::Retry, Err(PoisonReasonError::FailureRecordPanic.to_string())),
     };
 
     let result = finalize_report(message, settlement, stream_position, result).await;

@@ -142,7 +142,7 @@ where
 
         if !response.is_success() {
             return Err(ExecutionScheduleWriteError::Purge {
-                source: Box::new(PurgeUnacknowledged),
+                source: Box::new(PurgeUnacknowledgedError),
             });
         }
 
@@ -154,7 +154,7 @@ where
 /// acknowledge it as successful.
 #[derive(Debug, thiserror::Error)]
 #[error("purge was not acknowledged as successful by the server")]
-struct PurgeUnacknowledged;
+struct PurgeUnacknowledgedError;
 
 fn build_headers(request: &ScheduleRequest, msg_id: &str, trace_headers: &HeaderMap) -> HeaderMap {
     let mut headers = trace_headers.clone();

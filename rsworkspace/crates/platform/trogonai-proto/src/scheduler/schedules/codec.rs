@@ -12,7 +12,7 @@ use crate::codec::{decode_event_case, event_type};
 use trogon_decider_runtime::EventIdentity;
 #[cfg(feature = "runtime-snapshot")]
 use trogon_decider_runtime::{
-    InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    InvalidSnapshotTypeNameError, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     SnapshotTypeName,
 };
 
@@ -99,7 +99,7 @@ fn schedule_event_case_type(event: &ScheduleEventCase) -> &'static str {
 
 #[cfg(feature = "runtime-snapshot")]
 impl SnapshotType for state_v1::State {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         proto_snapshot_type::<Self>()

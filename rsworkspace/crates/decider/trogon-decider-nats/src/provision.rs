@@ -14,7 +14,7 @@
 //! the first time concurrently) is still handled by falling back to a get on
 //! an already-exists conflict from create. When the resource already
 //! exists, its configuration is validated against the caller's requirements
-//! and a [`StreamConfigMismatch`] or [`KvConfigMismatch`] names the specific
+//! and a [`StreamConfigMismatchError`] or [`KvConfigMismatchError`] names the specific
 //! field that diverged, rather than dumping the whole configuration.
 
 use async_nats::jetstream;
@@ -29,7 +29,7 @@ use trogon_nats::jetstream::{is_create_key_value_already_exists, is_create_strea
 /// A single divergent field between a required and an existing stream
 /// configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum StreamConfigMismatch {
+pub enum StreamConfigMismatchError {
     /// The existing stream's retention policy does not match the requirement.
     #[error("stream '{stream}' retention mismatch: expected {expected:?}, found {actual:?}")]
     Retention {
@@ -67,7 +67,7 @@ pub enum StreamConfigMismatch {
 /// A single divergent field between a required and an existing Key/Value
 /// bucket configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum KvConfigMismatch {
+pub enum KvConfigMismatchError {
     /// The existing bucket's history depth does not match the requirement.
     #[error("bucket '{bucket}' history mismatch: expected {expected}, found {actual}")]
     History {
@@ -103,7 +103,7 @@ pub enum EnsureStreamError {
     },
     /// The stream already existed with a configuration that diverges from the requirement.
     #[error(transparent)]
-    ConfigMismatch(#[from] StreamConfigMismatch),
+    ConfigMismatch(#[from] StreamConfigMismatchError),
 }
 
 /// Error returned by [`ensure_bucket`].
@@ -129,7 +129,7 @@ pub enum EnsureBucketError {
     },
     /// The bucket already existed with a configuration that diverges from the requirement.
     #[error(transparent)]
-    ConfigMismatch(#[from] KvConfigMismatch),
+    ConfigMismatch(#[from] KvConfigMismatchError),
 }
 
 /// Creates a JetStream stream, or opens it if it already exists.
@@ -230,17 +230,17 @@ fn validate_stream_config(
     name: &str,
     required: &jetstream::stream::Config,
     actual: &jetstream::stream::Info,
-) -> Result<(), StreamConfigMismatch> {
+) -> Result<(), StreamConfigMismatchError> {
     let actual = &actual.config;
     if actual.retention != required.retention {
-        return Err(StreamConfigMismatch::Retention {
+        return Err(StreamConfigMismatchError::Retention {
             stream: name.to_string(),
             expected: required.retention,
             actual: actual.retention,
         });
     }
     if actual.allow_atomic_publish != required.allow_atomic_publish {
-        return Err(StreamConfigMismatch::AllowAtomicPublish {
+        return Err(StreamConfigMismatchError::AllowAtomicPublish {
             stream: name.to_string(),
             expected: required.allow_atomic_publish,
             actual: actual.allow_atomic_publish,
@@ -248,7 +248,7 @@ fn validate_stream_config(
     }
     for subject in &required.subjects {
         if !actual.subjects.contains(subject) {
-            return Err(StreamConfigMismatch::MissingSubject {
+            return Err(StreamConfigMismatchError::MissingSubject {
                 stream: name.to_string(),
                 subject: subject.clone(),
             });
@@ -261,9 +261,9 @@ fn validate_kv_config(
     bucket: &str,
     required: &kv::Config,
     actual: &jetstream::stream::Config,
-) -> Result<(), KvConfigMismatch> {
+) -> Result<(), KvConfigMismatchError> {
     if actual.max_messages_per_subject != required.history {
-        return Err(KvConfigMismatch::History {
+        return Err(KvConfigMismatchError::History {
             bucket: bucket.to_string(),
             expected: required.history,
             actual: actual.max_messages_per_subject,

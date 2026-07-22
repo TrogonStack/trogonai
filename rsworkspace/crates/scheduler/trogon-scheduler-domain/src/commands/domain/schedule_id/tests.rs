@@ -3,14 +3,18 @@ use super::*;
 #[test]
 fn rejects_empty() {
     let error = ScheduleId::parse("").unwrap_err();
-    assert_eq!(error.violation, ScheduleIdViolation::Empty);
+    assert_eq!(error.violation, ScheduleIdViolationError::Empty);
 }
 
 #[test]
 fn rejects_surrounding_whitespace() {
     for raw in [" backup", "backup ", "\tbackup", "backup\n"] {
         let error = ScheduleId::parse(raw).unwrap_err();
-        assert_eq!(error.violation, ScheduleIdViolation::SurroundingWhitespace, "{raw:?}");
+        assert_eq!(
+            error.violation,
+            ScheduleIdViolationError::SurroundingWhitespace,
+            "{raw:?}"
+        );
     }
 }
 
@@ -26,7 +30,7 @@ fn rejects_over_max_length() {
     let error = ScheduleId::parse(&raw).unwrap_err();
     assert_eq!(
         error.violation,
-        ScheduleIdViolation::TooLong {
+        ScheduleIdViolationError::TooLong {
             max: MAX_LENGTH,
             actual: MAX_LENGTH + 1,
         }
@@ -60,13 +64,13 @@ fn supports_standard_string_conversions_and_display() {
     assert_eq!(id.as_ref(), "backup");
     assert_eq!("backup".parse::<ScheduleId>().unwrap().as_str(), "backup");
     assert_eq!(id.to_string(), "backup");
-    assert_eq!(ScheduleIdViolation::Empty.to_string(), "must not be empty");
+    assert_eq!(ScheduleIdViolationError::Empty.to_string(), "must not be empty");
     assert_eq!(
-        ScheduleIdViolation::TooLong { max: 256, actual: 257 }.to_string(),
+        ScheduleIdViolationError::TooLong { max: 256, actual: 257 }.to_string(),
         "must be at most 256 characters, got 257"
     );
     assert_eq!(
-        ScheduleIdViolation::SurroundingWhitespace.to_string(),
+        ScheduleIdViolationError::SurroundingWhitespace.to_string(),
         "must not have leading or trailing whitespace"
     );
     assert_eq!(

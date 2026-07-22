@@ -129,7 +129,7 @@
 
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{Decider, DecisionFailure, Events, evaluate_decision};
+use crate::{Decider, DecisionFailureError, Events, evaluate_decision};
 
 /// Prior events used to rebuild decider state in tests.
 ///
@@ -815,8 +815,8 @@ where
     C: Decider,
 {
     let (state, events) = evaluate_decision(state, command).map_err(|failure| match failure {
-        DecisionFailure::Decide(error) => DecisionEvaluationFailure::Decide(error),
-        DecisionFailure::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
+        DecisionFailureError::Decide(error) => DecisionEvaluationFailure::Decide(error),
+        DecisionFailureError::Evolve(error) => DecisionEvaluationFailure::Evolve(error),
     })?;
     Ok((events, state))
 }
