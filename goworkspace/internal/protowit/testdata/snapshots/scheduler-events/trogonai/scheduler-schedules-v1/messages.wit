@@ -1,0 +1,35 @@
+package trogonai:scheduler-schedules-v1;
+
+interface messages {
+  record schedule-completed {
+    schedule-id: string,
+    last-occurrence-sequence: option<u64>,
+  }
+
+  record schedule-paused {
+    schedule-id: string,
+  }
+
+  record schedule-removed {
+    schedule-id: string,
+  }
+
+  record schedule-resumed {
+    schedule-id: string,
+  }
+
+  record schedule-status {
+    kind: option<schedule-status-kind>,
+  }
+
+  record schedule-status-paused {
+  }
+
+  record schedule-status-scheduled {
+  }
+
+  variant schedule-status-kind {
+    scheduled(schedule-status-scheduled),
+    paused(schedule-status-paused),
+  }
+}

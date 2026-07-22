@@ -1,0 +1,18 @@
+package example:events-v1;
+
+interface messages {
+  record envelope {
+    body: option<envelope-body>,
+  }
+
+  record envelope-created {
+  }
+
+  record envelope-deleted {
+  }
+
+  variant envelope-body {
+    created(envelope-created),
+    deleted(envelope-deleted),
+  }
+}
