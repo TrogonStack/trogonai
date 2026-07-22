@@ -289,6 +289,26 @@ fn conclude_session_skips_a_guest_that_already_trapped() {
 }
 
 #[test]
+fn drop_session_discarding_trap_swallows_a_destructor_failure() {
+    let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
+    let module = WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads");
+    let (mut store, bindings, session) = instantiated_session(&module);
+    let context = test_phase_context(&module);
+
+    module
+        .engine()
+        .arm_guest_call(&mut store, 0, 0)
+        .expect("arming an exhausted budget succeeds");
+    host::drop_session(&bindings, &mut store, session)
+        .expect_err("dropping a session on an exhausted leftover budget traps");
+
+    // The trap left the instance unenterable, so this second drop attempt
+    // fails; the wrapper must record and discard that failure, not panic or
+    // propagate it.
+    drop_session_discarding_trap(&mut store, &bindings, module.engine(), session, &context);
+}
+
+#[test]
 fn map_trap_distinguishes_epoch_deadline_from_other_traps() {
     let deadline_error: WasmCommandError<std::convert::Infallible, std::convert::Infallible, std::convert::Infallible> =
         map_trap(wasmtime::Error::from(wasmtime::Trap::Interrupt), WasmCommandError::Trap);

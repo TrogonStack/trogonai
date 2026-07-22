@@ -15,8 +15,9 @@ use trogon_decider_runtime::{Event, EventId, Headers, StreamPosition};
 use super::replay::is_empty_replay_range;
 use super::{
     NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, PublishStreamError, StreamStoreError, StreamSubject,
-    TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, build_publish_message, headers_from_nats_headers,
-    read_stream, read_stream_range, subject_current_position,
+    TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE, append_stream, build_publish_message, event_header_name,
+    event_header_value, headers_from_nats_headers, read_stream, read_stream_range, subject_current_position,
+    validate_event_headers,
 };
 
 #[test]
@@ -43,8 +44,7 @@ fn build_publish_message_sets_trogon_event_type_header() {
         headers: Headers::empty(),
     };
 
-    let message = build_publish_message(&event, Vec::new(), Some(0), "batch-1", 0, 1)
-        .expect("event with no user headers should publish")
+    let message = build_publish_message(&event, Vec::new(), Vec::new(), Some(0), "batch-1", 0, 1)
         .outbound_message("scheduler.schedules.events.backup");
     let headers = message.headers.unwrap_or_default();
 
@@ -67,8 +67,8 @@ fn build_publish_message_maps_headers_to_trogon_headers() {
         headers: Headers::from_entries([("trace-id", "trace-1"), ("tenant", "trogon")]).unwrap(),
     };
 
-    let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect("valid header names should publish")
+    let validated = validate_event_headers(&event).expect("valid header names should validate");
+    let headers = build_publish_message(&event, validated, Vec::new(), None, "batch-1", 0, 1)
         .outbound_message("scheduler.schedules.events.backup")
         .headers
         .unwrap_or_default();
@@ -100,8 +100,7 @@ fn make_event_with_header(name: &str, value: &str) -> Event {
 fn build_publish_message_rejects_header_name_containing_colon() {
     let event = make_event_with_header("tenant:id", "trogon");
 
-    let error = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect_err("header name with ':' must not panic");
+    let error = validate_event_headers(&event).expect_err("header name with ':' must not panic");
 
     assert!(matches!(error, PublishStreamError::InvalidEventHeaderName { .. }));
 }
@@ -110,8 +109,7 @@ fn build_publish_message_rejects_header_name_containing_colon() {
 fn build_publish_message_rejects_header_name_containing_space() {
     let event = make_event_with_header("tenant id", "trogon");
 
-    let error = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect_err("header name with a space must not panic");
+    let error = validate_event_headers(&event).expect_err("header name with a space must not panic");
 
     assert!(matches!(error, PublishStreamError::InvalidEventHeaderName { .. }));
 }
@@ -120,8 +118,7 @@ fn build_publish_message_rejects_header_name_containing_space() {
 fn build_publish_message_rejects_header_name_containing_non_ascii_character() {
     let event = make_event_with_header("tenant-é", "trogon");
 
-    let error = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect_err("header name with a non-ASCII character must not panic");
+    let error = validate_event_headers(&event).expect_err("header name with a non-ASCII character must not panic");
 
     assert!(matches!(error, PublishStreamError::InvalidEventHeaderName { .. }));
 }
@@ -130,8 +127,8 @@ fn build_publish_message_rejects_header_name_containing_non_ascii_character() {
 fn build_publish_message_publishes_valid_header_name() {
     let event = make_event_with_header("tenant-id", "trogon");
 
-    let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect("valid header name should publish")
+    let validated = validate_event_headers(&event).expect("valid header name should validate");
+    let headers = build_publish_message(&event, validated, Vec::new(), None, "batch-1", 0, 1)
         .outbound_message("scheduler.schedules.events.backup")
         .headers
         .unwrap_or_default();
@@ -142,6 +139,18 @@ fn build_publish_message_publishes_valid_header_name() {
             .map(|value| value.as_str()),
         Some("trogon")
     );
+}
+
+/// The domain `HeaderValue` already rejects carriage returns and line feeds, so this adapter-side
+/// check is defense in depth for values that bypass the domain type; it must stay a typed error
+/// rather than async-nats's panicking conversion.
+#[test]
+fn event_header_value_rejects_a_value_nats_would_panic_on() {
+    let header_name = event_header_name("tenant-id").expect("valid header name");
+
+    let error = event_header_value(&header_name, "multi\r\nline").expect_err("CR LF value must fail");
+
+    assert!(matches!(error, PublishStreamError::InvalidEventHeaderValue { .. }));
 }
 
 #[tokio::test]
@@ -203,13 +212,11 @@ fn build_publish_message_sets_atomic_batch_occ_on_first_message_only() {
         headers: Headers::empty(),
     };
 
-    let first = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 0, 2)
-        .expect("event with no user headers should publish")
+    let first = build_publish_message(&event, Vec::new(), Vec::new(), Some(8), "batch-1", 0, 2)
         .outbound_message("scheduler.schedules.events.backup")
         .headers
         .unwrap_or_default();
-    let second = build_publish_message(&event, Vec::new(), Some(8), "batch-1", 1, 2)
-        .expect("event with no user headers should publish")
+    let second = build_publish_message(&event, Vec::new(), Vec::new(), Some(8), "batch-1", 1, 2)
         .outbound_message("scheduler.schedules.events.backup")
         .headers
         .unwrap_or_default();
@@ -239,8 +246,7 @@ fn build_publish_message_omits_occ_header_without_expected_sequence() {
         headers: Headers::empty(),
     };
 
-    let headers = build_publish_message(&event, Vec::new(), None, "batch-1", 0, 1)
-        .expect("event with no user headers should publish")
+    let headers = build_publish_message(&event, Vec::new(), Vec::new(), None, "batch-1", 0, 1)
         .outbound_message("scheduler.schedules.events.backup")
         .headers
         .unwrap_or_default();

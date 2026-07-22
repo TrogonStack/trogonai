@@ -253,19 +253,21 @@ where
     // Validating every event's headers first surfaces a failure before any
     // batch member reaches the server, without keeping the whole batch's
     // built messages resident.
+    let mut validated_headers = Vec::with_capacity(events.len());
     for event in events {
-        validate_event_headers(event)?;
+        validated_headers.push(validate_event_headers(event)?);
     }
 
-    for (index, event) in events.iter().enumerate() {
+    for ((index, event), headers) in events.iter().enumerate().zip(validated_headers) {
         let publish = build_publish_message(
             event,
+            headers,
             event.content.clone(),
             expected_last_subject_sequence,
             batch_id.as_str(),
             index,
             events.len(),
-        )?;
+        );
 
         let ack = js
             .publish_message(publish.outbound_message(subject.clone()))
@@ -336,21 +338,20 @@ fn is_wrong_last_sequence(error: &context::PublishError) -> bool {
 
 fn build_publish_message(
     event: &Event,
+    validated_headers: Vec<(HeaderName, HeaderValue)>,
     payload: Vec<u8>,
     expected_last_subject_sequence: Option<u64>,
     batch_id: &str,
     index: usize,
     event_count: usize,
-) -> Result<PublishMessage, PublishStreamError> {
+) -> PublishMessage {
     let mut publish = PublishMessage::build()
         .payload(payload.into())
         .message_id(event.id.to_string())
         .header(TROGON_EVENT_TYPE, event.r#type.as_str())
         .header(NATS_BATCH_ID, batch_id)
         .header(NATS_BATCH_SEQUENCE, (index + 1).to_string());
-    for (name, value) in event.headers.iter() {
-        let header_name = event_header_name(name.as_str())?;
-        let header_value = event_header_value(&header_name, value.as_str())?;
+    for (header_name, header_value) in validated_headers {
         publish = publish.header(header_name, header_value);
     }
     if let (0, Some(expected_last_subject_sequence)) = (index, expected_last_subject_sequence) {
@@ -359,7 +360,7 @@ fn build_publish_message(
     if index + 1 == event_count {
         publish = publish.header(NATS_BATCH_COMMIT, "1");
     }
-    Ok(publish)
+    publish
 }
 
 /// Reads all events from the JetStream stream starting at a stream sequence.
@@ -473,12 +474,14 @@ pub fn record_stream_message(
     })
 }
 
-fn validate_event_headers(event: &Event) -> Result<(), PublishStreamError> {
+fn validate_event_headers(event: &Event) -> Result<Vec<(HeaderName, HeaderValue)>, PublishStreamError> {
+    let mut validated = Vec::with_capacity(event.headers.len());
     for (name, value) in event.headers.iter() {
         let header_name = event_header_name(name.as_str())?;
-        event_header_value(&header_name, value.as_str())?;
+        let header_value = event_header_value(&header_name, value.as_str())?;
+        validated.push((header_name, header_value));
     }
-    Ok(())
+    Ok(validated)
 }
 
 fn event_header_name(name: &str) -> Result<HeaderName, PublishStreamError> {
