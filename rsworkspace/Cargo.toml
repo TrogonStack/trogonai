@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "wasm-components/*", "cli/trogon-decider-test"]
-default-members = ["crates/*", "cli/trogon-decider-test"]
+members = ["crates/*/*", "wasm-components/*", "cli/trogon-decider-test"]
+default-members = ["crates/*/*", "cli/trogon-decider-test"]
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -15,38 +15,38 @@ unwrap_used = "deny"
 
 [workspace.dependencies]
 # Internal crates
-a2a-auth-callout = { path = "crates/a2a-auth-callout" }
-a2a-bridge = { path = "crates/a2a-bridge" }
-a2a-identity-types = { path = "crates/a2a-identity-types" }
-a2a-nats = { path = "crates/a2a-nats" }
-a2a-pack = { path = "crates/a2a-pack" }
-ard-catalog = { path = "crates/ard-catalog" }
-ard-nats = { path = "crates/ard-nats" }
-ard-registry = { path = "crates/ard-registry" }
-a2a-redaction = { path = "crates/a2a-redaction" }
-acp-nats = { path = "crates/acp-nats" }
-trogon-telemetry = { path = "crates/trogon-telemetry" }
-mcp-nats = { path = "crates/mcp-nats" }
-mcp-nats-server = { path = "crates/mcp-nats-server" }
-mcp-nats-stdio = { path = "crates/mcp-nats-stdio" }
-jsonrpc-nats = { path = "crates/jsonrpc-nats" }
-trogon-nats = { path = "crates/trogon-nats" }
-trogon-aauth-sdk = { path = "crates/trogon-aauth-sdk" }
-trogon-aauth-verify = { path = "crates/trogon-aauth-verify" }
-trogon-decider = { path = "crates/trogon-decider" }
-trogon-decider-nats = { path = "crates/trogon-decider-nats" }
-trogon-decider-wit = { path = "crates/trogon-decider-wit" }
-trogon-decider-guest-macros = { path = "crates/trogon-decider-guest-macros" }
-trogon-decider-guest-sdk = { path = "crates/trogon-decider-guest-sdk" }
-trogon-decider-sim = { path = "crates/trogon-decider-sim" }
-trogon-decider-runtime = { path = "crates/trogon-decider-runtime" }
-trogon-decider-wasm-runtime = { path = "crates/trogon-decider-wasm-runtime" }
-trogon-identity-types = { path = "crates/trogon-identity-types" }
-trogon-jwks-publisher = { path = "crates/trogon-jwks-publisher" }
-trogon-semconv = { path = "crates/trogon-semconv" }
-trogon-service-config = { path = "crates/trogon-service-config" }
-trogon-std = { path = "crates/trogon-std" }
-trogonai-proto = { path = "crates/trogonai-proto" }
+a2a-auth-callout = { path = "crates/a2a/a2a-auth-callout" }
+a2a-bridge = { path = "crates/a2a/a2a-bridge" }
+a2a-identity-types = { path = "crates/a2a/a2a-identity-types" }
+a2a-nats = { path = "crates/a2a/a2a-nats" }
+a2a-pack = { path = "crates/a2a/a2a-pack" }
+ard-catalog = { path = "crates/ard/ard-catalog" }
+ard-nats = { path = "crates/ard/ard-nats" }
+ard-registry = { path = "crates/ard/ard-registry" }
+a2a-redaction = { path = "crates/a2a/a2a-redaction" }
+acp-nats = { path = "crates/acp/acp-nats" }
+trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
+mcp-nats = { path = "crates/mcp/mcp-nats" }
+mcp-nats-server = { path = "crates/mcp/mcp-nats-server" }
+mcp-nats-stdio = { path = "crates/mcp/mcp-nats-stdio" }
+jsonrpc-nats = { path = "crates/platform/jsonrpc-nats" }
+trogon-nats = { path = "crates/platform/trogon-nats" }
+trogon-aauth-sdk = { path = "crates/aauth/trogon-aauth-sdk" }
+trogon-aauth-verify = { path = "crates/aauth/trogon-aauth-verify" }
+trogon-decider = { path = "crates/decider/trogon-decider" }
+trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
+trogon-decider-wit = { path = "crates/decider/trogon-decider-wit" }
+trogon-decider-guest-macros = { path = "crates/decider/trogon-decider-guest-macros" }
+trogon-decider-guest-sdk = { path = "crates/decider/trogon-decider-guest-sdk" }
+trogon-decider-sim = { path = "crates/decider/trogon-decider-sim" }
+trogon-decider-runtime = { path = "crates/decider/trogon-decider-runtime" }
+trogon-decider-wasm-runtime = { path = "crates/decider/trogon-decider-wasm-runtime" }
+trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
+trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
+trogon-semconv = { path = "crates/platform/trogon-semconv" }
+trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-std = { path = "crates/platform/trogon-std" }
+trogonai-proto = { path = "crates/platform/trogonai-proto" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }

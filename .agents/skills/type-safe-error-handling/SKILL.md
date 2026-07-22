@@ -81,11 +81,11 @@ of control flow.
 
 Local examples to learn from:
 
-- `rsworkspace/crates/a2a-auth-callout/src/denial_category.rs` classifies
+- `rsworkspace/crates/a2a/a2a-auth-callout/src/denial_category.rs` classifies
   `CredentialVerification(String)` with `msg.contains(...)`. The category
   decision belongs in typed credential or domain errors that map directly to
   `DenialCategory`.
-- `rsworkspace/crates/a2a-auth-callout/src/account_resolver.rs` converts
+- `rsworkspace/crates/a2a/a2a-auth-callout/src/account_resolver.rs` converts
   `AccountResolverError` through `value.to_string()`. The resolver already knows
   whether the problem is `EmptyRequest` or `Unknown`; that distinction should
   survive until category mapping.

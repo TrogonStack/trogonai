@@ -10,7 +10,7 @@ summarizes.
 ## The `decide`/`evolve`/`initial_state` cycle
 
 Every decider is a plain Rust type implementing `trogon_decider::Decider`
-(`crates/trogon-decider/src/lib.rs`):
+(`crates/decider/trogon-decider/src/lib.rs`):
 
 ```rust
 pub trait Decider: Sized {
@@ -35,7 +35,7 @@ state and returns a `Decision`, never mutating anything itself. When a rejection
 WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
 `domain-error` and carries the typed error's causal chain in its `details` pairs.
 
-`WRITE_PRECONDITION` (`crates/trogon-decider/src/write_precondition.rs`) is the optional
+`WRITE_PRECONDITION` (`crates/decider/trogon-decider/src/write_precondition.rs`) is the optional
 concurrency guard applied when the decided events are appended:
 
 ```rust
@@ -48,7 +48,7 @@ pub enum WritePrecondition {
 
 ### `Decision::Events` vs `Decision::Act`
 
-`decide` returns a `Decision<C>` (`crates/trogon-decider/src/decision.rs`):
+`decide` returns a `Decision<C>` (`crates/decider/trogon-decider/src/decision.rs`):
 
 ```rust
 #[non_exhaustive]
@@ -74,7 +74,7 @@ Each `.execute` call returns a new typestate `ActChain<C, S>` (`S: Steps<C>`, bu
 `#[doc(hidden)]` implementation detail. Converting the finished chain into a
 `Result<Decision<C>, C::DecideError>` boxes the whole plan exactly once into an `Act<C>`, so
 `Decision` can hold either form as one uniform type. `evaluate_decision`
-(`crates/trogon-decider/src/decision.rs`, `#[doc(hidden)]`) is the shared entry point both the
+(`crates/decider/trogon-decider/src/decision.rs`, `#[doc(hidden)]`) is the shared entry point both the
 native runtime and the WASM guest bridge call: `C::decide` then, for an `Act`, runs each step
 in turn, folding that step's events via `C::evolve` before handing the resulting state to the
 next step. This is why `Decision::Act` behaves identically on both paths: neither path
@@ -83,7 +83,7 @@ reimplements the stepping logic.
 ## The native path: `CommandExecution`
 
 `trogon-decider-runtime`'s `CommandExecution<'a, E, C, S, G>`
-(`crates/trogon-decider-runtime/src/execution.rs`) is the runtime boundary that applies one
+(`crates/decider/trogon-decider-runtime/src/execution.rs`) is the runtime boundary that applies one
 command to one stream: read, replay, decide, append. Build one with `CommandExecution::new`
 and configure it with builder methods before calling `execute`:
 
