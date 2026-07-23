@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.agents.agents.state.v1;
+
+import "trogonai/agents/agents/v1/agent.proto";
+
+message ProvisionAgentState {
+  // Absence means the agent has not been provisioned.
+  ProvisionedAgent provisioned = 1;
+}
+
+// ProvisionedAgent contains only the persistent fields used to classify
+// retries. Delivery metadata and the provisioning actor never enter state.
+message ProvisionedAgent {
+  string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string name = 2 [features.field_presence = LEGACY_REQUIRED];
+  string parent = 3 [features.field_presence = LEGACY_REQUIRED];
+  string owner = 4 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.agents.agents.v1.Label labels = 5;
+  map<string, string> annotations = 6;
+  trogonai.agents.agents.v1.Charter charter = 7 [features.field_presence = LEGACY_REQUIRED];
+  string content_digest = 8 [features.field_presence = LEGACY_REQUIRED];
+}

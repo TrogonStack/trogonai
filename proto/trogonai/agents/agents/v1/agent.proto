@@ -1,0 +1,57 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+// Charter is the minimal, versioned declaration of an agent (design Q16):
+// identity, engine, and dependency declarations. Nothing economic, temporal,
+// evaluative, or reputational lives here; those are stances on their own
+// planes (policy, evaluation, scheduling), selector-bound and human-owned.
+message Charter {
+  // Execution engine. Immutable for the agent's v1 lifetime; switching
+  // engines mints a new sibling agent rather than a revision (design Q24).
+  string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Default model; a per-session override does not mint a revision.
+  Model model = 2 [features.field_presence = LEGACY_REQUIRED];
+  ToolDependencies tools = 3 [features.field_presence = LEGACY_REQUIRED];
+  DelegateDependencies delegates = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ModelParameter is one deterministic model-configuration entry. Entries must
+// have unique keys and be ordered by key before they cross the wire boundary.
+message ModelParameter {
+  string key = 1 [features.field_presence = LEGACY_REQUIRED];
+  string value = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Label is selectable metadata. Entries must have unique keys and be ordered
+// by key so guest Wasm receives a deterministic sequence.
+message Label {
+  string key = 1 [features.field_presence = LEGACY_REQUIRED];
+  string value = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Model is a default, not a constraint; sessions may override it without
+// minting a revision.
+message Model {
+  string id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ModelParameter params = 2;
+}
+
+// ToolDependencies are declarations, not grants. Grants are human-held,
+// evaluated live at every tool call on the Grants stream (design Q8/Q16).
+message ToolDependencies {
+  repeated string required = 1;
+  repeated string optional = 2;
+}
+
+// DelegateDependencies are declarations, not permissions.
+message DelegateDependencies {
+  repeated string required = 1;
+  repeated string optional = 2;
+}
+
+// RevisionRef pins a specific revision by number and content digest.
+message RevisionRef {
+  uint64 number = 1 [features.field_presence = LEGACY_REQUIRED];
+  string content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
