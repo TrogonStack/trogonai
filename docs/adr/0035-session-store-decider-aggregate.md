@@ -17,8 +17,8 @@ and output, authorized tool and delegation dispatch, cancellation intent and
 terminal outcome, the parent-child collaboration graph, and a durable operation
 ledger that makes tool and delegation side effects idempotent (deduplicated by
 operation id and digest, with outcome reconciliation for indeterminate results).
-Nothing on the curated line persists any of this: the [ADR index](./index.md)
-runs `0000`-`0034` with no session-store record, and
+Nothing on the curated line persists any of this: before this decision the
+[ADR index](./index.md) ran `0000`-`0034` with no session-store record, and
 [ADR#0024](./0024-agent-platform-stream-topology.md) deliberately left "sessions
 each keep their own streams" and the physical [JetStream](../glossary/jetstream)
 topology "for a separate decision before infrastructure provisioning." This is
@@ -142,7 +142,9 @@ when a stale decision would violate an invariant; otherwise append unconditional
   assistant message are both valid, and their order is arrival order. Appends never
   overwrite, so there is no lost update to prevent -- a head guard here would only
   force a wasted retry (re-replay, re-decide) on the highest-volume path. `Any`
-  appends to the tail with no server-side guard and never retries.
+  appends to the tail with no server-side guard and never retries; its appends are
+  therefore at-least-once, with duplicates deduped by readers (see below), not
+  prevented at write.
 - **Invariant-bearing transitions** -- the commands recording `SessionClosed`/
   `SessionCancelled`/`SessionFailed`/`SessionDeleted`, `SessionRewound`, `Compacted`,
   `DelegationDispatched`, and `SubagentDetached` (named here by the fact each records;
@@ -190,15 +192,20 @@ commands in arrival order) would remove even the lifecycle-path retries, but it 
 an optional latency optimization, not a correctness requirement, and is a Non-Goal
 here.
 
-**At-least-once delivery and idempotent append.** Commands are processed
-at-least-once -- a NATS processor redelivers a command after a crash before its ack
--- so an append must be idempotent, or a redelivered `record-message` command would
-double-append a fact an append-only log can never later edit away. Every command
-carries an idempotency key (the id it would stamp on its event), and `decide` treats
-a key it has already recorded as a typed already-applied no-op that the runtime acks
-without appending. This is the log-level counterpart of [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s operation ledger:
-the ledger keeps external tool and delegation side effects deduplicated, this keeps
-the log itself free of duplicate facts.
+**At-least-once delivery and idempotency.** Commands are processed at-least-once --
+a NATS processor redelivers a command after a crash before its ack. On the `Any` path
+this makes an append **at-least-once, not exactly-once**: two concurrent deliveries
+sharing an idempotency key can both replay state before either append is visible, both
+conclude the key is new, and both append. A `decide`-time key check is only a cheap
+best-effort filter, never atomic, precisely because `Any` sends no server-side guard.
+So every event carries an idempotency key and **readers dedup by it** -- the fold and
+every projection collapse duplicate keys, the same way they already tolerate
+post-terminal facts (see Consequences). A command that needs exactly-once *append*
+must instead take the guarded (`At(current_position)`) path, where the sequence guard
+makes check-and-append atomic: the losing delivery gets `WrongExpectedVersion`,
+re-replays, sees the key, and no-ops. Exactly-once external *side effects* (tool,
+delegation) are handled separately by [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s
+operation ledger, which reserves the operation id atomically before the effect.
 
 ### 3. Every event is a typed protobuf, schema-validated at the storage boundary
 
