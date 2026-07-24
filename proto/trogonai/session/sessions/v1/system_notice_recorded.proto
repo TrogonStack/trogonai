@@ -11,6 +11,8 @@ message SystemNoticeRecorded {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   NoticeLevel level = 2 [features.field_presence = LEGACY_REQUIRED];
   string text = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Tool call this notice concerns, when applicable; empty for a general notice.
+  string tool_call_id = 4;
 }
 
 // NoticeLevel is the severity of a system notice.

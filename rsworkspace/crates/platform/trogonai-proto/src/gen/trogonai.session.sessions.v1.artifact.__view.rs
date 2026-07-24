@@ -401,70 +401,38 @@ impl ::serde::Serialize for ArtifactRefOwnedView {
         ::serde::Serialize::serialize(&self.0, __s)
     }
 }
-/// ArtifactMetadata is the claim-check record carried by ArtifactRecorded: it
-/// captures how to locate and verify the out-of-line bytes without inlining them
-/// into the log.
+/// ArtifactMetadata is the claim-check record carried by ArtifactRecorded. Its
+/// source arm distinguishes durably-stored bytes (addressable by sha256) from a
+/// degraded external reference whose bytes were never fetched, so required-ness is
+/// expressed per branch rather than collapsed into always-required fields that a
+/// degraded artifact cannot supply (ADR#0035 facet 3).
 #[derive(Clone, Debug, Default)]
 pub struct ArtifactMetadataView<'a> {
     /// Stable artifact id within the session.
     ///
     /// Field 1: `artifact_id`
     pub artifact_id: &'a str,
-    /// Content digest over the artifact bytes; the claim-check key.
+    /// Effective media type: decoded/validated when stored, source-declared when external.
     ///
-    /// Field 2: `sha256`
-    pub sha256: &'a str,
-    /// Size of the stored bytes.
-    ///
-    /// Field 3: `size_bytes`
-    pub size_bytes: ::core::option::Option<u64>,
-    /// IANA media type of the stored bytes.
-    ///
-    /// Field 4: `mime`
+    /// Field 2: `mime`
     pub mime: &'a str,
-    /// External location the bytes were stored at (for example an Object Store key).
-    ///
-    /// Field 5: `storage_ref`
-    pub storage_ref: &'a str,
     /// Short human-readable preview; empty when none was produced.
     ///
-    /// Field 6: `preview`
+    /// Field 3: `preview`
     pub preview: ::core::option::Option<&'a str>,
     /// True when preview is a truncation of the full content.
     ///
-    /// Field 7: `truncated`
+    /// Field 4: `truncated`
     pub truncated: ::core::option::Option<bool>,
-    /// Wall-clock instant the artifact was stored.
+    /// Wall-clock instant the artifact record was created.
     ///
-    /// Field 8: `created_at`
+    /// Field 5: `created_at`
     pub created_at: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
     >,
-    /// Whether the bytes were durably stored or only a degraded external reference
-    /// was kept; recorded because a failed fetch leaves no other trace of the
-    /// difference between "we hold the bytes" and "we only had a broken reference".
-    ///
-    /// Field 9: `availability`
-    pub availability: ::buffa::EnumValue<super::super::ArtifactSourceAvailability>,
-    /// Original source URL for a fetched or degraded artifact; empty when none.
-    ///
-    /// Field 10: `source_url`
-    pub source_url: ::core::option::Option<&'a str>,
-    /// When the source bytes were fetched; unset when not applicable.
-    ///
-    /// Field 11: `fetched_at`
-    pub fetched_at: ::buffa::MessageFieldView<
-        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+    pub source: ::core::option::Option<
+        super::super::__buffa::view::oneof::artifact_metadata::Source<'a>,
     >,
-    /// Source transport encoding, for example "base64"; empty when none.
-    ///
-    /// Field 12: `source_encoding`
-    pub source_encoding: ::core::option::Option<&'a str>,
-    /// MIME as declared by the source before validation; empty when not declared.
-    /// The authoritative decoded type is mime above.
-    ///
-    /// Field 13: `declared_mime`
-    pub declared_mime: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -477,29 +445,13 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_artifact_id(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
     }
-    /**Whether required field `sha256` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_sha256(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
-    }
     /**Whether required field `mime` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
     pub const fn has_mime(&self) -> bool {
-        self.__buffa_required_seen_0 & 4u64 != 0
-    }
-    /**Whether required field `storage_ref` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_storage_ref(&self) -> bool {
-        self.__buffa_required_seen_0 & 8u64 != 0
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
     /**Whether required field `created_at` is set.
 
@@ -508,14 +460,6 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_created_at(&self) -> bool {
         self.created_at.is_set()
-    }
-    /**Whether required field `availability` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_availability(&self) -> bool {
-        self.__buffa_required_seen_0 & 16u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
@@ -558,47 +502,24 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.sha256 = ::buffa::types::borrow_str(&mut cur)?;
+                view.mime = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 2u64;
             }
             3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.size_bytes = Some(::buffa::types::decode_uint64(&mut cur)?);
-            }
-            4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.mime = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 4u64;
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.storage_ref = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 8u64;
-            }
-            6u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.preview = Some(::buffa::types::borrow_str(&mut cur)?);
             }
-            7u32 => {
+            4u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
                 view.truncated = Some(::buffa::types::decode_bool(&mut cur)?);
             }
-            8u32 => {
+            5u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
@@ -619,57 +540,67 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                     }
                 }
             }
-            9u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                view.availability = ::buffa::EnumValue::from(
-                    ::buffa::types::decode_int32(&mut cur)?,
-                );
-                view.__buffa_required_seen_0 |= 16u64;
-            }
-            10u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.source_url = Some(::buffa::types::borrow_str(&mut cur)?);
-            }
-            11u32 => {
+            6u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                match view.fetched_at.as_mut() {
-                    Some(existing) => {
-                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
-                    }
-                    None => {
-                        view.fetched_at = ::buffa::MessageFieldView::set(
-                            <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
-                                sub,
-                                __sub_ctx,
-                            )?,
-                        );
-                    }
+                if let Some(
+                    super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                        ref mut existing,
+                    ),
+                ) = view.source
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.source = Some(
+                        super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::StoredArtifactView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
                 }
             }
-            12u32 => {
+            7u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.source_encoding = Some(::buffa::types::borrow_str(&mut cur)?);
-            }
-            13u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.declared_mime = Some(::buffa::types::borrow_str(&mut cur)?);
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                        ref mut existing,
+                    ),
+                ) = view.source
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.source = Some(
+                        super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::ExternalArtifactView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -692,10 +623,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::ArtifactMetadata {
             artifact_id: self.artifact_id.to_string(),
-            sha256: self.sha256.to_string(),
-            size_bytes: self.size_bytes,
             mime: self.mime.to_string(),
-            storage_ref: self.storage_ref.to_string(),
             preview: self.preview.map(|s| s.to_string()),
             truncated: self.truncated,
             created_at: match self.created_at.as_option() {
@@ -706,18 +634,33 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            availability: self.availability,
-            source_url: self.source_url.map(|s| s.to_string()),
-            fetched_at: match self.fetched_at.as_option() {
-                Some(v) => {
-                    ::buffa::MessageField::<
-                        ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_from_source(__buffa_src)?)
+            source: match self.source.as_ref() {
+                ::core::option::Option::Some(v) => {
+                    ::core::option::Option::Some(
+                        match v {
+                            super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::artifact_metadata::Source::Stored(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::artifact_metadata::Source::External(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                        },
+                    )
                 }
-                None => ::buffa::MessageField::none(),
+                ::core::option::Option::None => ::core::option::Option::None,
             },
-            source_encoding: self.source_encoding.map(|s| s.to_string()),
-            declared_mime: self.declared_mime.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -729,12 +672,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.artifact_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
-        if let Some(v) = self.size_bytes {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
-        }
         size += 1u32 + ::buffa::types::string_encoded_len(&self.mime) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.storage_ref) as u32;
         if let Some(ref v) = self.preview {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
@@ -749,26 +687,29 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        {
-            let val = self.availability.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
-        }
-        if let Some(ref v) = self.source_url {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        if self.fetched_at.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.fetched_at.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        if let Some(ref v) = self.source_encoding {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        if let Some(ref v) = self.declared_mime {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        if let ::core::option::Option::Some(ref v) = self.source {
+            match v {
+                super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+            }
         }
         size
     }
@@ -781,35 +722,40 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.artifact_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.sha256, buf);
-        if let Some(v) = self.size_bytes {
-            ::buffa::types::put_uint64_field(3u32, v, buf);
-        }
-        ::buffa::types::put_string_field(4u32, &self.mime, buf);
-        ::buffa::types::put_string_field(5u32, &self.storage_ref, buf);
+        ::buffa::types::put_string_field(2u32, &self.mime, buf);
         if let Some(ref v) = self.preview {
-            ::buffa::types::put_string_field(6u32, v, buf);
+            ::buffa::types::put_string_field(3u32, v, buf);
         }
         if let Some(v) = self.truncated {
-            ::buffa::types::put_bool_field(7u32, v, buf);
+            ::buffa::types::put_bool_field(4u32, v, buf);
         }
         if self.created_at.is_set() {
-            ::buffa::types::put_len_delimited_header(8u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
             self.created_at.write_to(__cache, buf);
         }
-        ::buffa::types::put_int32_field(9u32, self.availability.to_i32(), buf);
-        if let Some(ref v) = self.source_url {
-            ::buffa::types::put_string_field(10u32, v, buf);
-        }
-        if self.fetched_at.is_set() {
-            ::buffa::types::put_len_delimited_header(11u32, __cache.consume_next(), buf);
-            self.fetched_at.write_to(__cache, buf);
-        }
-        if let Some(ref v) = self.source_encoding {
-            ::buffa::types::put_string_field(12u32, v, buf);
-        }
-        if let Some(ref v) = self.declared_mime {
-            ::buffa::types::put_string_field(13u32, v, buf);
+        if let ::core::option::Option::Some(ref v) = self.source {
+            match v {
+                super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        6u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        7u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+            }
         }
     }
 }
@@ -835,16 +781,7 @@ impl<'__a> ::serde::Serialize for ArtifactMetadataView<'__a> {
             __map.serialize_entry("artifactId", self.artifact_id)?;
         }
         {
-            __map.serialize_entry("sha256", self.sha256)?;
-        }
-        if let ::core::option::Option::Some(__v) = self.size_bytes {
-            __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
-        }
-        {
             __map.serialize_entry("mime", self.mime)?;
-        }
-        {
-            __map.serialize_entry("storageRef", self.storage_ref)?;
         }
         if let ::core::option::Option::Some(__v) = self.preview {
             __map.serialize_entry("preview", __v)?;
@@ -857,22 +794,19 @@ impl<'__a> ::serde::Serialize for ArtifactMetadataView<'__a> {
                 __map.serialize_entry("createdAt", __v)?;
             }
         }
-        {
-            __map.serialize_entry("availability", &self.availability)?;
-        }
-        if let ::core::option::Option::Some(__v) = self.source_url {
-            __map.serialize_entry("sourceUrl", __v)?;
-        }
-        {
-            if let ::core::option::Option::Some(__v) = self.fetched_at.as_option() {
-                __map.serialize_entry("fetchedAt", __v)?;
+        if let ::core::option::Option::Some(ref __ov) = self.source {
+            match __ov {
+                super::super::__buffa::view::oneof::artifact_metadata::Source::Stored(
+                    v,
+                ) => {
+                    __map.serialize_entry("stored", v)?;
+                }
+                super::super::__buffa::view::oneof::artifact_metadata::Source::External(
+                    v,
+                ) => {
+                    __map.serialize_entry("external", v)?;
+                }
             }
-        }
-        if let ::core::option::Option::Some(__v) = self.source_encoding {
-            __map.serialize_entry("sourceEncoding", __v)?;
-        }
-        if let ::core::option::Option::Some(__v) = self.declared_mime {
-            __map.serialize_entry("declaredMime", __v)?;
         }
         __map.end()
     }
@@ -972,51 +906,30 @@ impl ArtifactMetadataOwnedView {
     pub fn artifact_id(&self) -> &'_ str {
         self.0.reborrow().artifact_id
     }
-    /// Content digest over the artifact bytes; the claim-check key.
+    /// Effective media type: decoded/validated when stored, source-declared when external.
     ///
-    /// Field 2: `sha256`
-    #[must_use]
-    pub fn sha256(&self) -> &'_ str {
-        self.0.reborrow().sha256
-    }
-    /// Size of the stored bytes.
-    ///
-    /// Field 3: `size_bytes`
-    #[must_use]
-    pub fn size_bytes(&self) -> ::core::option::Option<u64> {
-        self.0.reborrow().size_bytes
-    }
-    /// IANA media type of the stored bytes.
-    ///
-    /// Field 4: `mime`
+    /// Field 2: `mime`
     #[must_use]
     pub fn mime(&self) -> &'_ str {
         self.0.reborrow().mime
     }
-    /// External location the bytes were stored at (for example an Object Store key).
-    ///
-    /// Field 5: `storage_ref`
-    #[must_use]
-    pub fn storage_ref(&self) -> &'_ str {
-        self.0.reborrow().storage_ref
-    }
     /// Short human-readable preview; empty when none was produced.
     ///
-    /// Field 6: `preview`
+    /// Field 3: `preview`
     #[must_use]
     pub fn preview(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().preview
     }
     /// True when preview is a truncation of the full content.
     ///
-    /// Field 7: `truncated`
+    /// Field 4: `truncated`
     #[must_use]
     pub fn truncated(&self) -> ::core::option::Option<bool> {
         self.0.reborrow().truncated
     }
-    /// Wall-clock instant the artifact was stored.
+    /// Wall-clock instant the artifact record was created.
     ///
-    /// Field 8: `created_at`
+    /// Field 5: `created_at`
     #[must_use]
     pub fn created_at(
         &self,
@@ -1025,49 +938,14 @@ impl ArtifactMetadataOwnedView {
     > {
         &self.0.reborrow().created_at
     }
-    /// Whether the bytes were durably stored or only a degraded external reference
-    /// was kept; recorded because a failed fetch leaves no other trace of the
-    /// difference between "we hold the bytes" and "we only had a broken reference".
-    ///
-    /// Field 9: `availability`
+    /// Oneof `source`.
     #[must_use]
-    pub fn availability(
+    pub fn source(
         &self,
-    ) -> ::buffa::EnumValue<super::super::ArtifactSourceAvailability> {
-        self.0.reborrow().availability
-    }
-    /// Original source URL for a fetched or degraded artifact; empty when none.
-    ///
-    /// Field 10: `source_url`
-    #[must_use]
-    pub fn source_url(&self) -> ::core::option::Option<&'_ str> {
-        self.0.reborrow().source_url
-    }
-    /// When the source bytes were fetched; unset when not applicable.
-    ///
-    /// Field 11: `fetched_at`
-    #[must_use]
-    pub fn fetched_at(
-        &self,
-    ) -> &::buffa::MessageFieldView<
-        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+    ) -> ::core::option::Option<
+        &super::super::__buffa::view::oneof::artifact_metadata::Source<'_>,
     > {
-        &self.0.reborrow().fetched_at
-    }
-    /// Source transport encoding, for example "base64"; empty when none.
-    ///
-    /// Field 12: `source_encoding`
-    #[must_use]
-    pub fn source_encoding(&self) -> ::core::option::Option<&'_ str> {
-        self.0.reborrow().source_encoding
-    }
-    /// MIME as declared by the source before validation; empty when not declared.
-    /// The authoritative decoded type is mime above.
-    ///
-    /// Field 13: `declared_mime`
-    #[must_use]
-    pub fn declared_mime(&self) -> ::core::option::Option<&'_ str> {
-        self.0.reborrow().declared_mime
+        self.0.reborrow().source.as_ref()
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ArtifactMetadataView<'static>>>
@@ -1093,6 +971,687 @@ impl ::buffa::HasMessageView for super::super::ArtifactMetadata {
     type ViewHandle = ArtifactMetadataOwnedView;
 }
 impl ::serde::Serialize for ArtifactMetadataOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+/// StoredArtifact is the source arm for an artifact whose bytes were durably stored.
+#[derive(Clone, Debug, Default)]
+pub struct StoredArtifactView<'a> {
+    /// Content digest over the stored bytes; the claim-check key.
+    ///
+    /// Field 1: `sha256`
+    pub sha256: &'a str,
+    /// Size of the stored bytes.
+    ///
+    /// Field 2: `size_bytes`
+    pub size_bytes: ::core::option::Option<u64>,
+    /// External location the bytes were stored at (for example an Object Store key).
+    ///
+    /// Field 3: `storage_ref`
+    pub storage_ref: &'a str,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> StoredArtifactView<'a> {
+    /**Whether required field `sha256` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_sha256(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+    /**Whether required field `storage_ref` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_storage_ref(&self) -> bool {
+        self.__buffa_required_seen_0 & 2u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
+    type Owned = super::super::StoredArtifact;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.sha256 = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.size_bytes = Some(::buffa::types::decode_uint64(&mut cur)?);
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.storage_ref = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 2u64;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::StoredArtifact, ::buffa::DecodeError> {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<super::super::StoredArtifact, ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::StoredArtifact {
+            sha256: self.sha256.to_string(),
+            size_bytes: self.size_bytes,
+            storage_ref: self.storage_ref.to_string(),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
+        if let Some(v) = self.size_bytes {
+            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.storage_ref) as u32;
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_string_field(1u32, &self.sha256, buf);
+        if let Some(v) = self.size_bytes {
+            ::buffa::types::put_uint64_field(2u32, v, buf);
+        }
+        ::buffa::types::put_string_field(3u32, &self.storage_ref, buf);
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for StoredArtifactView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("sha256", self.sha256)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.size_bytes {
+            __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
+        }
+        {
+            __map.serialize_entry("storageRef", self.storage_ref)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for StoredArtifactView<'a> {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1";
+    const NAME: &'static str = "StoredArtifact";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1.StoredArtifact";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.StoredArtifact";
+}
+::buffa::impl_default_view_instance!(StoredArtifactView);
+::buffa::impl_view_reborrow!(StoredArtifactView);
+/** Self-contained, `'static` owned view of a `StoredArtifact` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`StoredArtifactView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`StoredArtifactView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct StoredArtifactOwnedView(::buffa::OwnedView<StoredArtifactView<'static>>);
+impl StoredArtifactOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            StoredArtifactOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            StoredArtifactOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::StoredArtifact,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            StoredArtifactOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`StoredArtifactView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &StoredArtifactView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::StoredArtifact, ::buffa::DecodeError> {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Content digest over the stored bytes; the claim-check key.
+    ///
+    /// Field 1: `sha256`
+    #[must_use]
+    pub fn sha256(&self) -> &'_ str {
+        self.0.reborrow().sha256
+    }
+    /// Size of the stored bytes.
+    ///
+    /// Field 2: `size_bytes`
+    #[must_use]
+    pub fn size_bytes(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().size_bytes
+    }
+    /// External location the bytes were stored at (for example an Object Store key).
+    ///
+    /// Field 3: `storage_ref`
+    #[must_use]
+    pub fn storage_ref(&self) -> &'_ str {
+        self.0.reborrow().storage_ref
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<StoredArtifactView<'static>>>
+for StoredArtifactOwnedView {
+    fn from(inner: ::buffa::OwnedView<StoredArtifactView<'static>>) -> Self {
+        StoredArtifactOwnedView(inner)
+    }
+}
+impl ::core::convert::From<StoredArtifactOwnedView>
+for ::buffa::OwnedView<StoredArtifactView<'static>> {
+    fn from(wrapper: StoredArtifactOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<StoredArtifactView<'static>>>
+for StoredArtifactOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<StoredArtifactView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::StoredArtifact {
+    type View<'a> = StoredArtifactView<'a>;
+    type ViewHandle = StoredArtifactOwnedView;
+}
+impl ::serde::Serialize for StoredArtifactOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+/// ExternalArtifact is the degraded source arm for an artifact whose bytes were
+/// never fetched; only a reference to the source is kept.
+#[derive(Clone, Debug, Default)]
+pub struct ExternalArtifactView<'a> {
+    /// The (un-fetchable) source location.
+    ///
+    /// Field 1: `source_url`
+    pub source_url: &'a str,
+    /// Source transport encoding, for example "base64"; empty when none.
+    ///
+    /// Field 2: `source_encoding`
+    pub source_encoding: ::core::option::Option<&'a str>,
+    /// MIME as declared by the source before validation; empty when not declared.
+    ///
+    /// Field 3: `declared_mime`
+    pub declared_mime: ::core::option::Option<&'a str>,
+    /// When a fetch of the source was attempted; unset when not applicable.
+    ///
+    /// Field 4: `fetched_at`
+    pub fetched_at: ::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+    >,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> ExternalArtifactView<'a> {
+    /**Whether required field `source_url` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_source_url(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for ExternalArtifactView<'a> {
+    type Owned = super::super::ExternalArtifact;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.source_url = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.source_encoding = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.declared_mime = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.fetched_at.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.fetched_at = ::buffa::MessageFieldView::set(
+                            <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::ExternalArtifact, ::buffa::DecodeError> {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<super::super::ExternalArtifact, ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::ExternalArtifact {
+            source_url: self.source_url.to_string(),
+            source_encoding: self.source_encoding.map(|s| s.to_string()),
+            declared_mime: self.declared_mime.map(|s| s.to_string()),
+            fetched_at: match self.fetched_at.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        ::buffa_types::google::protobuf::Timestamp,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for ExternalArtifactView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.source_url) as u32;
+        if let Some(ref v) = self.source_encoding {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if let Some(ref v) = self.declared_mime {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if self.fetched_at.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.fetched_at.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_string_field(1u32, &self.source_url, buf);
+        if let Some(ref v) = self.source_encoding {
+            ::buffa::types::put_string_field(2u32, v, buf);
+        }
+        if let Some(ref v) = self.declared_mime {
+            ::buffa::types::put_string_field(3u32, v, buf);
+        }
+        if self.fetched_at.is_set() {
+            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
+            self.fetched_at.write_to(__cache, buf);
+        }
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for ExternalArtifactView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("sourceUrl", self.source_url)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.source_encoding {
+            __map.serialize_entry("sourceEncoding", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.declared_mime {
+            __map.serialize_entry("declaredMime", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.fetched_at.as_option() {
+                __map.serialize_entry("fetchedAt", __v)?;
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for ExternalArtifactView<'a> {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1";
+    const NAME: &'static str = "ExternalArtifact";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1.ExternalArtifact";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.ExternalArtifact";
+}
+::buffa::impl_default_view_instance!(ExternalArtifactView);
+::buffa::impl_view_reborrow!(ExternalArtifactView);
+/** Self-contained, `'static` owned view of a `ExternalArtifact` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`ExternalArtifactView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`ExternalArtifactView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct ExternalArtifactOwnedView(::buffa::OwnedView<ExternalArtifactView<'static>>);
+impl ExternalArtifactOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ExternalArtifactOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ExternalArtifactOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::ExternalArtifact,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ExternalArtifactOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`ExternalArtifactView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &ExternalArtifactView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::ExternalArtifact, ::buffa::DecodeError> {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// The (un-fetchable) source location.
+    ///
+    /// Field 1: `source_url`
+    #[must_use]
+    pub fn source_url(&self) -> &'_ str {
+        self.0.reborrow().source_url
+    }
+    /// Source transport encoding, for example "base64"; empty when none.
+    ///
+    /// Field 2: `source_encoding`
+    #[must_use]
+    pub fn source_encoding(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().source_encoding
+    }
+    /// MIME as declared by the source before validation; empty when not declared.
+    ///
+    /// Field 3: `declared_mime`
+    #[must_use]
+    pub fn declared_mime(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().declared_mime
+    }
+    /// When a fetch of the source was attempted; unset when not applicable.
+    ///
+    /// Field 4: `fetched_at`
+    #[must_use]
+    pub fn fetched_at(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+    > {
+        &self.0.reborrow().fetched_at
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<ExternalArtifactView<'static>>>
+for ExternalArtifactOwnedView {
+    fn from(inner: ::buffa::OwnedView<ExternalArtifactView<'static>>) -> Self {
+        ExternalArtifactOwnedView(inner)
+    }
+}
+impl ::core::convert::From<ExternalArtifactOwnedView>
+for ::buffa::OwnedView<ExternalArtifactView<'static>> {
+    fn from(wrapper: ExternalArtifactOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<ExternalArtifactView<'static>>>
+for ExternalArtifactOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<ExternalArtifactView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::ExternalArtifact {
+    type View<'a> = ExternalArtifactView<'a>;
+    type ViewHandle = ExternalArtifactOwnedView;
+}
+impl ::serde::Serialize for ExternalArtifactOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

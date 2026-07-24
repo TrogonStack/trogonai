@@ -383,6 +383,11 @@ pub struct TextToolResultView<'a> {
     ///
     /// Field 2: `truncated`
     pub truncated: ::core::option::Option<bool>,
+    /// True when the tool ran to completion but its output represents an
+    /// application-level error (mirrors the MCP tool-result isError flag).
+    ///
+    /// Field 3: `is_error`
+    pub is_error: ::core::option::Option<bool>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -438,6 +443,13 @@ impl<'a> ::buffa::MessageView<'a> for TextToolResultView<'a> {
                 )?;
                 view.truncated = Some(::buffa::types::decode_bool(&mut cur)?);
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.is_error = Some(::buffa::types::decode_bool(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -460,6 +472,7 @@ impl<'a> ::buffa::MessageView<'a> for TextToolResultView<'a> {
         ::core::result::Result::Ok(super::super::TextToolResult {
             content: self.content.to_string(),
             truncated: self.truncated,
+            is_error: self.is_error,
             ..::core::default::Default::default()
         })
     }
@@ -472,6 +485,9 @@ impl<'a> ::buffa::ViewEncode<'a> for TextToolResultView<'a> {
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.content) as u32;
         if self.truncated.is_some() {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
+        if self.is_error.is_some() {
             size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
         size
@@ -487,6 +503,9 @@ impl<'a> ::buffa::ViewEncode<'a> for TextToolResultView<'a> {
         ::buffa::types::put_string_field(1u32, &self.content, buf);
         if let Some(v) = self.truncated {
             ::buffa::types::put_bool_field(2u32, v, buf);
+        }
+        if let Some(v) = self.is_error {
+            ::buffa::types::put_bool_field(3u32, v, buf);
         }
     }
 }
@@ -513,6 +532,9 @@ impl<'__a> ::serde::Serialize for TextToolResultView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.truncated {
             __map.serialize_entry("truncated", &__v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.is_error {
+            __map.serialize_entry("isError", &__v)?;
         }
         __map.end()
     }
@@ -618,6 +640,14 @@ impl TextToolResultOwnedView {
     #[must_use]
     pub fn truncated(&self) -> ::core::option::Option<bool> {
         self.0.reborrow().truncated
+    }
+    /// True when the tool ran to completion but its output represents an
+    /// application-level error (mirrors the MCP tool-result isError flag).
+    ///
+    /// Field 3: `is_error`
+    #[must_use]
+    pub fn is_error(&self) -> ::core::option::Option<bool> {
+        self.0.reborrow().is_error
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<TextToolResultView<'static>>>

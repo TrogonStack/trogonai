@@ -13,6 +13,9 @@ message AssistantMessageCompleted {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   CanonicalMessage message = 2 [features.field_presence = LEGACY_REQUIRED];
   FinishReason finish_reason = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The stop sequence that fired, set only when finish_reason is
+  // FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
+  string matched_stop_sequence = 4;
 }
 
 // FinishReason is why a completed assistant turn stopped generating.
@@ -28,4 +31,8 @@ enum FinishReason {
   FINISH_REASON_STOP_SEQUENCE = 4;
   // Output stopped by a content filter.
   FINISH_REASON_CONTENT_FILTER = 5;
+  // Resumable server-side pause of a tool loop (e.g. Claude pause_turn).
+  FINISH_REASON_PAUSE_TURN = 6;
+  // Model declined to respond on safety grounds (e.g. Claude refusal).
+  FINISH_REASON_REFUSAL = 7;
 }

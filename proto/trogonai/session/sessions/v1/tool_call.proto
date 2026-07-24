@@ -19,4 +19,7 @@ message TextToolResult {
   string content = 1 [features.field_presence = LEGACY_REQUIRED];
   // True when content is a truncation of the full result.
   bool truncated = 2;
+  // True when the tool ran to completion but its output represents an
+  // application-level error (mirrors the MCP tool-result isError flag).
+  bool is_error = 3;
 }

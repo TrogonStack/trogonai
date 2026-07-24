@@ -13,6 +13,12 @@ pub struct ToolCallFailedView<'a> {
     pub tool_execution_id: &'a str,
     /// Field 4: `error`
     pub error: &'a str,
+    /// Typed failure reason, so a cancelled or timed-out call is distinguishable
+    /// from a genuine error without parsing the error string (parity with
+    /// AssistantMessageFailed).
+    ///
+    /// Field 5: `reason`
+    pub reason: ::buffa::EnumValue<super::super::ToolCallFailureReason>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -48,6 +54,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_error(&self) -> bool {
         self.__buffa_required_seen_0 & 8u64 != 0
+    }
+    /**Whether required field `reason` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_reason(&self) -> bool {
+        self.__buffa_required_seen_0 & 16u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ToolCallFailedView<'a> {
@@ -109,6 +123,16 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallFailedView<'a> {
                 view.error = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 8u64;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.reason = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(&mut cur)?,
+                );
+                view.__buffa_required_seen_0 |= 16u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -133,6 +157,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallFailedView<'a> {
             tool_call_id: self.tool_call_id.to_string(),
             tool_execution_id: self.tool_execution_id.to_string(),
             error: self.error.to_string(),
+            reason: self.reason,
             ..::core::default::Default::default()
         })
     }
@@ -148,6 +173,10 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallFailedView<'a> {
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.error) as u32;
+        {
+            let val = self.reason.to_i32();
+            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -162,6 +191,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallFailedView<'a> {
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
         ::buffa::types::put_string_field(4u32, &self.error, buf);
+        ::buffa::types::put_int32_field(5u32, self.reason.to_i32(), buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -193,6 +223,9 @@ impl<'__a> ::serde::Serialize for ToolCallFailedView<'__a> {
         }
         {
             __map.serialize_entry("error", self.error)?;
+        }
+        {
+            __map.serialize_entry("reason", &self.reason)?;
         }
         __map.end()
     }
@@ -304,6 +337,15 @@ impl ToolCallFailedOwnedView {
     #[must_use]
     pub fn error(&self) -> &'_ str {
         self.0.reborrow().error
+    }
+    /// Typed failure reason, so a cancelled or timed-out call is distinguishable
+    /// from a genuine error without parsing the error string (parity with
+    /// AssistantMessageFailed).
+    ///
+    /// Field 5: `reason`
+    #[must_use]
+    pub fn reason(&self) -> ::buffa::EnumValue<super::super::ToolCallFailureReason> {
+        self.0.reborrow().reason
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallFailedView<'static>>>

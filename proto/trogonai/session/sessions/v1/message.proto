@@ -31,8 +31,6 @@ enum MessageRole {
   MESSAGE_ROLE_UNSPECIFIED = 0;
   MESSAGE_ROLE_USER = 1;
   MESSAGE_ROLE_ASSISTANT = 2;
-  MESSAGE_ROLE_SYSTEM = 3;
-  MESSAGE_ROLE_TOOL = 4;
 }
 
 // ContentBlock is one typed block inside a CanonicalMessage.

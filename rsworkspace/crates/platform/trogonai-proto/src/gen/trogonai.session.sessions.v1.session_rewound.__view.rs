@@ -12,6 +12,11 @@ pub struct SessionRewoundView<'a> {
     pub session_id: &'a str,
     /// Field 2: `to_sequence`
     pub to_sequence: u64,
+    /// Why the rewind happened; a command-time input not derivable from the log,
+    /// mirroring ForkReason and CompactionTrigger.
+    ///
+    /// Field 3: `reason`
+    pub reason: ::buffa::EnumValue<super::super::RewindReason>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -31,6 +36,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_to_sequence(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
+    }
+    /**Whether required field `reason` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_reason(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for SessionRewoundView<'a> {
@@ -76,6 +89,16 @@ impl<'a> ::buffa::MessageView<'a> for SessionRewoundView<'a> {
                 view.to_sequence = ::buffa::types::decode_uint64(&mut cur)?;
                 view.__buffa_required_seen_0 |= 2u64;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.reason = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(&mut cur)?,
+                );
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -98,6 +121,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionRewoundView<'a> {
         ::core::result::Result::Ok(super::super::SessionRewound {
             session_id: self.session_id.to_string(),
             to_sequence: self.to_sequence,
+            reason: self.reason,
             ..::core::default::Default::default()
         })
     }
@@ -110,6 +134,10 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionRewoundView<'a> {
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
         size += 1u32 + ::buffa::types::uint64_encoded_len(self.to_sequence) as u32;
+        {
+            let val = self.reason.to_i32();
+            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -122,6 +150,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionRewoundView<'a> {
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_uint64_field(2u32, self.to_sequence, buf);
+        ::buffa::types::put_int32_field(3u32, self.reason.to_i32(), buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -151,6 +180,9 @@ impl<'__a> ::serde::Serialize for SessionRewoundView<'__a> {
                     "toSequence",
                     &::buffa::json_helpers::ProtoJson(&self.to_sequence),
                 )?;
+        }
+        {
+            __map.serialize_entry("reason", &self.reason)?;
         }
         __map.end()
     }
@@ -252,6 +284,14 @@ impl SessionRewoundOwnedView {
     #[must_use]
     pub fn to_sequence(&self) -> u64 {
         self.0.reborrow().to_sequence
+    }
+    /// Why the rewind happened; a command-time input not derivable from the log,
+    /// mirroring ForkReason and CompactionTrigger.
+    ///
+    /// Field 3: `reason`
+    #[must_use]
+    pub fn reason(&self) -> ::buffa::EnumValue<super::super::RewindReason> {
+        self.0.reborrow().reason
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<SessionRewoundView<'static>>>

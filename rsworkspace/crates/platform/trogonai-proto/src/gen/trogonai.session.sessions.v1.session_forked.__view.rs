@@ -3,7 +3,7 @@
 
 /// SessionForked is the first event on the child subject; its producing command
 /// ForkSession appends under the NoStream precondition, making creation atomic
-/// and exactly-once (ADR#0035 facet 2). history_base_seq is a physical JetStream
+/// and exactly-once (ADR#0035 facet 2). history_base_sequence is a physical JetStream
 /// stream sequence (sparse, shared across subjects, ADR#0013), resolved at the
 /// application boundary; fork composes a shared prefix at replay time, never a
 /// physical copy (ADR#0035 facet 5).
@@ -13,8 +13,8 @@ pub struct SessionForkedView<'a> {
     pub session_id: &'a str,
     /// Field 2: `source_session_id`
     pub source_session_id: &'a str,
-    /// Field 3: `history_base_seq`
-    pub history_base_seq: u64,
+    /// Field 3: `history_base_sequence`
+    pub history_base_sequence: u64,
     /// Why the fork happened; a command-time input not derivable from the rest of
     /// the log.
     ///
@@ -40,12 +40,12 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_source_session_id(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
     }
-    /**Whether required field `history_base_seq` was present on the wire.
+    /**Whether required field `history_base_sequence` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_history_base_seq(&self) -> bool {
+    pub const fn has_history_base_sequence(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
     }
     /**Whether required field `reason` was present on the wire.
@@ -105,7 +105,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionForkedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                view.history_base_seq = ::buffa::types::decode_uint64(&mut cur)?;
+                view.history_base_sequence = ::buffa::types::decode_uint64(&mut cur)?;
                 view.__buffa_required_seen_0 |= 4u64;
             }
             4u32 => {
@@ -140,7 +140,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionForkedView<'a> {
         ::core::result::Result::Ok(super::super::SessionForked {
             session_id: self.session_id.to_string(),
             source_session_id: self.source_session_id.to_string(),
-            history_base_seq: self.history_base_seq,
+            history_base_sequence: self.history_base_sequence,
             reason: self.reason,
             ..::core::default::Default::default()
         })
@@ -155,7 +155,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionForkedView<'a> {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.source_session_id) as u32;
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.history_base_seq) as u32;
+        size
+            += 1u32
+                + ::buffa::types::uint64_encoded_len(self.history_base_sequence) as u32;
         {
             let val = self.reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
@@ -172,7 +174,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionForkedView<'a> {
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.source_session_id, buf);
-        ::buffa::types::put_uint64_field(3u32, self.history_base_seq, buf);
+        ::buffa::types::put_uint64_field(3u32, self.history_base_sequence, buf);
         ::buffa::types::put_int32_field(4u32, self.reason.to_i32(), buf);
     }
 }
@@ -203,8 +205,8 @@ impl<'__a> ::serde::Serialize for SessionForkedView<'__a> {
         {
             __map
                 .serialize_entry(
-                    "historyBaseSeq",
-                    &::buffa::json_helpers::ProtoJson(&self.history_base_seq),
+                    "historyBaseSequence",
+                    &::buffa::json_helpers::ProtoJson(&self.history_base_sequence),
                 )?;
         }
         {
@@ -309,10 +311,10 @@ impl SessionForkedOwnedView {
     pub fn source_session_id(&self) -> &'_ str {
         self.0.reborrow().source_session_id
     }
-    /// Field 3: `history_base_seq`
+    /// Field 3: `history_base_sequence`
     #[must_use]
-    pub fn history_base_seq(&self) -> u64 {
-        self.0.reborrow().history_base_seq
+    pub fn history_base_sequence(&self) -> u64 {
+        self.0.reborrow().history_base_sequence
     }
     /// Why the fork happened; a command-time input not derivable from the rest of
     /// the log.

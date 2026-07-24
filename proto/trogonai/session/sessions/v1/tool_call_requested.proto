@@ -11,4 +11,8 @@ message ToolCallRequested {
   string name = 4 [features.field_presence = LEGACY_REQUIRED];
   string input_json = 5 [features.field_presence = LEGACY_REQUIRED];
   string parent_tool_use_id = 6;
+  // Operation-ledger id reserved for this call's side effect, joining it to
+  // OperationReserved/OperationOutcomeRecorded (mirrors DelegationDispatched.operation_id).
+  // Empty for a call that reserves no operation (e.g. a read-only tool).
+  string operation_id = 7;
 }

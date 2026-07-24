@@ -7,6 +7,10 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct TokenUsage {
+    /// Counters are intentionally not required: a provider may not report every
+    /// class (e.g. cache tokens), and edition-2024 presence distinguishes an unset
+    /// "not reported" counter from a reported 0.
+    ///
     /// Field 1: `input_tokens`
     #[serde(
         rename = "inputTokens",

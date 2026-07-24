@@ -169,7 +169,7 @@ impl ::buffa::Enumeration for ForkReason {
 }
 /// SessionForked is the first event on the child subject; its producing command
 /// ForkSession appends under the NoStream precondition, making creation atomic
-/// and exactly-once (ADR#0035 facet 2). history_base_seq is a physical JetStream
+/// and exactly-once (ADR#0035 facet 2). history_base_sequence is a physical JetStream
 /// stream sequence (sparse, shared across subjects, ADR#0013), resolved at the
 /// application boundary; fork composes a shared prefix at replay time, never a
 /// physical copy (ADR#0035 facet 5).
@@ -191,13 +191,13 @@ pub struct SessionForked {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub source_session_id: ::buffa::alloc::string::String,
-    /// Field 3: `history_base_seq`
+    /// Field 3: `history_base_sequence`
     #[serde(
-        rename = "historyBaseSeq",
-        alias = "history_base_seq",
+        rename = "historyBaseSequence",
+        alias = "history_base_sequence",
         with = "::buffa::json_helpers::uint64"
     )]
-    pub history_base_seq: u64,
+    pub history_base_sequence: u64,
     /// Why the fork happened; a command-time input not derivable from the rest of
     /// the log.
     ///
@@ -210,7 +210,7 @@ impl ::core::fmt::Debug for SessionForked {
         f.debug_struct("SessionForked")
             .field("session_id", &self.session_id)
             .field("source_session_id", &self.source_session_id)
-            .field("history_base_seq", &self.history_base_seq)
+            .field("history_base_sequence", &self.history_base_sequence)
             .field("reason", &self.reason)
             .finish()
     }
@@ -243,7 +243,9 @@ impl ::buffa::Message for SessionForked {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.source_session_id) as u32;
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.history_base_seq) as u32;
+        size
+            += 1u32
+                + ::buffa::types::uint64_encoded_len(self.history_base_sequence) as u32;
         {
             let val = self.reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
@@ -259,7 +261,7 @@ impl ::buffa::Message for SessionForked {
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.source_session_id, buf);
-        ::buffa::types::put_uint64_field(3u32, self.history_base_seq, buf);
+        ::buffa::types::put_uint64_field(3u32, self.history_base_sequence, buf);
         ::buffa::types::put_int32_field(4u32, self.reason.to_i32(), buf);
     }
     fn merge_field(
@@ -292,7 +294,7 @@ impl ::buffa::Message for SessionForked {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                self.history_base_seq = ::buffa::types::decode_uint64(buf)?;
+                self.history_base_sequence = ::buffa::types::decode_uint64(buf)?;
             }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -312,7 +314,7 @@ impl ::buffa::Message for SessionForked {
     fn clear(&mut self) {
         self.session_id.clear();
         self.source_session_id.clear();
-        self.history_base_seq = 0u64;
+        self.history_base_sequence = 0u64;
         self.reason = ::buffa::EnumValue::from(0);
     }
 }

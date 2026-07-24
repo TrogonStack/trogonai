@@ -32,6 +32,7 @@ import "trogonai/session/sessions/v1/tool_call_denied.proto";
 import "trogonai/session/sessions/v1/tool_call_failed.proto";
 import "trogonai/session/sessions/v1/tool_call_requested.proto";
 import "trogonai/session/sessions/v1/tool_call_started.proto";
+import "trogonai/session/sessions/v1/todo_updated.proto";
 import "trogonai/session/sessions/v1/user_message_recorded.proto";
 
 // SessionEvent is the session aggregate's event catalog: one oneof arm per
@@ -81,5 +82,7 @@ message SessionEvent {
     OperationOutcomeRecorded operation_outcome_recorded = 27;
     // System.
     SystemNoticeRecorded system_notice_recorded = 31;
+    // Plan.
+    TodoUpdated todo_updated = 32;
   }
 }

@@ -45,6 +45,17 @@ pub struct ToolCallRequested {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub parent_tool_use_id: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Operation-ledger id reserved for this call's side effect, joining it to
+    /// OperationReserved/OperationOutcomeRecorded (mirrors DelegationDispatched.operation_id).
+    /// Empty for a call that reserves no operation (e.g. a read-only tool).
+    ///
+    /// Field 7: `operation_id`
+    #[serde(
+        rename = "operationId",
+        alias = "operation_id",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub operation_id: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for ToolCallRequested {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -55,6 +66,7 @@ impl ::core::fmt::Debug for ToolCallRequested {
             .field("name", &self.name)
             .field("input_json", &self.input_json)
             .field("parent_tool_use_id", &self.parent_tool_use_id)
+            .field("operation_id", &self.operation_id)
             .finish()
     }
 }
@@ -74,6 +86,16 @@ impl ToolCallRequested {
         value: impl Into<::buffa::alloc::string::String>,
     ) -> Self {
         self.parent_tool_use_id = Some(value.into());
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::operation_id`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_operation_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.operation_id = Some(value.into());
         self
     }
 }
@@ -104,6 +126,9 @@ impl ::buffa::Message for ToolCallRequested {
         if let Some(ref v) = self.parent_tool_use_id {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if let Some(ref v) = self.operation_id {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     fn write_to(
@@ -120,6 +145,9 @@ impl ::buffa::Message for ToolCallRequested {
         ::buffa::types::put_string_field(5u32, &self.input_json, buf);
         if let Some(ref v) = self.parent_tool_use_id {
             ::buffa::types::put_string_field(6u32, v, buf);
+        }
+        if let Some(ref v) = self.operation_id {
+            ::buffa::types::put_string_field(7u32, v, buf);
         }
     }
     fn merge_field(
@@ -180,6 +208,18 @@ impl ::buffa::Message for ToolCallRequested {
                     buf,
                 )?;
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .operation_id
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -193,6 +233,7 @@ impl ::buffa::Message for ToolCallRequested {
         self.name.clear();
         self.input_json.clear();
         self.parent_tool_use_id = ::core::option::Option::None;
+        self.operation_id = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallRequested {

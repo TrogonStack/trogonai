@@ -16,6 +16,11 @@ pub struct AssistantMessageCompletedView<'a> {
     >,
     /// Field 3: `finish_reason`
     pub finish_reason: ::buffa::EnumValue<super::super::FinishReason>,
+    /// The stop sequence that fired, set only when finish_reason is
+    /// FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
+    ///
+    /// Field 4: `matched_stop_sequence`
+    pub matched_stop_sequence: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -111,6 +116,13 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageCompletedView<'a> {
                 );
                 view.__buffa_required_seen_0 |= 2u64;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.matched_stop_sequence = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -147,6 +159,7 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageCompletedView<'a> {
                 None => ::buffa::MessageField::none(),
             },
             finish_reason: self.finish_reason,
+            matched_stop_sequence: self.matched_stop_sequence.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -170,6 +183,9 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageCompletedView<'a> {
             let val = self.finish_reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
+        if let Some(ref v) = self.matched_stop_sequence {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -186,6 +202,9 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageCompletedView<'a> {
             self.message.write_to(__cache, buf);
         }
         ::buffa::types::put_int32_field(3u32, self.finish_reason.to_i32(), buf);
+        if let Some(ref v) = self.matched_stop_sequence {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -216,6 +235,9 @@ impl<'__a> ::serde::Serialize for AssistantMessageCompletedView<'__a> {
         }
         {
             __map.serialize_entry("finishReason", &self.finish_reason)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.matched_stop_sequence {
+            __map.serialize_entry("matchedStopSequence", __v)?;
         }
         __map.end()
     }
@@ -331,6 +353,14 @@ impl AssistantMessageCompletedOwnedView {
     #[must_use]
     pub fn finish_reason(&self) -> ::buffa::EnumValue<super::super::FinishReason> {
         self.0.reborrow().finish_reason
+    }
+    /// The stop sequence that fired, set only when finish_reason is
+    /// FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
+    ///
+    /// Field 4: `matched_stop_sequence`
+    #[must_use]
+    pub fn matched_stop_sequence(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().matched_stop_sequence
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AssistantMessageCompletedView<'static>>>

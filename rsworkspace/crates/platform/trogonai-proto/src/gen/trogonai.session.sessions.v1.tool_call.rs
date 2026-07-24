@@ -278,12 +278,23 @@ pub struct TextToolResult {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub truncated: ::core::option::Option<bool>,
+    /// True when the tool ran to completion but its output represents an
+    /// application-level error (mirrors the MCP tool-result isError flag).
+    ///
+    /// Field 3: `is_error`
+    #[serde(
+        rename = "isError",
+        alias = "is_error",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub is_error: ::core::option::Option<bool>,
 }
 impl ::core::fmt::Debug for TextToolResult {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("TextToolResult")
             .field("content", &self.content)
             .field("truncated", &self.truncated)
+            .field("is_error", &self.is_error)
             .finish()
     }
 }
@@ -300,6 +311,13 @@ impl TextToolResult {
     ///Sets [`Self::truncated`] to `Some(value)`, consuming and returning `self`.
     pub fn with_truncated(mut self, value: bool) -> Self {
         self.truncated = Some(value);
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::is_error`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_is_error(mut self, value: bool) -> Self {
+        self.is_error = Some(value);
         self
     }
 }
@@ -325,6 +343,9 @@ impl ::buffa::Message for TextToolResult {
         if self.truncated.is_some() {
             size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
+        if self.is_error.is_some() {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
         size
     }
     fn write_to(
@@ -337,6 +358,9 @@ impl ::buffa::Message for TextToolResult {
         ::buffa::types::put_string_field(1u32, &self.content, buf);
         if let Some(v) = self.truncated {
             ::buffa::types::put_bool_field(2u32, v, buf);
+        }
+        if let Some(v) = self.is_error {
+            ::buffa::types::put_bool_field(3u32, v, buf);
         }
     }
     fn merge_field(
@@ -366,6 +390,15 @@ impl ::buffa::Message for TextToolResult {
                     ::buffa::types::decode_bool(buf)?,
                 );
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.is_error = ::core::option::Option::Some(
+                    ::buffa::types::decode_bool(buf)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -375,6 +408,7 @@ impl ::buffa::Message for TextToolResult {
     fn clear(&mut self) {
         self.content.clear();
         self.truncated = ::core::option::Option::None;
+        self.is_error = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for TextToolResult {

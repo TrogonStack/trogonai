@@ -182,6 +182,15 @@ pub struct SystemNoticeRecorded {
     /// Field 3: `text`
     #[serde(rename = "text", with = "::buffa::json_helpers::proto_string")]
     pub text: ::buffa::alloc::string::String,
+    /// Tool call this notice concerns, when applicable; empty for a general notice.
+    ///
+    /// Field 4: `tool_call_id`
+    #[serde(
+        rename = "toolCallId",
+        alias = "tool_call_id",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub tool_call_id: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for SystemNoticeRecorded {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -189,6 +198,7 @@ impl ::core::fmt::Debug for SystemNoticeRecorded {
             .field("session_id", &self.session_id)
             .field("level", &self.level)
             .field("text", &self.text)
+            .field("tool_call_id", &self.tool_call_id)
             .finish()
     }
 }
@@ -198,6 +208,18 @@ impl SystemNoticeRecorded {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.SystemNoticeRecorded";
+}
+impl SystemNoticeRecorded {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::tool_call_id`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_tool_call_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.tool_call_id = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(SystemNoticeRecorded);
 impl ::buffa::MessageName for SystemNoticeRecorded {
@@ -223,6 +245,9 @@ impl ::buffa::Message for SystemNoticeRecorded {
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
         size += 1u32 + ::buffa::types::string_encoded_len(&self.text) as u32;
+        if let Some(ref v) = self.tool_call_id {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     fn write_to(
@@ -235,6 +260,9 @@ impl ::buffa::Message for SystemNoticeRecorded {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_int32_field(2u32, self.level.to_i32(), buf);
         ::buffa::types::put_string_field(3u32, &self.text, buf);
+        if let Some(ref v) = self.tool_call_id {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -270,6 +298,18 @@ impl ::buffa::Message for SystemNoticeRecorded {
                 )?;
                 ::buffa::types::merge_string(&mut self.text, buf)?;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .tool_call_id
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -280,6 +320,7 @@ impl ::buffa::Message for SystemNoticeRecorded {
         self.session_id.clear();
         self.level = ::buffa::EnumValue::from(0);
         self.text.clear();
+        self.tool_call_id = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for SystemNoticeRecorded {

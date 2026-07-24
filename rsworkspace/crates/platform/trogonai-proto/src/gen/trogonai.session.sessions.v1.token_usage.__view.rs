@@ -5,6 +5,10 @@
 /// message; audit and budgeting input, never an identity or ordering input.
 #[derive(Clone, Debug, Default)]
 pub struct TokenUsageView<'a> {
+    /// Counters are intentionally not required: a provider may not report every
+    /// class (e.g. cache tokens), and edition-2024 presence distinguishes an unset
+    /// "not reported" counter from a reported 0.
+    ///
     /// Field 1: `input_tokens`
     pub input_tokens: ::core::option::Option<u64>,
     /// Field 2: `output_tokens`
@@ -328,6 +332,10 @@ impl TokenUsageOwnedView {
     pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
         self.0.into_bytes()
     }
+    /// Counters are intentionally not required: a provider may not report every
+    /// class (e.g. cache tokens), and edition-2024 presence distinguishes an unset
+    /// "not reported" counter from a reported 0.
+    ///
     /// Field 1: `input_tokens`
     #[must_use]
     pub fn input_tokens(&self) -> ::core::option::Option<u64> {

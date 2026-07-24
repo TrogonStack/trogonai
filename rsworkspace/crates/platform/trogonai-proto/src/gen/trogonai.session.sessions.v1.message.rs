@@ -8,8 +8,6 @@ pub enum MessageRole {
     MESSAGE_ROLE_UNSPECIFIED = 0i32,
     MESSAGE_ROLE_USER = 1i32,
     MESSAGE_ROLE_ASSISTANT = 2i32,
-    MESSAGE_ROLE_SYSTEM = 3i32,
-    MESSAGE_ROLE_TOOL = 4i32,
 }
 impl MessageRole {
     ///Idiomatic alias for [`Self::MESSAGE_ROLE_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -21,12 +19,6 @@ impl MessageRole {
     ///Idiomatic alias for [`Self::MESSAGE_ROLE_ASSISTANT`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Assistant: Self = Self::MESSAGE_ROLE_ASSISTANT;
-    ///Idiomatic alias for [`Self::MESSAGE_ROLE_SYSTEM`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const System: Self = Self::MESSAGE_ROLE_SYSTEM;
-    ///Idiomatic alias for [`Self::MESSAGE_ROLE_TOOL`]; `Debug` prints the variant name.
-    #[allow(non_upper_case_globals)]
-    pub const Tool: Self = Self::MESSAGE_ROLE_TOOL;
 }
 impl ::core::default::Default for MessageRole {
     fn default() -> Self {
@@ -125,8 +117,6 @@ impl ::buffa::Enumeration for MessageRole {
             0i32 => ::core::option::Option::Some(Self::MESSAGE_ROLE_UNSPECIFIED),
             1i32 => ::core::option::Option::Some(Self::MESSAGE_ROLE_USER),
             2i32 => ::core::option::Option::Some(Self::MESSAGE_ROLE_ASSISTANT),
-            3i32 => ::core::option::Option::Some(Self::MESSAGE_ROLE_SYSTEM),
-            4i32 => ::core::option::Option::Some(Self::MESSAGE_ROLE_TOOL),
             _ => ::core::option::Option::None,
         }
     }
@@ -138,8 +128,6 @@ impl ::buffa::Enumeration for MessageRole {
             Self::MESSAGE_ROLE_UNSPECIFIED => "MESSAGE_ROLE_UNSPECIFIED",
             Self::MESSAGE_ROLE_USER => "MESSAGE_ROLE_USER",
             Self::MESSAGE_ROLE_ASSISTANT => "MESSAGE_ROLE_ASSISTANT",
-            Self::MESSAGE_ROLE_SYSTEM => "MESSAGE_ROLE_SYSTEM",
-            Self::MESSAGE_ROLE_TOOL => "MESSAGE_ROLE_TOOL",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -151,10 +139,6 @@ impl ::buffa::Enumeration for MessageRole {
             "MESSAGE_ROLE_ASSISTANT" => {
                 ::core::option::Option::Some(Self::MESSAGE_ROLE_ASSISTANT)
             }
-            "MESSAGE_ROLE_SYSTEM" => {
-                ::core::option::Option::Some(Self::MESSAGE_ROLE_SYSTEM)
-            }
-            "MESSAGE_ROLE_TOOL" => ::core::option::Option::Some(Self::MESSAGE_ROLE_TOOL),
             _ => ::core::option::Option::None,
         }
     }
@@ -163,8 +147,6 @@ impl ::buffa::Enumeration for MessageRole {
             Self::MESSAGE_ROLE_UNSPECIFIED,
             Self::MESSAGE_ROLE_USER,
             Self::MESSAGE_ROLE_ASSISTANT,
-            Self::MESSAGE_ROLE_SYSTEM,
-            Self::MESSAGE_ROLE_TOOL,
         ]
     }
 }

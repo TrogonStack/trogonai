@@ -9,4 +9,19 @@ message ToolCallFailed {
   string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
   string error = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Typed failure reason, so a cancelled or timed-out call is distinguishable
+  // from a genuine error without parsing the error string (parity with
+  // AssistantMessageFailed).
+  ToolCallFailureReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ToolCallFailureReason is why a started tool call did not complete.
+enum ToolCallFailureReason {
+  TOOL_CALL_FAILURE_REASON_UNSPECIFIED = 0;
+  // Failed with a tool or runtime error.
+  TOOL_CALL_FAILURE_REASON_ERROR = 1;
+  // Deliberately cancelled before completion.
+  TOOL_CALL_FAILURE_REASON_CANCELLED = 2;
+  // Exceeded its time budget.
+  TOOL_CALL_FAILURE_REASON_TIMEOUT = 3;
 }

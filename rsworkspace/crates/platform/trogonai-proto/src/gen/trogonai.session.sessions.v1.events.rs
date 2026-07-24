@@ -292,6 +292,14 @@ impl ::buffa::Message for SessionEvent {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
+                __buffa::oneof::session_event::Event::TodoUpdated(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
             }
         }
         size
@@ -548,6 +556,14 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SystemNoticeRecorded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         31u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::session_event::Event::TodoUpdated(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        32u32,
                         __cache.consume_next(),
                         buf,
                     );
@@ -1234,6 +1250,26 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
                         __buffa::oneof::session_event::Event::SystemNoticeRecorded(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            32u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::TodoUpdated(ref mut existing),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::TodoUpdated(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -2008,6 +2044,30 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 }
                                 __oneof_event = Some(
                                     __buffa::oneof::session_event::Event::SystemNoticeRecorded(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "todoUpdated" | "todo_updated" => {
+                            let v: ::core::option::Option<TodoUpdated> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            TodoUpdated,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::TodoUpdated(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

@@ -171,5 +171,10 @@ pub mod session_event {
                 super::super::super::super::__buffa::view::SystemNoticeRecordedView<'a>,
             >,
         ),
+        TodoUpdated(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::TodoUpdatedView<'a>,
+            >,
+        ),
     }
 }

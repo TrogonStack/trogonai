@@ -14,6 +14,10 @@ pub struct SystemNoticeRecordedView<'a> {
     pub level: ::buffa::EnumValue<super::super::NoticeLevel>,
     /// Field 3: `text`
     pub text: &'a str,
+    /// Tool call this notice concerns, when applicable; empty for a general notice.
+    ///
+    /// Field 4: `tool_call_id`
+    pub tool_call_id: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -96,6 +100,13 @@ impl<'a> ::buffa::MessageView<'a> for SystemNoticeRecordedView<'a> {
                 view.text = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 4u64;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.tool_call_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -125,6 +136,7 @@ impl<'a> ::buffa::MessageView<'a> for SystemNoticeRecordedView<'a> {
             session_id: self.session_id.to_string(),
             level: self.level,
             text: self.text.to_string(),
+            tool_call_id: self.tool_call_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -141,6 +153,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SystemNoticeRecordedView<'a> {
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
         size += 1u32 + ::buffa::types::string_encoded_len(&self.text) as u32;
+        if let Some(ref v) = self.tool_call_id {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -154,6 +169,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SystemNoticeRecordedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_int32_field(2u32, self.level.to_i32(), buf);
         ::buffa::types::put_string_field(3u32, &self.text, buf);
+        if let Some(ref v) = self.tool_call_id {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -182,6 +200,9 @@ impl<'__a> ::serde::Serialize for SystemNoticeRecordedView<'__a> {
         }
         {
             __map.serialize_entry("text", self.text)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.tool_call_id {
+            __map.serialize_entry("toolCallId", __v)?;
         }
         __map.end()
     }
@@ -293,6 +314,13 @@ impl SystemNoticeRecordedOwnedView {
     #[must_use]
     pub fn text(&self) -> &'_ str {
         self.0.reborrow().text
+    }
+    /// Tool call this notice concerns, when applicable; empty for a general notice.
+    ///
+    /// Field 4: `tool_call_id`
+    #[must_use]
+    pub fn tool_call_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().tool_call_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<SystemNoticeRecordedView<'static>>>

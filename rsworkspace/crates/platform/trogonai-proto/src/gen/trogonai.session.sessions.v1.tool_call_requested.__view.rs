@@ -17,6 +17,12 @@ pub struct ToolCallRequestedView<'a> {
     pub input_json: &'a str,
     /// Field 6: `parent_tool_use_id`
     pub parent_tool_use_id: ::core::option::Option<&'a str>,
+    /// Operation-ledger id reserved for this call's side effect, joining it to
+    /// OperationReserved/OperationOutcomeRecorded (mirrors DelegationDispatched.operation_id).
+    /// Empty for a call that reserves no operation (e.g. a read-only tool).
+    ///
+    /// Field 7: `operation_id`
+    pub operation_id: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -136,6 +142,13 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallRequestedView<'a> {
                 )?;
                 view.parent_tool_use_id = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.operation_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -162,6 +175,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallRequestedView<'a> {
             name: self.name.to_string(),
             input_json: self.input_json.to_string(),
             parent_tool_use_id: self.parent_tool_use_id.map(|s| s.to_string()),
+            operation_id: self.operation_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -181,6 +195,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallRequestedView<'a> {
         if let Some(ref v) = self.parent_tool_use_id {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if let Some(ref v) = self.operation_id {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -198,6 +215,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallRequestedView<'a> {
         ::buffa::types::put_string_field(5u32, &self.input_json, buf);
         if let Some(ref v) = self.parent_tool_use_id {
             ::buffa::types::put_string_field(6u32, v, buf);
+        }
+        if let Some(ref v) = self.operation_id {
+            ::buffa::types::put_string_field(7u32, v, buf);
         }
     }
 }
@@ -236,6 +256,9 @@ impl<'__a> ::serde::Serialize for ToolCallRequestedView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.parent_tool_use_id {
             __map.serialize_entry("parentToolUseId", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.operation_id {
+            __map.serialize_entry("operationId", __v)?;
         }
         __map.end()
     }
@@ -359,6 +382,15 @@ impl ToolCallRequestedOwnedView {
     #[must_use]
     pub fn parent_tool_use_id(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().parent_tool_use_id
+    }
+    /// Operation-ledger id reserved for this call's side effect, joining it to
+    /// OperationReserved/OperationOutcomeRecorded (mirrors DelegationDispatched.operation_id).
+    /// Empty for a call that reserves no operation (e.g. a read-only tool).
+    ///
+    /// Field 7: `operation_id`
+    #[must_use]
+    pub fn operation_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().operation_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallRequestedView<'static>>>

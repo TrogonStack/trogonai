@@ -16,6 +16,10 @@ pub enum FinishReason {
     FINISH_REASON_STOP_SEQUENCE = 4i32,
     /// Output stopped by a content filter.
     FINISH_REASON_CONTENT_FILTER = 5i32,
+    /// Resumable server-side pause of a tool loop (e.g. Claude pause_turn).
+    FINISH_REASON_PAUSE_TURN = 6i32,
+    /// Model declined to respond on safety grounds (e.g. Claude refusal).
+    FINISH_REASON_REFUSAL = 7i32,
 }
 impl FinishReason {
     ///Idiomatic alias for [`Self::FINISH_REASON_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -36,6 +40,12 @@ impl FinishReason {
     ///Idiomatic alias for [`Self::FINISH_REASON_CONTENT_FILTER`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const ContentFilter: Self = Self::FINISH_REASON_CONTENT_FILTER;
+    ///Idiomatic alias for [`Self::FINISH_REASON_PAUSE_TURN`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const PauseTurn: Self = Self::FINISH_REASON_PAUSE_TURN;
+    ///Idiomatic alias for [`Self::FINISH_REASON_REFUSAL`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Refusal: Self = Self::FINISH_REASON_REFUSAL;
 }
 impl ::core::default::Default for FinishReason {
     fn default() -> Self {
@@ -137,6 +147,8 @@ impl ::buffa::Enumeration for FinishReason {
             3i32 => ::core::option::Option::Some(Self::FINISH_REASON_TOOL_USE),
             4i32 => ::core::option::Option::Some(Self::FINISH_REASON_STOP_SEQUENCE),
             5i32 => ::core::option::Option::Some(Self::FINISH_REASON_CONTENT_FILTER),
+            6i32 => ::core::option::Option::Some(Self::FINISH_REASON_PAUSE_TURN),
+            7i32 => ::core::option::Option::Some(Self::FINISH_REASON_REFUSAL),
             _ => ::core::option::Option::None,
         }
     }
@@ -151,6 +163,8 @@ impl ::buffa::Enumeration for FinishReason {
             Self::FINISH_REASON_TOOL_USE => "FINISH_REASON_TOOL_USE",
             Self::FINISH_REASON_STOP_SEQUENCE => "FINISH_REASON_STOP_SEQUENCE",
             Self::FINISH_REASON_CONTENT_FILTER => "FINISH_REASON_CONTENT_FILTER",
+            Self::FINISH_REASON_PAUSE_TURN => "FINISH_REASON_PAUSE_TURN",
+            Self::FINISH_REASON_REFUSAL => "FINISH_REASON_REFUSAL",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -173,6 +187,12 @@ impl ::buffa::Enumeration for FinishReason {
             "FINISH_REASON_CONTENT_FILTER" => {
                 ::core::option::Option::Some(Self::FINISH_REASON_CONTENT_FILTER)
             }
+            "FINISH_REASON_PAUSE_TURN" => {
+                ::core::option::Option::Some(Self::FINISH_REASON_PAUSE_TURN)
+            }
+            "FINISH_REASON_REFUSAL" => {
+                ::core::option::Option::Some(Self::FINISH_REASON_REFUSAL)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -184,6 +204,8 @@ impl ::buffa::Enumeration for FinishReason {
             Self::FINISH_REASON_TOOL_USE,
             Self::FINISH_REASON_STOP_SEQUENCE,
             Self::FINISH_REASON_CONTENT_FILTER,
+            Self::FINISH_REASON_PAUSE_TURN,
+            Self::FINISH_REASON_REFUSAL,
         ]
     }
 }
@@ -213,6 +235,16 @@ pub struct AssistantMessageCompleted {
         with = "::buffa::json_helpers::proto_enum"
     )]
     pub finish_reason: ::buffa::EnumValue<FinishReason>,
+    /// The stop sequence that fired, set only when finish_reason is
+    /// FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
+    ///
+    /// Field 4: `matched_stop_sequence`
+    #[serde(
+        rename = "matchedStopSequence",
+        alias = "matched_stop_sequence",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub matched_stop_sequence: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for AssistantMessageCompleted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -220,6 +252,7 @@ impl ::core::fmt::Debug for AssistantMessageCompleted {
             .field("session_id", &self.session_id)
             .field("message", &self.message)
             .field("finish_reason", &self.finish_reason)
+            .field("matched_stop_sequence", &self.matched_stop_sequence)
             .finish()
     }
 }
@@ -229,6 +262,18 @@ impl AssistantMessageCompleted {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.AssistantMessageCompleted";
+}
+impl AssistantMessageCompleted {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::matched_stop_sequence`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_matched_stop_sequence(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.matched_stop_sequence = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(AssistantMessageCompleted);
 impl ::buffa::MessageName for AssistantMessageCompleted {
@@ -261,6 +306,9 @@ impl ::buffa::Message for AssistantMessageCompleted {
             let val = self.finish_reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
+        if let Some(ref v) = self.matched_stop_sequence {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     fn write_to(
@@ -276,6 +324,9 @@ impl ::buffa::Message for AssistantMessageCompleted {
             self.message.write_to(__cache, buf);
         }
         ::buffa::types::put_int32_field(3u32, self.finish_reason.to_i32(), buf);
+        if let Some(ref v) = self.matched_stop_sequence {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -315,6 +366,18 @@ impl ::buffa::Message for AssistantMessageCompleted {
                     ::buffa::types::decode_int32(buf)?,
                 );
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .matched_stop_sequence
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -325,6 +388,7 @@ impl ::buffa::Message for AssistantMessageCompleted {
         self.session_id.clear();
         self.message = ::buffa::MessageField::none();
         self.finish_reason = ::buffa::EnumValue::from(0);
+        self.matched_stop_sequence = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AssistantMessageCompleted {

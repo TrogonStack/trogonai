@@ -77,6 +77,7 @@ pub mod session_event {
         SystemNoticeRecorded(
             ::buffa::alloc::boxed::Box<super::super::super::SystemNoticeRecorded>,
         ),
+        TodoUpdated(::buffa::alloc::boxed::Box<super::super::super::TodoUpdated>),
     }
     impl ::buffa::Oneof for Event {}
     impl From<super::super::super::SessionStarted> for Event {
@@ -401,6 +402,16 @@ pub mod session_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::TodoUpdated> for Event {
+        fn from(v: super::super::super::TodoUpdated) -> Self {
+            Self::TodoUpdated(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::TodoUpdated> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::TodoUpdated) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl serde::Serialize for Event {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -501,6 +512,9 @@ pub mod session_event {
                 }
                 Self::SystemNoticeRecorded(v) => {
                     map.serialize_entry("systemNoticeRecorded", v)?;
+                }
+                Self::TodoUpdated(v) => {
+                    map.serialize_entry("todoUpdated", v)?;
                 }
             }
             map.end()

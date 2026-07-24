@@ -39,6 +39,7 @@ include!("trogonai.session.sessions.v1.tool_call_denied.rs");
 include!("trogonai.session.sessions.v1.tool_call_failed.rs");
 include!("trogonai.session.sessions.v1.tool_call_requested.rs");
 include!("trogonai.session.sessions.v1.tool_call_started.rs");
+include!("trogonai.session.sessions.v1.todo_updated.rs");
 include!("trogonai.session.sessions.v1.user_message_recorded.rs");
 include!("trogonai.session.sessions.v1.events.rs");
 #[allow(
@@ -95,11 +96,13 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.tool_call_failed.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_requested.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_started.__view.rs");
+        include!("trogonai.session.sessions.v1.todo_updated.__view.rs");
         include!("trogonai.session.sessions.v1.user_message_recorded.__view.rs");
         include!("trogonai.session.sessions.v1.events.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
+            include!("trogonai.session.sessions.v1.artifact.__view_oneof.rs");
             include!("trogonai.session.sessions.v1.tool_call.__view_oneof.rs");
             include!("trogonai.session.sessions.v1.message.__view_oneof.rs");
             include!("trogonai.session.sessions.v1.events.__view_oneof.rs");
@@ -108,6 +111,7 @@ pub mod __buffa {
     pub mod oneof {
         #[allow(unused_imports)]
         use super::*;
+        include!("trogonai.session.sessions.v1.artifact.__oneof.rs");
         include!("trogonai.session.sessions.v1.tool_call.__oneof.rs");
         include!("trogonai.session.sessions.v1.message.__oneof.rs");
         include!("trogonai.session.sessions.v1.events.__oneof.rs");
@@ -116,6 +120,8 @@ pub mod __buffa {
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__ARTIFACT_REF_JSON_ANY);
         reg.register_json_any(super::__ARTIFACT_METADATA_JSON_ANY);
+        reg.register_json_any(super::__STORED_ARTIFACT_JSON_ANY);
+        reg.register_json_any(super::__EXTERNAL_ARTIFACT_JSON_ANY);
         reg.register_json_any(super::__ARTIFACT_RECORDED_JSON_ANY);
         reg.register_json_any(super::__TOKEN_USAGE_JSON_ANY);
         reg.register_json_any(super::__COST_JSON_ANY);
@@ -158,6 +164,8 @@ pub mod __buffa {
         reg.register_json_any(super::__TOOL_CALL_FAILED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_REQUESTED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_STARTED_JSON_ANY);
+        reg.register_json_any(super::__TODO_UPDATED_JSON_ANY);
+        reg.register_json_any(super::__TODO_ITEM_JSON_ANY);
         reg.register_json_any(super::__USER_MESSAGE_RECORDED_JSON_ANY);
         reg.register_json_any(super::__SESSION_EVENT_JSON_ANY);
     }
@@ -170,6 +178,14 @@ pub use self::__buffa::view::ArtifactRefOwnedView;
 pub use self::__buffa::view::ArtifactMetadataView;
 #[doc(inline)]
 pub use self::__buffa::view::ArtifactMetadataOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::StoredArtifactView;
+#[doc(inline)]
+pub use self::__buffa::view::StoredArtifactOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ExternalArtifactView;
+#[doc(inline)]
+pub use self::__buffa::view::ExternalArtifactOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ArtifactRecordedView;
 #[doc(inline)]
@@ -338,6 +354,14 @@ pub use self::__buffa::view::ToolCallRequestedOwnedView;
 pub use self::__buffa::view::ToolCallStartedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallStartedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::TodoUpdatedView;
+#[doc(inline)]
+pub use self::__buffa::view::TodoUpdatedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::TodoItemView;
+#[doc(inline)]
+pub use self::__buffa::view::TodoItemOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::UserMessageRecordedView;
 #[doc(inline)]
