@@ -13,8 +13,12 @@ pub struct TokenUsageView<'a> {
     pub cache_creation_tokens: ::core::option::Option<u64>,
     /// Field 4: `cache_read_tokens`
     pub cache_read_tokens: ::core::option::Option<u64>,
-    #[doc(hidden)]
-    pub __buffa_phantom: ::core::marker::PhantomData<&'a ()>,
+    /// Monetary cost of this usage, priced at generation time. Recorded as a fact so
+    /// a deterministic cost projection folds recorded amounts and never re-reads a
+    /// drifting price catalog. Unset when cost is not tracked.
+    ///
+    /// Field 5: `cost`
+    pub cost: ::buffa::MessageFieldView<super::super::__buffa::view::CostView<'a>>,
 }
 impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
     type Owned = super::super::TokenUsage;
@@ -73,6 +77,27 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
                 )?;
                 view.cache_read_tokens = Some(::buffa::types::decode_uint64(&mut cur)?);
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.cost.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.cost = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CostView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -97,13 +122,21 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
             output_tokens: self.output_tokens,
             cache_creation_tokens: self.cache_creation_tokens,
             cache_read_tokens: self.cache_read_tokens,
+            cost: match self.cost.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Cost,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -119,12 +152,20 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
         if let Some(v) = self.cache_read_tokens {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
+        if self.cost.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.cost.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -140,6 +181,10 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
         }
         if let Some(v) = self.cache_read_tokens {
             ::buffa::types::put_uint64_field(4u32, v, buf);
+        }
+        if self.cost.is_set() {
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            self.cost.write_to(__cache, buf);
         }
     }
 }
@@ -188,6 +233,11 @@ impl<'__a> ::serde::Serialize for TokenUsageView<'__a> {
                     "cacheReadTokens",
                     &::buffa::json_helpers::ProtoJson(&__v),
                 )?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.cost.as_option() {
+                __map.serialize_entry("cost", __v)?;
+            }
         }
         __map.end()
     }
@@ -298,6 +348,17 @@ impl TokenUsageOwnedView {
     pub fn cache_read_tokens(&self) -> ::core::option::Option<u64> {
         self.0.reborrow().cache_read_tokens
     }
+    /// Monetary cost of this usage, priced at generation time. Recorded as a fact so
+    /// a deterministic cost projection folds recorded amounts and never re-reads a
+    /// drifting price catalog. Unset when cost is not tracked.
+    ///
+    /// Field 5: `cost`
+    #[must_use]
+    pub fn cost(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CostView<'_>> {
+        &self.0.reborrow().cost
+    }
 }
 impl ::core::convert::From<::buffa::OwnedView<TokenUsageView<'static>>>
 for TokenUsageOwnedView {
@@ -322,6 +383,312 @@ impl ::buffa::HasMessageView for super::super::TokenUsage {
     type ViewHandle = TokenUsageOwnedView;
 }
 impl ::serde::Serialize for TokenUsageOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+/// Cost is a fixed-point monetary amount priced when the usage was recorded.
+#[derive(Clone, Debug, Default)]
+pub struct CostView<'a> {
+    /// Amount in millionths of one currency unit (micros); avoids floating point.
+    ///
+    /// Field 1: `amount_micros`
+    pub amount_micros: i64,
+    /// ISO 4217 currency code, for example "USD".
+    ///
+    /// Field 2: `currency_code`
+    pub currency_code: &'a str,
+    /// Reference to the price catalog or rate version applied; empty when untracked.
+    ///
+    /// Field 3: `rate_ref`
+    pub rate_ref: ::core::option::Option<&'a str>,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> CostView<'a> {
+    /**Whether required field `amount_micros` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_amount_micros(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+    /**Whether required field `currency_code` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_currency_code(&self) -> bool {
+        self.__buffa_required_seen_0 & 2u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for CostView<'a> {
+    type Owned = super::super::Cost;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.amount_micros = ::buffa::types::decode_int64(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.currency_code = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 2u64;
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.rate_ref = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::Cost, ::buffa::DecodeError> {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<super::super::Cost, ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::Cost {
+            amount_micros: self.amount_micros,
+            currency_code: self.currency_code.to_string(),
+            rate_ref: self.rate_ref.map(|s| s.to_string()),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for CostView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        size += 1u32 + ::buffa::types::int64_encoded_len(self.amount_micros) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.currency_code) as u32;
+        if let Some(ref v) = self.rate_ref {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_int64_field(1u32, self.amount_micros, buf);
+        ::buffa::types::put_string_field(2u32, &self.currency_code, buf);
+        if let Some(ref v) = self.rate_ref {
+            ::buffa::types::put_string_field(3u32, v, buf);
+        }
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for CostView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map
+                .serialize_entry(
+                    "amountMicros",
+                    &::buffa::json_helpers::ProtoJson(&self.amount_micros),
+                )?;
+        }
+        {
+            __map.serialize_entry("currencyCode", self.currency_code)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.rate_ref {
+            __map.serialize_entry("rateRef", __v)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for CostView<'a> {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1";
+    const NAME: &'static str = "Cost";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1.Cost";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.Cost";
+}
+::buffa::impl_default_view_instance!(CostView);
+::buffa::impl_view_reborrow!(CostView);
+/** Self-contained, `'static` owned view of a `Cost` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`CostView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CostView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct CostOwnedView(::buffa::OwnedView<CostView<'static>>);
+impl CostOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(CostOwnedView(::buffa::OwnedView::decode(bytes)?))
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            CostOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::Cost,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(CostOwnedView(::buffa::OwnedView::from_owned(msg)?))
+    }
+    /// Borrow the full [`CostView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &CostView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::Cost, ::buffa::DecodeError> {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Amount in millionths of one currency unit (micros); avoids floating point.
+    ///
+    /// Field 1: `amount_micros`
+    #[must_use]
+    pub fn amount_micros(&self) -> i64 {
+        self.0.reborrow().amount_micros
+    }
+    /// ISO 4217 currency code, for example "USD".
+    ///
+    /// Field 2: `currency_code`
+    #[must_use]
+    pub fn currency_code(&self) -> &'_ str {
+        self.0.reborrow().currency_code
+    }
+    /// Reference to the price catalog or rate version applied; empty when untracked.
+    ///
+    /// Field 3: `rate_ref`
+    #[must_use]
+    pub fn rate_ref(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().rate_ref
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<CostView<'static>>> for CostOwnedView {
+    fn from(inner: ::buffa::OwnedView<CostView<'static>>) -> Self {
+        CostOwnedView(inner)
+    }
+}
+impl ::core::convert::From<CostOwnedView> for ::buffa::OwnedView<CostView<'static>> {
+    fn from(wrapper: CostOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<CostView<'static>>> for CostOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<CostView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::Cost {
+    type View<'a> = CostView<'a>;
+    type ViewHandle = CostOwnedView;
+}
+impl ::serde::Serialize for CostOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

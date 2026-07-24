@@ -34,6 +34,9 @@ message ContentBlock {
     string thinking = 3;
     ToolUseBlock tool_use = 4;
     ToolResultBlock tool_result = 5;
+    // Provider-opaque reasoning payload (e.g. encrypted/signed thinking), kept
+    // verbatim for faithful replay, distinct from the human-readable thinking text.
+    bytes redacted_thinking = 6;
   }
 }
 

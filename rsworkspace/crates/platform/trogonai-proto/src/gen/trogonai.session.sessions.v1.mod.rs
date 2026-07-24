@@ -6,11 +6,14 @@ include!("trogonai.session.sessions.v1.token_usage.rs");
 include!("trogonai.session.sessions.v1.tool_call.rs");
 include!("trogonai.session.sessions.v1.message.rs");
 include!("trogonai.session.sessions.v1.assistant_message_completed.rs");
+include!("trogonai.session.sessions.v1.assistant_message_failed.rs");
 include!("trogonai.session.sessions.v1.assistant_message_started.rs");
 include!("trogonai.session.sessions.v1.cascade_policy.rs");
+include!("trogonai.session.sessions.v1.digest.rs");
+include!("trogonai.session.sessions.v1.checkpoint.rs");
+include!("trogonai.session.sessions.v1.checkpoint_produced.rs");
 include!("trogonai.session.sessions.v1.compacted.rs");
 include!("trogonai.session.sessions.v1.delegation_dispatched.rs");
-include!("trogonai.session.sessions.v1.digest.rs");
 include!("trogonai.session.sessions.v1.execution_attempt_ended.rs");
 include!("trogonai.session.sessions.v1.execution_attempt_ready.rs");
 include!("trogonai.session.sessions.v1.execution_attempt_started.rs");
@@ -31,6 +34,7 @@ include!("trogonai.session.sessions.v1.subagent_linked.rs");
 include!("trogonai.session.sessions.v1.subagent_parent_terminated.rs");
 include!("trogonai.session.sessions.v1.tool_call_approved.rs");
 include!("trogonai.session.sessions.v1.tool_call_completed.rs");
+include!("trogonai.session.sessions.v1.tool_call_denied.rs");
 include!("trogonai.session.sessions.v1.tool_call_failed.rs");
 include!("trogonai.session.sessions.v1.tool_call_requested.rs");
 include!("trogonai.session.sessions.v1.tool_call_started.rs");
@@ -59,10 +63,13 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.tool_call.__view.rs");
         include!("trogonai.session.sessions.v1.message.__view.rs");
         include!("trogonai.session.sessions.v1.assistant_message_completed.__view.rs");
+        include!("trogonai.session.sessions.v1.assistant_message_failed.__view.rs");
         include!("trogonai.session.sessions.v1.assistant_message_started.__view.rs");
+        include!("trogonai.session.sessions.v1.digest.__view.rs");
+        include!("trogonai.session.sessions.v1.checkpoint.__view.rs");
+        include!("trogonai.session.sessions.v1.checkpoint_produced.__view.rs");
         include!("trogonai.session.sessions.v1.compacted.__view.rs");
         include!("trogonai.session.sessions.v1.delegation_dispatched.__view.rs");
-        include!("trogonai.session.sessions.v1.digest.__view.rs");
         include!("trogonai.session.sessions.v1.execution_attempt_ended.__view.rs");
         include!("trogonai.session.sessions.v1.execution_attempt_ready.__view.rs");
         include!("trogonai.session.sessions.v1.execution_attempt_started.__view.rs");
@@ -82,6 +89,7 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.subagent_parent_terminated.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_approved.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_completed.__view.rs");
+        include!("trogonai.session.sessions.v1.tool_call_denied.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_failed.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_requested.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_started.__view.rs");
@@ -108,6 +116,7 @@ pub mod __buffa {
         reg.register_json_any(super::__ARTIFACT_METADATA_JSON_ANY);
         reg.register_json_any(super::__ARTIFACT_RECORDED_JSON_ANY);
         reg.register_json_any(super::__TOKEN_USAGE_JSON_ANY);
+        reg.register_json_any(super::__COST_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_RESULT_JSON_ANY);
         reg.register_json_any(super::__TEXT_TOOL_RESULT_JSON_ANY);
         reg.register_json_any(super::__CANONICAL_MESSAGE_JSON_ANY);
@@ -115,13 +124,15 @@ pub mod __buffa {
         reg.register_json_any(super::__TOOL_USE_BLOCK_JSON_ANY);
         reg.register_json_any(super::__TOOL_RESULT_BLOCK_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_COMPLETED_JSON_ANY);
+        reg.register_json_any(super::__ASSISTANT_MESSAGE_FAILED_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_STARTED_JSON_ANY);
+        reg.register_json_any(super::__DIGEST_JSON_ANY);
+        reg.register_json_any(super::__CHECKPOINT_JSON_ANY);
+        reg.register_json_any(super::__CHECKPOINT_PRODUCED_JSON_ANY);
         reg.register_json_any(super::__COMPACTED_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DISPATCHED_JSON_ANY);
-        reg.register_json_any(super::__DIGEST_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_ENDED_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_READY_JSON_ANY);
-        reg.register_json_any(super::__RESTORED_CHECKPOINT_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_STARTED_JSON_ANY);
         reg.register_json_any(super::__FILE_CHANGED_JSON_ANY);
         reg.register_json_any(super::__OPERATION_OUTCOME_RECORDED_JSON_ANY);
@@ -139,6 +150,7 @@ pub mod __buffa {
         reg.register_json_any(super::__SUBAGENT_PARENT_TERMINATED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_APPROVED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_COMPLETED_JSON_ANY);
+        reg.register_json_any(super::__TOOL_CALL_DENIED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_FAILED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_REQUESTED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_STARTED_JSON_ANY);
@@ -162,6 +174,10 @@ pub use self::__buffa::view::ArtifactRecordedOwnedView;
 pub use self::__buffa::view::TokenUsageView;
 #[doc(inline)]
 pub use self::__buffa::view::TokenUsageOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CostView;
+#[doc(inline)]
+pub use self::__buffa::view::CostOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallResultView;
 #[doc(inline)]
@@ -191,9 +207,25 @@ pub use self::__buffa::view::AssistantMessageCompletedView;
 #[doc(inline)]
 pub use self::__buffa::view::AssistantMessageCompletedOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::AssistantMessageFailedView;
+#[doc(inline)]
+pub use self::__buffa::view::AssistantMessageFailedOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::AssistantMessageStartedView;
 #[doc(inline)]
 pub use self::__buffa::view::AssistantMessageStartedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DigestView;
+#[doc(inline)]
+pub use self::__buffa::view::DigestOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointProducedView;
+#[doc(inline)]
+pub use self::__buffa::view::CheckpointProducedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::CompactedView;
 #[doc(inline)]
@@ -203,10 +235,6 @@ pub use self::__buffa::view::DelegationDispatchedView;
 #[doc(inline)]
 pub use self::__buffa::view::DelegationDispatchedOwnedView;
 #[doc(inline)]
-pub use self::__buffa::view::DigestView;
-#[doc(inline)]
-pub use self::__buffa::view::DigestOwnedView;
-#[doc(inline)]
 pub use self::__buffa::view::ExecutionAttemptEndedView;
 #[doc(inline)]
 pub use self::__buffa::view::ExecutionAttemptEndedOwnedView;
@@ -214,10 +242,6 @@ pub use self::__buffa::view::ExecutionAttemptEndedOwnedView;
 pub use self::__buffa::view::ExecutionAttemptReadyView;
 #[doc(inline)]
 pub use self::__buffa::view::ExecutionAttemptReadyOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::RestoredCheckpointView;
-#[doc(inline)]
-pub use self::__buffa::view::RestoredCheckpointOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ExecutionAttemptStartedView;
 #[doc(inline)]
@@ -286,6 +310,10 @@ pub use self::__buffa::view::ToolCallApprovedOwnedView;
 pub use self::__buffa::view::ToolCallCompletedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallCompletedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolCallDeniedView;
+#[doc(inline)]
+pub use self::__buffa::view::ToolCallDeniedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallFailedView;
 #[doc(inline)]

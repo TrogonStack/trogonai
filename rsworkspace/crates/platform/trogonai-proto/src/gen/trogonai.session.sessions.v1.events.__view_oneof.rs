@@ -65,6 +65,11 @@ pub mod session_event {
                 >,
             >,
         ),
+        AssistantMessageFailed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::AssistantMessageFailedView<'a>,
+            >,
+        ),
         ToolCallRequested(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::ToolCallRequestedView<'a>,
@@ -73,6 +78,11 @@ pub mod session_event {
         ToolCallApproved(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::ToolCallApprovedView<'a>,
+            >,
+        ),
+        ToolCallDenied(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ToolCallDeniedView<'a>,
             >,
         ),
         ToolCallStarted(
@@ -115,6 +125,11 @@ pub mod session_event {
         ExecutionAttemptEnded(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::ExecutionAttemptEndedView<'a>,
+            >,
+        ),
+        CheckpointProduced(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::CheckpointProducedView<'a>,
             >,
         ),
         DelegationDispatched(

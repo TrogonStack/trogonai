@@ -23,5 +23,6 @@ pub mod content_block {
                 super::super::super::super::__buffa::view::ToolResultBlockView<'a>,
             >,
         ),
+        RedactedThinking(&'a [u8]),
     }
 }

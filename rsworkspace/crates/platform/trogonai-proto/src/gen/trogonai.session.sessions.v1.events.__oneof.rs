@@ -25,12 +25,16 @@ pub mod session_event {
         AssistantMessageCompleted(
             ::buffa::alloc::boxed::Box<super::super::super::AssistantMessageCompleted>,
         ),
+        AssistantMessageFailed(
+            ::buffa::alloc::boxed::Box<super::super::super::AssistantMessageFailed>,
+        ),
         ToolCallRequested(
             ::buffa::alloc::boxed::Box<super::super::super::ToolCallRequested>,
         ),
         ToolCallApproved(
             ::buffa::alloc::boxed::Box<super::super::super::ToolCallApproved>,
         ),
+        ToolCallDenied(::buffa::alloc::boxed::Box<super::super::super::ToolCallDenied>),
         ToolCallStarted(
             ::buffa::alloc::boxed::Box<super::super::super::ToolCallStarted>,
         ),
@@ -50,6 +54,9 @@ pub mod session_event {
         ),
         ExecutionAttemptEnded(
             ::buffa::alloc::boxed::Box<super::super::super::ExecutionAttemptEnded>,
+        ),
+        CheckpointProduced(
+            ::buffa::alloc::boxed::Box<super::super::super::CheckpointProduced>,
         ),
         DelegationDispatched(
             ::buffa::alloc::boxed::Box<super::super::super::DelegationDispatched>,
@@ -182,6 +189,17 @@ pub mod session_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::AssistantMessageFailed> for Event {
+        fn from(v: super::super::super::AssistantMessageFailed) -> Self {
+            Self::AssistantMessageFailed(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::AssistantMessageFailed>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::AssistantMessageFailed) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl From<super::super::super::ToolCallRequested> for Event {
         fn from(v: super::super::super::ToolCallRequested) -> Self {
             Self::ToolCallRequested(::buffa::alloc::boxed::Box::new(v))
@@ -199,6 +217,16 @@ pub mod session_event {
     }
     impl From<super::super::super::ToolCallApproved> for ::core::option::Option<Event> {
         fn from(v: super::super::super::ToolCallApproved) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::ToolCallDenied> for Event {
+        fn from(v: super::super::super::ToolCallDenied) -> Self {
+            Self::ToolCallDenied(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ToolCallDenied> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ToolCallDenied) -> Self {
             Self::Some(Event::from(v))
         }
     }
@@ -282,6 +310,17 @@ pub mod session_event {
     impl From<super::super::super::ExecutionAttemptEnded>
     for ::core::option::Option<Event> {
         fn from(v: super::super::super::ExecutionAttemptEnded) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::CheckpointProduced> for Event {
+        fn from(v: super::super::super::CheckpointProduced) -> Self {
+            Self::CheckpointProduced(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::CheckpointProduced>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::CheckpointProduced) -> Self {
             Self::Some(Event::from(v))
         }
     }
@@ -389,11 +428,17 @@ pub mod session_event {
                 Self::AssistantMessageCompleted(v) => {
                     map.serialize_entry("assistantMessageCompleted", v)?;
                 }
+                Self::AssistantMessageFailed(v) => {
+                    map.serialize_entry("assistantMessageFailed", v)?;
+                }
                 Self::ToolCallRequested(v) => {
                     map.serialize_entry("toolCallRequested", v)?;
                 }
                 Self::ToolCallApproved(v) => {
                     map.serialize_entry("toolCallApproved", v)?;
+                }
+                Self::ToolCallDenied(v) => {
+                    map.serialize_entry("toolCallDenied", v)?;
                 }
                 Self::ToolCallStarted(v) => {
                     map.serialize_entry("toolCallStarted", v)?;
@@ -418,6 +463,9 @@ pub mod session_event {
                 }
                 Self::ExecutionAttemptEnded(v) => {
                     map.serialize_entry("executionAttemptEnded", v)?;
+                }
+                Self::CheckpointProduced(v) => {
+                    map.serialize_entry("checkpointProduced", v)?;
                 }
                 Self::DelegationDispatched(v) => {
                     map.serialize_entry("delegationDispatched", v)?;

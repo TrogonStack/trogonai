@@ -11,6 +11,7 @@ pub mod content_block {
         Thinking(::buffa::alloc::string::String),
         ToolUse(::buffa::alloc::boxed::Box<super::super::super::ToolUseBlock>),
         ToolResult(::buffa::alloc::boxed::Box<super::super::super::ToolResultBlock>),
+        RedactedThinking(::buffa::alloc::vec::Vec<u8>),
     }
     impl ::buffa::Oneof for Kind {}
     impl From<super::super::super::ArtifactRef> for Kind {
@@ -65,6 +66,12 @@ pub mod content_block {
                 }
                 Self::ToolResult(v) => {
                     map.serialize_entry("toolResult", v)?;
+                }
+                Self::RedactedThinking(v) => {
+                    map.serialize_entry(
+                        "redactedThinking",
+                        &::buffa::json_helpers::ProtoJson(v),
+                    )?;
                 }
             }
             map.end()

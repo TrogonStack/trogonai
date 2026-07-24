@@ -327,6 +327,9 @@ impl ::buffa::Message for ContentBlock {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
+                __buffa::oneof::content_block::Kind::RedactedThinking(x) => {
+                    size += 1u32 + ::buffa::types::bytes_encoded_len(x) as u32;
+                }
             }
         }
         size
@@ -369,6 +372,9 @@ impl ::buffa::Message for ContentBlock {
                         buf,
                     );
                     x.write_to(__cache, buf);
+                }
+                __buffa::oneof::content_block::Kind::RedactedThinking(x) => {
+                    ::buffa::types::put_bytes_field(6u32, x, buf);
                 }
             }
         }
@@ -465,6 +471,17 @@ impl ::buffa::Message for ContentBlock {
                         ),
                     );
                 }
+            }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                self.kind = ::core::option::Option::Some(
+                    __buffa::oneof::content_block::Kind::RedactedThinking(
+                        ::buffa::types::decode_bytes(buf)?,
+                    ),
+                );
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -613,6 +630,39 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
                                     __buffa::oneof::content_block::Kind::ToolResult(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
+                                );
+                            }
+                        }
+                        "redactedThinking" | "redacted_thinking" => {
+                            struct _DeserSeed;
+                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                                type Value = ::buffa::alloc::vec::Vec<u8>;
+                                fn deserialize<D: serde::Deserializer<'de>>(
+                                    self,
+                                    d: D,
+                                ) -> ::core::result::Result<
+                                    ::buffa::alloc::vec::Vec<u8>,
+                                    D::Error,
+                                > {
+                                    ::buffa::json_helpers::bytes::deserialize(d)
+                                }
+                            }
+                            let v: ::core::option::Option<
+                                ::buffa::alloc::vec::Vec<u8>,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(_DeserSeed),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_kind.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'kind'",
+                                        ),
+                                    );
+                                }
+                                __oneof_kind = Some(
+                                    __buffa::oneof::content_block::Kind::RedactedThinking(v),
                                 );
                             }
                         }

@@ -4,7 +4,9 @@ package trogonai.session.sessions.v1;
 
 import "trogonai/session/sessions/v1/artifact_recorded.proto";
 import "trogonai/session/sessions/v1/assistant_message_completed.proto";
+import "trogonai/session/sessions/v1/assistant_message_failed.proto";
 import "trogonai/session/sessions/v1/assistant_message_started.proto";
+import "trogonai/session/sessions/v1/checkpoint_produced.proto";
 import "trogonai/session/sessions/v1/compacted.proto";
 import "trogonai/session/sessions/v1/delegation_dispatched.proto";
 import "trogonai/session/sessions/v1/execution_attempt_ended.proto";
@@ -25,6 +27,7 @@ import "trogonai/session/sessions/v1/subagent_linked.proto";
 import "trogonai/session/sessions/v1/subagent_parent_terminated.proto";
 import "trogonai/session/sessions/v1/tool_call_approved.proto";
 import "trogonai/session/sessions/v1/tool_call_completed.proto";
+import "trogonai/session/sessions/v1/tool_call_denied.proto";
 import "trogonai/session/sessions/v1/tool_call_failed.proto";
 import "trogonai/session/sessions/v1/tool_call_requested.proto";
 import "trogonai/session/sessions/v1/tool_call_started.proto";
@@ -51,9 +54,11 @@ message SessionEvent {
     UserMessageRecorded user_message_recorded = 9;
     AssistantMessageStarted assistant_message_started = 10;
     AssistantMessageCompleted assistant_message_completed = 11;
+    AssistantMessageFailed assistant_message_failed = 28;
     // Tool lifecycle.
     ToolCallRequested tool_call_requested = 12;
     ToolCallApproved tool_call_approved = 13;
+    ToolCallDenied tool_call_denied = 29;
     ToolCallStarted tool_call_started = 14;
     ToolCallCompleted tool_call_completed = 15;
     ToolCallFailed tool_call_failed = 16;
@@ -64,6 +69,7 @@ message SessionEvent {
     ExecutionAttemptStarted execution_attempt_started = 19;
     ExecutionAttemptReady execution_attempt_ready = 20;
     ExecutionAttemptEnded execution_attempt_ended = 21;
+    CheckpointProduced checkpoint_produced = 30;
     // Delegation and subagents.
     DelegationDispatched delegation_dispatched = 22;
     SubagentLinked subagent_linked = 23;

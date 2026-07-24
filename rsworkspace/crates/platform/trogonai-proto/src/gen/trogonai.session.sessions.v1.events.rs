@@ -132,6 +132,14 @@ impl ::buffa::Message for SessionEvent {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
+                __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
                 __buffa::oneof::session_event::Event::ToolCallRequested(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
@@ -146,6 +154,14 @@ impl ::buffa::Message for SessionEvent {
                     __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                __buffa::oneof::session_event::Event::ToolCallDenied(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
                 __buffa::oneof::session_event::Event::ToolCallStarted(x) => {
@@ -205,6 +221,14 @@ impl ::buffa::Message for SessionEvent {
                             + inner;
                 }
                 __buffa::oneof::session_event::Event::ExecutionAttemptEnded(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                __buffa::oneof::session_event::Event::CheckpointProduced(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -361,6 +385,14 @@ impl ::buffa::Message for SessionEvent {
                     );
                     x.write_to(__cache, buf);
                 }
+                __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        28u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
                 __buffa::oneof::session_event::Event::ToolCallRequested(x) => {
                     ::buffa::types::put_len_delimited_header(
                         12u32,
@@ -372,6 +404,14 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallApproved(x) => {
                     ::buffa::types::put_len_delimited_header(
                         13u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::session_event::Event::ToolCallDenied(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        29u32,
                         __cache.consume_next(),
                         buf,
                     );
@@ -436,6 +476,14 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ExecutionAttemptEnded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         21u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::session_event::Event::CheckpointProduced(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        30u32,
                         __cache.consume_next(),
                         buf,
                     );
@@ -737,6 +785,28 @@ impl ::buffa::Message for SessionEvent {
                     );
                 }
             }
+            28u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::AssistantMessageFailed(
+                        ref mut existing,
+                    ),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::AssistantMessageFailed(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
             12u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -776,6 +846,28 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
                         __buffa::oneof::session_event::Event::ToolCallApproved(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            29u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::ToolCallDenied(
+                        ref mut existing,
+                    ),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::ToolCallDenied(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -950,6 +1042,28 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
                         __buffa::oneof::session_event::Event::ExecutionAttemptEnded(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            30u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::session_event::Event::CheckpointProduced(
+                        ref mut existing,
+                    ),
+                ) = self.event
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.event = ::core::option::Option::Some(
+                        __buffa::oneof::session_event::Event::CheckpointProduced(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -1381,6 +1495,30 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 );
                             }
                         }
+                        "assistantMessageFailed" | "assistant_message_failed" => {
+                            let v: ::core::option::Option<AssistantMessageFailed> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            AssistantMessageFailed,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::AssistantMessageFailed(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
                         "toolCallRequested" | "tool_call_requested" => {
                             let v: ::core::option::Option<ToolCallRequested> = map
                                 .next_value_seed(
@@ -1424,6 +1562,30 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 }
                                 __oneof_event = Some(
                                     __buffa::oneof::session_event::Event::ToolCallApproved(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "toolCallDenied" | "tool_call_denied" => {
+                            let v: ::core::option::Option<ToolCallDenied> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            ToolCallDenied,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::ToolCallDenied(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -1616,6 +1778,30 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 }
                                 __oneof_event = Some(
                                     __buffa::oneof::session_event::Event::ExecutionAttemptEnded(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "checkpointProduced" | "checkpoint_produced" => {
+                            let v: ::core::option::Option<CheckpointProduced> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            CheckpointProduced,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_event.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'event'",
+                                        ),
+                                    );
+                                }
+                                __oneof_event = Some(
+                                    __buffa::oneof::session_event::Event::CheckpointProduced(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

@@ -647,6 +647,17 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                     );
                 }
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.kind = Some(
+                    super::super::__buffa::view::oneof::content_block::Kind::RedactedThinking(
+                        ::buffa::types::borrow_bytes(&mut cur)?,
+                    ),
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -712,6 +723,13 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                                     ),
                                 )
                             }
+                            super::super::__buffa::view::oneof::content_block::Kind::RedactedThinking(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::content_block::Kind::RedactedThinking(
+                                    (v).to_vec(),
+                                )
+                            }
                         },
                     )
                 }
@@ -761,6 +779,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
+                super::super::__buffa::view::oneof::content_block::Kind::RedactedThinking(
+                    x,
+                ) => {
+                    size += 1u32 + ::buffa::types::bytes_encoded_len(x) as u32;
+                }
             }
         }
         size
@@ -807,6 +830,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::content_block::Kind::RedactedThinking(
+                    x,
+                ) => {
+                    ::buffa::types::put_bytes_field(6u32, x, buf);
+                }
             }
         }
     }
@@ -847,6 +875,15 @@ impl<'__a> ::serde::Serialize for ContentBlockView<'__a> {
                     v,
                 ) => {
                     __map.serialize_entry("toolResult", v)?;
+                }
+                super::super::__buffa::view::oneof::content_block::Kind::RedactedThinking(
+                    v,
+                ) => {
+                    __map
+                        .serialize_entry(
+                            "redactedThinking",
+                            &::buffa::json_helpers::BytesJson(v),
+                        )?;
                 }
             }
         }

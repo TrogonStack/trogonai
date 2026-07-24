@@ -39,6 +39,16 @@ pub struct TokenUsage {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub cache_read_tokens: ::core::option::Option<u64>,
+    /// Monetary cost of this usage, priced at generation time. Recorded as a fact so
+    /// a deterministic cost projection folds recorded amounts and never re-reads a
+    /// drifting price catalog. Unset when cost is not tracked.
+    ///
+    /// Field 5: `cost`
+    #[serde(
+        rename = "cost",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub cost: ::buffa::MessageField<Cost>,
 }
 impl ::core::fmt::Debug for TokenUsage {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -47,6 +57,7 @@ impl ::core::fmt::Debug for TokenUsage {
             .field("output_tokens", &self.output_tokens)
             .field("cache_creation_tokens", &self.cache_creation_tokens)
             .field("cache_read_tokens", &self.cache_read_tokens)
+            .field("cost", &self.cost)
             .finish()
     }
 }
@@ -101,7 +112,7 @@ impl ::buffa::Message for TokenUsage {
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -117,11 +128,19 @@ impl ::buffa::Message for TokenUsage {
         if let Some(v) = self.cache_read_tokens {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
+        if self.cost.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.cost.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -137,6 +156,10 @@ impl ::buffa::Message for TokenUsage {
         }
         if let Some(v) = self.cache_read_tokens {
             ::buffa::types::put_uint64_field(4u32, v, buf);
+        }
+        if self.cost.is_set() {
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            self.cost.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -186,6 +209,17 @@ impl ::buffa::Message for TokenUsage {
                     ::buffa::types::decode_uint64(buf)?,
                 );
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.cost.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -197,6 +231,7 @@ impl ::buffa::Message for TokenUsage {
         self.output_tokens = ::core::option::Option::None;
         self.cache_creation_tokens = ::core::option::Option::None;
         self.cache_read_tokens = ::core::option::Option::None;
+        self.cost = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for TokenUsage {
@@ -217,5 +252,173 @@ pub const __TOKEN_USAGE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa
     type_url: "type.googleapis.com/trogonai.session.sessions.v1.TokenUsage",
     to_json: ::buffa::type_registry::any_to_json::<TokenUsage>,
     from_json: ::buffa::type_registry::any_from_json::<TokenUsage>,
+    is_wkt: false,
+};
+/// Cost is a fixed-point monetary amount priced when the usage was recorded.
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct Cost {
+    /// Amount in millionths of one currency unit (micros); avoids floating point.
+    ///
+    /// Field 1: `amount_micros`
+    #[serde(
+        rename = "amountMicros",
+        alias = "amount_micros",
+        with = "::buffa::json_helpers::int64"
+    )]
+    pub amount_micros: i64,
+    /// ISO 4217 currency code, for example "USD".
+    ///
+    /// Field 2: `currency_code`
+    #[serde(
+        rename = "currencyCode",
+        alias = "currency_code",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub currency_code: ::buffa::alloc::string::String,
+    /// Reference to the price catalog or rate version applied; empty when untracked.
+    ///
+    /// Field 3: `rate_ref`
+    #[serde(
+        rename = "rateRef",
+        alias = "rate_ref",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub rate_ref: ::core::option::Option<::buffa::alloc::string::String>,
+}
+impl ::core::fmt::Debug for Cost {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("Cost")
+            .field("amount_micros", &self.amount_micros)
+            .field("currency_code", &self.currency_code)
+            .field("rate_ref", &self.rate_ref)
+            .finish()
+    }
+}
+impl Cost {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.Cost";
+}
+impl Cost {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::rate_ref`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_rate_ref(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.rate_ref = Some(value.into());
+        self
+    }
+}
+::buffa::impl_default_instance!(Cost);
+impl ::buffa::MessageName for Cost {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1";
+    const NAME: &'static str = "Cost";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1.Cost";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.Cost";
+}
+impl ::buffa::Message for Cost {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// The result is a `u32`; the protobuf specification requires all
+    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
+    /// compliant message will never overflow this type.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        size += 1u32 + ::buffa::types::int64_encoded_len(self.amount_micros) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.currency_code) as u32;
+        if let Some(ref v) = self.rate_ref {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        size
+    }
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_int64_field(1u32, self.amount_micros, buf);
+        ::buffa::types::put_string_field(2u32, &self.currency_code, buf);
+        if let Some(ref v) = self.rate_ref {
+            ::buffa::types::put_string_field(3u32, v, buf);
+        }
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.amount_micros = ::buffa::types::decode_int64(buf)?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.currency_code, buf)?;
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self
+                        .rate_ref
+                        .get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.amount_micros = 0i64;
+        self.currency_code.clear();
+        self.rate_ref = ::core::option::Option::None;
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for Cost {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __COST_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.session.sessions.v1.Cost",
+    to_json: ::buffa::type_registry::any_to_json::<Cost>,
+    from_json: ::buffa::type_registry::any_from_json::<Cost>,
     is_wkt: false,
 };

@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/digest.proto";
+
+// Checkpoint is an opaque, out-of-line durable checkpoint: a reference plus a
+// content digest and the implementation version that wrote it, never inline
+// bytes (ADR#0031 §3, §6). It is produced by CheckpointProduced and restored via
+// ExecutionAttemptStarted.restored_checkpoint.
+message Checkpoint {
+  // Locator for the checkpoint artifact stored out of line.
+  string reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque, implementation-defined checkpoint type.
+  string checkpoint_type = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the checkpoint bytes, verified before restore.
+  Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Implementation version that wrote the checkpoint.
+  string implementation_version = 4 [features.field_presence = LEGACY_REQUIRED];
+}

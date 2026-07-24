@@ -9,4 +9,18 @@ message TokenUsage {
   uint64 output_tokens = 2;
   uint64 cache_creation_tokens = 3;
   uint64 cache_read_tokens = 4;
+  // Monetary cost of this usage, priced at generation time. Recorded as a fact so
+  // a deterministic cost projection folds recorded amounts and never re-reads a
+  // drifting price catalog. Unset when cost is not tracked.
+  Cost cost = 5;
+}
+
+// Cost is a fixed-point monetary amount priced when the usage was recorded.
+message Cost {
+  // Amount in millionths of one currency unit (micros); avoids floating point.
+  int64 amount_micros = 1 [features.field_presence = LEGACY_REQUIRED];
+  // ISO 4217 currency code, for example "USD".
+  string currency_code = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Reference to the price catalog or rate version applied; empty when untracked.
+  string rate_ref = 3;
 }
