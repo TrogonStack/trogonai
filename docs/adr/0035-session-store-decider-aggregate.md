@@ -73,10 +73,10 @@ hazard the substrate on the curated line already closes. This ADR **ratifies tha
 domain model and deliberately supersedes its persistence mechanism**.
 
 Several primitives this decision leans on are themselves `draft`, not accepted,
-and some are not yet implemented in the substrate: ADR#0026's `CommandPrincipal`/
-`CommandAuthorizer`, ADR#0027's `Tenant`/`TenantBinding`, ADR#0028's admission
-limiter, ADR#0029's snapshot-derived
-[retention watermark](../glossary/retention-watermark), and ADR#0031's Session
+and some are not yet implemented in the substrate: [ADR#0026](./0026-command-authorization-principal.md)'s `CommandPrincipal`/
+`CommandAuthorizer`, [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s `Tenant`/`TenantBinding`, [ADR#0028](./0028-decider-admission-control-and-backpressure.md)'s admission
+limiter, [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s snapshot-derived
+[retention watermark](../glossary/retention-watermark), and [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s Session
 model. Where this ADR names those types it is naming proposed primitives it
 depends on, not shipped code, and decisions that build on them are provisional to
 that extent. The two facts marked "already ships, by default" above
@@ -89,7 +89,7 @@ implemented in `trogon-decider`/`trogon-decider-nats` today.
 
 Each Session, each subagent, and each fork is its own logical stream -- its own
 subject on a shared physical JetStream stream `SESSION_EVENTS` -- never events
-inlined into another stream. This follows ADR#0024's placement rule (a fact
+inlined into another stream. This follows [ADR#0024](./0024-agent-platform-stream-topology.md)'s placement rule (a fact
 belongs in a stream only when its order is load-bearing for that stream's
 invariants) and its single-write-once-per-fact rule (cross-stream questions are
 answered by projections, never by mirrored writes).
@@ -127,7 +127,7 @@ cautionary cases (Goose's `DELETE`+re-`INSERT`, Hermes's flag flips).
 
 Identity and order are separate concerns (forced decision #2). The `SessionId` is
 an opaque addressing key only; the sole monotonic order is the physical JetStream
-stream sequence (ADR#0013). The prior art's application-assigned per-session
+stream sequence ([ADR#0013](./0013-origin-stream-sequence-header.md)). The prior art's application-assigned per-session
 `Seq` is dropped -- it is exactly what forced the read-last-sequence-then-lease
 anti-pattern, and JetStream already assigns the authoritative sequence.
 
@@ -196,7 +196,7 @@ at-least-once -- a NATS processor redelivers a command after a crash before its 
 double-append a fact an append-only log can never later edit away. Every command
 carries an idempotency key (the id it would stamp on its event), and `decide` treats
 a key it has already recorded as a typed already-applied no-op that the runtime acks
-without appending. This is the log-level counterpart of ADR#0031's operation ledger:
+without appending. This is the log-level counterpart of [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s operation ledger:
 the ledger keeps external tool and delegation side effects deduplicated, this keeps
 the log itself free of duplicate facts.
 
@@ -219,26 +219,26 @@ and replay (forced decision #9,
 payload is rejected at the boundary and never reaches durable storage. This ADR
 adds an observable decode-failure metric for session events -- the decider crate
 emits no such metric today and its append/replay decode-error paths are currently
-silent -- following ADR#0021's principle that boundary decode failures must be
+silent -- following [ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md)'s principle that boundary decode failures must be
 measured, not dropped. Unlike the prior art, no `InvalidEventRejected` event is
 persisted: rejection happens before the write, so there is nothing to record.
 Schema evolution is additive (new optional fields, reserved retired numbers),
 never a per-event version branch. Every event carries a small envelope alongside
 its typed payload -- an event id (which doubles as the append idempotency key of
-facet 2), an append timestamp, and the acting principal (ADR#0026) -- so dedup,
+facet 2), an append timestamp, and the acting principal ([ADR#0026](./0026-command-authorization-principal.md)) -- so dedup,
 audit, and authorization are answerable from the event itself.
 
 The prior art's 46-arm payload is ratified as the starting vocabulary checklist,
 not copied verbatim: lifecycle (`SessionStarted`, which stores the
-`StoredSessionExecutionPlan` once per ADR#0031; `SessionClosed`,
+`StoredSessionExecutionPlan` once per [ADR#0031](./0031-agent-implementation-and-session-plan.md); `SessionClosed`,
 `SessionCancelled`, `SessionFailed`, `SessionDeleted`), the ExecutionAttempt
-facts (ADR#0031), conversation (`UserMessageRecorded`,
+facts ([ADR#0031](./0031-agent-implementation-and-session-plan.md)), conversation (`UserMessageRecorded`,
 `AssistantMessageStarted`/`Completed`), tool lifecycle
 (`ToolCallRequested`/`Approved`/`Started`/`Completed`/`Failed`), artifacts
 (`ArtifactRecorded`, claim-check by sha256), file changes, compaction
 (`Compacted`, facet 4), rewind (`SessionRewound`), fork (`SessionForked`, facet
 5), delegation and subagents (facet 6), and the operation-ledger reservations
-that make tool and delegation side effects idempotent -- ADR#0031's ledger
+that make tool and delegation side effects idempotent -- [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s ledger
 deduplicates by operation id and digest and reconciles indeterminate outcomes; it
 is not exactly-once execution. Every command is gated before `decide` by the
 proposed `CommandPrincipal`/`CommandAuthorizer` of draft
@@ -293,7 +293,7 @@ next execution finds the marker without a snapshot, falls back to the full
 two-segment replay, and writes the missing snapshot. This is the corpus's
 converged-on cheaper alternative (Codex CLI's `history_base`), available because
 events are immutable, and it needs no `Trogon-Origin-Stream-Sequence` -- a fork
-mints a new aggregate, it does not migrate an existing one, so ADR#0013's closed
+mints a new aggregate, it does not migrate an existing one, so [ADR#0013](./0013-origin-stream-sequence-header.md)'s closed
 use-case list is neither stretched nor needed.
 
 ### 6. Subagents are sibling streams with an explicit cascade policy, reconciled by a process manager
@@ -301,7 +301,7 @@ use-case list is neither stretched nor needed.
 A subagent is its own logical stream linked by two distinct facts (never a
 cross-stream transaction, which `decide` cannot express): the parent records
 `DelegationDispatched{operation_id, child_session_id, dispatched_at_sequence,
-cascade_policy}` (reusing ADR#0031's operation-ledger id to dedupe dispatch), and
+cascade_policy}` (reusing [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s operation-ledger id to dedupe dispatch), and
 the child records `SubagentLinked{parent_session_id, parent_sequence_at_dispatch,
 cascade_policy}` -- `parent_sequence_at_dispatch` is a plain domain field copied
 from the parent's physical sequence, never `Trogon-Origin-Stream-Sequence`. The
@@ -312,7 +312,7 @@ silent-orphan gap (forced decision #6) by making both outcomes explicit facts.
 A parent reaches a terminal state through a Session-level event on its own
 subject: `SessionClosed` (normal completion), `SessionCancelled`, `SessionFailed`,
 or `SessionDeleted`, plus the partial-invalidation case `SessionRewound`. Crash
-is not itself a trigger: an `ExecutionAttemptEnded` is per-attempt (ADR#0031's
+is not itself a trigger: an `ExecutionAttemptEnded` is per-attempt ([ADR#0031](./0031-agent-implementation-and-session-plan.md)'s
 outcome set is `failed | cancelled | terminated`, and a restart may still
 follow), so a liveness watchdog that concludes no further attempt will run records
 a Session-level `SessionFailed`, and that is what cascades. A reconciler
@@ -337,7 +337,7 @@ the common ordering of the race inside one stream's OCC (it is one of facet 2's
 it for its own invariant) records an intentional detach. Crash and downtime are
 covered by bounded processor redelivery plus a scheduled orphan-closure sweep
 that reads already-durable projections and snapshots -- never raw events, so it is
-immune to any retention race and needs no extension to ADR#0029. This sweep
+immune to any retention race and needs no extension to [ADR#0029](./0029-decider-retention-and-truncation-watermark.md). This sweep
 closes logical cascade only; it never purges bytes.
 
 ### 7. The log is never truncated: keep-forever, with snapshot-bounded replay
@@ -352,13 +352,13 @@ Storage is managed without ever removing a fact:
 
 - **Snapshots bound replay, not storage.** The runtime resumes from the newest
   snapshot and replays only the tail after it (facet 8), so a long session costs
-  O(tail) to load even though its log grows forever. ADR#0029's
+  O(tail) to load even though its log grows forever. [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s
   `MinimumRequiredSequence` watermark is kept only as a read-only diagnostic; the
-  session store never issues the purge ADR#0029 permits.
+  session store never issues the purge [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) permits.
 - **Cold-storage tiering is an optional, reversible, non-semantic relocation.** If a
   deployment must bound the hot JetStream stream, already-immutable old events may be
   copied to the JetStream Object Store, evicted from the hot stream, and restored on
-  demand through ADR#0013's restore path (the one authorized use of
+  demand through [ADR#0013](./0013-origin-stream-sequence-header.md)'s restore path (the one authorized use of
   `Trogon-Origin-Stream-Sequence`). This moves bytes between tiers; it never edits or
   logically deletes an event, and whether to enable it is deferred to deployment, not
   decided here.
@@ -400,9 +400,9 @@ mechanism is not.
 ### Fork as a physical O(history) copy
 
 Rejected. Copying the source events under a new subject either duplicates the same
-facts under two subjects (violating ADR#0024's single-write-once-per-fact rule) or
+facts under two subjects (violating [ADR#0024](./0024-agent-platform-stream-topology.md)'s single-write-once-per-fact rule) or
 tags them with `Trogon-Origin-Stream-Sequence` to fake provenance for a case
-ADR#0013 does not authorize (a fork is a new aggregate, not a migration). It also
+[ADR#0013](./0013-origin-stream-sequence-header.md) does not authorize (a fork is a new aggregate, not a migration). It also
 pays O(history) cost per fork and needs crash-resumable copy machinery that does
 not exist in `trogon-decider-nats`, for no benefit over the shared-prefix
 reference of facet 5.
@@ -485,19 +485,19 @@ hot path without inheriting its weak lifecycle guarantees.
   with no prior art -- a total order across several independently-appending Session
   streams -- needs its own design pass.
 - **Mid-session model or runner switching.** The prior art's `trogonai-switching`
-  crate and `cambio-modelo.md` mutate a running session's model. ADR#0031 makes
+  crate and `cambio-modelo.md` mutate a running session's model. [ADR#0031](./0031-agent-implementation-and-session-plan.md) makes
   the SessionExecutionPlan immutable and requires a new Session for any change to
   what runs; the continuity concern becomes a fork or a new session. Deferred
-  pending ADR#0031's resolution.
+  pending [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s resolution.
 - **The optional cold-tiering job** (facet 7) -- its scheduling, authorization,
   failure handling, and whether a deployment enables it at all -- is out of scope;
   the log is keep-forever by default and tiering only relocates bytes reversibly.
 - **How long cold-tiered copies live in the Object Store** -- a follow-up question
-  only if tiering is enabled, analogous to ADR#0029's deferred KV history-depth.
-- **Per-tenant retention or admission fairness.** ADR#0028 leaves QoS open and
-  ADR#0027 scopes `Tenant` to storage resolution only; a per-tenant policy
+  only if tiering is enabled, analogous to [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s deferred KV history-depth.
+- **Per-tenant retention or admission fairness.** [ADR#0028](./0028-decider-admission-control-and-backpressure.md) leaves QoS open and
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md) scopes `Tenant` to storage resolution only; a per-tenant policy
   composes with both but is not decided here.
-- **Tenant-to-authorization-principal linkage** -- ADR#0027 Non-Goal; ADR#0026
+- **Tenant-to-authorization-principal linkage** -- [ADR#0027](./0027-decider-multi-tenancy-primitive.md) Non-Goal; [ADR#0026](./0026-command-authorization-principal.md)
   owns the principal.
 - **Concrete Rust and proto contracts** -- exact message fields, KV key shapes,
   and the event-envelope / idempotency-key representation are implementation-level
@@ -517,7 +517,7 @@ hot path without inheriting its weak lifecycle guarantees.
   model over the transcript must be written to tolerate this.
 - No caller migration is needed on the curated line (greenfield). The platform
   `crates/session` domain model is salvaged; its persistence is rewritten as a
-  decider, and the switching subsystem is dropped pending ADR#0031.
+  decider, and the switching subsystem is dropped pending [ADR#0031](./0031-agent-implementation-and-session-plan.md).
 - New standing services appear: a subagent reconciler processor plus a scheduled
   orphan-closure sweep (facet 6); optional cold-storage tiering (facet 7) adds one
   more, but only if a deployment chooses to bound the hot stream.
