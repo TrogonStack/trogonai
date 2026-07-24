@@ -11,10 +11,10 @@ pub struct CanonicalMessageView<'a> {
     ///
     /// Field 1: `message_id`
     pub message_id: &'a str,
-    /// Message role, for example "user" or "assistant".
+    /// Conversation role.
     ///
     /// Field 2: `role`
-    pub role: &'a str,
+    pub role: ::buffa::EnumValue<super::super::MessageRole>,
     /// Ordered content blocks making up the message.
     ///
     /// Field 3: `content`
@@ -26,7 +26,7 @@ pub struct CanonicalMessageView<'a> {
     ///
     /// Field 4: `model`
     pub model: ::core::option::Option<&'a str>,
-    /// Token accounting for the message; unset when not applicable.
+    /// Token accounting and cost for the message; unset when not applicable.
     ///
     /// Field 5: `usage`
     pub usage: ::buffa::MessageFieldView<
@@ -105,9 +105,11 @@ impl<'a> ::buffa::MessageView<'a> for CanonicalMessageView<'a> {
             2u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
+                    ::buffa::encoding::WireType::Varint,
                 )?;
-                view.role = ::buffa::types::borrow_str(&mut cur)?;
+                view.role = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(&mut cur)?,
+                );
                 view.__buffa_required_seen_0 |= 2u64;
             }
             4u32 => {
@@ -195,7 +197,7 @@ impl<'a> ::buffa::MessageView<'a> for CanonicalMessageView<'a> {
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::CanonicalMessage {
             message_id: self.message_id.to_string(),
-            role: self.role.to_string(),
+            role: self.role,
             content: self
                 .content
                 .iter()
@@ -229,7 +231,10 @@ impl<'a> ::buffa::ViewEncode<'a> for CanonicalMessageView<'a> {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.message_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.role) as u32;
+        {
+            let val = self.role.to_i32();
+            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+        }
         for v in &self.content {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -268,7 +273,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CanonicalMessageView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.message_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.role, buf);
+        ::buffa::types::put_int32_field(2u32, self.role.to_i32(), buf);
         for v in &self.content {
             ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
             v.write_to(__cache, buf);
@@ -308,7 +313,7 @@ impl<'__a> ::serde::Serialize for CanonicalMessageView<'__a> {
             __map.serialize_entry("messageId", self.message_id)?;
         }
         {
-            __map.serialize_entry("role", self.role)?;
+            __map.serialize_entry("role", &self.role)?;
         }
         if !self.content.is_empty() {
             __map.serialize_entry("content", &*self.content)?;
@@ -424,11 +429,11 @@ impl CanonicalMessageOwnedView {
     pub fn message_id(&self) -> &'_ str {
         self.0.reborrow().message_id
     }
-    /// Message role, for example "user" or "assistant".
+    /// Conversation role.
     ///
     /// Field 2: `role`
     #[must_use]
-    pub fn role(&self) -> &'_ str {
+    pub fn role(&self) -> ::buffa::EnumValue<super::super::MessageRole> {
         self.0.reborrow().role
     }
     /// Ordered content blocks making up the message.
@@ -447,7 +452,7 @@ impl CanonicalMessageOwnedView {
     pub fn model(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().model
     }
-    /// Token accounting for the message; unset when not applicable.
+    /// Token accounting and cost for the message; unset when not applicable.
     ///
     /// Field 5: `usage`
     #[must_use]
@@ -579,11 +584,31 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.kind = Some(
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
                     super::super::__buffa::view::oneof::content_block::Kind::Thinking(
-                        ::buffa::types::borrow_str(&mut cur)?,
+                        ref mut existing,
                     ),
-                );
+                ) = view.kind
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.kind = Some(
+                        super::super::__buffa::view::oneof::content_block::Kind::Thinking(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::ThinkingBlockView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
             }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -702,7 +727,9 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                                 v,
                             ) => {
                                 super::super::__buffa::oneof::content_block::Kind::Thinking(
-                                    v.to_string(),
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
                                 )
                             }
                             super::super::__buffa::view::oneof::content_block::Kind::ToolUse(
@@ -759,7 +786,12 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                             + inner;
                 }
                 super::super::__buffa::view::oneof::content_block::Kind::Thinking(x) => {
-                    size += 1u32 + ::buffa::types::string_encoded_len(x) as u32;
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
                 }
                 super::super::__buffa::view::oneof::content_block::Kind::ToolUse(x) => {
                     let __slot = __cache.reserve();
@@ -810,7 +842,12 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                     x.write_to(__cache, buf);
                 }
                 super::super::__buffa::view::oneof::content_block::Kind::Thinking(x) => {
-                    ::buffa::types::put_string_field(3u32, x, buf);
+                    ::buffa::types::put_len_delimited_header(
+                        3u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
                 }
                 super::super::__buffa::view::oneof::content_block::Kind::ToolUse(x) => {
                     ::buffa::types::put_len_delimited_header(
@@ -1009,6 +1046,280 @@ impl ::buffa::HasMessageView for super::super::ContentBlock {
     type ViewHandle = ContentBlockOwnedView;
 }
 impl ::serde::Serialize for ContentBlockOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+/// ThinkingBlock is visible model reasoning plus the provider's opaque
+/// continuation/verification signature, kept so a thinking-bearing turn can be
+/// resumed or forked faithfully.
+#[derive(Clone, Debug, Default)]
+pub struct ThinkingBlockView<'a> {
+    /// Field 1: `text`
+    pub text: &'a str,
+    /// Provider signature over the reasoning; empty when the provider emits none.
+    ///
+    /// Field 2: `signature`
+    pub signature: ::core::option::Option<&'a [u8]>,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> ThinkingBlockView<'a> {
+    /**Whether required field `text` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_text(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for ThinkingBlockView<'a> {
+    type Owned = super::super::ThinkingBlock;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.text = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.signature = Some(::buffa::types::borrow_bytes(&mut cur)?);
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::ThinkingBlock, ::buffa::DecodeError> {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<super::super::ThinkingBlock, ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::ThinkingBlock {
+            text: self.text.to_string(),
+            signature: self.signature.map(|b| (b).to_vec()),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for ThinkingBlockView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.text) as u32;
+        if let Some(ref v) = self.signature {
+            size += 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
+        }
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_string_field(1u32, &self.text, buf);
+        if let Some(ref v) = self.signature {
+            ::buffa::types::put_bytes_field(2u32, v, buf);
+        }
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for ThinkingBlockView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            __map.serialize_entry("text", self.text)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.signature {
+            __map.serialize_entry("signature", &::buffa::json_helpers::BytesJson(__v))?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for ThinkingBlockView<'a> {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1";
+    const NAME: &'static str = "ThinkingBlock";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1.ThinkingBlock";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.ThinkingBlock";
+}
+::buffa::impl_default_view_instance!(ThinkingBlockView);
+::buffa::impl_view_reborrow!(ThinkingBlockView);
+/** Self-contained, `'static` owned view of a `ThinkingBlock` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`ThinkingBlockView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`ThinkingBlockView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct ThinkingBlockOwnedView(::buffa::OwnedView<ThinkingBlockView<'static>>);
+impl ThinkingBlockOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ThinkingBlockOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ThinkingBlockOwnedView(::buffa::OwnedView::decode_with_options(bytes, opts)?),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::ThinkingBlock,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            ThinkingBlockOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`ThinkingBlockView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &ThinkingBlockView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<super::super::ThinkingBlock, ::buffa::DecodeError> {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Field 1: `text`
+    #[must_use]
+    pub fn text(&self) -> &'_ str {
+        self.0.reborrow().text
+    }
+    /// Provider signature over the reasoning; empty when the provider emits none.
+    ///
+    /// Field 2: `signature`
+    #[must_use]
+    pub fn signature(&self) -> ::core::option::Option<&'_ [u8]> {
+        self.0.reborrow().signature
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<ThinkingBlockView<'static>>>
+for ThinkingBlockOwnedView {
+    fn from(inner: ::buffa::OwnedView<ThinkingBlockView<'static>>) -> Self {
+        ThinkingBlockOwnedView(inner)
+    }
+}
+impl ::core::convert::From<ThinkingBlockOwnedView>
+for ::buffa::OwnedView<ThinkingBlockView<'static>> {
+    fn from(wrapper: ThinkingBlockOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<ThinkingBlockView<'static>>>
+for ThinkingBlockOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<ThinkingBlockView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::ThinkingBlock {
+    type View<'a> = ThinkingBlockView<'a>;
+    type ViewHandle = ThinkingBlockOwnedView;
+}
+impl ::serde::Serialize for ThinkingBlockOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

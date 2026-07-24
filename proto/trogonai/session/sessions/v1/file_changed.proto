@@ -2,6 +2,7 @@ edition = "2024";
 
 package trogonai.session.sessions.v1;
 
+import "trogonai/session/sessions/v1/artifact.proto";
 import "trogonai/session/sessions/v1/file_change.proto";
 
 // FileChanged records that a file changed, in arrival order. It is a commuting
@@ -11,4 +12,11 @@ message FileChanged {
   string path = 2 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKind change_kind = 3 [features.field_presence = LEGACY_REQUIRED];
   string previous_path = 4;
+  // Claim-check to the file's content before the change; unset for a create or
+  // when content was not captured. Recorded because our checkpoints are opaque,
+  // so "what changed" is not re-derivable by diffing them after the fact.
+  ArtifactRef before_ref = 5;
+  // Claim-check to the file's content after the change; unset for a delete or
+  // when content was not captured.
+  ArtifactRef after_ref = 6;
 }

@@ -440,6 +440,31 @@ pub struct ArtifactMetadataView<'a> {
     pub created_at: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
     >,
+    /// Whether the bytes were durably stored or only a degraded external reference
+    /// was kept; recorded because a failed fetch leaves no other trace of the
+    /// difference between "we hold the bytes" and "we only had a broken reference".
+    ///
+    /// Field 9: `availability`
+    pub availability: ::buffa::EnumValue<super::super::ArtifactSourceAvailability>,
+    /// Original source URL for a fetched or degraded artifact; empty when none.
+    ///
+    /// Field 10: `source_url`
+    pub source_url: ::core::option::Option<&'a str>,
+    /// When the source bytes were fetched; unset when not applicable.
+    ///
+    /// Field 11: `fetched_at`
+    pub fetched_at: ::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'a>,
+    >,
+    /// Source transport encoding, for example "base64"; empty when none.
+    ///
+    /// Field 12: `source_encoding`
+    pub source_encoding: ::core::option::Option<&'a str>,
+    /// MIME as declared by the source before validation; empty when not declared.
+    /// The authoritative decoded type is mime above.
+    ///
+    /// Field 13: `declared_mime`
+    pub declared_mime: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -483,6 +508,14 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_created_at(&self) -> bool {
         self.created_at.is_set()
+    }
+    /**Whether required field `availability` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_availability(&self) -> bool {
+        self.__buffa_required_seen_0 & 16u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
@@ -586,6 +619,58 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                     }
                 }
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.availability = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(&mut cur)?,
+                );
+                view.__buffa_required_seen_0 |= 16u64;
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.source_url = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.fetched_at.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.fetched_at = ::buffa::MessageFieldView::set(
+                            <::buffa_types::google::protobuf::__buffa::view::TimestampView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            12u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.source_encoding = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            13u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.declared_mime = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -621,6 +706,18 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            availability: self.availability,
+            source_url: self.source_url.map(|s| s.to_string()),
+            fetched_at: match self.fetched_at.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        ::buffa_types::google::protobuf::Timestamp,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            source_encoding: self.source_encoding.map(|s| s.to_string()),
+            declared_mime: self.declared_mime.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -652,6 +749,27 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        {
+            let val = self.availability.to_i32();
+            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+        }
+        if let Some(ref v) = self.source_url {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if self.fetched_at.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.fetched_at.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        if let Some(ref v) = self.source_encoding {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if let Some(ref v) = self.declared_mime {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -678,6 +796,20 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
         if self.created_at.is_set() {
             ::buffa::types::put_len_delimited_header(8u32, __cache.consume_next(), buf);
             self.created_at.write_to(__cache, buf);
+        }
+        ::buffa::types::put_int32_field(9u32, self.availability.to_i32(), buf);
+        if let Some(ref v) = self.source_url {
+            ::buffa::types::put_string_field(10u32, v, buf);
+        }
+        if self.fetched_at.is_set() {
+            ::buffa::types::put_len_delimited_header(11u32, __cache.consume_next(), buf);
+            self.fetched_at.write_to(__cache, buf);
+        }
+        if let Some(ref v) = self.source_encoding {
+            ::buffa::types::put_string_field(12u32, v, buf);
+        }
+        if let Some(ref v) = self.declared_mime {
+            ::buffa::types::put_string_field(13u32, v, buf);
         }
     }
 }
@@ -724,6 +856,23 @@ impl<'__a> ::serde::Serialize for ArtifactMetadataView<'__a> {
             if let ::core::option::Option::Some(__v) = self.created_at.as_option() {
                 __map.serialize_entry("createdAt", __v)?;
             }
+        }
+        {
+            __map.serialize_entry("availability", &self.availability)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.source_url {
+            __map.serialize_entry("sourceUrl", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.fetched_at.as_option() {
+                __map.serialize_entry("fetchedAt", __v)?;
+            }
+        }
+        if let ::core::option::Option::Some(__v) = self.source_encoding {
+            __map.serialize_entry("sourceEncoding", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.declared_mime {
+            __map.serialize_entry("declaredMime", __v)?;
         }
         __map.end()
     }
@@ -875,6 +1024,50 @@ impl ArtifactMetadataOwnedView {
         ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
     > {
         &self.0.reborrow().created_at
+    }
+    /// Whether the bytes were durably stored or only a degraded external reference
+    /// was kept; recorded because a failed fetch leaves no other trace of the
+    /// difference between "we hold the bytes" and "we only had a broken reference".
+    ///
+    /// Field 9: `availability`
+    #[must_use]
+    pub fn availability(
+        &self,
+    ) -> ::buffa::EnumValue<super::super::ArtifactSourceAvailability> {
+        self.0.reborrow().availability
+    }
+    /// Original source URL for a fetched or degraded artifact; empty when none.
+    ///
+    /// Field 10: `source_url`
+    #[must_use]
+    pub fn source_url(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().source_url
+    }
+    /// When the source bytes were fetched; unset when not applicable.
+    ///
+    /// Field 11: `fetched_at`
+    #[must_use]
+    pub fn fetched_at(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::TimestampView<'_>,
+    > {
+        &self.0.reborrow().fetched_at
+    }
+    /// Source transport encoding, for example "base64"; empty when none.
+    ///
+    /// Field 12: `source_encoding`
+    #[must_use]
+    pub fn source_encoding(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().source_encoding
+    }
+    /// MIME as declared by the source before validation; empty when not declared.
+    /// The authoritative decoded type is mime above.
+    ///
+    /// Field 13: `declared_mime`
+    #[must_use]
+    pub fn declared_mime(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().declared_mime
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ArtifactMetadataView<'static>>>

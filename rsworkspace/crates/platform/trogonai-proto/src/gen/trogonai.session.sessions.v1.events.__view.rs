@@ -968,6 +968,37 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                     );
                 }
             }
+            31u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::SystemNoticeRecordedView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -1257,6 +1288,15 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                                 v,
                             ) => {
                                 super::super::__buffa::oneof::session_event::Event::OperationOutcomeRecorded(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::session_event::Event::SystemNoticeRecorded(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
@@ -1570,6 +1610,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                             + inner;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::OperationOutcomeRecorded(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -1893,6 +1943,16 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        31u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
             }
         }
     }
@@ -2066,6 +2126,11 @@ impl<'__a> ::serde::Serialize for SessionEventView<'__a> {
                     v,
                 ) => {
                     __map.serialize_entry("operationOutcomeRecorded", v)?;
+                }
+                super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
+                    v,
+                ) => {
+                    __map.serialize_entry("systemNoticeRecorded", v)?;
                 }
             }
         }

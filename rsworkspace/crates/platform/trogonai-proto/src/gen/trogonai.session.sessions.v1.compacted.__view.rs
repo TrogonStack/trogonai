@@ -4,8 +4,9 @@
 /// Compacted is a self-sufficient in-stream compaction marker the store only
 /// records (ADR#0035 facet 4); summary content is inline. from_sequence and
 /// to_sequence are physical stream sequences delimiting the kept-tail boundary;
-/// the model-visible view folds from the newest Compacted plus every event
-/// after it, and full history below the boundary stays on the stream. It is
+/// the model-visible view folds from the newest Compacted plus every event after
+/// it, and full history below the boundary stays on the stream (keep-forever), so
+/// no structured replacement set is needed to rewind past it. It is
 /// invariant-bearing, admitting one active compaction, guarded by
 /// WRITE_PRECONDITION = At(current_position).
 #[derive(Clone, Debug, Default)]
@@ -20,6 +21,31 @@ pub struct CompactedView<'a> {
     pub from_sequence: u64,
     /// Field 5: `to_sequence`
     pub to_sequence: u64,
+    /// Why compaction fired; a command-time input not derivable from the log.
+    ///
+    /// Field 6: `trigger`
+    pub trigger: ::buffa::EnumValue<super::super::CompactionTrigger>,
+    /// Optional user guidance steering the summarizer; empty when none.
+    ///
+    /// Field 7: `guidance`
+    pub guidance: ::core::option::Option<&'a str>,
+    /// Transcript token counts measured at compaction time; recorded because
+    /// tokenizer output is not deterministically recomputable later. Unset when the
+    /// compactor did not measure them.
+    ///
+    /// Field 8: `tokens_before`
+    pub tokens_before: ::core::option::Option<u64>,
+    /// Field 9: `tokens_after`
+    pub tokens_after: ::core::option::Option<u64>,
+    /// Model that produced the summary and its own token and cost usage; empty or
+    /// unset when not attributed.
+    ///
+    /// Field 10: `model`
+    pub model: ::core::option::Option<&'a str>,
+    /// Field 11: `usage`
+    pub usage: ::buffa::MessageFieldView<
+        super::super::__buffa::view::TokenUsageView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -63,6 +89,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_to_sequence(&self) -> bool {
         self.__buffa_required_seen_0 & 16u64 != 0
+    }
+    /**Whether required field `trigger` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_trigger(&self) -> bool {
+        self.__buffa_required_seen_0 & 32u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CompactedView<'a> {
@@ -132,6 +166,65 @@ impl<'a> ::buffa::MessageView<'a> for CompactedView<'a> {
                 view.to_sequence = ::buffa::types::decode_uint64(&mut cur)?;
                 view.__buffa_required_seen_0 |= 16u64;
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.trigger = ::buffa::EnumValue::from(
+                    ::buffa::types::decode_int32(&mut cur)?,
+                );
+                view.__buffa_required_seen_0 |= 32u64;
+            }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.guidance = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.tokens_before = Some(::buffa::types::decode_uint64(&mut cur)?);
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.tokens_after = Some(::buffa::types::decode_uint64(&mut cur)?);
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.model = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.usage.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.usage = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::TokenUsageView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -157,13 +250,26 @@ impl<'a> ::buffa::MessageView<'a> for CompactedView<'a> {
             summary_content: self.summary_content.to_string(),
             from_sequence: self.from_sequence,
             to_sequence: self.to_sequence,
+            trigger: self.trigger,
+            guidance: self.guidance.map(|s| s.to_string()),
+            tokens_before: self.tokens_before,
+            tokens_after: self.tokens_after,
+            model: self.model.map(|s| s.to_string()),
+            usage: match self.usage.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::TokenUsage,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for CompactedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -172,12 +278,36 @@ impl<'a> ::buffa::ViewEncode<'a> for CompactedView<'a> {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.summary_content) as u32;
         size += 1u32 + ::buffa::types::uint64_encoded_len(self.from_sequence) as u32;
         size += 1u32 + ::buffa::types::uint64_encoded_len(self.to_sequence) as u32;
+        {
+            let val = self.trigger.to_i32();
+            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+        }
+        if let Some(ref v) = self.guidance {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if let Some(v) = self.tokens_before {
+            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+        }
+        if let Some(v) = self.tokens_after {
+            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+        }
+        if let Some(ref v) = self.model {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        if self.usage.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.usage.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -187,6 +317,23 @@ impl<'a> ::buffa::ViewEncode<'a> for CompactedView<'a> {
         ::buffa::types::put_string_field(3u32, &self.summary_content, buf);
         ::buffa::types::put_uint64_field(4u32, self.from_sequence, buf);
         ::buffa::types::put_uint64_field(5u32, self.to_sequence, buf);
+        ::buffa::types::put_int32_field(6u32, self.trigger.to_i32(), buf);
+        if let Some(ref v) = self.guidance {
+            ::buffa::types::put_string_field(7u32, v, buf);
+        }
+        if let Some(v) = self.tokens_before {
+            ::buffa::types::put_uint64_field(8u32, v, buf);
+        }
+        if let Some(v) = self.tokens_after {
+            ::buffa::types::put_uint64_field(9u32, v, buf);
+        }
+        if let Some(ref v) = self.model {
+            ::buffa::types::put_string_field(10u32, v, buf);
+        }
+        if self.usage.is_set() {
+            ::buffa::types::put_len_delimited_header(11u32, __cache.consume_next(), buf);
+            self.usage.write_to(__cache, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -229,6 +376,34 @@ impl<'__a> ::serde::Serialize for CompactedView<'__a> {
                     "toSequence",
                     &::buffa::json_helpers::ProtoJson(&self.to_sequence),
                 )?;
+        }
+        {
+            __map.serialize_entry("trigger", &self.trigger)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.guidance {
+            __map.serialize_entry("guidance", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.tokens_before {
+            __map
+                .serialize_entry(
+                    "tokensBefore",
+                    &::buffa::json_helpers::ProtoJson(&__v),
+                )?;
+        }
+        if let ::core::option::Option::Some(__v) = self.tokens_after {
+            __map
+                .serialize_entry(
+                    "tokensAfter",
+                    &::buffa::json_helpers::ProtoJson(&__v),
+                )?;
+        }
+        if let ::core::option::Option::Some(__v) = self.model {
+            __map.serialize_entry("model", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.usage.as_option() {
+                __map.serialize_entry("usage", __v)?;
+            }
         }
         __map.end()
     }
@@ -343,6 +518,49 @@ impl CompactedOwnedView {
     #[must_use]
     pub fn to_sequence(&self) -> u64 {
         self.0.reborrow().to_sequence
+    }
+    /// Why compaction fired; a command-time input not derivable from the log.
+    ///
+    /// Field 6: `trigger`
+    #[must_use]
+    pub fn trigger(&self) -> ::buffa::EnumValue<super::super::CompactionTrigger> {
+        self.0.reborrow().trigger
+    }
+    /// Optional user guidance steering the summarizer; empty when none.
+    ///
+    /// Field 7: `guidance`
+    #[must_use]
+    pub fn guidance(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().guidance
+    }
+    /// Transcript token counts measured at compaction time; recorded because
+    /// tokenizer output is not deterministically recomputable later. Unset when the
+    /// compactor did not measure them.
+    ///
+    /// Field 8: `tokens_before`
+    #[must_use]
+    pub fn tokens_before(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().tokens_before
+    }
+    /// Field 9: `tokens_after`
+    #[must_use]
+    pub fn tokens_after(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().tokens_after
+    }
+    /// Model that produced the summary and its own token and cost usage; empty or
+    /// unset when not attributed.
+    ///
+    /// Field 10: `model`
+    #[must_use]
+    pub fn model(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().model
+    }
+    /// Field 11: `usage`
+    #[must_use]
+    pub fn usage(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::TokenUsageView<'_>> {
+        &self.0.reborrow().usage
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CompactedView<'static>>>

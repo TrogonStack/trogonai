@@ -21,4 +21,7 @@ enum OperationOutcome {
   OPERATION_OUTCOME_SUCCEEDED = 1;
   OPERATION_OUTCOME_FAILED = 2;
   OPERATION_OUTCOME_UNKNOWN = 3;
+  // Deliberately cancelled before completion, distinct from FAILED or UNKNOWN
+  // (e.g. a subagent delegation cancelled by parent-terminal cascade).
+  OPERATION_OUTCOME_CANCELLED = 4;
 }

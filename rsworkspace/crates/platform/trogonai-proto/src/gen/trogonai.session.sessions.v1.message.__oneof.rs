@@ -8,7 +8,7 @@ pub mod content_block {
     pub enum Kind {
         Text(::buffa::alloc::string::String),
         ImageRef(::buffa::alloc::boxed::Box<super::super::super::ArtifactRef>),
-        Thinking(::buffa::alloc::string::String),
+        Thinking(::buffa::alloc::boxed::Box<super::super::super::ThinkingBlock>),
         ToolUse(::buffa::alloc::boxed::Box<super::super::super::ToolUseBlock>),
         ToolResult(::buffa::alloc::boxed::Box<super::super::super::ToolResultBlock>),
         RedactedThinking(::buffa::alloc::vec::Vec<u8>),
@@ -21,6 +21,16 @@ pub mod content_block {
     }
     impl From<super::super::super::ArtifactRef> for ::core::option::Option<Kind> {
         fn from(v: super::super::super::ArtifactRef) -> Self {
+            Self::Some(Kind::from(v))
+        }
+    }
+    impl From<super::super::super::ThinkingBlock> for Kind {
+        fn from(v: super::super::super::ThinkingBlock) -> Self {
+            Self::Thinking(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ThinkingBlock> for ::core::option::Option<Kind> {
+        fn from(v: super::super::super::ThinkingBlock) -> Self {
             Self::Some(Kind::from(v))
         }
     }

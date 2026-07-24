@@ -42,4 +42,27 @@ message ArtifactMetadata {
   bool truncated = 7;
   // Wall-clock instant the artifact was stored.
   google.protobuf.Timestamp created_at = 8 [features.field_presence = LEGACY_REQUIRED];
+  // Whether the bytes were durably stored or only a degraded external reference
+  // was kept; recorded because a failed fetch leaves no other trace of the
+  // difference between "we hold the bytes" and "we only had a broken reference".
+  ArtifactSourceAvailability availability = 9 [features.field_presence = LEGACY_REQUIRED];
+  // Original source URL for a fetched or degraded artifact; empty when none.
+  string source_url = 10;
+  // When the source bytes were fetched; unset when not applicable.
+  google.protobuf.Timestamp fetched_at = 11;
+  // Source transport encoding, for example "base64"; empty when none.
+  string source_encoding = 12;
+  // MIME as declared by the source before validation; empty when not declared.
+  // The authoritative decoded type is mime above.
+  string declared_mime = 13;
+}
+
+// ArtifactSourceAvailability distinguishes durably-stored bytes from a degraded
+// external-reference-only artifact.
+enum ArtifactSourceAvailability {
+  ARTIFACT_SOURCE_AVAILABILITY_UNSPECIFIED = 0;
+  // Bytes were fetched or decoded, validated, and stored.
+  ARTIFACT_SOURCE_AVAILABILITY_STORED = 1;
+  // Degraded: only an external reference (e.g. an un-fetchable URL) is kept.
+  ARTIFACT_SOURCE_AVAILABILITY_EXTERNAL_REF = 2;
 }

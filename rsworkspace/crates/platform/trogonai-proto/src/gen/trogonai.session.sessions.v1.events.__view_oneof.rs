@@ -166,5 +166,10 @@ pub mod session_event {
                 >,
             >,
         ),
+        SystemNoticeRecorded(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::SystemNoticeRecordedView<'a>,
+            >,
+        ),
     }
 }

@@ -16,6 +16,12 @@ pub struct CheckpointProducedView<'a> {
     pub checkpoint: ::buffa::MessageFieldView<
         super::super::__buffa::view::CheckpointView<'a>,
     >,
+    /// Physical JetStream stream sequence the checkpoint's state is current through,
+    /// so a "restore to sequence N" resolves to a checkpoint deterministically
+    /// rather than by guessing which checkpoint covers N (ADR#0013).
+    ///
+    /// Field 4: `at_sequence`
+    pub at_sequence: u64,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -43,6 +49,14 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_checkpoint(&self) -> bool {
         self.checkpoint.is_set()
+    }
+    /**Whether required field `at_sequence` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_at_sequence(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CheckpointProducedView<'a> {
@@ -109,6 +123,14 @@ impl<'a> ::buffa::MessageView<'a> for CheckpointProducedView<'a> {
                     }
                 }
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.at_sequence = ::buffa::types::decode_uint64(&mut cur)?;
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -139,6 +161,7 @@ impl<'a> ::buffa::MessageView<'a> for CheckpointProducedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            at_sequence: self.at_sequence,
             ..::core::default::Default::default()
         })
     }
@@ -161,6 +184,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CheckpointProducedView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.at_sequence) as u32;
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -177,6 +201,7 @@ impl<'a> ::buffa::ViewEncode<'a> for CheckpointProducedView<'a> {
             ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
             self.checkpoint.write_to(__cache, buf);
         }
+        ::buffa::types::put_uint64_field(4u32, self.at_sequence, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -207,6 +232,13 @@ impl<'__a> ::serde::Serialize for CheckpointProducedView<'__a> {
             if let ::core::option::Option::Some(__v) = self.checkpoint.as_option() {
                 __map.serialize_entry("checkpoint", __v)?;
             }
+        }
+        {
+            __map
+                .serialize_entry(
+                    "atSequence",
+                    &::buffa::json_helpers::ProtoJson(&self.at_sequence),
+                )?;
         }
         __map.end()
     }
@@ -317,6 +349,15 @@ impl CheckpointProducedOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CheckpointView<'_>> {
         &self.0.reborrow().checkpoint
+    }
+    /// Physical JetStream stream sequence the checkpoint's state is current through,
+    /// so a "restore to sequence N" resolves to a checkpoint deterministically
+    /// rather than by guessing which checkpoint covers N (ADR#0013).
+    ///
+    /// Field 4: `at_sequence`
+    #[must_use]
+    pub fn at_sequence(&self) -> u64 {
+        self.0.reborrow().at_sequence
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CheckpointProducedView<'static>>>

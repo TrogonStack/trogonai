@@ -27,6 +27,17 @@ pub struct CheckpointProduced {
     /// Field 3: `checkpoint`
     #[serde(rename = "checkpoint")]
     pub checkpoint: ::buffa::MessageField<Checkpoint>,
+    /// Physical JetStream stream sequence the checkpoint's state is current through,
+    /// so a "restore to sequence N" resolves to a checkpoint deterministically
+    /// rather than by guessing which checkpoint covers N (ADR#0013).
+    ///
+    /// Field 4: `at_sequence`
+    #[serde(
+        rename = "atSequence",
+        alias = "at_sequence",
+        with = "::buffa::json_helpers::uint64"
+    )]
+    pub at_sequence: u64,
 }
 impl ::core::fmt::Debug for CheckpointProduced {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -34,6 +45,7 @@ impl ::core::fmt::Debug for CheckpointProduced {
             .field("session_id", &self.session_id)
             .field("execution_attempt_id", &self.execution_attempt_id)
             .field("checkpoint", &self.checkpoint)
+            .field("at_sequence", &self.at_sequence)
             .finish()
     }
 }
@@ -74,6 +86,7 @@ impl ::buffa::Message for CheckpointProduced {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.at_sequence) as u32;
         size
     }
     fn write_to(
@@ -89,6 +102,7 @@ impl ::buffa::Message for CheckpointProduced {
             ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
             self.checkpoint.write_to(__cache, buf);
         }
+        ::buffa::types::put_uint64_field(4u32, self.at_sequence, buf);
     }
     fn merge_field(
         &mut self,
@@ -126,6 +140,13 @@ impl ::buffa::Message for CheckpointProduced {
                     ctx,
                 )?;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.at_sequence = ::buffa::types::decode_uint64(buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -136,6 +157,7 @@ impl ::buffa::Message for CheckpointProduced {
         self.session_id.clear();
         self.execution_attempt_id.clear();
         self.checkpoint = ::buffa::MessageField::none();
+        self.at_sequence = 0u64;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CheckpointProduced {

@@ -14,16 +14,25 @@ import "trogonai/session/sessions/v1/tool_call.proto";
 message CanonicalMessage {
   // Stable message id.
   string message_id = 1 [features.field_presence = LEGACY_REQUIRED];
-  // Message role, for example "user" or "assistant".
-  string role = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Conversation role.
+  MessageRole role = 2 [features.field_presence = LEGACY_REQUIRED];
   // Ordered content blocks making up the message.
   repeated ContentBlock content = 3;
   // Exact model that produced an assistant message; empty when not applicable.
   string model = 4;
-  // Token accounting for the message; unset when not applicable.
+  // Token accounting and cost for the message; unset when not applicable.
   TokenUsage usage = 5;
   // Wall-clock instant the message was created.
   google.protobuf.Timestamp created_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// MessageRole is the closed set of conversation roles.
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+  MESSAGE_ROLE_SYSTEM = 3;
+  MESSAGE_ROLE_TOOL = 4;
 }
 
 // ContentBlock is one typed block inside a CanonicalMessage.
@@ -31,13 +40,21 @@ message ContentBlock {
   oneof kind {
     string text = 1;
     ArtifactRef image_ref = 2;
-    string thinking = 3;
+    ThinkingBlock thinking = 3;
     ToolUseBlock tool_use = 4;
     ToolResultBlock tool_result = 5;
-    // Provider-opaque reasoning payload (e.g. encrypted/signed thinking), kept
-    // verbatim for faithful replay, distinct from the human-readable thinking text.
+    // Provider-encrypted reasoning with no visible text, kept verbatim.
     bytes redacted_thinking = 6;
   }
+}
+
+// ThinkingBlock is visible model reasoning plus the provider's opaque
+// continuation/verification signature, kept so a thinking-bearing turn can be
+// resumed or forked faithfully.
+message ThinkingBlock {
+  string text = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Provider signature over the reasoning; empty when the provider emits none.
+  bytes signature = 2;
 }
 
 // ToolUseBlock is a model request to invoke a tool, embedded in message content.

@@ -12,7 +12,11 @@ pub mod content_block {
                 super::super::super::super::__buffa::view::ArtifactRefView<'a>,
             >,
         ),
-        Thinking(&'a str),
+        Thinking(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ThinkingBlockView<'a>,
+            >,
+        ),
         ToolUse(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::ToolUseBlockView<'a>,

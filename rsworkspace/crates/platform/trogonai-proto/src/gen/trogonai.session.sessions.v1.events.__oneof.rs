@@ -74,6 +74,9 @@ pub mod session_event {
         OperationOutcomeRecorded(
             ::buffa::alloc::boxed::Box<super::super::super::OperationOutcomeRecorded>,
         ),
+        SystemNoticeRecorded(
+            ::buffa::alloc::boxed::Box<super::super::super::SystemNoticeRecorded>,
+        ),
     }
     impl ::buffa::Oneof for Event {}
     impl From<super::super::super::SessionStarted> for Event {
@@ -387,6 +390,17 @@ pub mod session_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::SystemNoticeRecorded> for Event {
+        fn from(v: super::super::super::SystemNoticeRecorded) -> Self {
+            Self::SystemNoticeRecorded(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::SystemNoticeRecorded>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::SystemNoticeRecorded) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl serde::Serialize for Event {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -484,6 +498,9 @@ pub mod session_event {
                 }
                 Self::OperationOutcomeRecorded(v) => {
                     map.serialize_entry("operationOutcomeRecorded", v)?;
+                }
+                Self::SystemNoticeRecorded(v) => {
+                    map.serialize_entry("systemNoticeRecorded", v)?;
                 }
             }
             map.end()

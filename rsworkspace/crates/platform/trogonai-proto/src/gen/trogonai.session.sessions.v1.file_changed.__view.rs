@@ -13,6 +13,21 @@ pub struct FileChangedView<'a> {
     pub change_kind: ::buffa::EnumValue<super::super::FileChangeKind>,
     /// Field 4: `previous_path`
     pub previous_path: ::core::option::Option<&'a str>,
+    /// Claim-check to the file's content before the change; unset for a create or
+    /// when content was not captured. Recorded because our checkpoints are opaque,
+    /// so "what changed" is not re-derivable by diffing them after the fact.
+    ///
+    /// Field 5: `before_ref`
+    pub before_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ArtifactRefView<'a>,
+    >,
+    /// Claim-check to the file's content after the change; unset for a delete or
+    /// when content was not captured.
+    ///
+    /// Field 6: `after_ref`
+    pub after_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ArtifactRefView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -102,6 +117,48 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
                 )?;
                 view.previous_path = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.before_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.before_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ArtifactRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.after_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.after_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ArtifactRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -126,13 +183,29 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
             path: self.path.to_string(),
             change_kind: self.change_kind,
             previous_path: self.previous_path.map(|s| s.to_string()),
+            before_ref: match self.before_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ArtifactRef,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            after_ref: match self.after_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ArtifactRef,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -145,12 +218,28 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
         if let Some(ref v) = self.previous_path {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if self.before_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.before_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        if self.after_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.after_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -160,6 +249,14 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
         ::buffa::types::put_int32_field(3u32, self.change_kind.to_i32(), buf);
         if let Some(ref v) = self.previous_path {
             ::buffa::types::put_string_field(4u32, v, buf);
+        }
+        if self.before_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            self.before_ref.write_to(__cache, buf);
+        }
+        if self.after_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            self.after_ref.write_to(__cache, buf);
         }
     }
 }
@@ -192,6 +289,16 @@ impl<'__a> ::serde::Serialize for FileChangedView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.previous_path {
             __map.serialize_entry("previousPath", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.before_ref.as_option() {
+                __map.serialize_entry("beforeRef", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.after_ref.as_option() {
+                __map.serialize_entry("afterRef", __v)?;
+            }
         }
         __map.end()
     }
@@ -301,6 +408,27 @@ impl FileChangedOwnedView {
     #[must_use]
     pub fn previous_path(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().previous_path
+    }
+    /// Claim-check to the file's content before the change; unset for a create or
+    /// when content was not captured. Recorded because our checkpoints are opaque,
+    /// so "what changed" is not re-derivable by diffing them after the fact.
+    ///
+    /// Field 5: `before_ref`
+    #[must_use]
+    pub fn before_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ArtifactRefView<'_>> {
+        &self.0.reborrow().before_ref
+    }
+    /// Claim-check to the file's content after the change; unset for a delete or
+    /// when content was not captured.
+    ///
+    /// Field 6: `after_ref`
+    #[must_use]
+    pub fn after_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ArtifactRefView<'_>> {
+        &self.0.reborrow().after_ref
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<FileChangedView<'static>>>

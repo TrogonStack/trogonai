@@ -32,6 +32,7 @@ include!("trogonai.session.sessions.v1.session_started.rs");
 include!("trogonai.session.sessions.v1.subagent_detached.rs");
 include!("trogonai.session.sessions.v1.subagent_linked.rs");
 include!("trogonai.session.sessions.v1.subagent_parent_terminated.rs");
+include!("trogonai.session.sessions.v1.system_notice_recorded.rs");
 include!("trogonai.session.sessions.v1.tool_call_approved.rs");
 include!("trogonai.session.sessions.v1.tool_call_completed.rs");
 include!("trogonai.session.sessions.v1.tool_call_denied.rs");
@@ -87,6 +88,7 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.subagent_detached.__view.rs");
         include!("trogonai.session.sessions.v1.subagent_linked.__view.rs");
         include!("trogonai.session.sessions.v1.subagent_parent_terminated.__view.rs");
+        include!("trogonai.session.sessions.v1.system_notice_recorded.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_approved.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_completed.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_denied.__view.rs");
@@ -121,6 +123,7 @@ pub mod __buffa {
         reg.register_json_any(super::__TEXT_TOOL_RESULT_JSON_ANY);
         reg.register_json_any(super::__CANONICAL_MESSAGE_JSON_ANY);
         reg.register_json_any(super::__CONTENT_BLOCK_JSON_ANY);
+        reg.register_json_any(super::__THINKING_BLOCK_JSON_ANY);
         reg.register_json_any(super::__TOOL_USE_BLOCK_JSON_ANY);
         reg.register_json_any(super::__TOOL_RESULT_BLOCK_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_COMPLETED_JSON_ANY);
@@ -148,6 +151,7 @@ pub mod __buffa {
         reg.register_json_any(super::__SUBAGENT_DETACHED_JSON_ANY);
         reg.register_json_any(super::__SUBAGENT_LINKED_JSON_ANY);
         reg.register_json_any(super::__SUBAGENT_PARENT_TERMINATED_JSON_ANY);
+        reg.register_json_any(super::__SYSTEM_NOTICE_RECORDED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_APPROVED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_COMPLETED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_DENIED_JSON_ANY);
@@ -194,6 +198,10 @@ pub use self::__buffa::view::CanonicalMessageOwnedView;
 pub use self::__buffa::view::ContentBlockView;
 #[doc(inline)]
 pub use self::__buffa::view::ContentBlockOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ThinkingBlockView;
+#[doc(inline)]
+pub use self::__buffa::view::ThinkingBlockOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolUseBlockView;
 #[doc(inline)]
@@ -302,6 +310,10 @@ pub use self::__buffa::view::SubagentLinkedOwnedView;
 pub use self::__buffa::view::SubagentParentTerminatedView;
 #[doc(inline)]
 pub use self::__buffa::view::SubagentParentTerminatedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::SystemNoticeRecordedView;
+#[doc(inline)]
+pub use self::__buffa::view::SystemNoticeRecordedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallApprovedView;
 #[doc(inline)]

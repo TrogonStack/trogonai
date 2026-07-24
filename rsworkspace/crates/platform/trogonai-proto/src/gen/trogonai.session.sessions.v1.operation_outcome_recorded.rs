@@ -9,6 +9,9 @@ pub enum OperationOutcome {
     OPERATION_OUTCOME_SUCCEEDED = 1i32,
     OPERATION_OUTCOME_FAILED = 2i32,
     OPERATION_OUTCOME_UNKNOWN = 3i32,
+    /// Deliberately cancelled before completion, distinct from FAILED or UNKNOWN
+    /// (e.g. a subagent delegation cancelled by parent-terminal cascade).
+    OPERATION_OUTCOME_CANCELLED = 4i32,
 }
 impl OperationOutcome {
     ///Idiomatic alias for [`Self::OPERATION_OUTCOME_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -23,6 +26,9 @@ impl OperationOutcome {
     ///Idiomatic alias for [`Self::OPERATION_OUTCOME_UNKNOWN`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Unknown: Self = Self::OPERATION_OUTCOME_UNKNOWN;
+    ///Idiomatic alias for [`Self::OPERATION_OUTCOME_CANCELLED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Cancelled: Self = Self::OPERATION_OUTCOME_CANCELLED;
 }
 impl ::core::default::Default for OperationOutcome {
     fn default() -> Self {
@@ -124,6 +130,7 @@ impl ::buffa::Enumeration for OperationOutcome {
             1i32 => ::core::option::Option::Some(Self::OPERATION_OUTCOME_SUCCEEDED),
             2i32 => ::core::option::Option::Some(Self::OPERATION_OUTCOME_FAILED),
             3i32 => ::core::option::Option::Some(Self::OPERATION_OUTCOME_UNKNOWN),
+            4i32 => ::core::option::Option::Some(Self::OPERATION_OUTCOME_CANCELLED),
             _ => ::core::option::Option::None,
         }
     }
@@ -136,6 +143,7 @@ impl ::buffa::Enumeration for OperationOutcome {
             Self::OPERATION_OUTCOME_SUCCEEDED => "OPERATION_OUTCOME_SUCCEEDED",
             Self::OPERATION_OUTCOME_FAILED => "OPERATION_OUTCOME_FAILED",
             Self::OPERATION_OUTCOME_UNKNOWN => "OPERATION_OUTCOME_UNKNOWN",
+            Self::OPERATION_OUTCOME_CANCELLED => "OPERATION_OUTCOME_CANCELLED",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -152,6 +160,9 @@ impl ::buffa::Enumeration for OperationOutcome {
             "OPERATION_OUTCOME_UNKNOWN" => {
                 ::core::option::Option::Some(Self::OPERATION_OUTCOME_UNKNOWN)
             }
+            "OPERATION_OUTCOME_CANCELLED" => {
+                ::core::option::Option::Some(Self::OPERATION_OUTCOME_CANCELLED)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -161,6 +172,7 @@ impl ::buffa::Enumeration for OperationOutcome {
             Self::OPERATION_OUTCOME_SUCCEEDED,
             Self::OPERATION_OUTCOME_FAILED,
             Self::OPERATION_OUTCOME_UNKNOWN,
+            Self::OPERATION_OUTCOME_CANCELLED,
         ]
     }
 }

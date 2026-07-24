@@ -25,6 +25,7 @@ import "trogonai/session/sessions/v1/session_started.proto";
 import "trogonai/session/sessions/v1/subagent_detached.proto";
 import "trogonai/session/sessions/v1/subagent_linked.proto";
 import "trogonai/session/sessions/v1/subagent_parent_terminated.proto";
+import "trogonai/session/sessions/v1/system_notice_recorded.proto";
 import "trogonai/session/sessions/v1/tool_call_approved.proto";
 import "trogonai/session/sessions/v1/tool_call_completed.proto";
 import "trogonai/session/sessions/v1/tool_call_denied.proto";
@@ -78,5 +79,7 @@ message SessionEvent {
     // Operation ledger.
     OperationReserved operation_reserved = 26;
     OperationOutcomeRecorded operation_outcome_recorded = 27;
+    // System.
+    SystemNoticeRecorded system_notice_recorded = 31;
   }
 }
