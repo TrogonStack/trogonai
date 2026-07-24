@@ -16,7 +16,7 @@ message ArtifactRef {
   // package (algorithm is typically "sha256").
   Digest digest = 2 [features.field_presence = LEGACY_REQUIRED];
   // Size of the referenced bytes.
-  uint64 size_bytes = 3;
+  uint64 size_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
   // IANA media type of the referenced bytes.
   string mime = 4 [features.field_presence = LEGACY_REQUIRED];
   // Short human-readable preview; empty when none was produced.
@@ -52,7 +52,7 @@ message StoredArtifact {
   // Content digest over the stored bytes; the claim-check key.
   Digest digest = 1 [features.field_presence = LEGACY_REQUIRED];
   // Size of the stored bytes.
-  uint64 size_bytes = 2;
+  uint64 size_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
   // External location the bytes were stored at (for example an Object Store key).
   string storage_ref = 3 [features.field_presence = LEGACY_REQUIRED];
 }

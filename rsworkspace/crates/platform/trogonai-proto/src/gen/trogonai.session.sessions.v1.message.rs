@@ -452,7 +452,7 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::Text(x) => {
                     size += 1u32 + ::buffa::types::string_encoded_len(x) as u32;
                 }
-                __buffa::oneof::content_block::Kind::ImageRef(x) => {
+                __buffa::oneof::content_block::Kind::ArtifactRef(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -503,7 +503,7 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::Text(x) => {
                     ::buffa::types::put_string_field(1u32, x, buf);
                 }
-                __buffa::oneof::content_block::Kind::ImageRef(x) => {
+                __buffa::oneof::content_block::Kind::ArtifactRef(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
                         __cache.consume_next(),
@@ -569,7 +569,7 @@ impl ::buffa::Message for ContentBlock {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::content_block::Kind::ImageRef(ref mut existing),
+                    __buffa::oneof::content_block::Kind::ArtifactRef(ref mut existing),
                 ) = self.kind
                 {
                     ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
@@ -577,7 +577,7 @@ impl ::buffa::Message for ContentBlock {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.kind = ::core::option::Option::Some(
-                        __buffa::oneof::content_block::Kind::ImageRef(
+                        __buffa::oneof::content_block::Kind::ArtifactRef(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -708,7 +708,7 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
                                 );
                             }
                         }
-                        "imageRef" | "image_ref" => {
+                        "artifactRef" | "artifact_ref" => {
                             let v: ::core::option::Option<ArtifactRef> = map
                                 .next_value_seed(
                                     ::buffa::json_helpers::NullableDeserializeSeed(
@@ -726,7 +726,7 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
                                     );
                                 }
                                 __oneof_kind = Some(
-                                    __buffa::oneof::content_block::Kind::ImageRef(
+                                    __buffa::oneof::content_block::Kind::ArtifactRef(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

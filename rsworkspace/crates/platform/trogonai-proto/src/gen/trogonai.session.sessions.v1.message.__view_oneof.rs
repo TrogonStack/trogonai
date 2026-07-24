@@ -7,7 +7,7 @@ pub mod content_block {
     #[derive(Clone, Debug)]
     pub enum Kind<'a> {
         Text(&'a str),
-        ImageRef(
+        ArtifactRef(
             ::buffa::alloc::boxed::Box<
                 super::super::super::super::__buffa::view::ArtifactRefView<'a>,
             >,

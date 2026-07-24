@@ -30,10 +30,9 @@ pub struct ArtifactRef {
     #[serde(
         rename = "sizeBytes",
         alias = "size_bytes",
-        with = "::buffa::json_helpers::opt_uint64",
-        skip_serializing_if = "::core::option::Option::is_none"
+        with = "::buffa::json_helpers::uint64"
     )]
-    pub size_bytes: ::core::option::Option<u64>,
+    pub size_bytes: u64,
     /// IANA media type of the referenced bytes.
     ///
     /// Field 4: `mime`
@@ -73,13 +72,6 @@ impl ArtifactRef {
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.ArtifactRef";
 }
 impl ArtifactRef {
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::size_bytes`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_size_bytes(mut self, value: u64) -> Self {
-        self.size_bytes = Some(value);
-        self
-    }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
     #[inline]
     ///Sets [`Self::preview`] to `Some(value)`, consuming and returning `self`.
@@ -125,9 +117,7 @@ impl ::buffa::Message for ArtifactRef {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if let Some(v) = self.size_bytes {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
-        }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.mime) as u32;
         if let Some(ref v) = self.preview {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -149,9 +139,7 @@ impl ::buffa::Message for ArtifactRef {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
             self.digest.write_to(__cache, buf);
         }
-        if let Some(v) = self.size_bytes {
-            ::buffa::types::put_uint64_field(3u32, v, buf);
-        }
+        ::buffa::types::put_uint64_field(3u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(4u32, &self.mime, buf);
         if let Some(ref v) = self.preview {
             ::buffa::types::put_string_field(5u32, v, buf);
@@ -194,9 +182,7 @@ impl ::buffa::Message for ArtifactRef {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                self.size_bytes = ::core::option::Option::Some(
-                    ::buffa::types::decode_uint64(buf)?,
-                );
+                self.size_bytes = ::buffa::types::decode_uint64(buf)?;
             }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -233,7 +219,7 @@ impl ::buffa::Message for ArtifactRef {
     fn clear(&mut self) {
         self.artifact_id.clear();
         self.digest = ::buffa::MessageField::none();
-        self.size_bytes = ::core::option::Option::None;
+        self.size_bytes = 0u64;
         self.mime.clear();
         self.preview = ::core::option::Option::None;
         self.truncated = ::core::option::Option::None;
@@ -761,10 +747,9 @@ pub struct StoredArtifact {
     #[serde(
         rename = "sizeBytes",
         alias = "size_bytes",
-        with = "::buffa::json_helpers::opt_uint64",
-        skip_serializing_if = "::core::option::Option::is_none"
+        with = "::buffa::json_helpers::uint64"
     )]
-    pub size_bytes: ::core::option::Option<u64>,
+    pub size_bytes: u64,
     /// External location the bytes were stored at (for example an Object Store key).
     ///
     /// Field 3: `storage_ref`
@@ -790,15 +775,6 @@ impl StoredArtifact {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.StoredArtifact";
-}
-impl StoredArtifact {
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::size_bytes`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_size_bytes(mut self, value: u64) -> Self {
-        self.size_bytes = Some(value);
-        self
-    }
 }
 ::buffa::impl_default_instance!(StoredArtifact);
 impl ::buffa::MessageName for StoredArtifact {
@@ -826,9 +802,7 @@ impl ::buffa::Message for StoredArtifact {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if let Some(v) = self.size_bytes {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
-        }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.storage_ref) as u32;
         size
     }
@@ -843,9 +817,7 @@ impl ::buffa::Message for StoredArtifact {
             ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
             self.digest.write_to(__cache, buf);
         }
-        if let Some(v) = self.size_bytes {
-            ::buffa::types::put_uint64_field(2u32, v, buf);
-        }
+        ::buffa::types::put_uint64_field(2u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(3u32, &self.storage_ref, buf);
     }
     fn merge_field(
@@ -875,9 +847,7 @@ impl ::buffa::Message for StoredArtifact {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                self.size_bytes = ::core::option::Option::Some(
-                    ::buffa::types::decode_uint64(buf)?,
-                );
+                self.size_bytes = ::buffa::types::decode_uint64(buf)?;
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -894,7 +864,7 @@ impl ::buffa::Message for StoredArtifact {
     }
     fn clear(&mut self) {
         self.digest = ::buffa::MessageField::none();
-        self.size_bytes = ::core::option::Option::None;
+        self.size_bytes = 0u64;
         self.storage_ref.clear();
     }
 }

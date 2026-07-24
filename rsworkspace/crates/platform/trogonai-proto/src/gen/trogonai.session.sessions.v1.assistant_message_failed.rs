@@ -12,6 +12,9 @@ pub enum AssistantMessageFailureReason {
     ASSISTANT_MESSAGE_FAILURE_REASON_CANCELLED = 2i32,
     /// Failed with a provider or runtime error.
     ASSISTANT_MESSAGE_FAILURE_REASON_ERROR = 3i32,
+    /// Generation hung and exceeded its time budget (parity with
+    /// ToolCallFailureReason.TIMEOUT).
+    ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT = 4i32,
 }
 impl AssistantMessageFailureReason {
     ///Idiomatic alias for [`Self::ASSISTANT_MESSAGE_FAILURE_REASON_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -26,6 +29,9 @@ impl AssistantMessageFailureReason {
     ///Idiomatic alias for [`Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Error: Self = Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR;
+    ///Idiomatic alias for [`Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Timeout: Self = Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT;
 }
 impl ::core::default::Default for AssistantMessageFailureReason {
     fn default() -> Self {
@@ -146,6 +152,11 @@ impl ::buffa::Enumeration for AssistantMessageFailureReason {
                     Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR,
                 )
             }
+            4i32 => {
+                ::core::option::Option::Some(
+                    Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT,
+                )
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -165,6 +176,9 @@ impl ::buffa::Enumeration for AssistantMessageFailureReason {
             }
             Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR => {
                 "ASSISTANT_MESSAGE_FAILURE_REASON_ERROR"
+            }
+            Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT => {
+                "ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT"
             }
         }
     }
@@ -190,6 +204,11 @@ impl ::buffa::Enumeration for AssistantMessageFailureReason {
                     Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR,
                 )
             }
+            "ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT" => {
+                ::core::option::Option::Some(
+                    Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT,
+                )
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -199,6 +218,7 @@ impl ::buffa::Enumeration for AssistantMessageFailureReason {
             Self::ASSISTANT_MESSAGE_FAILURE_REASON_INTERRUPTED,
             Self::ASSISTANT_MESSAGE_FAILURE_REASON_CANCELLED,
             Self::ASSISTANT_MESSAGE_FAILURE_REASON_ERROR,
+            Self::ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT,
         ]
     }
 }

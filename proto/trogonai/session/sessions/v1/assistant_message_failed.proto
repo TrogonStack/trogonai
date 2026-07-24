@@ -30,4 +30,7 @@ enum AssistantMessageFailureReason {
   ASSISTANT_MESSAGE_FAILURE_REASON_CANCELLED = 2;
   // Failed with a provider or runtime error.
   ASSISTANT_MESSAGE_FAILURE_REASON_ERROR = 3;
+  // Generation hung and exceeded its time budget (parity with
+  // ToolCallFailureReason.TIMEOUT).
+  ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT = 4;
 }

@@ -19,7 +19,7 @@ pub struct ArtifactRefView<'a> {
     /// Size of the referenced bytes.
     ///
     /// Field 3: `size_bytes`
-    pub size_bytes: ::core::option::Option<u64>,
+    pub size_bytes: u64,
     /// IANA media type of the referenced bytes.
     ///
     /// Field 4: `mime`
@@ -52,13 +52,21 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     pub const fn has_digest(&self) -> bool {
         self.digest.is_set()
     }
+    /**Whether required field `size_bytes` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_size_bytes(&self) -> bool {
+        self.__buffa_required_seen_0 & 2u64 != 0
+    }
     /**Whether required field `mime` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
     pub const fn has_mime(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
@@ -122,7 +130,8 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                view.size_bytes = Some(::buffa::types::decode_uint64(&mut cur)?);
+                view.size_bytes = ::buffa::types::decode_uint64(&mut cur)?;
+                view.__buffa_required_seen_0 |= 2u64;
             }
             4u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -130,7 +139,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.mime = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
+                view.__buffa_required_seen_0 |= 4u64;
             }
             5u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -198,9 +207,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if let Some(v) = self.size_bytes {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
-        }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.mime) as u32;
         if let Some(ref v) = self.preview {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -223,9 +230,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
             self.digest.write_to(__cache, buf);
         }
-        if let Some(v) = self.size_bytes {
-            ::buffa::types::put_uint64_field(3u32, v, buf);
-        }
+        ::buffa::types::put_uint64_field(3u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(4u32, &self.mime, buf);
         if let Some(ref v) = self.preview {
             ::buffa::types::put_string_field(5u32, v, buf);
@@ -261,8 +266,12 @@ impl<'__a> ::serde::Serialize for ArtifactRefView<'__a> {
                 __map.serialize_entry("digest", __v)?;
             }
         }
-        if let ::core::option::Option::Some(__v) = self.size_bytes {
-            __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
+        {
+            __map
+                .serialize_entry(
+                    "sizeBytes",
+                    &::buffa::json_helpers::ProtoJson(&self.size_bytes),
+                )?;
         }
         {
             __map.serialize_entry("mime", self.mime)?;
@@ -384,7 +393,7 @@ impl ArtifactRefOwnedView {
     ///
     /// Field 3: `size_bytes`
     #[must_use]
-    pub fn size_bytes(&self) -> ::core::option::Option<u64> {
+    pub fn size_bytes(&self) -> u64 {
         self.0.reborrow().size_bytes
     }
     /// IANA media type of the referenced bytes.
@@ -1026,7 +1035,7 @@ pub struct StoredArtifactView<'a> {
     /// Size of the stored bytes.
     ///
     /// Field 2: `size_bytes`
-    pub size_bytes: ::core::option::Option<u64>,
+    pub size_bytes: u64,
     /// External location the bytes were stored at (for example an Object Store key).
     ///
     /// Field 3: `storage_ref`
@@ -1043,13 +1052,21 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     pub const fn has_digest(&self) -> bool {
         self.digest.is_set()
     }
+    /**Whether required field `size_bytes` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_size_bytes(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
     /**Whether required field `storage_ref` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
     pub const fn has_storage_ref(&self) -> bool {
-        self.__buffa_required_seen_0 & 1u64 != 0
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
@@ -1105,7 +1122,8 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                     tag,
                     ::buffa::encoding::WireType::Varint,
                 )?;
-                view.size_bytes = Some(::buffa::types::decode_uint64(&mut cur)?);
+                view.size_bytes = ::buffa::types::decode_uint64(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -1113,7 +1131,7 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.storage_ref = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 1u64;
+                view.__buffa_required_seen_0 |= 2u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -1163,9 +1181,7 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if let Some(v) = self.size_bytes {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
-        }
+        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.storage_ref) as u32;
         size
     }
@@ -1181,9 +1197,7 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
             ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
             self.digest.write_to(__cache, buf);
         }
-        if let Some(v) = self.size_bytes {
-            ::buffa::types::put_uint64_field(2u32, v, buf);
-        }
+        ::buffa::types::put_uint64_field(2u32, self.size_bytes, buf);
         ::buffa::types::put_string_field(3u32, &self.storage_ref, buf);
     }
 }
@@ -1210,8 +1224,12 @@ impl<'__a> ::serde::Serialize for StoredArtifactView<'__a> {
                 __map.serialize_entry("digest", __v)?;
             }
         }
-        if let ::core::option::Option::Some(__v) = self.size_bytes {
-            __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
+        {
+            __map
+                .serialize_entry(
+                    "sizeBytes",
+                    &::buffa::json_helpers::ProtoJson(&self.size_bytes),
+                )?;
         }
         {
             __map.serialize_entry("storageRef", self.storage_ref)?;
@@ -1320,7 +1338,7 @@ impl StoredArtifactOwnedView {
     ///
     /// Field 2: `size_bytes`
     #[must_use]
-    pub fn size_bytes(&self) -> ::core::option::Option<u64> {
+    pub fn size_bytes(&self) -> u64 {
         self.0.reborrow().size_bytes
     }
     /// External location the bytes were stored at (for example an Object Store key).

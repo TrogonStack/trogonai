@@ -37,7 +37,7 @@ enum MessageRole {
 message ContentBlock {
   oneof kind {
     string text = 1;
-    ArtifactRef image_ref = 2;
+    ArtifactRef artifact_ref = 2;
     ThinkingBlock thinking = 3;
     ToolUseBlock tool_use = 4;
     ToolResultBlock tool_result = 5;

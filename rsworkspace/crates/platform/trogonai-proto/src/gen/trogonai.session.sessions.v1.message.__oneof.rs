@@ -7,7 +7,7 @@ pub mod content_block {
     #[derive(Clone, PartialEq, Debug)]
     pub enum Kind {
         Text(::buffa::alloc::string::String),
-        ImageRef(::buffa::alloc::boxed::Box<super::super::super::ArtifactRef>),
+        ArtifactRef(::buffa::alloc::boxed::Box<super::super::super::ArtifactRef>),
         Thinking(::buffa::alloc::boxed::Box<super::super::super::ThinkingBlock>),
         ToolUse(::buffa::alloc::boxed::Box<super::super::super::ToolUseBlock>),
         ToolResult(::buffa::alloc::boxed::Box<super::super::super::ToolResultBlock>),
@@ -16,7 +16,7 @@ pub mod content_block {
     impl ::buffa::Oneof for Kind {}
     impl From<super::super::super::ArtifactRef> for Kind {
         fn from(v: super::super::super::ArtifactRef) -> Self {
-            Self::ImageRef(::buffa::alloc::boxed::Box::new(v))
+            Self::ArtifactRef(::buffa::alloc::boxed::Box::new(v))
         }
     }
     impl From<super::super::super::ArtifactRef> for ::core::option::Option<Kind> {
@@ -65,8 +65,8 @@ pub mod content_block {
                 Self::Text(v) => {
                     map.serialize_entry("text", v)?;
                 }
-                Self::ImageRef(v) => {
-                    map.serialize_entry("imageRef", v)?;
+                Self::ArtifactRef(v) => {
+                    map.serialize_entry("artifactRef", v)?;
                 }
                 Self::Thinking(v) => {
                     map.serialize_entry("thinking", v)?;

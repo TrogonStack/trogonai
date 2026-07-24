@@ -556,7 +556,7 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::content_block::Kind::ImageRef(
+                    super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
                         ref mut existing,
                     ),
                 ) = view.kind
@@ -568,7 +568,7 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                     )?;
                 } else {
                     view.kind = Some(
-                        super::super::__buffa::view::oneof::content_block::Kind::ImageRef(
+                        super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
                             ::buffa::alloc::boxed::Box::new(
                                 <super::super::__buffa::view::ArtifactRefView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
@@ -714,10 +714,10 @@ impl<'a> ::buffa::MessageView<'a> for ContentBlockView<'a> {
                                     v.to_string(),
                                 )
                             }
-                            super::super::__buffa::view::oneof::content_block::Kind::ImageRef(
+                            super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::content_block::Kind::ImageRef(
+                                super::super::__buffa::oneof::content_block::Kind::ArtifactRef(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
@@ -777,7 +777,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                 super::super::__buffa::view::oneof::content_block::Kind::Text(x) => {
                     size += 1u32 + ::buffa::types::string_encoded_len(x) as u32;
                 }
-                super::super::__buffa::view::oneof::content_block::Kind::ImageRef(x) => {
+                super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
+                    x,
+                ) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -833,7 +835,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ContentBlockView<'a> {
                 super::super::__buffa::view::oneof::content_block::Kind::Text(x) => {
                     ::buffa::types::put_string_field(1u32, x, buf);
                 }
-                super::super::__buffa::view::oneof::content_block::Kind::ImageRef(x) => {
+                super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
+                    x,
+                ) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
                         __cache.consume_next(),
@@ -899,8 +903,10 @@ impl<'__a> ::serde::Serialize for ContentBlockView<'__a> {
                 super::super::__buffa::view::oneof::content_block::Kind::Text(v) => {
                     __map.serialize_entry("text", v)?;
                 }
-                super::super::__buffa::view::oneof::content_block::Kind::ImageRef(v) => {
-                    __map.serialize_entry("imageRef", v)?;
+                super::super::__buffa::view::oneof::content_block::Kind::ArtifactRef(
+                    v,
+                ) => {
+                    __map.serialize_entry("artifactRef", v)?;
                 }
                 super::super::__buffa::view::oneof::content_block::Kind::Thinking(v) => {
                     __map.serialize_entry("thinking", v)?;
