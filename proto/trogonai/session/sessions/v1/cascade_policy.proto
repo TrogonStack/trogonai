@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// CascadePolicy records what happens to a subagent when its parent reaches a
+// terminal state. Making both outcomes an explicit, recorded fact closes the
+// industry-wide silent-orphan gap (ADR#0035 facet 6).
+enum CascadePolicy {
+  CASCADE_POLICY_UNSPECIFIED = 0;
+  // Safe default: the subagent is cancelled when the parent reaches a terminal
+  // state, reconciled by the subagent reconciler process manager.
+  CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL = 1;
+  // Intentional, recorded orphan: the subagent keeps running independently of the
+  // parent's terminal state.
+  CASCADE_POLICY_INDEPENDENT = 2;
+}

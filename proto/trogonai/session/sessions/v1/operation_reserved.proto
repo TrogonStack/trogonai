@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/digest.proto";
+
+// OperationReserved reserves an operation id and request digest before a
+// side effect, so a retry with the same id and bytes observes the
+// reservation (ADR#0031 §4, ADR#0035 facet 3). It is an invariant-bearing
+// transition (WRITE_PRECONDITION = At), making the reserve-and-check atomic.
+message OperationReserved {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest request_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  OperationKind operation_kind = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// OperationKind is the kind of side effect an operation guards.
+enum OperationKind {
+  OPERATION_KIND_UNSPECIFIED = 0;
+  OPERATION_KIND_TOOL = 1;
+  OPERATION_KIND_DELEGATION = 2;
+}

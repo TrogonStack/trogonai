@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionRewound records a retroactive rewind as a new event, never an edit of
+// stored events; to_sequence is a physical JetStream stream sequence (ADR#0013).
+// Children whose parent_sequence_at_dispatch >= to_sequence are cascade-cancelled
+// (ADR#0035 facet 6). It is an invariant-bearing transition guarded by
+// WRITE_PRECONDITION = At(current_position).
+message SessionRewound {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 to_sequence = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Why the rewind happened; a command-time input not derivable from the log,
+  // mirroring ForkReason and CompactionTrigger.
+  RewindReason reason = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// RewindReason is why a session was rewound.
+enum RewindReason {
+  REWIND_REASON_UNSPECIFIED = 0;
+  // An explicit user rewind/undo.
+  REWIND_REASON_MANUAL = 1;
+  // A message was edited and the turn re-sent from that point.
+  REWIND_REASON_EDIT_AND_RESEND = 2;
+  // A retry of a turn from an earlier point.
+  REWIND_REASON_RETRY = 3;
+}

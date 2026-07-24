@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SubagentDetached is an intentional detach fact, mirrored on both the
+// parent and child subjects since each side needs it for its own invariant;
+// the stream it is on is the one whose id equals session_id. It is an
+// invariant-bearing transition (WRITE_PRECONDITION = At).
+message SubagentDetached {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string child_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Command-time reason for the intentional detach; empty when none. Follows the
+  // SessionCancelled.reason precedent for intentional transitions.
+  string reason = 4;
+}

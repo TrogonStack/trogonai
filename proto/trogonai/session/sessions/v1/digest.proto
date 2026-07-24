@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// Digest is a content digest over an opaque byte sequence: the algorithm that
+// produced it plus the raw digest value. It is stored beside the bytes it
+// commits to, never inside them, and verified before those bytes are decoded
+// (ADR#0031 §6).
+message Digest {
+  // Digest algorithm identifier, for example "sha256".
+  string algorithm = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Raw digest bytes produced by algorithm over the committed content.
+  bytes value = 2 [features.field_presence = LEGACY_REQUIRED];
+}

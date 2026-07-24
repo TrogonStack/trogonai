@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// ToolCallApproved records that a requested tool call was approved. It is a
+// commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+message ToolCallApproved {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string approved_by = 4 [features.field_presence = LEGACY_REQUIRED];
+}

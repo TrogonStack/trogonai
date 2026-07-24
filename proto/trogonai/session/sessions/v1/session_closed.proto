@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionClosed is the normal-completion terminal marker for a session. It is an
+// invariant-bearing transition (WRITE_PRECONDITION = At); a second close is
+// rejected (ADR#0035 facet 2).
+message SessionClosed {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

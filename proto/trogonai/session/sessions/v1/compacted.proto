@@ -1,0 +1,45 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/token_usage.proto";
+
+// Compacted is a self-sufficient in-stream compaction marker the store only
+// records (ADR#0035 facet 4); summary content is inline. from_sequence and
+// to_sequence are physical stream sequences delimiting the kept-tail boundary;
+// the model-visible view folds from the newest Compacted plus every event after
+// it, and full history below the boundary stays on the stream (keep-forever), so
+// no structured replacement set is needed to rewind past it. It is
+// invariant-bearing, admitting one active compaction, guarded by
+// WRITE_PRECONDITION = At(current_position).
+message Compacted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string summary_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string summary_content = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint64 from_sequence = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 to_sequence = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Why compaction fired; a command-time input not derivable from the log.
+  CompactionTrigger trigger = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Optional user guidance steering the summarizer; empty when none.
+  string guidance = 7;
+  // Transcript token counts measured at compaction time; recorded because
+  // tokenizer output is not deterministically recomputable later. Unset when the
+  // compactor did not measure them.
+  uint64 tokens_before = 8;
+  uint64 tokens_after = 9;
+  // Model that produced the summary and its own token and cost usage; empty or
+  // unset when not attributed.
+  string model = 10;
+  TokenUsage usage = 11;
+}
+
+// CompactionTrigger is why a compaction fired.
+enum CompactionTrigger {
+  COMPACTION_TRIGGER_UNSPECIFIED = 0;
+  // Explicitly requested.
+  COMPACTION_TRIGGER_MANUAL = 1;
+  // Fired when the transcript crossed a token threshold.
+  COMPACTION_TRIGGER_TOKEN_THRESHOLD = 2;
+  // Fired reactively after a context-length overflow.
+  COMPACTION_TRIGGER_CONTEXT_OVERFLOW = 3;
+}

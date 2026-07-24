@@ -1,0 +1,88 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/artifact_recorded.proto";
+import "trogonai/session/sessions/v1/assistant_message_completed.proto";
+import "trogonai/session/sessions/v1/assistant_message_failed.proto";
+import "trogonai/session/sessions/v1/assistant_message_started.proto";
+import "trogonai/session/sessions/v1/checkpoint_produced.proto";
+import "trogonai/session/sessions/v1/compacted.proto";
+import "trogonai/session/sessions/v1/delegation_dispatched.proto";
+import "trogonai/session/sessions/v1/execution_attempt_ended.proto";
+import "trogonai/session/sessions/v1/execution_attempt_ready.proto";
+import "trogonai/session/sessions/v1/execution_attempt_started.proto";
+import "trogonai/session/sessions/v1/file_changed.proto";
+import "trogonai/session/sessions/v1/operation_outcome_recorded.proto";
+import "trogonai/session/sessions/v1/operation_reserved.proto";
+import "trogonai/session/sessions/v1/session_cancelled.proto";
+import "trogonai/session/sessions/v1/session_closed.proto";
+import "trogonai/session/sessions/v1/session_deleted.proto";
+import "trogonai/session/sessions/v1/session_failed.proto";
+import "trogonai/session/sessions/v1/session_forked.proto";
+import "trogonai/session/sessions/v1/session_rewound.proto";
+import "trogonai/session/sessions/v1/session_started.proto";
+import "trogonai/session/sessions/v1/subagent_detached.proto";
+import "trogonai/session/sessions/v1/subagent_linked.proto";
+import "trogonai/session/sessions/v1/subagent_parent_terminated.proto";
+import "trogonai/session/sessions/v1/system_notice_recorded.proto";
+import "trogonai/session/sessions/v1/tool_call_approved.proto";
+import "trogonai/session/sessions/v1/tool_call_completed.proto";
+import "trogonai/session/sessions/v1/tool_call_denied.proto";
+import "trogonai/session/sessions/v1/tool_call_failed.proto";
+import "trogonai/session/sessions/v1/tool_call_requested.proto";
+import "trogonai/session/sessions/v1/tool_call_started.proto";
+import "trogonai/session/sessions/v1/todo_updated.proto";
+import "trogonai/session/sessions/v1/user_message_recorded.proto";
+
+// SessionEvent is the session aggregate's event catalog: one oneof arm per
+// concrete event type. It is a convenience union for matching and codegen, not
+// the persisted form -- the store persists each concrete event's own bytes under
+// its stable type name and never the bytes of this wrapper (ADR#0031 §6).
+message SessionEvent {
+  oneof event {
+    // Lifecycle.
+    SessionStarted session_started = 1;
+    SessionClosed session_closed = 2;
+    SessionCancelled session_cancelled = 3;
+    SessionFailed session_failed = 4;
+    SessionDeleted session_deleted = 5;
+    // Fork and rewind.
+    SessionForked session_forked = 6;
+    SessionRewound session_rewound = 7;
+    // Compaction.
+    Compacted compacted = 8;
+    // Conversation.
+    UserMessageRecorded user_message_recorded = 9;
+    AssistantMessageStarted assistant_message_started = 10;
+    AssistantMessageCompleted assistant_message_completed = 11;
+    AssistantMessageFailed assistant_message_failed = 28;
+    // Tool lifecycle.
+    ToolCallRequested tool_call_requested = 12;
+    ToolCallApproved tool_call_approved = 13;
+    ToolCallDenied tool_call_denied = 29;
+    ToolCallStarted tool_call_started = 14;
+    ToolCallCompleted tool_call_completed = 15;
+    ToolCallFailed tool_call_failed = 16;
+    // Artifacts and files.
+    ArtifactRecorded artifact_recorded = 17;
+    FileChanged file_changed = 18;
+    // Execution attempts.
+    ExecutionAttemptStarted execution_attempt_started = 19;
+    ExecutionAttemptReady execution_attempt_ready = 20;
+    ExecutionAttemptEnded execution_attempt_ended = 21;
+    CheckpointProduced checkpoint_produced = 30;
+    // Delegation and subagents.
+    DelegationDispatched delegation_dispatched = 22;
+    SubagentLinked subagent_linked = 23;
+    SubagentParentTerminated subagent_parent_terminated = 24;
+    SubagentDetached subagent_detached = 25;
+    // Operation ledger.
+    OperationReserved operation_reserved = 26;
+    OperationOutcomeRecorded operation_outcome_recorded = 27;
+    // System.
+    SystemNoticeRecorded system_notice_recorded = 31;
+    // Plan.
+    TodoUpdated todo_updated = 32;
+  }
+}

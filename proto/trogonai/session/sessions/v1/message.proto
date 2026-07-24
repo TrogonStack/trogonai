@@ -1,0 +1,72 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1/artifact.proto";
+import "trogonai/session/sessions/v1/token_usage.proto";
+import "trogonai/session/sessions/v1/tool_call.proto";
+
+// CanonicalMessage is one conversation message in its normalized, model-agnostic
+// form. It is the durable shape a UserMessageRecorded or AssistantMessageCompleted
+// event carries; streamed token deltas are delivered out of band and never
+// appended per token (ADR#0035 facet 2).
+message CanonicalMessage {
+  // Stable message id.
+  string message_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Conversation role.
+  MessageRole role = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Ordered content blocks making up the message.
+  repeated ContentBlock content = 3;
+  // Exact model that produced an assistant message; empty when not applicable.
+  string model = 4;
+  // Token accounting and cost for the message; unset when not applicable.
+  TokenUsage usage = 5;
+  // Wall-clock instant the message was created.
+  google.protobuf.Timestamp created_at = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// MessageRole is the closed set of conversation roles.
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_ASSISTANT = 2;
+}
+
+// ContentBlock is one typed block inside a CanonicalMessage.
+message ContentBlock {
+  oneof kind {
+    string text = 1;
+    ArtifactRef artifact_ref = 2;
+    ThinkingBlock thinking = 3;
+    ToolUseBlock tool_use = 4;
+    ToolResultBlock tool_result = 5;
+    // Provider-encrypted reasoning with no visible text, kept verbatim.
+    bytes redacted_thinking = 6;
+  }
+}
+
+// ThinkingBlock is visible model reasoning plus the provider's opaque
+// continuation/verification signature, kept so a thinking-bearing turn can be
+// resumed or forked faithfully.
+message ThinkingBlock {
+  string text = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Provider signature over the reasoning; empty when the provider emits none.
+  bytes signature = 2;
+}
+
+// ToolUseBlock is a model request to invoke a tool, embedded in message content.
+message ToolUseBlock {
+  string id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string name = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Tool input arguments as a JSON document.
+  string input_json = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Parent tool-use id for nested calls; empty when top-level.
+  string parent_tool_use_id = 4;
+}
+
+// ToolResultBlock carries a tool result back into message content.
+message ToolResultBlock {
+  string tool_use_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ToolCallResult result = 2 [features.field_presence = LEGACY_REQUIRED];
+}

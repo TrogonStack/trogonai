@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/artifact.proto";
+
+// ArtifactRecorded records an artifact by claim-check (sha256), never inlining
+// its bytes (ADR#0035 facet 3); a commuting happened-fact (WRITE_PRECONDITION = Any).
+message ArtifactRecorded {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ArtifactMetadata artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+}

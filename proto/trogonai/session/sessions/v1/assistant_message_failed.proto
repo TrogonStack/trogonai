@@ -1,0 +1,36 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/token_usage.proto";
+
+// AssistantMessageFailed records that an assistant turn did not complete
+// normally -- interrupted by user steering, cancelled, or errored -- so every
+// AssistantMessageStarted has a determinable outcome (AssistantMessageCompleted
+// or this), mirroring the tool lifecycle's Completed/Failed. It is a commuting
+// happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+message AssistantMessageFailed {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string message_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  AssistantMessageFailureReason reason = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable detail; empty when none.
+  string detail = 4;
+  // Token accounting and cost billed for the partial turn; unset when the
+  // provider reported none. Recorded so a cost fold does not undercount tokens
+  // consumed by a turn that failed mid-generation.
+  TokenUsage usage = 5;
+}
+
+// AssistantMessageFailureReason is why an assistant turn did not complete.
+enum AssistantMessageFailureReason {
+  ASSISTANT_MESSAGE_FAILURE_REASON_UNSPECIFIED = 0;
+  // Cut off by user steering mid-turn.
+  ASSISTANT_MESSAGE_FAILURE_REASON_INTERRUPTED = 1;
+  // Cancelled by an explicit cancellation intent.
+  ASSISTANT_MESSAGE_FAILURE_REASON_CANCELLED = 2;
+  // Failed with a provider or runtime error.
+  ASSISTANT_MESSAGE_FAILURE_REASON_ERROR = 3;
+  // Generation hung and exceeded its time budget (parity with
+  // ToolCallFailureReason.TIMEOUT).
+  ASSISTANT_MESSAGE_FAILURE_REASON_TIMEOUT = 4;
+}

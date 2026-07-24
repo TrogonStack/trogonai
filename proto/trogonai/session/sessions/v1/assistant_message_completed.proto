@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/message.proto";
+
+// AssistantMessageCompleted is a durable fact carrying the full assistant message
+// in canonical form; its message id, token usage, and cost live on the embedded
+// CanonicalMessage. finish_reason records why the turn stopped, so a truncated
+// turn is distinguishable from a normal one. It is a commuting happened-fact
+// (WRITE_PRECONDITION = Any).
+message AssistantMessageCompleted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CanonicalMessage message = 2 [features.field_presence = LEGACY_REQUIRED];
+  FinishReason finish_reason = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The stop sequence that fired, set only when finish_reason is
+  // FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
+  string matched_stop_sequence = 4;
+}
+
+// FinishReason is why a completed assistant turn stopped generating.
+enum FinishReason {
+  FINISH_REASON_UNSPECIFIED = 0;
+  // Model ended its turn normally.
+  FINISH_REASON_END_TURN = 1;
+  // Output stopped at the max-tokens limit.
+  FINISH_REASON_MAX_TOKENS = 2;
+  // Model stopped to invoke a tool.
+  FINISH_REASON_TOOL_USE = 3;
+  // Output stopped at a configured stop sequence.
+  FINISH_REASON_STOP_SEQUENCE = 4;
+  // Output stopped by a content filter.
+  FINISH_REASON_CONTENT_FILTER = 5;
+  // Resumable server-side pause of a tool loop (e.g. Claude pause_turn).
+  FINISH_REASON_PAUSE_TURN = 6;
+  // Model declined to respond on safety grounds (e.g. Claude refusal).
+  FINISH_REASON_REFUSAL = 7;
+}

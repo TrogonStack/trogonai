@@ -1,0 +1,71 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1/digest.proto";
+
+// ArtifactRef is an inline claim-check to an artifact stored out of line: the
+// stream carries the content digest and a preview, never the bytes. It appears
+// inside messages and tool results that reference an artifact.
+message ArtifactRef {
+  // Stable artifact id within the session.
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Content digest over the artifact bytes; the claim-check key (ADR#0035 facet 3).
+  // Uses the shared Digest type for consistency with every other digest in the
+  // package (algorithm is typically "sha256").
+  Digest digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Size of the referenced bytes.
+  uint64 size_bytes = 3 [features.field_presence = LEGACY_REQUIRED];
+  // IANA media type of the referenced bytes.
+  string mime = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Short human-readable preview; empty when none was produced.
+  string preview = 5;
+  // True when preview is a truncation of the full content.
+  bool truncated = 6;
+}
+
+// ArtifactMetadata is the claim-check record carried by ArtifactRecorded. Its
+// source arm distinguishes durably-stored bytes (addressable by sha256) from a
+// degraded external reference whose bytes were never fetched, so required-ness is
+// expressed per branch rather than collapsed into always-required fields that a
+// degraded artifact cannot supply (ADR#0035 facet 3).
+message ArtifactMetadata {
+  // Stable artifact id within the session.
+  string artifact_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Effective media type: decoded/validated when stored, source-declared when external.
+  string mime = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Short human-readable preview; empty when none was produced.
+  string preview = 3;
+  // True when preview is a truncation of the full content.
+  bool truncated = 4;
+  // Wall-clock instant the artifact record was created.
+  google.protobuf.Timestamp created_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  oneof source {
+    StoredArtifact stored = 6;
+    ExternalArtifact external = 7;
+  }
+}
+
+// StoredArtifact is the source arm for an artifact whose bytes were durably stored.
+message StoredArtifact {
+  // Content digest over the stored bytes; the claim-check key.
+  Digest digest = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Size of the stored bytes.
+  uint64 size_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+  // External location the bytes were stored at (for example an Object Store key).
+  string storage_ref = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ExternalArtifact is the degraded source arm for an artifact whose bytes were
+// never fetched; only a reference to the source is kept.
+message ExternalArtifact {
+  // The (un-fetchable) source location.
+  string source_url = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Source transport encoding, for example "base64"; empty when none.
+  string source_encoding = 2;
+  // MIME as declared by the source before validation; empty when not declared.
+  string declared_mime = 3;
+  // When a fetch of the source was attempted; unset when not applicable.
+  google.protobuf.Timestamp fetched_at = 4;
+}

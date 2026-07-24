@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionDeleted is the logical-deletion terminal marker for a session,
+// interpreted at replay; the log is never physically purged (ADR#0035 facet 2,
+// facet 7). It is an invariant-bearing transition guarded by
+// WRITE_PRECONDITION = At(current_position).
+message SessionDeleted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,29 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionForked is the first event on the child subject; its producing command
+// ForkSession appends under the NoStream precondition, making creation atomic
+// and exactly-once (ADR#0035 facet 2). history_base_sequence is a physical JetStream
+// stream sequence (sparse, shared across subjects, ADR#0013), resolved at the
+// application boundary; fork composes a shared prefix at replay time, never a
+// physical copy (ADR#0035 facet 5).
+message SessionForked {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 history_base_sequence = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Why the fork happened; a command-time input not derivable from the rest of
+  // the log.
+  ForkReason reason = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ForkReason is why a session was forked.
+enum ForkReason {
+  FORK_REASON_UNSPECIFIED = 0;
+  // An explicit user branch.
+  FORK_REASON_MANUAL_BRANCH = 1;
+  // A continuation forked at a compaction boundary.
+  FORK_REASON_COMPACTION_CONTINUATION = 2;
+  // A retry of a prior run from a shared prefix.
+  FORK_REASON_RETRY = 3;
+}

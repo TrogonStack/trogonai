@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// ExecutionAttemptEnded is a per-attempt outcome fact; ending an attempt is
+// not itself a session terminal marker (ADR#0031 §4, ADR#0035 facet 6). It is
+// a commuting happened-fact (WRITE_PRECONDITION = Any).
+message ExecutionAttemptEnded {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  AttemptOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable explanation of the outcome; empty when none. This is a
+  // failure-only event (no success outcome exists), so an audit fold needs it to
+  // explain, not just classify, why the attempt ended.
+  string detail = 4;
+}
+
+// AttemptOutcome is how an execution attempt ended.
+enum AttemptOutcome {
+  ATTEMPT_OUTCOME_UNSPECIFIED = 0;
+  ATTEMPT_OUTCOME_FAILED = 1;
+  ATTEMPT_OUTCOME_CANCELLED = 2;
+  ATTEMPT_OUTCOME_TERMINATED = 3;
+}
