@@ -288,14 +288,17 @@ JetStream stream sequences -- sparse and shared across every subject on
 `SESSION_EVENTS`, not per-subject ordinals -- so the composition is expressed in
 those positions, not small integers: if a child's first event is `SessionForked`,
 the store folds the source-subject events up to and including `history_base_seq`,
-then the child-subject events from the fork marker's own position onward
-(`ReadFrom::after` that position), and evolves the concatenation; otherwise it
-does an ordinary subject read. This composes recursively for fork-of-fork chains.
+then the child subject in full -- its first event, the `SessionForked` marker, folds
+into `state.forked_from`, and the child's own events follow -- and evolves the
+concatenation; otherwise it does an ordinary subject read. The marker is folded, not
+skipped: reading the child from strictly after it would drop the fork metadata. This composes recursively for fork-of-fork chains.
 Immediately after the `SessionForked` append succeeds, the fork handler folds the
-source prefix once and writes it as a sealing [snapshot](../glossary/snapshot) at
-the marker's returned `StreamPosition`, so steady-state replay resumes from that
-snapshot and never re-reads the source, bounding cost to O(1) regardless of fork
-depth. A crash between the marker append and the snapshot write self-heals: the
+source prefix **and the marker itself** into one sealing
+[snapshot](../glossary/snapshot) at the marker's returned `StreamPosition`, so the
+snapshot already carries `forked_from`; steady-state replay resumes from it and reads
+only the child events after the marker (`ReadFrom::after` the snapshot position),
+never re-reading the source and never dropping the fork metadata, bounding cost to
+O(1) regardless of fork depth. A crash between the marker append and the snapshot write self-heals: the
 next execution finds the marker without a snapshot, falls back to the full
 two-segment replay, and writes the missing snapshot. This is the corpus's
 converged-on cheaper alternative (Codex CLI's `history_base`), available because
