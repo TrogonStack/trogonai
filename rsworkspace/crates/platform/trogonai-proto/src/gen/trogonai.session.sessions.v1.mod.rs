@@ -13,6 +13,7 @@ include!("trogonai.session.sessions.v1.cascade_policy.rs");
 include!("trogonai.session.sessions.v1.checkpoint.rs");
 include!("trogonai.session.sessions.v1.checkpoint_produced.rs");
 include!("trogonai.session.sessions.v1.compacted.rs");
+include!("trogonai.session.sessions.v1.delegation_detached.rs");
 include!("trogonai.session.sessions.v1.delegation_dispatched.rs");
 include!("trogonai.session.sessions.v1.execution_attempt_ended.rs");
 include!("trogonai.session.sessions.v1.execution_attempt_ready.rs");
@@ -21,6 +22,8 @@ include!("trogonai.session.sessions.v1.file_change.rs");
 include!("trogonai.session.sessions.v1.file_changed.rs");
 include!("trogonai.session.sessions.v1.operation_outcome_recorded.rs");
 include!("trogonai.session.sessions.v1.operation_reserved.rs");
+include!("trogonai.session.sessions.v1.parent_linked.rs");
+include!("trogonai.session.sessions.v1.parent_terminated.rs");
 include!("trogonai.session.sessions.v1.session_cancelled.rs");
 include!("trogonai.session.sessions.v1.session_closed.rs");
 include!("trogonai.session.sessions.v1.session_deleted.rs");
@@ -29,9 +32,6 @@ include!("trogonai.session.sessions.v1.session_forked.rs");
 include!("trogonai.session.sessions.v1.session_rewound.rs");
 include!("trogonai.session.sessions.v1.execution_plan.rs");
 include!("trogonai.session.sessions.v1.session_started.rs");
-include!("trogonai.session.sessions.v1.subagent_detached.rs");
-include!("trogonai.session.sessions.v1.subagent_linked.rs");
-include!("trogonai.session.sessions.v1.subagent_parent_terminated.rs");
 include!("trogonai.session.sessions.v1.system_notice_recorded.rs");
 include!("trogonai.session.sessions.v1.tool_call_approved.rs");
 include!("trogonai.session.sessions.v1.tool_call_completed.rs");
@@ -71,6 +71,7 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.checkpoint.__view.rs");
         include!("trogonai.session.sessions.v1.checkpoint_produced.__view.rs");
         include!("trogonai.session.sessions.v1.compacted.__view.rs");
+        include!("trogonai.session.sessions.v1.delegation_detached.__view.rs");
         include!("trogonai.session.sessions.v1.delegation_dispatched.__view.rs");
         include!("trogonai.session.sessions.v1.execution_attempt_ended.__view.rs");
         include!("trogonai.session.sessions.v1.execution_attempt_ready.__view.rs");
@@ -78,6 +79,8 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.file_changed.__view.rs");
         include!("trogonai.session.sessions.v1.operation_outcome_recorded.__view.rs");
         include!("trogonai.session.sessions.v1.operation_reserved.__view.rs");
+        include!("trogonai.session.sessions.v1.parent_linked.__view.rs");
+        include!("trogonai.session.sessions.v1.parent_terminated.__view.rs");
         include!("trogonai.session.sessions.v1.session_cancelled.__view.rs");
         include!("trogonai.session.sessions.v1.session_closed.__view.rs");
         include!("trogonai.session.sessions.v1.session_deleted.__view.rs");
@@ -86,9 +89,6 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1.session_rewound.__view.rs");
         include!("trogonai.session.sessions.v1.execution_plan.__view.rs");
         include!("trogonai.session.sessions.v1.session_started.__view.rs");
-        include!("trogonai.session.sessions.v1.subagent_detached.__view.rs");
-        include!("trogonai.session.sessions.v1.subagent_linked.__view.rs");
-        include!("trogonai.session.sessions.v1.subagent_parent_terminated.__view.rs");
         include!("trogonai.session.sessions.v1.system_notice_recorded.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_approved.__view.rs");
         include!("trogonai.session.sessions.v1.tool_call_completed.__view.rs");
@@ -139,6 +139,7 @@ pub mod __buffa {
         reg.register_json_any(super::__CHECKPOINT_JSON_ANY);
         reg.register_json_any(super::__CHECKPOINT_PRODUCED_JSON_ANY);
         reg.register_json_any(super::__COMPACTED_JSON_ANY);
+        reg.register_json_any(super::__DELEGATION_DETACHED_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DISPATCHED_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_ENDED_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_READY_JSON_ANY);
@@ -146,6 +147,8 @@ pub mod __buffa {
         reg.register_json_any(super::__FILE_CHANGED_JSON_ANY);
         reg.register_json_any(super::__OPERATION_OUTCOME_RECORDED_JSON_ANY);
         reg.register_json_any(super::__OPERATION_RESERVED_JSON_ANY);
+        reg.register_json_any(super::__PARENT_LINKED_JSON_ANY);
+        reg.register_json_any(super::__PARENT_TERMINATED_JSON_ANY);
         reg.register_json_any(super::__SESSION_CANCELLED_JSON_ANY);
         reg.register_json_any(super::__SESSION_CLOSED_JSON_ANY);
         reg.register_json_any(super::__SESSION_DELETED_JSON_ANY);
@@ -154,9 +157,6 @@ pub mod __buffa {
         reg.register_json_any(super::__SESSION_REWOUND_JSON_ANY);
         reg.register_json_any(super::__STORED_SESSION_EXECUTION_PLAN_JSON_ANY);
         reg.register_json_any(super::__SESSION_STARTED_JSON_ANY);
-        reg.register_json_any(super::__SUBAGENT_DETACHED_JSON_ANY);
-        reg.register_json_any(super::__SUBAGENT_LINKED_JSON_ANY);
-        reg.register_json_any(super::__SUBAGENT_PARENT_TERMINATED_JSON_ANY);
         reg.register_json_any(super::__SYSTEM_NOTICE_RECORDED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_APPROVED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_COMPLETED_JSON_ANY);
@@ -255,6 +255,10 @@ pub use self::__buffa::view::CompactedView;
 #[doc(inline)]
 pub use self::__buffa::view::CompactedOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::DelegationDetachedView;
+#[doc(inline)]
+pub use self::__buffa::view::DelegationDetachedOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::DelegationDispatchedView;
 #[doc(inline)]
 pub use self::__buffa::view::DelegationDispatchedOwnedView;
@@ -282,6 +286,14 @@ pub use self::__buffa::view::OperationOutcomeRecordedOwnedView;
 pub use self::__buffa::view::OperationReservedView;
 #[doc(inline)]
 pub use self::__buffa::view::OperationReservedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ParentLinkedView;
+#[doc(inline)]
+pub use self::__buffa::view::ParentLinkedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ParentTerminatedView;
+#[doc(inline)]
+pub use self::__buffa::view::ParentTerminatedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::SessionCancelledView;
 #[doc(inline)]
@@ -314,18 +326,6 @@ pub use self::__buffa::view::StoredSessionExecutionPlanOwnedView;
 pub use self::__buffa::view::SessionStartedView;
 #[doc(inline)]
 pub use self::__buffa::view::SessionStartedOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentDetachedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentDetachedOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentLinkedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentLinkedOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentParentTerminatedView;
-#[doc(inline)]
-pub use self::__buffa::view::SubagentParentTerminatedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::SystemNoticeRecordedView;
 #[doc(inline)]

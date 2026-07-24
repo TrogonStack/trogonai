@@ -10,7 +10,7 @@ pub enum OperationOutcome {
     OPERATION_OUTCOME_FAILED = 2i32,
     OPERATION_OUTCOME_UNKNOWN = 3i32,
     /// Deliberately cancelled before completion, distinct from FAILED or UNKNOWN
-    /// (e.g. a subagent delegation cancelled by parent-terminal cascade).
+    /// (e.g. a child-session delegation cancelled by parent-terminal cascade).
     OPERATION_OUTCOME_CANCELLED = 4i32,
 }
 impl OperationOutcome {

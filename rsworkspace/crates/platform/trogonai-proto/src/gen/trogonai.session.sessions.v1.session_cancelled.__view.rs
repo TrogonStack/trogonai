@@ -2,7 +2,7 @@
 // source: trogonai/session/sessions/v1/session_cancelled.proto
 
 /// SessionCancelled is the cancellation terminal marker for a session; it is also
-/// emitted on the child in the cascade batch after SubagentParentTerminated
+/// emitted on the child in the cascade batch after ParentTerminated
 /// (ADR#0035 facet 6). It is an invariant-bearing transition guarded by
 /// WRITE_PRECONDITION = At(current_position).
 #[derive(Clone, Debug, Default)]

@@ -147,7 +147,7 @@ when a stale decision would violate an invariant; otherwise append unconditional
   prevented at write.
 - **Invariant-bearing transitions** -- the commands recording `SessionClosed`/
   `SessionCancelled`/`SessionFailed`/`SessionDeleted`, `SessionRewound`, `Compacted`,
-  `DelegationDispatched`, and `SubagentDetached` (named here by the fact each records;
+  `DelegationDispatched`, and `DelegationDetached` (named here by the fact each records;
   the command is the verb form, e.g. `CloseSession` records `SessionClosed`,
   `DispatchDelegation` records `DelegationDispatched`) -- declare no
   `WRITE_PRECONDITION`, so the runtime applies the default `At(current_position)`: a
@@ -312,7 +312,7 @@ A subagent is its own logical stream linked by two distinct facts (never a
 cross-stream transaction, which `decide` cannot express): the parent records
 `DelegationDispatched{operation_id, child_session_id, dispatched_at_sequence,
 cascade_policy}` (reusing [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s operation-ledger id to dedupe dispatch), and
-the child records `SubagentLinked{parent_session_id, parent_sequence_at_dispatch,
+the child records `ParentLinked{parent_session_id, parent_sequence_at_dispatch,
 cascade_policy}` -- `parent_sequence_at_dispatch` is a plain domain field copied
 from the parent's physical sequence, never `Trogon-Origin-Stream-Sequence`. The
 `cascade_policy` is `CASCADE_ON_PARENT_TERMINAL` (the safe default) or
@@ -330,7 +330,7 @@ a Session-level `SessionFailed`, and that is what cascades. A reconciler
 matches those Session-level terminal markers and dispatches
 `ReconcileParentTerminal` to each eligible child -- discovered through the
 parent-to-children lineage projection folded from `DelegationDispatched` -- whose
-`decide` emits one atomic `[SubagentParentTerminated, SessionCancelled]` batch on
+`decide` emits one atomic `[ParentTerminated, SessionCancelled]` batch on
 the child's own subject, or a typed no-op error if already terminal. On a
 `SessionRewound` trigger only the children whose `parent_sequence_at_dispatch` is
 at or after the rewound-to sequence are cascade-cancelled; children dispatched
@@ -343,7 +343,7 @@ policy, and discovery depends on the lineage projection's freshness.
 `DispatchDelegation` refuses to spawn under an already-terminal parent, closing
 the common ordering of the race inside one stream's OCC (it is one of facet 2's
 `At(current_position)`-guarded transitions, which is what makes the refusal race-safe);
-`DetachSubagent`/`SubagentDetached` (mirrored on both streams, each side needing
+`DetachDelegation`/`DelegationDetached` (mirrored on both streams, each side needing
 it for its own invariant) records an intentional detach. Crash and downtime are
 covered by bounded processor redelivery plus a scheduled orphan-closure sweep
 that reads already-durable projections and snapshots -- never raw events, so it is

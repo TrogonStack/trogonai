@@ -2,7 +2,7 @@
 // source: trogonai/session/sessions/v1/delegation_dispatched.proto
 
 /// DelegationDispatched is the parent-side link fact recording a dispatched
-/// subagent, reusing the operation-ledger id to dedupe dispatch (ADR#0035
+/// child session, reusing the operation-ledger id to dedupe dispatch (ADR#0035
 /// facet 6). It is an invariant-bearing transition (WRITE_PRECONDITION = At),
 /// letting DispatchDelegation refuse to spawn under an already-terminal parent
 /// race-safely.

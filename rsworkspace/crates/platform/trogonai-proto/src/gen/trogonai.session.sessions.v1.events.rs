@@ -244,7 +244,7 @@ impl ::buffa::Message for SessionEvent {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::session_event::Event::SubagentLinked(x) => {
+                __buffa::oneof::session_event::Event::ParentLinked(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -252,7 +252,7 @@ impl ::buffa::Message for SessionEvent {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::session_event::Event::SubagentParentTerminated(x) => {
+                __buffa::oneof::session_event::Event::ParentTerminated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -260,7 +260,7 @@ impl ::buffa::Message for SessionEvent {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                __buffa::oneof::session_event::Event::SubagentDetached(x) => {
+                __buffa::oneof::session_event::Event::DelegationDetached(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
@@ -513,7 +513,7 @@ impl ::buffa::Message for SessionEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::session_event::Event::SubagentLinked(x) => {
+                __buffa::oneof::session_event::Event::ParentLinked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         23u32,
                         __cache.consume_next(),
@@ -521,7 +521,7 @@ impl ::buffa::Message for SessionEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::session_event::Event::SubagentParentTerminated(x) => {
+                __buffa::oneof::session_event::Event::ParentTerminated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         24u32,
                         __cache.consume_next(),
@@ -529,7 +529,7 @@ impl ::buffa::Message for SessionEvent {
                     );
                     x.write_to(__cache, buf);
                 }
-                __buffa::oneof::session_event::Event::SubagentDetached(x) => {
+                __buffa::oneof::session_event::Event::DelegationDetached(x) => {
                     ::buffa::types::put_len_delimited_header(
                         25u32,
                         __cache.consume_next(),
@@ -1129,9 +1129,7 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::session_event::Event::SubagentLinked(
-                        ref mut existing,
-                    ),
+                    __buffa::oneof::session_event::Event::ParentLinked(ref mut existing),
                 ) = self.event
                 {
                     ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
@@ -1139,7 +1137,7 @@ impl ::buffa::Message for SessionEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::session_event::Event::SubagentLinked(
+                        __buffa::oneof::session_event::Event::ParentLinked(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -1151,7 +1149,7 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::session_event::Event::SubagentParentTerminated(
+                    __buffa::oneof::session_event::Event::ParentTerminated(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -1161,7 +1159,7 @@ impl ::buffa::Message for SessionEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::session_event::Event::SubagentParentTerminated(
+                        __buffa::oneof::session_event::Event::ParentTerminated(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -1173,7 +1171,7 @@ impl ::buffa::Message for SessionEvent {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 if let ::core::option::Option::Some(
-                    __buffa::oneof::session_event::Event::SubagentDetached(
+                    __buffa::oneof::session_event::Event::DelegationDetached(
                         ref mut existing,
                     ),
                 ) = self.event
@@ -1183,7 +1181,7 @@ impl ::buffa::Message for SessionEvent {
                     let mut val = ::core::default::Default::default();
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.event = ::core::option::Option::Some(
-                        __buffa::oneof::session_event::Event::SubagentDetached(
+                        __buffa::oneof::session_event::Event::DelegationDetached(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -1905,12 +1903,12 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                 );
                             }
                         }
-                        "subagentLinked" | "subagent_linked" => {
-                            let v: ::core::option::Option<SubagentLinked> = map
+                        "parentLinked" | "parent_linked" => {
+                            let v: ::core::option::Option<ParentLinked> = map
                                 .next_value_seed(
                                     ::buffa::json_helpers::NullableDeserializeSeed(
                                         ::buffa::json_helpers::DefaultDeserializeSeed::<
-                                            SubagentLinked,
+                                            ParentLinked,
                                         >::new(),
                                     ),
                                 )?;
@@ -1923,18 +1921,18 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::session_event::Event::SubagentLinked(
+                                    __buffa::oneof::session_event::Event::ParentLinked(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
                             }
                         }
-                        "subagentParentTerminated" | "subagent_parent_terminated" => {
-                            let v: ::core::option::Option<SubagentParentTerminated> = map
+                        "parentTerminated" | "parent_terminated" => {
+                            let v: ::core::option::Option<ParentTerminated> = map
                                 .next_value_seed(
                                     ::buffa::json_helpers::NullableDeserializeSeed(
                                         ::buffa::json_helpers::DefaultDeserializeSeed::<
-                                            SubagentParentTerminated,
+                                            ParentTerminated,
                                         >::new(),
                                     ),
                                 )?;
@@ -1947,18 +1945,18 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::session_event::Event::SubagentParentTerminated(
+                                    __buffa::oneof::session_event::Event::ParentTerminated(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
                             }
                         }
-                        "subagentDetached" | "subagent_detached" => {
-                            let v: ::core::option::Option<SubagentDetached> = map
+                        "delegationDetached" | "delegation_detached" => {
+                            let v: ::core::option::Option<DelegationDetached> = map
                                 .next_value_seed(
                                     ::buffa::json_helpers::NullableDeserializeSeed(
                                         ::buffa::json_helpers::DefaultDeserializeSeed::<
-                                            SubagentDetached,
+                                            DelegationDetached,
                                         >::new(),
                                     ),
                                 )?;
@@ -1971,7 +1969,7 @@ impl<'de> serde::Deserialize<'de> for SessionEvent {
                                     );
                                 }
                                 __oneof_event = Some(
-                                    __buffa::oneof::session_event::Event::SubagentDetached(
+                                    __buffa::oneof::session_event::Event::DelegationDetached(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );

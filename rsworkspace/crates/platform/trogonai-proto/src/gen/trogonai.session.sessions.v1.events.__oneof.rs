@@ -61,12 +61,12 @@ pub mod session_event {
         DelegationDispatched(
             ::buffa::alloc::boxed::Box<super::super::super::DelegationDispatched>,
         ),
-        SubagentLinked(::buffa::alloc::boxed::Box<super::super::super::SubagentLinked>),
-        SubagentParentTerminated(
-            ::buffa::alloc::boxed::Box<super::super::super::SubagentParentTerminated>,
+        ParentLinked(::buffa::alloc::boxed::Box<super::super::super::ParentLinked>),
+        ParentTerminated(
+            ::buffa::alloc::boxed::Box<super::super::super::ParentTerminated>,
         ),
-        SubagentDetached(
-            ::buffa::alloc::boxed::Box<super::super::super::SubagentDetached>,
+        DelegationDetached(
+            ::buffa::alloc::boxed::Box<super::super::super::DelegationDetached>,
         ),
         OperationReserved(
             ::buffa::alloc::boxed::Box<super::super::super::OperationReserved>,
@@ -339,34 +339,34 @@ pub mod session_event {
             Self::Some(Event::from(v))
         }
     }
-    impl From<super::super::super::SubagentLinked> for Event {
-        fn from(v: super::super::super::SubagentLinked) -> Self {
-            Self::SubagentLinked(::buffa::alloc::boxed::Box::new(v))
+    impl From<super::super::super::ParentLinked> for Event {
+        fn from(v: super::super::super::ParentLinked) -> Self {
+            Self::ParentLinked(::buffa::alloc::boxed::Box::new(v))
         }
     }
-    impl From<super::super::super::SubagentLinked> for ::core::option::Option<Event> {
-        fn from(v: super::super::super::SubagentLinked) -> Self {
+    impl From<super::super::super::ParentLinked> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ParentLinked) -> Self {
             Self::Some(Event::from(v))
         }
     }
-    impl From<super::super::super::SubagentParentTerminated> for Event {
-        fn from(v: super::super::super::SubagentParentTerminated) -> Self {
-            Self::SubagentParentTerminated(::buffa::alloc::boxed::Box::new(v))
+    impl From<super::super::super::ParentTerminated> for Event {
+        fn from(v: super::super::super::ParentTerminated) -> Self {
+            Self::ParentTerminated(::buffa::alloc::boxed::Box::new(v))
         }
     }
-    impl From<super::super::super::SubagentParentTerminated>
+    impl From<super::super::super::ParentTerminated> for ::core::option::Option<Event> {
+        fn from(v: super::super::super::ParentTerminated) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::DelegationDetached> for Event {
+        fn from(v: super::super::super::DelegationDetached) -> Self {
+            Self::DelegationDetached(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::DelegationDetached>
     for ::core::option::Option<Event> {
-        fn from(v: super::super::super::SubagentParentTerminated) -> Self {
-            Self::Some(Event::from(v))
-        }
-    }
-    impl From<super::super::super::SubagentDetached> for Event {
-        fn from(v: super::super::super::SubagentDetached) -> Self {
-            Self::SubagentDetached(::buffa::alloc::boxed::Box::new(v))
-        }
-    }
-    impl From<super::super::super::SubagentDetached> for ::core::option::Option<Event> {
-        fn from(v: super::super::super::SubagentDetached) -> Self {
+        fn from(v: super::super::super::DelegationDetached) -> Self {
             Self::Some(Event::from(v))
         }
     }
@@ -495,14 +495,14 @@ pub mod session_event {
                 Self::DelegationDispatched(v) => {
                     map.serialize_entry("delegationDispatched", v)?;
                 }
-                Self::SubagentLinked(v) => {
-                    map.serialize_entry("subagentLinked", v)?;
+                Self::ParentLinked(v) => {
+                    map.serialize_entry("parentLinked", v)?;
                 }
-                Self::SubagentParentTerminated(v) => {
-                    map.serialize_entry("subagentParentTerminated", v)?;
+                Self::ParentTerminated(v) => {
+                    map.serialize_entry("parentTerminated", v)?;
                 }
-                Self::SubagentDetached(v) => {
-                    map.serialize_entry("subagentDetached", v)?;
+                Self::DelegationDetached(v) => {
+                    map.serialize_entry("delegationDetached", v)?;
                 }
                 Self::OperationReserved(v) => {
                     map.serialize_entry("operationReserved", v)?;

@@ -8,6 +8,7 @@ import "trogonai/session/sessions/v1/assistant_message_failed.proto";
 import "trogonai/session/sessions/v1/assistant_message_started.proto";
 import "trogonai/session/sessions/v1/checkpoint_produced.proto";
 import "trogonai/session/sessions/v1/compacted.proto";
+import "trogonai/session/sessions/v1/delegation_detached.proto";
 import "trogonai/session/sessions/v1/delegation_dispatched.proto";
 import "trogonai/session/sessions/v1/execution_attempt_ended.proto";
 import "trogonai/session/sessions/v1/execution_attempt_ready.proto";
@@ -15,6 +16,8 @@ import "trogonai/session/sessions/v1/execution_attempt_started.proto";
 import "trogonai/session/sessions/v1/file_changed.proto";
 import "trogonai/session/sessions/v1/operation_outcome_recorded.proto";
 import "trogonai/session/sessions/v1/operation_reserved.proto";
+import "trogonai/session/sessions/v1/parent_linked.proto";
+import "trogonai/session/sessions/v1/parent_terminated.proto";
 import "trogonai/session/sessions/v1/session_cancelled.proto";
 import "trogonai/session/sessions/v1/session_closed.proto";
 import "trogonai/session/sessions/v1/session_deleted.proto";
@@ -22,9 +25,6 @@ import "trogonai/session/sessions/v1/session_failed.proto";
 import "trogonai/session/sessions/v1/session_forked.proto";
 import "trogonai/session/sessions/v1/session_rewound.proto";
 import "trogonai/session/sessions/v1/session_started.proto";
-import "trogonai/session/sessions/v1/subagent_detached.proto";
-import "trogonai/session/sessions/v1/subagent_linked.proto";
-import "trogonai/session/sessions/v1/subagent_parent_terminated.proto";
 import "trogonai/session/sessions/v1/system_notice_recorded.proto";
 import "trogonai/session/sessions/v1/tool_call_approved.proto";
 import "trogonai/session/sessions/v1/tool_call_completed.proto";
@@ -72,11 +72,11 @@ message SessionEvent {
     ExecutionAttemptReady execution_attempt_ready = 20;
     ExecutionAttemptEnded execution_attempt_ended = 21;
     CheckpointProduced checkpoint_produced = 30;
-    // Delegation and subagents.
+    // Delegation and child sessions.
     DelegationDispatched delegation_dispatched = 22;
-    SubagentLinked subagent_linked = 23;
-    SubagentParentTerminated subagent_parent_terminated = 24;
-    SubagentDetached subagent_detached = 25;
+    ParentLinked parent_linked = 23;
+    ParentTerminated parent_terminated = 24;
+    DelegationDetached delegation_detached = 25;
     // Operation ledger.
     OperationReserved operation_reserved = 26;
     OperationOutcomeRecorded operation_outcome_recorded = 27;

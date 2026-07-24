@@ -821,7 +821,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                    super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                         ref mut existing,
                     ),
                 ) = view.event
@@ -833,9 +833,9 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                     )?;
                 } else {
                     view.event = Some(
-                        super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                        super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                             ::buffa::alloc::boxed::Box::new(
-                                <super::super::__buffa::view::SubagentLinkedView as ::buffa::MessageView>::decode_view_ctx(
+                                <super::super::__buffa::view::ParentLinkedView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
                                     __sub_ctx,
                                 )?,
@@ -852,7 +852,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                    super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                         ref mut existing,
                     ),
                 ) = view.event
@@ -864,9 +864,9 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                     )?;
                 } else {
                     view.event = Some(
-                        super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                        super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                             ::buffa::alloc::boxed::Box::new(
-                                <super::super::__buffa::view::SubagentParentTerminatedView as ::buffa::MessageView>::decode_view_ctx(
+                                <super::super::__buffa::view::ParentTerminatedView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
                                     __sub_ctx,
                                 )?,
@@ -883,7 +883,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 if let Some(
-                    super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                    super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                         ref mut existing,
                     ),
                 ) = view.event
@@ -895,9 +895,9 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                     )?;
                 } else {
                     view.event = Some(
-                        super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                        super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                             ::buffa::alloc::boxed::Box::new(
-                                <super::super::__buffa::view::SubagentDetachedView as ::buffa::MessageView>::decode_view_ctx(
+                                <super::super::__buffa::view::DelegationDetachedView as ::buffa::MessageView>::decode_view_ctx(
                                     sub,
                                     __sub_ctx,
                                 )?,
@@ -1279,28 +1279,28 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                            super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::session_event::Event::SubagentLinked(
+                                super::super::__buffa::oneof::session_event::Event::ParentLinked(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                            super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::session_event::Event::SubagentParentTerminated(
+                                super::super::__buffa::oneof::session_event::Event::ParentTerminated(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
                                 )
                             }
-                            super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                            super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                                 v,
                             ) => {
-                                super::super::__buffa::oneof::session_event::Event::SubagentDetached(
+                                super::super::__buffa::oneof::session_event::Event::DelegationDetached(
                                     ::buffa::alloc::boxed::Box::new(
                                         v.to_owned_from_source(__buffa_src)?,
                                     ),
@@ -1609,7 +1609,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -1619,7 +1619,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -1629,7 +1629,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                         += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -1943,7 +1943,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -1953,7 +1953,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -1963,7 +1963,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                     x,
                 ) => {
                     ::buffa::types::put_len_delimited_header(
@@ -2162,20 +2162,20 @@ impl<'__a> ::serde::Serialize for SessionEventView<'__a> {
                 ) => {
                     __map.serialize_entry("delegationDispatched", v)?;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentLinked(
+                super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                     v,
                 ) => {
-                    __map.serialize_entry("subagentLinked", v)?;
+                    __map.serialize_entry("parentLinked", v)?;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentParentTerminated(
+                super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                     v,
                 ) => {
-                    __map.serialize_entry("subagentParentTerminated", v)?;
+                    __map.serialize_entry("parentTerminated", v)?;
                 }
-                super::super::__buffa::view::oneof::session_event::Event::SubagentDetached(
+                super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                     v,
                 ) => {
-                    __map.serialize_entry("subagentDetached", v)?;
+                    __map.serialize_entry("delegationDetached", v)?;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::OperationReserved(
                     v,

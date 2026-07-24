@@ -137,21 +137,19 @@ pub mod session_event {
                 super::super::super::super::__buffa::view::DelegationDispatchedView<'a>,
             >,
         ),
-        SubagentLinked(
+        ParentLinked(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::SubagentLinkedView<'a>,
+                super::super::super::super::__buffa::view::ParentLinkedView<'a>,
             >,
         ),
-        SubagentParentTerminated(
+        ParentTerminated(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::SubagentParentTerminatedView<
-                    'a,
-                >,
+                super::super::super::super::__buffa::view::ParentTerminatedView<'a>,
             >,
         ),
-        SubagentDetached(
+        DelegationDetached(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::SubagentDetachedView<'a>,
+                super::super::super::super::__buffa::view::DelegationDetachedView<'a>,
             >,
         ),
         OperationReserved(
