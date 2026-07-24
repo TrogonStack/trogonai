@@ -13,6 +13,11 @@ pub struct SubagentDetachedView<'a> {
     pub parent_session_id: &'a str,
     /// Field 3: `child_session_id`
     pub child_session_id: &'a str,
+    /// Command-time reason for the intentional detach; empty when none. Follows the
+    /// SessionCancelled.reason precedent for intentional transitions.
+    ///
+    /// Field 4: `reason`
+    pub reason: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -93,6 +98,13 @@ impl<'a> ::buffa::MessageView<'a> for SubagentDetachedView<'a> {
                 view.child_session_id = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 4u64;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.reason = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -116,6 +128,7 @@ impl<'a> ::buffa::MessageView<'a> for SubagentDetachedView<'a> {
             session_id: self.session_id.to_string(),
             parent_session_id: self.parent_session_id.to_string(),
             child_session_id: self.child_session_id.to_string(),
+            reason: self.reason.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -130,6 +143,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SubagentDetachedView<'a> {
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.parent_session_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.child_session_id) as u32;
+        if let Some(ref v) = self.reason {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -143,6 +159,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SubagentDetachedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.parent_session_id, buf);
         ::buffa::types::put_string_field(3u32, &self.child_session_id, buf);
+        if let Some(ref v) = self.reason {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -171,6 +190,9 @@ impl<'__a> ::serde::Serialize for SubagentDetachedView<'__a> {
         }
         {
             __map.serialize_entry("childSessionId", self.child_session_id)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.reason {
+            __map.serialize_entry("reason", __v)?;
         }
         __map.end()
     }
@@ -277,6 +299,14 @@ impl SubagentDetachedOwnedView {
     #[must_use]
     pub fn child_session_id(&self) -> &'_ str {
         self.0.reborrow().child_session_id
+    }
+    /// Command-time reason for the intentional detach; empty when none. Follows the
+    /// SessionCancelled.reason precedent for intentional transitions.
+    ///
+    /// Field 4: `reason`
+    #[must_use]
+    pub fn reason(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().reason
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<SubagentDetachedView<'static>>>

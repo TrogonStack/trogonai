@@ -10,4 +10,7 @@ message SubagentDetached {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string child_session_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Command-time reason for the intentional detach; empty when none. Follows the
+  // SessionCancelled.reason precedent for intentional transitions.
+  string reason = 4;
 }

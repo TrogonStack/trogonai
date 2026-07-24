@@ -30,6 +30,12 @@ pub struct SubagentDetached {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub child_session_id: ::buffa::alloc::string::String,
+    /// Command-time reason for the intentional detach; empty when none. Follows the
+    /// SessionCancelled.reason precedent for intentional transitions.
+    ///
+    /// Field 4: `reason`
+    #[serde(rename = "reason", skip_serializing_if = "::core::option::Option::is_none")]
+    pub reason: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for SubagentDetached {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -37,6 +43,7 @@ impl ::core::fmt::Debug for SubagentDetached {
             .field("session_id", &self.session_id)
             .field("parent_session_id", &self.parent_session_id)
             .field("child_session_id", &self.child_session_id)
+            .field("reason", &self.reason)
             .finish()
     }
 }
@@ -46,6 +53,18 @@ impl SubagentDetached {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.SubagentDetached";
+}
+impl SubagentDetached {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::reason`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_reason(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.reason = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(SubagentDetached);
 impl ::buffa::MessageName for SubagentDetached {
@@ -69,6 +88,9 @@ impl ::buffa::Message for SubagentDetached {
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.parent_session_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.child_session_id) as u32;
+        if let Some(ref v) = self.reason {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     fn write_to(
@@ -81,6 +103,9 @@ impl ::buffa::Message for SubagentDetached {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.parent_session_id, buf);
         ::buffa::types::put_string_field(3u32, &self.child_session_id, buf);
+        if let Some(ref v) = self.reason {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -114,6 +139,16 @@ impl ::buffa::Message for SubagentDetached {
                 )?;
                 ::buffa::types::merge_string(&mut self.child_session_id, buf)?;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self.reason.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -124,6 +159,7 @@ impl ::buffa::Message for SubagentDetached {
         self.session_id.clear();
         self.parent_session_id.clear();
         self.child_session_id.clear();
+        self.reason = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for SubagentDetached {

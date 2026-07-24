@@ -2,8 +2,8 @@
 // source: trogonai/session/sessions/v1/artifact.proto
 
 /// ArtifactRef is an inline claim-check to an artifact stored out of line: the
-/// stream carries the sha256 and a preview, never the bytes. It appears inside
-/// messages and tool results that reference an artifact.
+/// stream carries the content digest and a preview, never the bytes. It appears
+/// inside messages and tool results that reference an artifact.
 #[derive(Clone, Debug, Default)]
 pub struct ArtifactRefView<'a> {
     /// Stable artifact id within the session.
@@ -11,9 +11,11 @@ pub struct ArtifactRefView<'a> {
     /// Field 1: `artifact_id`
     pub artifact_id: &'a str,
     /// Content digest over the artifact bytes; the claim-check key (ADR#0035 facet 3).
+    /// Uses the shared Digest type for consistency with every other digest in the
+    /// package (algorithm is typically "sha256").
     ///
-    /// Field 2: `sha256`
-    pub sha256: &'a str,
+    /// Field 2: `digest`
+    pub digest: ::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'a>>,
     /// Size of the referenced bytes.
     ///
     /// Field 3: `size_bytes`
@@ -42,13 +44,13 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_artifact_id(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
     }
-    /**Whether required field `sha256` was present on the wire.
+    /**Whether required field `digest` is set.
 
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_sha256(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
+    pub const fn has_digest(&self) -> bool {
+        self.digest.is_set()
     }
     /**Whether required field `mime` was present on the wire.
 
@@ -56,7 +58,7 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[must_use]
     #[inline]
     pub const fn has_mime(&self) -> bool {
-        self.__buffa_required_seen_0 & 4u64 != 0
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
@@ -99,8 +101,21 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.sha256 = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.digest.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.digest = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DigestView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -115,7 +130,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.mime = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 4u64;
+                view.__buffa_required_seen_0 |= 2u64;
             }
             5u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -152,7 +167,14 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::ArtifactRef {
             artifact_id: self.artifact_id.to_string(),
-            sha256: self.sha256.to_string(),
+            digest: match self.digest.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Digest,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             size_bytes: self.size_bytes,
             mime: self.mime.to_string(),
             preview: self.preview.map(|s| s.to_string()),
@@ -163,12 +185,19 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
 }
 impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.artifact_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
+        if self.digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         if let Some(v) = self.size_bytes {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -184,13 +213,16 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.artifact_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.sha256, buf);
+        if self.digest.is_set() {
+            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            self.digest.write_to(__cache, buf);
+        }
         if let Some(v) = self.size_bytes {
             ::buffa::types::put_uint64_field(3u32, v, buf);
         }
@@ -225,7 +257,9 @@ impl<'__a> ::serde::Serialize for ArtifactRefView<'__a> {
             __map.serialize_entry("artifactId", self.artifact_id)?;
         }
         {
-            __map.serialize_entry("sha256", self.sha256)?;
+            if let ::core::option::Option::Some(__v) = self.digest.as_option() {
+                __map.serialize_entry("digest", __v)?;
+            }
         }
         if let ::core::option::Option::Some(__v) = self.size_bytes {
             __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
@@ -336,11 +370,15 @@ impl ArtifactRefOwnedView {
         self.0.reborrow().artifact_id
     }
     /// Content digest over the artifact bytes; the claim-check key (ADR#0035 facet 3).
+    /// Uses the shared Digest type for consistency with every other digest in the
+    /// package (algorithm is typically "sha256").
     ///
-    /// Field 2: `sha256`
+    /// Field 2: `digest`
     #[must_use]
-    pub fn sha256(&self) -> &'_ str {
-        self.0.reborrow().sha256
+    pub fn digest(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
+        &self.0.reborrow().digest
     }
     /// Size of the referenced bytes.
     ///
@@ -983,8 +1021,8 @@ impl ::serde::Serialize for ArtifactMetadataOwnedView {
 pub struct StoredArtifactView<'a> {
     /// Content digest over the stored bytes; the claim-check key.
     ///
-    /// Field 1: `sha256`
-    pub sha256: &'a str,
+    /// Field 1: `digest`
+    pub digest: ::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'a>>,
     /// Size of the stored bytes.
     ///
     /// Field 2: `size_bytes`
@@ -997,13 +1035,13 @@ pub struct StoredArtifactView<'a> {
     pub __buffa_required_seen_0: u64,
 }
 impl<'a> StoredArtifactView<'a> {
-    /**Whether required field `sha256` was present on the wire.
+    /**Whether required field `digest` is set.
 
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_sha256(&self) -> bool {
-        self.__buffa_required_seen_0 & 1u64 != 0
+    pub const fn has_digest(&self) -> bool {
+        self.digest.is_set()
     }
     /**Whether required field `storage_ref` was present on the wire.
 
@@ -1011,7 +1049,7 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[must_use]
     #[inline]
     pub const fn has_storage_ref(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
+        self.__buffa_required_seen_0 & 1u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
@@ -1046,8 +1084,21 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.sha256 = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 1u64;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.digest.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.digest = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DigestView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -1062,7 +1113,7 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 view.storage_ref = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
+                view.__buffa_required_seen_0 |= 1u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -1084,7 +1135,14 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
         use ::buffa::alloc::string::ToString as _;
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::StoredArtifact {
-            sha256: self.sha256.to_string(),
+            digest: match self.digest.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Digest,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             size_bytes: self.size_bytes,
             storage_ref: self.storage_ref.to_string(),
             ..::core::default::Default::default()
@@ -1093,11 +1151,18 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
 }
 impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
+        if self.digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         if let Some(v) = self.size_bytes {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -1107,12 +1172,15 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.sha256, buf);
+        if self.digest.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.digest.write_to(__cache, buf);
+        }
         if let Some(v) = self.size_bytes {
             ::buffa::types::put_uint64_field(2u32, v, buf);
         }
@@ -1138,7 +1206,9 @@ impl<'__a> ::serde::Serialize for StoredArtifactView<'__a> {
         use ::serde::ser::SerializeMap as _;
         let mut __map = __s.serialize_map(::core::option::Option::None)?;
         {
-            __map.serialize_entry("sha256", self.sha256)?;
+            if let ::core::option::Option::Some(__v) = self.digest.as_option() {
+                __map.serialize_entry("digest", __v)?;
+            }
         }
         if let ::core::option::Option::Some(__v) = self.size_bytes {
             __map.serialize_entry("sizeBytes", &::buffa::json_helpers::ProtoJson(&__v))?;
@@ -1239,10 +1309,12 @@ impl StoredArtifactOwnedView {
     }
     /// Content digest over the stored bytes; the claim-check key.
     ///
-    /// Field 1: `sha256`
+    /// Field 1: `digest`
     #[must_use]
-    pub fn sha256(&self) -> &'_ str {
-        self.0.reborrow().sha256
+    pub fn digest(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
+        &self.0.reborrow().digest
     }
     /// Size of the stored bytes.
     ///

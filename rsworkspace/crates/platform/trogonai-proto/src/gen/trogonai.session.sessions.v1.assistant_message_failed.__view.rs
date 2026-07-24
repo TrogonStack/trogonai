@@ -18,6 +18,14 @@ pub struct AssistantMessageFailedView<'a> {
     ///
     /// Field 4: `detail`
     pub detail: ::core::option::Option<&'a str>,
+    /// Token accounting and cost billed for the partial turn; unset when the
+    /// provider reported none. Recorded so a cost fold does not undercount tokens
+    /// consumed by a turn that failed mid-generation.
+    ///
+    /// Field 5: `usage`
+    pub usage: ::buffa::MessageFieldView<
+        super::super::__buffa::view::TokenUsageView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -107,6 +115,27 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
                 )?;
                 view.detail = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.usage.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.usage = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::TokenUsageView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -137,13 +166,21 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
             message_id: self.message_id.to_string(),
             reason: self.reason,
             detail: self.detail.map(|s| s.to_string()),
+            usage: match self.usage.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::TokenUsage,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageFailedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -156,12 +193,20 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageFailedView<'a> {
         if let Some(ref v) = self.detail {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if self.usage.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.usage.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -171,6 +216,10 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageFailedView<'a> {
         ::buffa::types::put_int32_field(3u32, self.reason.to_i32(), buf);
         if let Some(ref v) = self.detail {
             ::buffa::types::put_string_field(4u32, v, buf);
+        }
+        if self.usage.is_set() {
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            self.usage.write_to(__cache, buf);
         }
     }
 }
@@ -203,6 +252,11 @@ impl<'__a> ::serde::Serialize for AssistantMessageFailedView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.detail {
             __map.serialize_entry("detail", __v)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.usage.as_option() {
+                __map.serialize_entry("usage", __v)?;
+            }
         }
         __map.end()
     }
@@ -323,6 +377,17 @@ impl AssistantMessageFailedOwnedView {
     #[must_use]
     pub fn detail(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().detail
+    }
+    /// Token accounting and cost billed for the partial turn; unset when the
+    /// provider reported none. Recorded so a cost fold does not undercount tokens
+    /// consumed by a turn that failed mid-generation.
+    ///
+    /// Field 5: `usage`
+    #[must_use]
+    pub fn usage(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::TokenUsageView<'_>> {
+        &self.0.reborrow().usage
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AssistantMessageFailedView<'static>>>

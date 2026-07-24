@@ -24,4 +24,7 @@ enum ToolCallFailureReason {
   TOOL_CALL_FAILURE_REASON_CANCELLED = 2;
   // Exceeded its time budget.
   TOOL_CALL_FAILURE_REASON_TIMEOUT = 3;
+  // Cut off as collateral of mid-turn user steering (parity with
+  // AssistantMessageFailureReason.INTERRUPTED), distinct from a targeted cancel.
+  TOOL_CALL_FAILURE_REASON_INTERRUPTED = 4;
 }

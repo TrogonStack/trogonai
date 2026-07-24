@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.session.sessions.v1;
 
+import "trogonai/session/sessions/v1/token_usage.proto";
+
 // AssistantMessageFailed records that an assistant turn did not complete
 // normally -- interrupted by user steering, cancelled, or errored -- so every
 // AssistantMessageStarted has a determinable outcome (AssistantMessageCompleted
@@ -13,6 +15,10 @@ message AssistantMessageFailed {
   AssistantMessageFailureReason reason = 3 [features.field_presence = LEGACY_REQUIRED];
   // Human-readable detail; empty when none.
   string detail = 4;
+  // Token accounting and cost billed for the partial turn; unset when the
+  // provider reported none. Recorded so a cost fold does not undercount tokens
+  // consumed by a turn that failed mid-generation.
+  TokenUsage usage = 5;
 }
 
 // AssistantMessageFailureReason is why an assistant turn did not complete.

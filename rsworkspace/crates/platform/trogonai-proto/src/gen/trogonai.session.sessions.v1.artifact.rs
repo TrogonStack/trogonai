@@ -2,8 +2,8 @@
 // source: trogonai/session/sessions/v1/artifact.proto
 
 /// ArtifactRef is an inline claim-check to an artifact stored out of line: the
-/// stream carries the sha256 and a preview, never the bytes. It appears inside
-/// messages and tool results that reference an artifact.
+/// stream carries the content digest and a preview, never the bytes. It appears
+/// inside messages and tool results that reference an artifact.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -18,10 +18,12 @@ pub struct ArtifactRef {
     )]
     pub artifact_id: ::buffa::alloc::string::String,
     /// Content digest over the artifact bytes; the claim-check key (ADR#0035 facet 3).
+    /// Uses the shared Digest type for consistency with every other digest in the
+    /// package (algorithm is typically "sha256").
     ///
-    /// Field 2: `sha256`
-    #[serde(rename = "sha256", with = "::buffa::json_helpers::proto_string")]
-    pub sha256: ::buffa::alloc::string::String,
+    /// Field 2: `digest`
+    #[serde(rename = "digest")]
+    pub digest: ::buffa::MessageField<Digest>,
     /// Size of the referenced bytes.
     ///
     /// Field 3: `size_bytes`
@@ -55,7 +57,7 @@ impl ::core::fmt::Debug for ArtifactRef {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("ArtifactRef")
             .field("artifact_id", &self.artifact_id)
-            .field("sha256", &self.sha256)
+            .field("digest", &self.digest)
             .field("size_bytes", &self.size_bytes)
             .field("mime", &self.mime)
             .field("preview", &self.preview)
@@ -110,12 +112,19 @@ impl ::buffa::Message for ArtifactRef {
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.artifact_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
+        if self.digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         if let Some(v) = self.size_bytes {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -130,13 +139,16 @@ impl ::buffa::Message for ArtifactRef {
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.artifact_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.sha256, buf);
+        if self.digest.is_set() {
+            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            self.digest.write_to(__cache, buf);
+        }
         if let Some(v) = self.size_bytes {
             ::buffa::types::put_uint64_field(3u32, v, buf);
         }
@@ -171,7 +183,11 @@ impl ::buffa::Message for ArtifactRef {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.sha256, buf)?;
+                ::buffa::Message::merge_length_delimited(
+                    self.digest.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -216,7 +232,7 @@ impl ::buffa::Message for ArtifactRef {
     }
     fn clear(&mut self) {
         self.artifact_id.clear();
-        self.sha256.clear();
+        self.digest = ::buffa::MessageField::none();
         self.size_bytes = ::core::option::Option::None;
         self.mime.clear();
         self.preview = ::core::option::Option::None;
@@ -736,9 +752,9 @@ pub mod artifact_metadata {
 pub struct StoredArtifact {
     /// Content digest over the stored bytes; the claim-check key.
     ///
-    /// Field 1: `sha256`
-    #[serde(rename = "sha256", with = "::buffa::json_helpers::proto_string")]
-    pub sha256: ::buffa::alloc::string::String,
+    /// Field 1: `digest`
+    #[serde(rename = "digest")]
+    pub digest: ::buffa::MessageField<Digest>,
     /// Size of the stored bytes.
     ///
     /// Field 2: `size_bytes`
@@ -762,7 +778,7 @@ pub struct StoredArtifact {
 impl ::core::fmt::Debug for StoredArtifact {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("StoredArtifact")
-            .field("sha256", &self.sha256)
+            .field("digest", &self.digest)
             .field("size_bytes", &self.size_bytes)
             .field("storage_ref", &self.storage_ref)
             .finish()
@@ -798,11 +814,18 @@ impl ::buffa::Message for StoredArtifact {
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.sha256) as u32;
+        if self.digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         if let Some(v) = self.size_bytes {
             size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
         }
@@ -811,12 +834,15 @@ impl ::buffa::Message for StoredArtifact {
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.sha256, buf);
+        if self.digest.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.digest.write_to(__cache, buf);
+        }
         if let Some(v) = self.size_bytes {
             ::buffa::types::put_uint64_field(2u32, v, buf);
         }
@@ -838,7 +864,11 @@ impl ::buffa::Message for StoredArtifact {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.sha256, buf)?;
+                ::buffa::Message::merge_length_delimited(
+                    self.digest.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             2u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -863,7 +893,7 @@ impl ::buffa::Message for StoredArtifact {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.sha256.clear();
+        self.digest = ::buffa::MessageField::none();
         self.size_bytes = ::core::option::Option::None;
         self.storage_ref.clear();
     }

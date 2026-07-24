@@ -9,6 +9,10 @@ message ExecutionAttemptEnded {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
   AttemptOutcome outcome = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable explanation of the outcome; empty when none. This is a
+  // failure-only event (no success outcome exists), so an audit fold needs it to
+  // explain, not just classify, why the attempt ended.
+  string detail = 4;
 }
 
 // AttemptOutcome is how an execution attempt ended.

@@ -12,6 +12,12 @@ pub struct ExecutionAttemptEndedView<'a> {
     pub execution_attempt_id: &'a str,
     /// Field 3: `outcome`
     pub outcome: ::buffa::EnumValue<super::super::AttemptOutcome>,
+    /// Human-readable explanation of the outcome; empty when none. This is a
+    /// failure-only event (no success outcome exists), so an audit fold needs it to
+    /// explain, not just classify, why the attempt ended.
+    ///
+    /// Field 4: `detail`
+    pub detail: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -94,6 +100,13 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptEndedView<'a> {
                 );
                 view.__buffa_required_seen_0 |= 4u64;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.detail = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -123,6 +136,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptEndedView<'a> {
             session_id: self.session_id.to_string(),
             execution_attempt_id: self.execution_attempt_id.to_string(),
             outcome: self.outcome,
+            detail: self.detail.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -141,6 +155,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptEndedView<'a> {
             let val = self.outcome.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
+        if let Some(ref v) = self.detail {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -154,6 +171,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptEndedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.execution_attempt_id, buf);
         ::buffa::types::put_int32_field(3u32, self.outcome.to_i32(), buf);
+        if let Some(ref v) = self.detail {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -182,6 +202,9 @@ impl<'__a> ::serde::Serialize for ExecutionAttemptEndedView<'__a> {
         }
         {
             __map.serialize_entry("outcome", &self.outcome)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.detail {
+            __map.serialize_entry("detail", __v)?;
         }
         __map.end()
     }
@@ -293,6 +316,15 @@ impl ExecutionAttemptEndedOwnedView {
     #[must_use]
     pub fn outcome(&self) -> ::buffa::EnumValue<super::super::AttemptOutcome> {
         self.0.reborrow().outcome
+    }
+    /// Human-readable explanation of the outcome; empty when none. This is a
+    /// failure-only event (no success outcome exists), so an audit fold needs it to
+    /// explain, not just classify, why the attempt ended.
+    ///
+    /// Field 4: `detail`
+    #[must_use]
+    pub fn detail(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().detail
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ExecutionAttemptEndedView<'static>>>

@@ -233,6 +233,16 @@ pub struct AssistantMessageFailed {
     /// Field 4: `detail`
     #[serde(rename = "detail", skip_serializing_if = "::core::option::Option::is_none")]
     pub detail: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Token accounting and cost billed for the partial turn; unset when the
+    /// provider reported none. Recorded so a cost fold does not undercount tokens
+    /// consumed by a turn that failed mid-generation.
+    ///
+    /// Field 5: `usage`
+    #[serde(
+        rename = "usage",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub usage: ::buffa::MessageField<TokenUsage>,
 }
 impl ::core::fmt::Debug for AssistantMessageFailed {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -241,6 +251,7 @@ impl ::core::fmt::Debug for AssistantMessageFailed {
             .field("message_id", &self.message_id)
             .field("reason", &self.reason)
             .field("detail", &self.detail)
+            .field("usage", &self.usage)
             .finish()
     }
 }
@@ -277,7 +288,7 @@ impl ::buffa::Message for AssistantMessageFailed {
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -290,11 +301,19 @@ impl ::buffa::Message for AssistantMessageFailed {
         if let Some(ref v) = self.detail {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        if self.usage.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.usage.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::bytes::BufMut,
     ) {
         #[allow(unused_imports)]
@@ -304,6 +323,10 @@ impl ::buffa::Message for AssistantMessageFailed {
         ::buffa::types::put_int32_field(3u32, self.reason.to_i32(), buf);
         if let Some(ref v) = self.detail {
             ::buffa::types::put_string_field(4u32, v, buf);
+        }
+        if self.usage.is_set() {
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            self.usage.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -350,6 +373,17 @@ impl ::buffa::Message for AssistantMessageFailed {
                     buf,
                 )?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.usage.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -361,6 +395,7 @@ impl ::buffa::Message for AssistantMessageFailed {
         self.message_id.clear();
         self.reason = ::buffa::EnumValue::from(0);
         self.detail = ::core::option::Option::None;
+        self.usage = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AssistantMessageFailed {

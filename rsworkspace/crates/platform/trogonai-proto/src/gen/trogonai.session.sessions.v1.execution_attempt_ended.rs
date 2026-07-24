@@ -188,6 +188,13 @@ pub struct ExecutionAttemptEnded {
     /// Field 3: `outcome`
     #[serde(rename = "outcome", with = "::buffa::json_helpers::proto_enum")]
     pub outcome: ::buffa::EnumValue<AttemptOutcome>,
+    /// Human-readable explanation of the outcome; empty when none. This is a
+    /// failure-only event (no success outcome exists), so an audit fold needs it to
+    /// explain, not just classify, why the attempt ended.
+    ///
+    /// Field 4: `detail`
+    #[serde(rename = "detail", skip_serializing_if = "::core::option::Option::is_none")]
+    pub detail: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for ExecutionAttemptEnded {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -195,6 +202,7 @@ impl ::core::fmt::Debug for ExecutionAttemptEnded {
             .field("session_id", &self.session_id)
             .field("execution_attempt_id", &self.execution_attempt_id)
             .field("outcome", &self.outcome)
+            .field("detail", &self.detail)
             .finish()
     }
 }
@@ -204,6 +212,18 @@ impl ExecutionAttemptEnded {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1.ExecutionAttemptEnded";
+}
+impl ExecutionAttemptEnded {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::detail`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_detail(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.detail = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(ExecutionAttemptEnded);
 impl ::buffa::MessageName for ExecutionAttemptEnded {
@@ -231,6 +251,9 @@ impl ::buffa::Message for ExecutionAttemptEnded {
             let val = self.outcome.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
         }
+        if let Some(ref v) = self.detail {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         size
     }
     fn write_to(
@@ -243,6 +266,9 @@ impl ::buffa::Message for ExecutionAttemptEnded {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.execution_attempt_id, buf);
         ::buffa::types::put_int32_field(3u32, self.outcome.to_i32(), buf);
+        if let Some(ref v) = self.detail {
+            ::buffa::types::put_string_field(4u32, v, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -278,6 +304,16 @@ impl ::buffa::Message for ExecutionAttemptEnded {
                     ::buffa::types::decode_int32(buf)?,
                 );
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self.detail.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -288,6 +324,7 @@ impl ::buffa::Message for ExecutionAttemptEnded {
         self.session_id.clear();
         self.execution_attempt_id.clear();
         self.outcome = ::buffa::EnumValue::from(0);
+        self.detail = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ExecutionAttemptEnded {

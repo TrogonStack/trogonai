@@ -12,6 +12,9 @@ pub enum ToolCallFailureReason {
     TOOL_CALL_FAILURE_REASON_CANCELLED = 2i32,
     /// Exceeded its time budget.
     TOOL_CALL_FAILURE_REASON_TIMEOUT = 3i32,
+    /// Cut off as collateral of mid-turn user steering (parity with
+    /// AssistantMessageFailureReason.INTERRUPTED), distinct from a targeted cancel.
+    TOOL_CALL_FAILURE_REASON_INTERRUPTED = 4i32,
 }
 impl ToolCallFailureReason {
     ///Idiomatic alias for [`Self::TOOL_CALL_FAILURE_REASON_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -26,6 +29,9 @@ impl ToolCallFailureReason {
     ///Idiomatic alias for [`Self::TOOL_CALL_FAILURE_REASON_TIMEOUT`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Timeout: Self = Self::TOOL_CALL_FAILURE_REASON_TIMEOUT;
+    ///Idiomatic alias for [`Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Interrupted: Self = Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED;
 }
 impl ::core::default::Default for ToolCallFailureReason {
     fn default() -> Self {
@@ -132,6 +138,9 @@ impl ::buffa::Enumeration for ToolCallFailureReason {
                 ::core::option::Option::Some(Self::TOOL_CALL_FAILURE_REASON_CANCELLED)
             }
             3i32 => ::core::option::Option::Some(Self::TOOL_CALL_FAILURE_REASON_TIMEOUT),
+            4i32 => {
+                ::core::option::Option::Some(Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -148,6 +157,9 @@ impl ::buffa::Enumeration for ToolCallFailureReason {
                 "TOOL_CALL_FAILURE_REASON_CANCELLED"
             }
             Self::TOOL_CALL_FAILURE_REASON_TIMEOUT => "TOOL_CALL_FAILURE_REASON_TIMEOUT",
+            Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED => {
+                "TOOL_CALL_FAILURE_REASON_INTERRUPTED"
+            }
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -164,6 +176,9 @@ impl ::buffa::Enumeration for ToolCallFailureReason {
             "TOOL_CALL_FAILURE_REASON_TIMEOUT" => {
                 ::core::option::Option::Some(Self::TOOL_CALL_FAILURE_REASON_TIMEOUT)
             }
+            "TOOL_CALL_FAILURE_REASON_INTERRUPTED" => {
+                ::core::option::Option::Some(Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -173,6 +188,7 @@ impl ::buffa::Enumeration for ToolCallFailureReason {
             Self::TOOL_CALL_FAILURE_REASON_ERROR,
             Self::TOOL_CALL_FAILURE_REASON_CANCELLED,
             Self::TOOL_CALL_FAILURE_REASON_TIMEOUT,
+            Self::TOOL_CALL_FAILURE_REASON_INTERRUPTED,
         ]
     }
 }
