@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionFailed is the terminal failure marker for a session; a liveness
+// watchdog records this when no further attempt will run (ADR#0035 facet 6).
+// It is an invariant-bearing transition guarded by WRITE_PRECONDITION = At(current_position).
+message SessionFailed {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string error = 2 [features.field_presence = LEGACY_REQUIRED];
+}

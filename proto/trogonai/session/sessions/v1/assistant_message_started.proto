@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// AssistantMessageStarted is a coarse durable fact that an assistant turn
+// began; streamed token deltas are delivered out of band and never appended
+// per token. It is a commuting happened-fact (WRITE_PRECONDITION = Any,
+// ADR#0035 facet 2).
+message AssistantMessageStarted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string message_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string model = 3 [features.field_presence = LEGACY_REQUIRED];
+}

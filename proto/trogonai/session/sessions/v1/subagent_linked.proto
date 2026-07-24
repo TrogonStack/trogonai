@@ -1,0 +1,14 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+import "trogonai/session/sessions/v1/cascade_policy.proto";
+
+// SubagentLinked is the child-side link fact naming its parent and the
+// cascade policy (ADR#0035 facet 6).
+message SubagentLinked {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 parent_sequence_at_dispatch = 3 [features.field_presence = LEGACY_REQUIRED];
+  CascadePolicy cascade_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+}

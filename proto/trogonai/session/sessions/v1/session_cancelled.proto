@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// SessionCancelled is the cancellation terminal marker for a session; it is also
+// emitted on the child in the cascade batch after SubagentParentTerminated
+// (ADR#0035 facet 6). It is an invariant-bearing transition guarded by
+// WRITE_PRECONDITION = At(current_position).
+message SessionCancelled {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 2;
+}

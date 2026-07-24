@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// TokenUsage is the token accounting recorded for one completed assistant
+// message; audit and budgeting input, never an identity or ordering input.
+message TokenUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_creation_tokens = 3;
+  uint64 cache_read_tokens = 4;
+}

@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1;
+
+// FileChangeKind classifies a recorded file change.
+enum FileChangeKind {
+  FILE_CHANGE_KIND_UNSPECIFIED = 0;
+  FILE_CHANGE_KIND_CREATED = 1;
+  FILE_CHANGE_KIND_MODIFIED = 2;
+  FILE_CHANGE_KIND_DELETED = 3;
+  FILE_CHANGE_KIND_RENAMED = 4;
+}
