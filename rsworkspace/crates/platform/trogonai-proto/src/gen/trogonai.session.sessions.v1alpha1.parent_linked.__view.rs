@@ -8,7 +8,10 @@
 /// parent's DelegationDispatched, joined by operation_id (the saga join key);
 /// parent_dispatched_at is the parent's DelegationDispatched event's own
 /// SessionOrdinal, copied onto the child only after the parent append acks
-/// (parent-first ordering), never predicted.
+/// (parent-first ordering), never predicted. cascade_policy is likewise copied
+/// verbatim from the parent's DelegationDispatched (the authoritative saga
+/// input); child creation rejects a differing copy as a typed conflict, so the
+/// two records cannot diverge.
 #[derive(Clone, Debug, Default)]
 pub struct ParentLinkedView<'a> {
     /// Field 1: `session_id`

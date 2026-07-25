@@ -10,7 +10,10 @@
 /// (WRITE_PRECONDITION = At), letting DispatchDelegation refuse to spawn under
 /// an already-terminal parent race-safely. Crash repair: the reconciler
 /// observes a DelegationDispatched with no child stream and re-issues child
-/// creation; NoStream makes the repair exactly-once.
+/// creation; NoStream makes the repair exactly-once. cascade_policy here is the
+/// authoritative saga input: repair mints the child from this fact alone, and
+/// ParentLinked.cascade_policy is copied verbatim from it, with a mismatching
+/// copy rejected at child creation as a typed conflict.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]

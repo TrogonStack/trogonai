@@ -9,7 +9,12 @@
 /// first-terminal-outcome-wins fold rule: the first of the two to appear in
 /// fold order is authoritative, and a later conflicting outcome is retained as
 /// audit-only, surfaced by a projection flag, never folded into state (D4). It
-/// is a commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+/// deliberately carries no model field: the model is recorded once on
+/// AssistantMessageStarted and joined by message_id (ADR#0024's
+/// record-a-fact-once rule); only AssistantMessageCompleted repeats the model,
+/// inside its provider-visible CanonicalMessage, where id/model agreement with
+/// the start is validated. It is a commuting happened-fact
+/// (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
 #[derive(Clone, Debug, Default)]
 pub struct AssistantMessageFailedView<'a> {
     /// Field 1: `session_id`

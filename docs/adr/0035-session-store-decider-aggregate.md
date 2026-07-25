@@ -522,7 +522,12 @@ Only after that append acks does child creation happen: the atomic
 subject. `ParentLinked` carries `operation_id` (the saga's join key, reusing the
 operation-ledger id) and `parent_dispatched_at`, a `SessionOrdinal` (facet 2)
 copied from the parent's `DelegationDispatched` event only after that parent
-append has acked. If the process crashes between the parent append and the
+append has acked. `DelegationDispatched.cascade_policy` is the authoritative
+saga input -- the crash-repair path mints the child from the parent fact alone,
+so the parent fact must carry everything creation needs -- and
+`ParentLinked.cascade_policy` is copied verbatim from it by the creation batch;
+`decide` rejects a creation whose copy differs as a typed conflict, so the two
+records cannot diverge. If the process crashes between the parent append and the
 child creation, a reconciler observes a `DelegationDispatched` with no
 corresponding child stream and re-issues child creation; `NoStream` makes that
 repair exactly-once, and a duplicate creation attempt simply no-ops on
@@ -743,7 +748,7 @@ decision.
 | `CreateSession` | none | `NoStream` | `[SessionStarted]` | stream must not exist | `session_id` |
 | `ForkSession` | source existence | `NoStream` (child) | `[SessionStarted, SessionForked]` | child stream must not exist; source must exist | `session_id` (child) |
 | `DispatchDelegation` | parent head | `At` (parent) | `[DelegationDispatched]` | parent not already terminal | `operation_id` |
-| `CreateChildSession` (saga step) | child stream existence | `NoStream` (child) | `[SessionStarted, ParentLinked]` | child stream must not exist | `operation_id` |
+| `CreateChildSession` (saga step) | child stream existence | `NoStream` (child) | `[SessionStarted, ParentLinked]` | child stream must not exist; `parent_dispatched_at` and `cascade_policy` copied verbatim from the parent's `DelegationDispatched` | `operation_id` |
 | `CloseSession` | head | `At` | `[SessionClosed]` | not already terminal | `session_id` + terminal-request id |
 | `CancelSession` | head | `At` | `[SessionCancelled]` | not already terminal | `session_id` + terminal-request id |
 | `FailSession` | head | `At` | `[SessionFailed]` | not already terminal | `session_id` + terminal-request id |
@@ -768,7 +773,7 @@ decision.
 | `RecordUserMessage` | none | `Any` | `[UserMessageRecorded]` | role is `USER` | `message_id` |
 | `StartAssistantMessage` | none | `Any` | `[AssistantMessageStarted]` | none | `message_id` |
 | `CompleteAssistantMessage` | none | `Any` | `[AssistantMessageCompleted]` | role is `ASSISTANT`; id/model agree with start | `message_id` |
-| `FailAssistantMessage` | none | `Any` | `[AssistantMessageFailed]` | id/model agree with start | `message_id` |
+| `FailAssistantMessage` | none | `Any` | `[AssistantMessageFailed]` | id references a started message; first terminal outcome per id wins | `message_id` |
 | `RequestToolCall` | none | `Any` | `[ToolCallRequested]` | none | `tool_call_id` |
 | `StartToolCall` | none | `Any` | `[ToolCallStarted]` | `tool_call_id` matches a request | `tool_call_id` |
 | `CompleteToolCall` | none | `Any` | `[ToolCallCompleted]` | first-terminal-outcome-wins vs. `ToolCallFailed` | `tool_execution_id` |

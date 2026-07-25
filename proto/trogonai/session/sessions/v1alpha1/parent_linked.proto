@@ -12,7 +12,10 @@ import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 // parent's DelegationDispatched, joined by operation_id (the saga join key);
 // parent_dispatched_at is the parent's DelegationDispatched event's own
 // SessionOrdinal, copied onto the child only after the parent append acks
-// (parent-first ordering), never predicted.
+// (parent-first ordering), never predicted. cascade_policy is likewise copied
+// verbatim from the parent's DelegationDispatched (the authoritative saga
+// input); child creation rejects a differing copy as a typed conflict, so the
+// two records cannot diverge.
 message ParentLinked {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
