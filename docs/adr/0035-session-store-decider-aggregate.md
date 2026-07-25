@@ -259,10 +259,17 @@ processor redelivers a command after a crash before its ack -- so every command
 carries a caller-supplied idempotency key, stable across redelivery, and no
 domain payload gains a separate identity field of its own. The runtime derives
 each appended event's envelope `Event.id` deterministically: UUIDv5 over
-`(command idempotency key, index of the event within the decision's batch)`. A
-redelivered command therefore reproduces byte-identical event ids on retry,
-while distinct events within one multi-event batch (a `[SessionStarted,
-SessionForked]` fork, say) stay distinct -- no batch aliasing. This is what makes
+`(resolved stream subject, command type, command idempotency key, index of the
+event within the decision's batch)`. The subject and command type are in the
+derivation because `Nats-Msg-Id` dedup is stream-wide and every session subject
+shares the one physical `SESSION_EVENTS` stream (facet 1): without them, two
+different sessions -- or two different commands -- reusing one idempotency key
+would collide to one id and the second append would be silently swallowed as a
+duplicate. With them, key uniqueness only has to hold per session and command
+type, which the caller can actually guarantee. A redelivered command therefore
+reproduces byte-identical event ids on retry, while distinct events within one
+multi-event batch (a `[SessionStarted, SessionForked]` fork, say) stay distinct
+-- no batch aliasing, and no cross-session aliasing. This is what makes
 the `Any` path's at-least-once append safe: two concurrent redeliveries sharing
 a key both replay state before either append is visible, both conclude the key
 is new, and both append -- but they append the *same* event id, so the fold and
