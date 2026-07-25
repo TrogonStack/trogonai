@@ -26,6 +26,30 @@ fn assistant_message() -> v1alpha1::CanonicalMessage {
     }
 }
 
+fn artifact_ref() -> v1alpha1::ArtifactRef {
+    v1alpha1::ArtifactRef {
+        artifact_id: "artifact-1".to_string(),
+        digest: MessageField::some(digest()),
+        size_bytes: 128,
+        mime: "text/plain".to_string(),
+        preview: None,
+        truncated: None,
+    }
+}
+
+fn checkpoint() -> v1alpha1::Checkpoint {
+    v1alpha1::Checkpoint {
+        reference: "checkpoint-ref".to_string(),
+        checkpoint_type: "full".to_string(),
+        digest: MessageField::some(digest()),
+        implementation_version: "v1".to_string(),
+        checkpoint_id: "checkpoint-1".to_string(),
+        producing_execution_attempt_id: "attempt-1".to_string(),
+        covers_through: MessageField::some(session_ordinal(1)),
+        session_execution_plan_digest: MessageField::some(digest()),
+    }
+}
+
 #[test]
 fn validate_session_event_rejects_missing_event_case() {
     let event = v1alpha1::SessionEvent { event: None };
@@ -715,4 +739,1132 @@ fn validate_session_started_accepts_valid_digest() {
     };
 
     assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_failed_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionFailed {
+                session_id: "session-1".to_string(),
+                detail: "boom".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::SessionFailureReason::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_session_failed_accepts_known_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionFailed {
+                session_id: "session-1".to_string(),
+                detail: "boom".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::SessionFailureReason::ExecutionError),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_hidden_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionHidden {
+                session_id: "session-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::SessionHiddenReason::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_session_hidden_accepts_known_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionHidden {
+                session_id: "session-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::SessionHiddenReason::UserRequested),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_forked_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionForked {
+                session_id: "session-1".to_string(),
+                source_session_id: "session-0".to_string(),
+                context_prefix_boundary: MessageField::some(session_ordinal(3)),
+                reason: buffa::EnumValue::from(v1alpha1::ForkReason::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_session_forked_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionForked {
+                session_id: "session-1".to_string(),
+                source_session_id: "session-0".to_string(),
+                context_prefix_boundary: MessageField::some(session_ordinal(3)),
+                reason: buffa::EnumValue::from(v1alpha1::ForkReason::ManualBranch),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_rewound_rejects_zero_keep_through() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionRewound {
+                session_id: "session-1".to_string(),
+                keep_through: MessageField::some(session_ordinal(0)),
+                reason: buffa::EnumValue::from(v1alpha1::RewindReason::Manual),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::OrdinalNotPositive { field: "keep_through" })
+    );
+}
+
+#[test]
+fn validate_session_rewound_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionRewound {
+                session_id: "session-1".to_string(),
+                keep_through: MessageField::some(session_ordinal(2)),
+                reason: buffa::EnumValue::from(v1alpha1::RewindReason::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_session_rewound_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionRewound {
+                session_id: "session-1".to_string(),
+                keep_through: MessageField::some(session_ordinal(2)),
+                reason: buffa::EnumValue::from(v1alpha1::RewindReason::Manual),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_assistant_message_failed_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageFailed {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Unspecified),
+                detail: None,
+                usage: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_assistant_message_failed_accepts_known_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageFailed {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
+                detail: None,
+                usage: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_failed_rejects_unspecified_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallFailed {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                error: "boom".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_tool_call_failed_accepts_known_reason() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallFailed {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                error: "boom".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_ready_rejects_wrong_length_sha256_digest() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptReady {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                ready_attestation_ref: "ready-ref".to_string(),
+                ready_attestation_digest: MessageField::some(v1alpha1::Digest {
+                    algorithm: "sha256".to_string(),
+                    value: vec![0u8; 4],
+                }),
+                ready_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::Sha256DigestWrongLength {
+            field: "ready_attestation_digest",
+            actual: 4
+        })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_ready_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptReady {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                ready_attestation_ref: "ready-ref".to_string(),
+                ready_attestation_digest: MessageField::some(digest()),
+                ready_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_ended_rejects_unspecified_outcome() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptEnded {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Unspecified),
+                detail: None,
+                ended_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "outcome" })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_ended_accepts_known_outcome() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptEnded {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Failed),
+                detail: None,
+                ended_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_delegation_dispatched_rejects_unspecified_cascade_policy() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::DelegationDispatched {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                child_session_id: "session-2".to_string(),
+                cascade_policy: buffa::EnumValue::from(v1alpha1::CascadePolicy::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "cascade_policy"
+        })
+    );
+}
+
+#[test]
+fn validate_delegation_dispatched_accepts_known_cascade_policy() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::DelegationDispatched {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                child_session_id: "session-2".to_string(),
+                cascade_policy: buffa::EnumValue::from(v1alpha1::CascadePolicy::CascadeOnParentTerminal),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_parent_linked_rejects_zero_parent_dispatched_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentLinked {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                parent_dispatched_at: MessageField::some(session_ordinal(0)),
+                cascade_policy: buffa::EnumValue::from(v1alpha1::CascadePolicy::CascadeOnParentTerminal),
+                operation_id: "operation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::OrdinalNotPositive {
+            field: "parent_dispatched_at"
+        })
+    );
+}
+
+#[test]
+fn validate_parent_linked_rejects_unspecified_cascade_policy() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentLinked {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                parent_dispatched_at: MessageField::some(session_ordinal(1)),
+                cascade_policy: buffa::EnumValue::from(v1alpha1::CascadePolicy::Unspecified),
+                operation_id: "operation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "cascade_policy"
+        })
+    );
+}
+
+#[test]
+fn validate_parent_linked_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentLinked {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                parent_dispatched_at: MessageField::some(session_ordinal(1)),
+                cascade_policy: buffa::EnumValue::from(v1alpha1::CascadePolicy::CascadeOnParentTerminal),
+                operation_id: "operation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_parent_terminated_rejects_unspecified_cause() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentTerminated {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                cause: buffa::EnumValue::from(v1alpha1::ParentTerminalCause::Unspecified),
+                triggering_event_id: "event-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "cause" })
+    );
+}
+
+#[test]
+fn validate_parent_terminated_accepts_known_cause() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentTerminated {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                cause: buffa::EnumValue::from(v1alpha1::ParentTerminalCause::Closed),
+                triggering_event_id: "event-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_parent_history_invalidated_rejects_zero_parent_keep_through() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentHistoryInvalidated {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                parent_keep_through: MessageField::some(session_ordinal(0)),
+                triggering_event_id: "event-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::OrdinalNotPositive {
+            field: "parent_keep_through"
+        })
+    );
+}
+
+#[test]
+fn validate_parent_history_invalidated_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentHistoryInvalidated {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                parent_keep_through: MessageField::some(session_ordinal(4)),
+                triggering_event_id: "event-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_external_delegation_dispatched_rejects_wrong_length_sha256_digest() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExternalDelegationDispatched {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                delegate_reference: "delegate-ref".to_string(),
+                authenticated_remote_subject: "subject-1".to_string(),
+                authorization_reference: "authz-ref".to_string(),
+                request_digest: MessageField::some(v1alpha1::Digest {
+                    algorithm: "sha256".to_string(),
+                    value: vec![0u8; 4],
+                }),
+                correlation_id: "correlation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::Sha256DigestWrongLength {
+            field: "request_digest",
+            actual: 4
+        })
+    );
+}
+
+#[test]
+fn validate_external_delegation_dispatched_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExternalDelegationDispatched {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                delegate_reference: "delegate-ref".to_string(),
+                authenticated_remote_subject: "subject-1".to_string(),
+                authorization_reference: "authz-ref".to_string(),
+                request_digest: MessageField::some(digest()),
+                correlation_id: "correlation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_operation_reserved_rejects_unspecified_operation_kind() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::OperationReserved {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                request_digest: MessageField::some(digest()),
+                operation_kind: buffa::EnumValue::from(v1alpha1::OperationKind::Unspecified),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "operation_kind"
+        })
+    );
+}
+
+#[test]
+fn validate_operation_reserved_rejects_wrong_length_sha256_digest() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::OperationReserved {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                request_digest: MessageField::some(v1alpha1::Digest {
+                    algorithm: "sha256".to_string(),
+                    value: vec![0u8; 4],
+                }),
+                operation_kind: buffa::EnumValue::from(v1alpha1::OperationKind::Tool),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::Sha256DigestWrongLength {
+            field: "request_digest",
+            actual: 4
+        })
+    );
+}
+
+#[test]
+fn validate_operation_reserved_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::OperationReserved {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                request_digest: MessageField::some(digest()),
+                operation_kind: buffa::EnumValue::from(v1alpha1::OperationKind::Tool),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_system_notice_recorded_rejects_unspecified_level() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SystemNoticeRecorded {
+                session_id: "session-1".to_string(),
+                level: buffa::EnumValue::from(v1alpha1::NoticeLevel::Unspecified),
+                text: "notice".to_string(),
+                tool_call_id: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::UnspecifiedEnum { field: "level" })
+    );
+}
+
+#[test]
+fn validate_system_notice_recorded_accepts_known_level() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SystemNoticeRecorded {
+                session_id: "session-1".to_string(),
+                level: buffa::EnumValue::from(v1alpha1::NoticeLevel::Info),
+                text: "notice".to_string(),
+                tool_call_id: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_assistant_message_started_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageStarted {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                model: "model".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_requested_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallRequested {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                name: "search".to_string(),
+                input_json: "{}".to_string(),
+                parent_tool_use_id: None,
+                operation_id: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_approved_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallApproved {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                approved_by: "user-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_denied_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallDenied {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                denied_by: "user-1".to_string(),
+                reason: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_started_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallStarted {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_delegation_detached_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::DelegationDetached {
+                session_id: "session-1".to_string(),
+                child_session_id: "session-2".to_string(),
+                reason: None,
+                detach_operation_id: "operation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_parent_detached_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ParentDetached {
+                session_id: "session-1".to_string(),
+                parent_session_id: "session-0".to_string(),
+                detach_operation_id: "operation-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_operation_cancellation_requested_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::OperationCancellationRequested {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                reason: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_artifact_erased_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactErased {
+                session_id: "session-1".to_string(),
+                artifact_id: "artifact-1".to_string(),
+                reason: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_renamed_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionRenamed {
+                session_id: "session-1".to_string(),
+                title: "New title".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_archived_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionArchived {
+                session_id: "session-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_unarchived_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionUnarchived {
+                session_id: "session-1".to_string(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::none(),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallCompleted {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                        v1alpha1::TextToolResult {
+                            content: "done".to_string(),
+                            truncated: None,
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_artifact_recorded_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::none(),
+                    source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
+                        v1alpha1::StoredArtifact {
+                            digest: MessageField::some(digest()),
+                            size_bytes: 128,
+                            storage_ref: "blob://artifact-1".to_string(),
+                            mime: "text/plain".to_string(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_operation_outcome_recorded_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::OperationOutcomeRecorded {
+                session_id: "session-1".to_string(),
+                operation_id: "operation-1".to_string(),
+                outcome: Some(v1alpha1::operation_outcome_recorded::Outcome::Succeeded(Box::new(
+                    v1alpha1::OperationSucceeded {
+                        response_digest: MessageField::some(digest()),
+                        response_ref: MessageField::some(artifact_ref()),
+                    },
+                ))),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_checkpoint_produced_accepts_valid_event() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::CheckpointProduced {
+                session_id: "session-1".to_string(),
+                checkpoint: MessageField::some(checkpoint()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_started_accepts_valid_restored_checkpoint() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::some(checkpoint()),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_started_rejects_invalid_restored_checkpoint() {
+    let mut broken_checkpoint = checkpoint();
+    broken_checkpoint.reference = String::new();
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::some(broken_checkpoint),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "checkpoint.reference"
+        })
+    );
+}
+
+#[test]
+fn validate_redaction_applied_rejects_empty_first_event_id() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::RedactionApplied {
+                session_id: "session-1".to_string(),
+                redacted_event_ids: vec![String::new(), "event-2".to_string()],
+                reason: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "redacted_event_ids[0]"
+        })
+    );
+}
+
+#[test]
+fn validate_redaction_applied_rejects_empty_non_first_event_id() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::RedactionApplied {
+                session_id: "session-1".to_string(),
+                redacted_event_ids: vec!["event-1".to_string(), String::new()],
+                reason: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "redacted_event_ids[n]"
+        })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_started_rejects_checkpoint_with_empty_producing_execution_attempt_id() {
+    let mut broken_checkpoint = checkpoint();
+    broken_checkpoint.producing_execution_attempt_id = String::new();
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::some(broken_checkpoint),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "checkpoint.producing_execution_attempt_id"
+        })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_started_rejects_checkpoint_with_invalid_session_execution_plan_digest() {
+    let mut broken_checkpoint = checkpoint();
+    broken_checkpoint.session_execution_plan_digest = MessageField::some(v1alpha1::Digest {
+        algorithm: String::new(),
+        value: vec![0u8; 32],
+    });
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::some(broken_checkpoint),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyDigestAlgorithm {
+            field: "checkpoint.session_execution_plan_digest"
+        })
+    );
 }
