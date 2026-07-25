@@ -126,6 +126,9 @@ pub enum SessionEventValidationError {
     #[error("{field}.algorithm must not be empty")]
     EmptyDigestAlgorithm { field: &'static str },
 
+    #[error("{field}.algorithm must be \"sha256\"; v1alpha1 supports no other digest algorithm (ADR#0035 facet 3)")]
+    UnsupportedDigestAlgorithm { field: &'static str },
+
     #[error("{field}.value must be exactly 32 bytes for algorithm sha256, got {actual}")]
     Sha256DigestWrongLength { field: &'static str, actual: usize },
 
@@ -175,7 +178,10 @@ fn require_digest(digest: &v1alpha1::Digest, field: &'static str) -> Result<(), 
     if digest.algorithm.is_empty() {
         return Err(SessionEventValidationError::EmptyDigestAlgorithm { field });
     }
-    if digest.algorithm == "sha256" && digest.value.len() != 32 {
+    if digest.algorithm != "sha256" {
+        return Err(SessionEventValidationError::UnsupportedDigestAlgorithm { field });
+    }
+    if digest.value.len() != 32 {
         return Err(SessionEventValidationError::Sha256DigestWrongLength {
             field,
             actual: digest.value.len(),
