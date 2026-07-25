@@ -104,6 +104,12 @@ pub enum SessionEventValidationError {
     #[error("attempt_number must be >= 1")]
     AttemptNumberNotPositive,
 
+    #[error("previous_attempt_id must be unset when attempt_number is 1")]
+    FirstAttemptHasPreviousAttemptId,
+
+    #[error("previous_attempt_id must be set when attempt_number is greater than 1")]
+    RestartAttemptMissingPreviousAttemptId,
+
     #[error("todo item id must not be empty")]
     EmptyTodoItemId,
 
@@ -171,10 +177,13 @@ fn validate_canonical_message(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&message.message_id, field)?;
     for block in &message.content {
-        if block.kind.is_none() {
+        let Some(kind) = block.kind.as_ref() else {
             return Err(SessionEventValidationError::MissingOneof {
                 oneof: "content_block.kind",
             });
+        };
+        if let v1alpha1::content_block::Kind::ArtifactRef(artifact_ref) = kind {
+            validate_artifact_ref(artifact_ref)?;
         }
     }
     Ok(())
@@ -196,6 +205,60 @@ fn validate_checkpoint(checkpoint: &v1alpha1::Checkpoint) -> Result<(), SessionE
     Ok(())
 }
 
+fn validate_artifact_ref(artifact_ref: &v1alpha1::ArtifactRef) -> Result<(), SessionEventValidationError> {
+    require_non_empty(&artifact_ref.artifact_id, "artifact_ref.artifact_id")?;
+    require_digest(&artifact_ref.digest, "artifact_ref.digest")?;
+    require_non_empty(&artifact_ref.mime, "artifact_ref.mime")
+}
+
+fn validate_artifact_metadata_source(
+    source: &v1alpha1::artifact_metadata::Source,
+) -> Result<(), SessionEventValidationError> {
+    match source {
+        v1alpha1::artifact_metadata::Source::Stored(stored) => {
+            require_digest(&stored.digest, "artifact_metadata.stored.digest")?;
+            require_non_empty(&stored.storage_ref, "artifact_metadata.stored.storage_ref")?;
+            require_non_empty(&stored.mime, "artifact_metadata.stored.mime")
+        }
+        v1alpha1::artifact_metadata::Source::External(external) => {
+            require_non_empty(&external.source_url, "artifact_metadata.external.source_url")?;
+            if let Some(content_digest) = external.content_digest.as_option() {
+                require_digest(content_digest, "artifact_metadata.external.content_digest")?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_operation_outcome(
+    outcome: &v1alpha1::operation_outcome_recorded::Outcome,
+) -> Result<(), SessionEventValidationError> {
+    match outcome {
+        v1alpha1::operation_outcome_recorded::Outcome::Succeeded(succeeded) => {
+            require_digest(
+                &succeeded.response_digest,
+                "operation_outcome_recorded.succeeded.response_digest",
+            )?;
+            if let Some(response_ref) = succeeded.response_ref.as_option() {
+                validate_artifact_ref(response_ref)?;
+            }
+            Ok(())
+        }
+        v1alpha1::operation_outcome_recorded::Outcome::Failed(failed) => {
+            require_non_empty(&failed.detail, "operation_outcome_recorded.failed.detail")?;
+            if let Some(failure_digest) = failed.failure_digest.as_option() {
+                require_digest(failure_digest, "operation_outcome_recorded.failed.failure_digest")?;
+            }
+            Ok(())
+        }
+        v1alpha1::operation_outcome_recorded::Outcome::Cancelled(cancelled) => require_non_empty(
+            &cancelled.cancelled_by,
+            "operation_outcome_recorded.cancelled.cancelled_by",
+        ),
+        v1alpha1::operation_outcome_recorded::Outcome::Unknown(_) => Ok(()),
+    }
+}
+
 fn validate_session_started(event: &v1alpha1::SessionStarted) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_digest(&event.execution_plan.plan_digest, "execution_plan.plan_digest")?;
@@ -203,7 +266,11 @@ fn validate_session_started(event: &v1alpha1::SessionStarted) -> Result<(), Sess
 }
 
 fn validate_session_closed(event: &v1alpha1::SessionClosed) -> Result<(), SessionEventValidationError> {
-    require_non_empty(&event.session_id, "session_id")
+    require_non_empty(&event.session_id, "session_id")?;
+    if let Some(result_ref) = event.result_ref.as_option() {
+        validate_artifact_ref(result_ref)?;
+    }
+    Ok(())
 }
 
 fn validate_session_cancelled(event: &v1alpha1::SessionCancelled) -> Result<(), SessionEventValidationError> {
@@ -329,10 +396,13 @@ fn validate_tool_call_completed(event: &v1alpha1::ToolCallCompleted) -> Result<(
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
     require_known_nonzero(event.result.status, "result.status")?;
-    if event.result.kind.is_none() {
+    let Some(kind) = event.result.kind.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
             oneof: "tool_call_result.kind",
         });
+    };
+    if let v1alpha1::tool_call_result::Kind::ArtifactRef(artifact_ref) = kind {
+        validate_artifact_ref(artifact_ref)?;
     }
     Ok(())
 }
@@ -347,12 +417,12 @@ fn validate_tool_call_failed(event: &v1alpha1::ToolCallFailed) -> Result<(), Ses
 fn validate_artifact_recorded(event: &v1alpha1::ArtifactRecorded) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.artifact.artifact_id, "artifact.artifact_id")?;
-    if event.artifact.source.is_none() {
+    let Some(source) = event.artifact.source.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
             oneof: "artifact_metadata.source",
         });
-    }
-    Ok(())
+    };
+    validate_artifact_metadata_source(source)
 }
 
 fn validate_file_changed(event: &v1alpha1::FileChanged) -> Result<(), SessionEventValidationError> {
@@ -363,10 +433,18 @@ fn validate_file_changed(event: &v1alpha1::FileChanged) -> Result<(), SessionEve
     let is_renamed = event.change_kind == v1alpha1::FileChangeKind::Renamed;
     let has_previous_path = event.previous_path.as_deref().is_some_and(|s| !s.is_empty());
     match (is_renamed, has_previous_path) {
-        (true, false) => Err(SessionEventValidationError::RenamedFileChangeMissingPreviousPath),
-        (false, true) => Err(SessionEventValidationError::NonRenamedFileChangeHasPreviousPath),
-        _ => Ok(()),
+        (true, false) => return Err(SessionEventValidationError::RenamedFileChangeMissingPreviousPath),
+        (false, true) => return Err(SessionEventValidationError::NonRenamedFileChangeHasPreviousPath),
+        _ => {}
     }
+
+    if let Some(before_ref) = event.before_ref.as_option() {
+        validate_artifact_ref(before_ref)?;
+    }
+    if let Some(after_ref) = event.after_ref.as_option() {
+        validate_artifact_ref(after_ref)?;
+    }
+    Ok(())
 }
 
 fn validate_execution_attempt_started(
@@ -379,6 +457,12 @@ fn validate_execution_attempt_started(
     require_digest(&event.host_artifact_digest, "host_artifact_digest")?;
     if event.attempt_number < 1 {
         return Err(SessionEventValidationError::AttemptNumberNotPositive);
+    }
+    let has_previous_attempt_id = event.previous_attempt_id.as_deref().is_some_and(|s| !s.is_empty());
+    match (event.attempt_number == 1, has_previous_attempt_id) {
+        (true, true) => return Err(SessionEventValidationError::FirstAttemptHasPreviousAttemptId),
+        (false, false) => return Err(SessionEventValidationError::RestartAttemptMissingPreviousAttemptId),
+        _ => {}
     }
     if let Some(checkpoint) = event.restored_checkpoint.as_option() {
         validate_checkpoint(checkpoint)?;
@@ -475,12 +559,12 @@ fn validate_operation_outcome_recorded(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.operation_id, "operation_id")?;
-    if event.outcome.is_none() {
+    let Some(outcome) = event.outcome.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
             oneof: "operation_outcome_recorded.outcome",
         });
-    }
-    Ok(())
+    };
+    validate_operation_outcome(outcome)
 }
 
 fn validate_operation_cancellation_requested(

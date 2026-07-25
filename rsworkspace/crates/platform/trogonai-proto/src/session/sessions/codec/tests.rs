@@ -83,7 +83,7 @@ fn session_cancelled() -> v1alpha1::SessionCancelled {
 fn session_failed() -> v1alpha1::SessionFailed {
     v1alpha1::SessionFailed {
         session_id: "session-1".to_string(),
-        detail: "boom".to_string(),
+        detail: Some("boom".to_string()),
         reason: buffa::EnumValue::from(v1alpha1::SessionFailureReason::ExecutionError),
     }
 }
