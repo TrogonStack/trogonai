@@ -22,6 +22,11 @@ pub struct ExecutionAttemptStartedView<'a> {
     >,
     /// Field 4: `attempt_number`
     pub attempt_number: u64,
+    /// Immediately preceding attempt's id: empty exactly when attempt_number is 1,
+    /// required for every restart (attempt_number \> 1). The boundary validator
+    /// enforces that coupling; the exact-predecessor match is a decide-time
+    /// invariant checked against folded state (ADR#0035 command matrix).
+    ///
     /// Field 5: `previous_attempt_id`
     pub previous_attempt_id: ::core::option::Option<&'a str>,
     /// Field 6: `restored_checkpoint`
@@ -650,6 +655,11 @@ impl ExecutionAttemptStartedOwnedView {
     pub fn attempt_number(&self) -> u64 {
         self.0.reborrow().attempt_number
     }
+    /// Immediately preceding attempt's id: empty exactly when attempt_number is 1,
+    /// required for every restart (attempt_number \> 1). The boundary validator
+    /// enforces that coupling; the exact-predecessor match is a decide-time
+    /// invariant checked against folded state (ADR#0035 command matrix).
+    ///
     /// Field 5: `previous_attempt_id`
     #[must_use]
     pub fn previous_attempt_id(&self) -> ::core::option::Option<&'_ str> {

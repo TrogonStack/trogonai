@@ -41,6 +41,11 @@ pub struct ExecutionAttemptStarted {
         with = "::buffa::json_helpers::uint64"
     )]
     pub attempt_number: u64,
+    /// Immediately preceding attempt's id: empty exactly when attempt_number is 1,
+    /// required for every restart (attempt_number \> 1). The boundary validator
+    /// enforces that coupling; the exact-predecessor match is a decide-time
+    /// invariant checked against folded state (ADR#0035 command matrix).
+    ///
     /// Field 5: `previous_attempt_id`
     #[serde(
         rename = "previousAttemptId",

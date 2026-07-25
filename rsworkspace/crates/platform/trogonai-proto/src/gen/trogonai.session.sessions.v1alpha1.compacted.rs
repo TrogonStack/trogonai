@@ -178,12 +178,14 @@ impl ::buffa::Enumeration for CompactionTrigger {
 /// Compacted is a self-sufficient in-stream compaction marker the store only
 /// records (ADR#0035 facet 4); summary content is inline. covers_from and
 /// covers_through are this session's own fold-derived SessionOrdinal positions,
-/// both inclusive, delimiting the kept-tail boundary and validated as an ordered
-/// range (covers_from \<= covers_through); the model-visible view folds from the
-/// newest Compacted plus every event after it, and full history below the
-/// boundary stays on the stream (keep-forever), so no structured replacement set
-/// is needed to rewind past it. It is invariant-bearing, admitting one active
-/// compaction, guarded by WRITE_PRECONDITION = At(current_position).
+/// both inclusive, delimiting exactly the range of events the summary replaces
+/// in the model-visible view, validated as an ordered range
+/// (covers_from \<= covers_through). The model-visible view folds from the
+/// newest Compacted summary plus every event strictly after covers_through;
+/// the covered events stay on the stream (keep-forever), so no structured
+/// replacement set is needed to rewind past the boundary. It is
+/// invariant-bearing, admitting one active compaction, guarded by
+/// WRITE_PRECONDITION = At(current_position).
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]

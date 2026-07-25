@@ -243,8 +243,8 @@ pub struct SessionFailed {
     /// Human-readable detail of the failure; empty when none.
     ///
     /// Field 2: `detail`
-    #[serde(rename = "detail", with = "::buffa::json_helpers::proto_string")]
-    pub detail: ::buffa::alloc::string::String,
+    #[serde(rename = "detail", skip_serializing_if = "::core::option::Option::is_none")]
+    pub detail: ::core::option::Option<::buffa::alloc::string::String>,
     /// Field 3: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_enum")]
     pub reason: ::buffa::EnumValue<SessionFailureReason>,
@@ -265,6 +265,18 @@ impl SessionFailed {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.SessionFailed";
 }
+impl SessionFailed {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::detail`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_detail(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.detail = Some(value.into());
+        self
+    }
+}
 ::buffa::impl_default_instance!(SessionFailed);
 impl ::buffa::MessageName for SessionFailed {
     const PACKAGE: &'static str = "trogonai.session.sessions.v1alpha1";
@@ -284,7 +296,9 @@ impl ::buffa::Message for SessionFailed {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.detail) as u32;
+        if let Some(ref v) = self.detail {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         {
             let val = self.reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
@@ -299,7 +313,9 @@ impl ::buffa::Message for SessionFailed {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.detail, buf);
+        if let Some(ref v) = self.detail {
+            ::buffa::types::put_string_field(2u32, v, buf);
+        }
         ::buffa::types::put_int32_field(3u32, self.reason.to_i32(), buf);
     }
     fn merge_field(
@@ -325,7 +341,10 @@ impl ::buffa::Message for SessionFailed {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.detail, buf)?;
+                ::buffa::types::merge_string(
+                    self.detail.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -344,7 +363,7 @@ impl ::buffa::Message for SessionFailed {
     }
     fn clear(&mut self) {
         self.session_id.clear();
-        self.detail.clear();
+        self.detail = ::core::option::Option::None;
         self.reason = ::buffa::EnumValue::from(0);
     }
 }

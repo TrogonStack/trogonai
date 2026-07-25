@@ -20,6 +20,10 @@ message ExecutionAttemptStarted {
   string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
   Digest session_execution_plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
   uint64 attempt_number = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Immediately preceding attempt's id: empty exactly when attempt_number is 1,
+  // required for every restart (attempt_number > 1). The boundary validator
+  // enforces that coupling; the exact-predecessor match is a decide-time
+  // invariant checked against folded state (ADR#0035 command matrix).
   string previous_attempt_id = 5;
   Checkpoint restored_checkpoint = 6;
   string resume_cursor = 7;

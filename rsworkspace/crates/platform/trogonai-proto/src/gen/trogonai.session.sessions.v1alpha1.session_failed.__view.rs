@@ -11,7 +11,7 @@ pub struct SessionFailedView<'a> {
     /// Human-readable detail of the failure; empty when none.
     ///
     /// Field 2: `detail`
-    pub detail: &'a str,
+    pub detail: ::core::option::Option<&'a str>,
     /// Field 3: `reason`
     pub reason: ::buffa::EnumValue<super::super::SessionFailureReason>,
     #[doc(hidden)]
@@ -26,21 +26,13 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_session_id(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
     }
-    /**Whether required field `detail` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_detail(&self) -> bool {
-        self.__buffa_required_seen_0 & 2u64 != 0
-    }
     /**Whether required field `reason` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
     pub const fn has_reason(&self) -> bool {
-        self.__buffa_required_seen_0 & 4u64 != 0
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for SessionFailedView<'a> {
@@ -83,8 +75,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionFailedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.detail = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 2u64;
+                view.detail = Some(::buffa::types::borrow_str(&mut cur)?);
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -94,7 +85,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionFailedView<'a> {
                 view.reason = ::buffa::EnumValue::from(
                     ::buffa::types::decode_int32(&mut cur)?,
                 );
-                view.__buffa_required_seen_0 |= 4u64;
+                view.__buffa_required_seen_0 |= 2u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -117,7 +108,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionFailedView<'a> {
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::SessionFailed {
             session_id: self.session_id.to_string(),
-            detail: self.detail.to_string(),
+            detail: self.detail.map(|s| s.to_string()),
             reason: self.reason,
             ..::core::default::Default::default()
         })
@@ -130,7 +121,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionFailedView<'a> {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.detail) as u32;
+        if let Some(ref v) = self.detail {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
         {
             let val = self.reason.to_i32();
             size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
@@ -146,7 +139,9 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionFailedView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.detail, buf);
+        if let Some(ref v) = self.detail {
+            ::buffa::types::put_string_field(2u32, v, buf);
+        }
         ::buffa::types::put_int32_field(3u32, self.reason.to_i32(), buf);
     }
 }
@@ -171,8 +166,8 @@ impl<'__a> ::serde::Serialize for SessionFailedView<'__a> {
         {
             __map.serialize_entry("sessionId", self.session_id)?;
         }
-        {
-            __map.serialize_entry("detail", self.detail)?;
+        if let ::core::option::Option::Some(__v) = self.detail {
+            __map.serialize_entry("detail", __v)?;
         }
         {
             __map.serialize_entry("reason", &self.reason)?;
@@ -275,7 +270,7 @@ impl SessionFailedOwnedView {
     ///
     /// Field 2: `detail`
     #[must_use]
-    pub fn detail(&self) -> &'_ str {
+    pub fn detail(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().detail
     }
     /// Field 3: `reason`

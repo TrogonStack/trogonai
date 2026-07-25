@@ -140,7 +140,7 @@ flag flips).
 `SessionId` is an opaque addressing key; order and durable cross-references are
 separate concerns from identity (forced decision #2). A payload that must
 reference another event's position -- a fork's inherited-prefix boundary, a
-rewind's kept-tail boundary, a compaction's covered range, a checkpoint's
+rewind's inclusive keep-through boundary, a compaction's covered range, a checkpoint's
 coverage, a delegated child's dispatch point -- uses `SessionOrdinal`: the
 1-indexed position of an already-appended event within its own subject's fold
 order, derived by counting at fold time, never read from JetStream message
@@ -438,11 +438,12 @@ before append, never persisted and reconciled later.
 Compaction is an upstream agent-loop concern (forced decision #4): the store
 neither triggers nor understands it. The loop decides when the transcript nears
 the context window and how to summarize; the store persists a single `Compacted`
-event carrying the summary content inline plus the kept-tail boundary
-(`covers_from`, `covers_through`, both a `SessionOrdinal`, facet 2), ratifying
-the prior art's `SummaryCreated` shape. The model-visible view folds from the
-newest `Compacted` summary and every event after it; the full history below the
-boundary remains on the stream for audit and rewind.
+event carrying the summary content inline plus the covered range
+(`covers_from`, `covers_through`, both a `SessionOrdinal`, facet 2, both
+inclusive): exactly the events the summary replaces in the model-visible view,
+ratifying the prior art's `SummaryCreated` shape. The model-visible view folds
+from the newest `Compacted` summary and every event strictly after
+`covers_through`; the covered events remain on the stream for audit and rewind.
 
 The marker is self-sufficient: no out-of-band sidecar is required to replay
 across a compaction boundary. This resolves the corpus's open sub-question in
