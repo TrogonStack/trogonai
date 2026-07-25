@@ -50,6 +50,49 @@ fn checkpoint() -> v1alpha1::Checkpoint {
     }
 }
 
+fn valid_timestamp() -> buffa_types::google::protobuf::Timestamp {
+    buffa_types::google::protobuf::Timestamp::from_unix(1_700_000_000, 0)
+}
+
+fn invalid_timestamp() -> buffa_types::google::protobuf::Timestamp {
+    let mut timestamp = buffa_types::google::protobuf::Timestamp::from_unix(0, 0);
+    timestamp.nanos = -1;
+    timestamp
+}
+
+fn token_usage_with_currency(currency_code: &str) -> v1alpha1::TokenUsage {
+    v1alpha1::TokenUsage {
+        input_tokens: None,
+        output_tokens: None,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
+        cost: MessageField::some(v1alpha1::Cost {
+            amount_micros: 1_000_000,
+            currency_code: currency_code.to_string(),
+            rate_ref: None,
+        }),
+    }
+}
+
+fn user_message_event(content: Vec<v1alpha1::ContentBlock>) -> v1alpha1::SessionEvent {
+    v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content,
+                    model: None,
+                    usage: MessageField::none(),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    }
+}
+
 #[test]
 fn validate_session_event_rejects_missing_event_case() {
     let event = v1alpha1::SessionEvent { event: None };
@@ -349,6 +392,35 @@ fn validate_file_changed_accepts_renamed_with_previous_path() {
 }
 
 #[test]
+fn validate_compacted_rejects_empty_summary_content() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::Compacted {
+                session_id: "session-1".to_string(),
+                summary_id: "summary-1".to_string(),
+                summary_content: String::new(),
+                covers_from: MessageField::some(session_ordinal(1)),
+                covers_through: MessageField::some(session_ordinal(5)),
+                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
+                guidance: None,
+                tokens_before: None,
+                tokens_after: None,
+                model: None,
+                usage: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "summary_content"
+        })
+    );
+}
+
+#[test]
 fn validate_compacted_rejects_range_out_of_order() {
     let event = v1alpha1::SessionEvent {
         event: Some(
@@ -554,6 +626,31 @@ fn validate_todo_updated_rejects_empty_item_id() {
     assert_eq!(
         validate_session_event(&event),
         Err(SessionEventValidationError::EmptyTodoItemId)
+    );
+}
+
+#[test]
+fn validate_todo_updated_rejects_empty_item_content() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::TodoUpdated {
+                session_id: "session-1".to_string(),
+                items: vec![v1alpha1::TodoItem {
+                    id: "todo-1".to_string(),
+                    content: String::new(),
+                    status: buffa::EnumValue::from(v1alpha1::TodoStatus::Pending),
+                }],
+                revision: 1,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "items[].content"
+        })
     );
 }
 
@@ -973,6 +1070,27 @@ fn validate_tool_call_failed_rejects_unspecified_reason() {
     assert_eq!(
         validate_session_event(&event),
         Err(SessionEventValidationError::UnspecifiedEnum { field: "reason" })
+    );
+}
+
+#[test]
+fn validate_tool_call_failed_rejects_empty_error() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallFailed {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                error: String::new(),
+                reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "error" })
     );
 }
 
@@ -1409,6 +1527,26 @@ fn validate_system_notice_recorded_accepts_known_level() {
 }
 
 #[test]
+fn validate_system_notice_recorded_rejects_empty_text() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SystemNoticeRecorded {
+                session_id: "session-1".to_string(),
+                level: buffa::EnumValue::from(v1alpha1::NoticeLevel::Info),
+                text: String::new(),
+                tool_call_id: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "text" })
+    );
+}
+
+#[test]
 fn validate_assistant_message_started_accepts_valid_event() {
     let event = v1alpha1::SessionEvent {
         event: Some(
@@ -1422,6 +1560,25 @@ fn validate_assistant_message_started_accepts_valid_event() {
     };
 
     assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_empty_model() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageStarted {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                model: String::new(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "model" })
+    );
 }
 
 #[test]
@@ -1573,6 +1730,24 @@ fn validate_session_renamed_accepts_valid_event() {
     };
 
     assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_session_renamed_rejects_empty_title() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionRenamed {
+                session_id: "session-1".to_string(),
+                title: String::new(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "title" })
+    );
 }
 
 #[test]
@@ -2668,4 +2843,807 @@ fn validate_operation_outcome_recorded_accepts_unknown_outcome() {
     };
 
     assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_thinking_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Thinking(Box::new(
+            v1alpha1::ThinkingBlock {
+                text: "reasoning".to_string(),
+                signature: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_empty_thinking_text() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Thinking(Box::new(
+            v1alpha1::ThinkingBlock {
+                text: String::new(),
+                signature: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.thinking.text"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_tool_use_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolUse(Box::new(
+            v1alpha1::ToolUseBlock {
+                id: "tool-use-1".to_string(),
+                name: "search".to_string(),
+                input_json: "{}".to_string(),
+                parent_tool_use_id: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_empty_tool_use_id() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolUse(Box::new(
+            v1alpha1::ToolUseBlock {
+                id: String::new(),
+                name: "search".to_string(),
+                input_json: "{}".to_string(),
+                parent_tool_use_id: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.tool_use.id"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_empty_tool_use_name() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolUse(Box::new(
+            v1alpha1::ToolUseBlock {
+                id: "tool-use-1".to_string(),
+                name: String::new(),
+                input_json: "{}".to_string(),
+                parent_tool_use_id: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.tool_use.name"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_invalid_tool_use_input_json() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolUse(Box::new(
+            v1alpha1::ToolUseBlock {
+                id: "tool-use-1".to_string(),
+                name: "search".to_string(),
+                input_json: "not json".to_string(),
+                parent_tool_use_id: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidJson {
+            field: "content_block.tool_use.input_json"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_tool_result_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolResult(Box::new(
+            v1alpha1::ToolResultBlock {
+                tool_use_id: "tool-use-1".to_string(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                        v1alpha1::TextToolResult {
+                            content: "done".to_string(),
+                            truncated: None,
+                        },
+                    ))),
+                }),
+            },
+        ))),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_empty_tool_result_tool_use_id() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolResult(Box::new(
+            v1alpha1::ToolResultBlock {
+                tool_use_id: String::new(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                        v1alpha1::TextToolResult {
+                            content: "done".to_string(),
+                            truncated: None,
+                        },
+                    ))),
+                }),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.tool_result.tool_use_id"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_tool_result_missing_kind() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolResult(Box::new(
+            v1alpha1::ToolResultBlock {
+                tool_use_id: "tool-use-1".to_string(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: None,
+                }),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingOneof {
+            oneof: "tool_call_result.kind"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_tool_result_empty_text_content() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::ToolResult(Box::new(
+            v1alpha1::ToolResultBlock {
+                tool_use_id: "tool-use-1".to_string(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                        v1alpha1::TextToolResult {
+                            content: String::new(),
+                            truncated: None,
+                        },
+                    ))),
+                }),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "tool_call_result.text.content"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_redacted_thinking_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::RedactedThinking(vec![1, 2, 3])),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_empty_text_result_content() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallCompleted {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                result: MessageField::some(v1alpha1::ToolCallResult {
+                    status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+                    kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                        v1alpha1::TextToolResult {
+                            content: String::new(),
+                            truncated: None,
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "tool_call_result.text.content"
+        })
+    );
+}
+
+#[test]
+fn validate_tool_call_requested_rejects_invalid_input_json() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallRequested {
+                session_id: "session-1".to_string(),
+                tool_call_id: "tool-call-1".to_string(),
+                tool_execution_id: "tool-exec-1".to_string(),
+                name: "search".to_string(),
+                input_json: "{not json".to_string(),
+                parent_tool_use_id: None,
+                operation_id: None,
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidJson { field: "input_json" })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_started_accepts_valid_started_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::none(),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::some(valid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_started_rejects_invalid_started_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::none(),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::some(invalid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp { field: "started_at" })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_ready_accepts_valid_ready_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptReady {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                ready_attestation_ref: "ready-ref".to_string(),
+                ready_attestation_digest: MessageField::some(digest()),
+                ready_at: MessageField::some(valid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_ready_rejects_invalid_ready_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptReady {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                ready_attestation_ref: "ready-ref".to_string(),
+                ready_attestation_digest: MessageField::some(digest()),
+                ready_at: MessageField::some(invalid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp { field: "ready_at" })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_ended_accepts_valid_ended_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptEnded {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Failed),
+                detail: None,
+                ended_at: MessageField::some(valid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_execution_attempt_ended_rejects_invalid_ended_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptEnded {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Failed),
+                detail: None,
+                ended_at: MessageField::some(invalid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp { field: "ended_at" })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_valid_created_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_invalid_created_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::none(),
+                    created_at: MessageField::some(invalid_timestamp()),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp {
+            field: "message.created_at"
+        })
+    );
+}
+
+#[test]
+fn validate_artifact_recorded_accepts_valid_created_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::some(valid_timestamp()),
+                    source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
+                        v1alpha1::StoredArtifact {
+                            digest: MessageField::some(digest()),
+                            size_bytes: 128,
+                            storage_ref: "blob://artifact-1".to_string(),
+                            mime: "text/plain".to_string(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_artifact_recorded_rejects_invalid_created_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::some(invalid_timestamp()),
+                    source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
+                        v1alpha1::StoredArtifact {
+                            digest: MessageField::some(digest()),
+                            size_bytes: 128,
+                            storage_ref: "blob://artifact-1".to_string(),
+                            mime: "text/plain".to_string(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp {
+            field: "artifact.created_at"
+        })
+    );
+}
+
+#[test]
+fn validate_artifact_recorded_accepts_external_source_with_valid_fetched_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::none(),
+                    source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
+                        v1alpha1::ExternalArtifact {
+                            source_url: "https://example.com/artifact-1".to_string(),
+                            source_encoding: None,
+                            declared_mime: None,
+                            fetched_at: MessageField::some(valid_timestamp()),
+                            content_digest: MessageField::none(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_artifact_recorded_rejects_external_source_invalid_fetched_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::none(),
+                    source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
+                        v1alpha1::ExternalArtifact {
+                            source_url: "https://example.com/artifact-1".to_string(),
+                            source_encoding: None,
+                            declared_mime: None,
+                            fetched_at: MessageField::some(invalid_timestamp()),
+                            content_digest: MessageField::none(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidTimestamp {
+            field: "artifact_metadata.external.fetched_at"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_usage_without_cost() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::some(v1alpha1::TokenUsage {
+                        input_tokens: Some(10),
+                        output_tokens: None,
+                        cache_creation_tokens: None,
+                        cache_read_tokens: None,
+                        cost: MessageField::none(),
+                    }),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_valid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::some(token_usage_with_currency("USD")),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_invalid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::some(token_usage_with_currency("dollars")),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidCurrencyCode {
+            field: "message.usage.cost.currency_code"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_accepts_valid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::Compacted {
+                session_id: "session-1".to_string(),
+                summary_id: "summary-1".to_string(),
+                summary_content: "summary".to_string(),
+                covers_from: MessageField::some(session_ordinal(1)),
+                covers_through: MessageField::some(session_ordinal(5)),
+                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
+                guidance: None,
+                tokens_before: None,
+                tokens_after: None,
+                model: None,
+                usage: MessageField::some(token_usage_with_currency("USD")),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_compacted_rejects_invalid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::Compacted {
+                session_id: "session-1".to_string(),
+                summary_id: "summary-1".to_string(),
+                summary_content: "summary".to_string(),
+                covers_from: MessageField::some(session_ordinal(1)),
+                covers_through: MessageField::some(session_ordinal(5)),
+                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
+                guidance: None,
+                tokens_before: None,
+                tokens_after: None,
+                model: None,
+                usage: MessageField::some(token_usage_with_currency("usd")),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidCurrencyCode {
+            field: "usage.cost.currency_code"
+        })
+    );
+}
+
+#[test]
+fn validate_assistant_message_failed_accepts_valid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageFailed {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
+                detail: None,
+                usage: MessageField::some(token_usage_with_currency("EUR")),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_assistant_message_failed_rejects_invalid_usage_currency_code() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageFailed {
+                session_id: "session-1".to_string(),
+                message_id: "message-1".to_string(),
+                reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
+                detail: None,
+                usage: MessageField::some(token_usage_with_currency("E1")),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::InvalidCurrencyCode {
+            field: "usage.cost.currency_code"
+        })
+    );
+}
+
+#[test]
+fn validate_checkpoint_produced_rejects_empty_checkpoint_type() {
+    let mut broken_checkpoint = checkpoint();
+    broken_checkpoint.checkpoint_type = String::new();
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::CheckpointProduced {
+                session_id: "session-1".to_string(),
+                checkpoint: MessageField::some(broken_checkpoint),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "checkpoint.checkpoint_type"
+        })
+    );
+}
+
+#[test]
+fn validate_checkpoint_produced_rejects_empty_implementation_version() {
+    let mut broken_checkpoint = checkpoint();
+    broken_checkpoint.implementation_version = String::new();
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::CheckpointProduced {
+                session_id: "session-1".to_string(),
+                checkpoint: MessageField::some(broken_checkpoint),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "checkpoint.implementation_version"
+        })
+    );
 }

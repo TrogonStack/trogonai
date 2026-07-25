@@ -13,6 +13,7 @@ use super::{SessionEventCase, v1alpha1};
 /// - attempt monotonicity and previous-attempt lineage
 /// - the started/completed assistant message sharing an id and model
 /// - a session's `StoredSessionExecutionPlan` digest matching the plan actually bound
+/// - an identifier matching the addressed stream, which requires the stream's own identity
 pub fn validate_session_event(event: &v1alpha1::SessionEvent) -> Result<(), SessionEventValidationError> {
     let Some(event) = event.event.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
@@ -127,6 +128,15 @@ pub enum SessionEventValidationError {
 
     #[error("{field}.value must be exactly 32 bytes for algorithm sha256, got {actual}")]
     Sha256DigestWrongLength { field: &'static str, actual: usize },
+
+    #[error("{field} must be well-formed JSON")]
+    InvalidJson { field: &'static str },
+
+    #[error("{field} must be a valid timestamp")]
+    InvalidTimestamp { field: &'static str },
+
+    #[error("{field} must be a valid ISO 4217 currency code")]
+    InvalidCurrencyCode { field: &'static str },
 }
 
 fn require_non_empty(value: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
@@ -171,6 +181,54 @@ fn require_digest(digest: &v1alpha1::Digest, field: &'static str) -> Result<(), 
     Ok(())
 }
 
+fn require_valid_json(value: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
+    serde_json::from_str::<serde_json::Value>(value)
+        .map(|_| ())
+        .map_err(|_| SessionEventValidationError::InvalidJson { field })
+}
+
+fn require_valid_timestamp(
+    timestamp: &buffa_types::google::protobuf::Timestamp,
+    field: &'static str,
+) -> Result<(), SessionEventValidationError> {
+    crate::convert::datetime_from_timestamp(timestamp)
+        .map(|_| ())
+        .map_err(|_| SessionEventValidationError::InvalidTimestamp { field })
+}
+
+fn require_iso4217_currency_code(code: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
+    if code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase()) {
+        Ok(())
+    } else {
+        Err(SessionEventValidationError::InvalidCurrencyCode { field })
+    }
+}
+
+fn validate_token_usage(
+    usage: &v1alpha1::TokenUsage,
+    currency_code_field: &'static str,
+) -> Result<(), SessionEventValidationError> {
+    if let Some(cost) = usage.cost.as_option() {
+        require_iso4217_currency_code(&cost.currency_code, currency_code_field)?;
+    }
+    Ok(())
+}
+
+fn validate_tool_call_result(result: &v1alpha1::ToolCallResult) -> Result<(), SessionEventValidationError> {
+    require_known_nonzero(result.status, "result.status")?;
+    let Some(kind) = result.kind.as_ref() else {
+        return Err(SessionEventValidationError::MissingOneof {
+            oneof: "tool_call_result.kind",
+        });
+    };
+    match kind {
+        v1alpha1::tool_call_result::Kind::Text(text) => {
+            require_non_empty(&text.content, "tool_call_result.text.content")
+        }
+        v1alpha1::tool_call_result::Kind::ArtifactRef(artifact_ref) => validate_artifact_ref(artifact_ref),
+    }
+}
+
 fn validate_canonical_message(
     message: &v1alpha1::CanonicalMessage,
     field: &'static str,
@@ -182,16 +240,38 @@ fn validate_canonical_message(
                 oneof: "content_block.kind",
             });
         };
-        if let v1alpha1::content_block::Kind::ArtifactRef(artifact_ref) = kind {
-            validate_artifact_ref(artifact_ref)?;
+        match kind {
+            v1alpha1::content_block::Kind::Text(_) => {}
+            v1alpha1::content_block::Kind::ArtifactRef(artifact_ref) => {
+                validate_artifact_ref(artifact_ref)?;
+            }
+            v1alpha1::content_block::Kind::Thinking(thinking) => {
+                require_non_empty(&thinking.text, "content_block.thinking.text")?;
+            }
+            v1alpha1::content_block::Kind::ToolUse(tool_use) => {
+                require_non_empty(&tool_use.id, "content_block.tool_use.id")?;
+                require_non_empty(&tool_use.name, "content_block.tool_use.name")?;
+                require_valid_json(&tool_use.input_json, "content_block.tool_use.input_json")?;
+            }
+            v1alpha1::content_block::Kind::ToolResult(tool_result) => {
+                require_non_empty(&tool_result.tool_use_id, "content_block.tool_result.tool_use_id")?;
+                validate_tool_call_result(&tool_result.result)?;
+            }
+            v1alpha1::content_block::Kind::RedactedThinking(_) => {}
         }
     }
+    if let Some(usage) = message.usage.as_option() {
+        validate_token_usage(usage, "message.usage.cost.currency_code")?;
+    }
+    require_valid_timestamp(&message.created_at, "message.created_at")?;
     Ok(())
 }
 
 fn validate_checkpoint(checkpoint: &v1alpha1::Checkpoint) -> Result<(), SessionEventValidationError> {
     require_non_empty(&checkpoint.checkpoint_id, "checkpoint.checkpoint_id")?;
     require_non_empty(&checkpoint.reference, "checkpoint.reference")?;
+    require_non_empty(&checkpoint.checkpoint_type, "checkpoint.checkpoint_type")?;
+    require_non_empty(&checkpoint.implementation_version, "checkpoint.implementation_version")?;
     require_non_empty(
         &checkpoint.producing_execution_attempt_id,
         "checkpoint.producing_execution_attempt_id",
@@ -224,6 +304,9 @@ fn validate_artifact_metadata_source(
             require_non_empty(&external.source_url, "artifact_metadata.external.source_url")?;
             if let Some(content_digest) = external.content_digest.as_option() {
                 require_digest(content_digest, "artifact_metadata.external.content_digest")?;
+            }
+            if let Some(fetched_at) = external.fetched_at.as_option() {
+                require_valid_timestamp(fetched_at, "artifact_metadata.external.fetched_at")?;
             }
             Ok(())
         }
@@ -304,6 +387,7 @@ fn validate_session_rewound(event: &v1alpha1::SessionRewound) -> Result<(), Sess
 fn validate_compacted(event: &v1alpha1::Compacted) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.summary_id, "summary_id")?;
+    require_non_empty(&event.summary_content, "summary_content")?;
     require_positive_ordinal(&event.covers_from, "covers_from")?;
     require_positive_ordinal(&event.covers_through, "covers_through")?;
     if event.covers_through.value < event.covers_from.value {
@@ -312,7 +396,11 @@ fn validate_compacted(event: &v1alpha1::Compacted) -> Result<(), SessionEventVal
             covers_through: event.covers_through.value,
         });
     }
-    require_known_nonzero(event.trigger, "trigger")
+    require_known_nonzero(event.trigger, "trigger")?;
+    if let Some(usage) = event.usage.as_option() {
+        validate_token_usage(usage, "usage.cost.currency_code")?;
+    }
+    Ok(())
 }
 
 fn validate_user_message_recorded(event: &v1alpha1::UserMessageRecorded) -> Result<(), SessionEventValidationError> {
@@ -331,7 +419,8 @@ fn validate_assistant_message_started(
     event: &v1alpha1::AssistantMessageStarted,
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
-    require_non_empty(&event.message_id, "message_id")
+    require_non_empty(&event.message_id, "message_id")?;
+    require_non_empty(&event.model, "model")
 }
 
 fn validate_assistant_message_completed(
@@ -361,14 +450,19 @@ fn validate_assistant_message_failed(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.message_id, "message_id")?;
-    require_known_nonzero(event.reason, "reason")
+    require_known_nonzero(event.reason, "reason")?;
+    if let Some(usage) = event.usage.as_option() {
+        validate_token_usage(usage, "usage.cost.currency_code")?;
+    }
+    Ok(())
 }
 
 fn validate_tool_call_requested(event: &v1alpha1::ToolCallRequested) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    require_non_empty(&event.name, "name")
+    require_non_empty(&event.name, "name")?;
+    require_valid_json(&event.input_json, "input_json")
 }
 
 fn validate_tool_call_approved(event: &v1alpha1::ToolCallApproved) -> Result<(), SessionEventValidationError> {
@@ -395,28 +489,21 @@ fn validate_tool_call_completed(event: &v1alpha1::ToolCallCompleted) -> Result<(
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    require_known_nonzero(event.result.status, "result.status")?;
-    let Some(kind) = event.result.kind.as_ref() else {
-        return Err(SessionEventValidationError::MissingOneof {
-            oneof: "tool_call_result.kind",
-        });
-    };
-    if let v1alpha1::tool_call_result::Kind::ArtifactRef(artifact_ref) = kind {
-        validate_artifact_ref(artifact_ref)?;
-    }
-    Ok(())
+    validate_tool_call_result(&event.result)
 }
 
 fn validate_tool_call_failed(event: &v1alpha1::ToolCallFailed) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
+    require_non_empty(&event.error, "error")?;
     require_known_nonzero(event.reason, "reason")
 }
 
 fn validate_artifact_recorded(event: &v1alpha1::ArtifactRecorded) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.artifact.artifact_id, "artifact.artifact_id")?;
+    require_valid_timestamp(&event.artifact.created_at, "artifact.created_at")?;
     let Some(source) = event.artifact.source.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
             oneof: "artifact_metadata.source",
@@ -467,7 +554,7 @@ fn validate_execution_attempt_started(
     if let Some(checkpoint) = event.restored_checkpoint.as_option() {
         validate_checkpoint(checkpoint)?;
     }
-    Ok(())
+    require_valid_timestamp(&event.started_at, "started_at")
 }
 
 fn validate_execution_attempt_ready(
@@ -476,7 +563,8 @@ fn validate_execution_attempt_ready(
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.execution_attempt_id, "execution_attempt_id")?;
     require_non_empty(&event.ready_attestation_ref, "ready_attestation_ref")?;
-    require_digest(&event.ready_attestation_digest, "ready_attestation_digest")
+    require_digest(&event.ready_attestation_digest, "ready_attestation_digest")?;
+    require_valid_timestamp(&event.ready_at, "ready_at")
 }
 
 fn validate_execution_attempt_ended(
@@ -484,7 +572,8 @@ fn validate_execution_attempt_ended(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.execution_attempt_id, "execution_attempt_id")?;
-    require_known_nonzero(event.outcome, "outcome")
+    require_known_nonzero(event.outcome, "outcome")?;
+    require_valid_timestamp(&event.ended_at, "ended_at")
 }
 
 fn validate_checkpoint_produced(event: &v1alpha1::CheckpointProduced) -> Result<(), SessionEventValidationError> {
@@ -600,6 +689,7 @@ fn validate_redaction_applied(event: &v1alpha1::RedactionApplied) -> Result<(), 
 
 fn validate_system_notice_recorded(event: &v1alpha1::SystemNoticeRecorded) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.text, "text")?;
     require_known_nonzero(event.level, "level")
 }
 
@@ -617,13 +707,15 @@ fn validate_todo_updated(event: &v1alpha1::TodoUpdated) -> Result<(), SessionEve
         if !seen_ids.insert(item.id.as_str()) {
             return Err(SessionEventValidationError::DuplicateTodoItemId { id: item.id.clone() });
         }
+        require_non_empty(&item.content, "items[].content")?;
         require_known_nonzero(item.status, "items[].status")?;
     }
     Ok(())
 }
 
 fn validate_session_renamed(event: &v1alpha1::SessionRenamed) -> Result<(), SessionEventValidationError> {
-    require_non_empty(&event.session_id, "session_id")
+    require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.title, "title")
 }
 
 fn validate_session_archived(event: &v1alpha1::SessionArchived) -> Result<(), SessionEventValidationError> {
