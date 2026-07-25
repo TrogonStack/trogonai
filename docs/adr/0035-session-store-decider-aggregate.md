@@ -110,7 +110,7 @@ resolver and snapshot-key surface would take a `Tenant`, the store would validat
 the resolved subject against it, and a tenant needing hard isolation would opt
 into `TenantBinding::Dedicated`. That type does not exist in the substrate yet;
 until it lands, a session is scoped by its subject alone, and **shared
-multi-tenant deployment of this store is explicitly blocked on ADR#0027's
+multi-tenant deployment of this store is explicitly blocked on [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
 resolver contract landing** -- no `tenant_id` is added speculatively ahead of it.
 Proto lives under `proto/trogonai/session/sessions/v1alpha1/` (domain `session`,
 aggregate `sessions`), per [ADR#0009](./0009-protocol-buffers-wire-contracts.md).
@@ -120,7 +120,7 @@ casually: the contract depends on five still-draft ADRs (0026, 0027, 0028, 0029,
 0031) and on the substrate obligations facet 2 lists as prerequisites, so it is
 promoted to `v1` only by a later decision, once this ADR and those dependencies
 are accepted and those obligations are met. `v1alpha1` is also the room in which
-ADR#0027's tenant scoping, once accepted, lands additively rather than as a
+[ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant scoping, once accepted, lands additively rather than as a
 breaking rename. `events.proto` carries a file-level comment naming this
 promotion criteria.
 
@@ -581,14 +581,14 @@ parent records `DelegationDetached{session_id, child_session_id,
 detach_operation_id, reason}` (no `parent_session_id` -- it is implicit in the
 stream the fact lives on), and the child records the new
 `ParentDetached{session_id, parent_session_id, detach_operation_id}`. Each is
-its own invariant-bearing (`At`-guarded) local fact, satisfying ADR#0024's
+its own invariant-bearing (`At`-guarded) local fact, satisfying [ADR#0024](./0024-agent-platform-stream-topology.md)'s
 record-once rule because neither is a copy of the other -- they are two
 different streams' own truths about the same operation. Crash repair follows
 the same shape as dispatch: the reconciler completes whichever side is missing,
 idempotently, deduping by `detach_operation_id`; a duplicate delivery no-ops
 because `decide` sees the operation id already folded on that side.
 
-**External delegation carries the evidence ADR#0031 requires.** New event
+**External delegation carries the evidence [ADR#0031](./0031-agent-implementation-and-session-plan.md) requires.** New event
 `ExternalDelegationDispatched{session_id, operation_id, delegate_reference,
 authenticated_remote_subject, authorization_reference, request_digest,
 correlation_id}` (`At`-guarded, on the dispatching session's stream) carries
