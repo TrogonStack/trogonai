@@ -12,6 +12,7 @@ workspace = true
 default = []
 chrono = ["dep:buffa-types", "dep:chrono"]
 schedules = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
+sessions = ["dep:buffa", "dep:buffa-types", "dep:serde", "dep:trogon-decider", "chrono"]
 runtime-snapshot = ["schedules", "dep:trogon-decider-runtime"]
 runtime-host = ["schedules", "dep:trogon-decider-runtime"]
 

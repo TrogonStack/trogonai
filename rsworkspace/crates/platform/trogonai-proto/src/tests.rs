@@ -1,6 +1,9 @@
 use buffa::{Message as _, MessageField, MessageName as _};
 
+#[cfg(feature = "schedules")]
 use crate::scheduler::schedules::v1::ScheduleOccurrenceRecorded;
+#[cfg(feature = "sessions")]
+use crate::session::sessions::v1alpha1::SessionCancelled;
 
 fn timestamp(seconds: i64) -> buffa_types::google::protobuf::Timestamp {
     buffa_types::google::protobuf::Timestamp {
@@ -10,6 +13,7 @@ fn timestamp(seconds: i64) -> buffa_types::google::protobuf::Timestamp {
     }
 }
 
+#[cfg(feature = "schedules")]
 #[test]
 fn decode_event_to_json_is_canonical_across_wire_orderings() {
     let event = ScheduleOccurrenceRecorded {
@@ -44,6 +48,7 @@ fn decode_event_to_json_is_canonical_across_wire_orderings() {
     assert_eq!(from_canonical, from_reordered);
 }
 
+#[cfg(feature = "schedules")]
 #[test]
 fn decode_event_to_json_returns_none_for_unknown_type() {
     assert_eq!(
@@ -52,9 +57,63 @@ fn decode_event_to_json_returns_none_for_unknown_type() {
     );
 }
 
+#[cfg(feature = "schedules")]
 #[test]
 fn decode_event_to_json_errors_on_malformed_known_payload() {
     let result = super::decode_event_to_json(ScheduleOccurrenceRecorded::FULL_NAME, b"\xff\xff\xff\xff");
+    assert!(
+        matches!(result, Err(super::EventDecodeError::Json { .. })),
+        "{result:?}"
+    );
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn decode_event_to_json_is_canonical_across_wire_orderings_for_sessions() {
+    let event = SessionCancelled {
+        session_id: "session-1".to_string(),
+        reason: buffa::EnumValue::from(crate::session::sessions::v1alpha1::SessionCancellationReason::UserRequested),
+        detail: Some("user requested cancellation".to_string()),
+    };
+    let canonical = event.encode_to_vec();
+
+    // Re-encode the same message with field 3 (detail) emitted before field 2
+    // (reason); protobuf permits any field order, so this is a valid alternate
+    // encoding that differs on the wire. Build each fragment with the encoder
+    // rather than hand-rolling tags.
+    let only_detail = SessionCancelled {
+        reason: buffa::EnumValue::from(0),
+        ..event.clone()
+    }
+    .encode_to_vec();
+    let without_detail = SessionCancelled {
+        detail: None,
+        ..event.clone()
+    }
+    .encode_to_vec();
+    let reordered = [only_detail, without_detail].concat();
+    assert_ne!(canonical, reordered, "encodings must differ on the wire");
+
+    let from_canonical = super::decode_event_to_json(SessionCancelled::FULL_NAME, &canonical);
+    let from_reordered = super::decode_event_to_json(SessionCancelled::FULL_NAME, &reordered);
+
+    assert!(matches!(from_canonical, Ok(Some(_))));
+    assert_eq!(from_canonical, from_reordered);
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn decode_event_to_json_returns_none_for_unknown_session_type() {
+    assert_eq!(
+        super::decode_event_to_json("type.googleapis.com/trogonai.session.sessions.v1alpha1.Unknown", &[]),
+        Ok(None)
+    );
+}
+
+#[cfg(feature = "sessions")]
+#[test]
+fn decode_event_to_json_errors_on_malformed_known_session_payload() {
+    let result = super::decode_event_to_json(SessionCancelled::FULL_NAME, b"\xff\xff\xff\xff");
     assert!(
         matches!(result, Err(super::EventDecodeError::Json { .. })),
         "{result:?}"

@@ -1,10 +1,10 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "sessions"))]
 mod r#gen;
 
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "sessions"))]
 mod codec;
 
 #[cfg(feature = "chrono")]
@@ -12,6 +12,9 @@ pub mod convert;
 
 #[cfg(feature = "schedules")]
 pub mod scheduler;
+
+#[cfg(feature = "sessions")]
+pub mod session;
 
 // Thin wrappers that re-export the generated proto packages, emitted as inline
 // module trees that mirror the codegen layout.
@@ -32,7 +35,7 @@ pub mod google {
 }
 
 /// Failure decoding a registered event payload to canonical JSON.
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "sessions"))]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EventDecodeError {
     #[error("failed to decode '{type_url}' payload as json: {message}")]
@@ -50,13 +53,16 @@ pub enum EventDecodeError {
 /// Returns `Ok(None)` only for unregistered types; a registered type whose payload
 /// fails to decode returns `Err`, so malformed output of a known event is never
 /// mistaken for an unknown type.
-#[cfg(feature = "schedules")]
+#[cfg(any(feature = "schedules", feature = "sessions"))]
 pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<String>, EventDecodeError> {
     static REGISTRY: std::sync::OnceLock<buffa::type_registry::TypeRegistry> = std::sync::OnceLock::new();
 
     let registry = REGISTRY.get_or_init(|| {
         let mut registry = buffa::type_registry::TypeRegistry::new();
+        #[cfg(feature = "schedules")]
         r#gen::trogonai::scheduler::schedules::v1::register_types(&mut registry);
+        #[cfg(feature = "sessions")]
+        r#gen::trogonai::session::sessions::v1alpha1::register_types(&mut registry);
         registry
     });
 
@@ -77,5 +83,5 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
         })
 }
 
-#[cfg(all(test, feature = "schedules"))]
+#[cfg(all(test, any(feature = "schedules", feature = "sessions")))]
 mod tests;
