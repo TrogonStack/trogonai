@@ -22,7 +22,7 @@ fn assistant_message() -> v1alpha1::CanonicalMessage {
         }],
         model: None,
         usage: MessageField::none(),
-        created_at: MessageField::none(),
+        created_at: MessageField::some(valid_timestamp()),
     }
 }
 
@@ -85,7 +85,7 @@ fn user_message_event(content: Vec<v1alpha1::ContentBlock>) -> v1alpha1::Session
                     content,
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -188,7 +188,7 @@ fn validate_user_message_recorded_rejects_missing_content_block_kind() {
                     content: vec![v1alpha1::ContentBlock { kind: None }],
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -238,7 +238,7 @@ fn validate_artifact_recorded_rejects_missing_artifact_source() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: None,
                 }),
             }
@@ -310,7 +310,7 @@ fn validate_assistant_message_completed_rejects_user_role() {
                     }],
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
                 finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::EndTurn),
                 matched_stop_sequence: None,
@@ -569,7 +569,7 @@ fn validate_execution_attempt_started_rejects_zero_attempt_number() {
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -597,7 +597,7 @@ fn validate_execution_attempt_started_accepts_positive_attempt_number() {
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1124,7 +1124,7 @@ fn validate_execution_attempt_ready_rejects_wrong_length_sha256_digest() {
                     algorithm: "sha256".to_string(),
                     value: vec![0u8; 4],
                 }),
-                ready_at: MessageField::none(),
+                ready_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1148,7 +1148,7 @@ fn validate_execution_attempt_ready_accepts_valid_event() {
                 execution_attempt_id: "attempt-1".to_string(),
                 ready_attestation_ref: "ready-ref".to_string(),
                 ready_attestation_digest: MessageField::some(digest()),
-                ready_at: MessageField::none(),
+                ready_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1166,7 +1166,7 @@ fn validate_execution_attempt_ended_rejects_unspecified_outcome() {
                 execution_attempt_id: "attempt-1".to_string(),
                 outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Unspecified),
                 detail: None,
-                ended_at: MessageField::none(),
+                ended_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1187,7 +1187,7 @@ fn validate_execution_attempt_ended_accepts_known_outcome() {
                 execution_attempt_id: "attempt-1".to_string(),
                 outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Failed),
                 detail: None,
-                ended_at: MessageField::none(),
+                ended_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1792,7 +1792,7 @@ fn validate_user_message_recorded_accepts_valid_event() {
                     }],
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -1837,7 +1837,7 @@ fn validate_artifact_recorded_accepts_valid_event() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
                         v1alpha1::StoredArtifact {
                             digest: MessageField::some(digest()),
@@ -1928,7 +1928,7 @@ fn validate_execution_attempt_started_accepts_valid_restored_checkpoint() {
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1953,7 +1953,7 @@ fn validate_execution_attempt_started_rejects_first_attempt_with_previous_attemp
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -1981,7 +1981,7 @@ fn validate_execution_attempt_started_rejects_restart_without_previous_attempt_i
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -2009,7 +2009,7 @@ fn validate_execution_attempt_started_accepts_restart_with_previous_attempt_id()
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -2037,7 +2037,7 @@ fn validate_execution_attempt_started_rejects_invalid_restored_checkpoint() {
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -2112,7 +2112,7 @@ fn validate_execution_attempt_started_rejects_checkpoint_with_empty_producing_ex
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -2148,7 +2148,7 @@ fn validate_execution_attempt_started_rejects_checkpoint_with_invalid_session_ex
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
                 isolation_placement: None,
-                started_at: MessageField::none(),
+                started_at: MessageField::some(valid_timestamp()),
             }
             .into(),
         ),
@@ -2176,7 +2176,7 @@ fn validate_user_message_recorded_accepts_artifact_ref_content_block() {
                     }],
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -2205,7 +2205,7 @@ fn validate_user_message_recorded_rejects_invalid_artifact_ref_content_block() {
                     }],
                     model: None,
                     usage: MessageField::none(),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -2406,7 +2406,7 @@ fn validate_artifact_recorded_accepts_external_source() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: "https://example.com/artifact-1".to_string(),
@@ -2435,7 +2435,7 @@ fn validate_artifact_recorded_accepts_external_source_without_content_digest() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: "https://example.com/artifact-1".to_string(),
@@ -2464,7 +2464,7 @@ fn validate_artifact_recorded_rejects_external_source_empty_source_url() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: String::new(),
@@ -2498,7 +2498,7 @@ fn validate_artifact_recorded_rejects_external_source_invalid_content_digest() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: "https://example.com/artifact-1".to_string(),
@@ -2535,7 +2535,7 @@ fn validate_artifact_recorded_rejects_stored_source_invalid_digest() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
                         v1alpha1::StoredArtifact {
                             digest: MessageField::none(),
@@ -2568,7 +2568,7 @@ fn validate_artifact_recorded_rejects_stored_source_empty_storage_ref() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
                         v1alpha1::StoredArtifact {
                             digest: MessageField::some(digest()),
@@ -2601,7 +2601,7 @@ fn validate_artifact_recorded_rejects_stored_source_empty_mime() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
                         v1alpha1::StoredArtifact {
                             digest: MessageField::some(digest()),
@@ -3171,6 +3171,34 @@ fn validate_execution_attempt_started_rejects_invalid_started_at() {
 }
 
 #[test]
+fn validate_execution_attempt_started_rejects_missing_started_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 1,
+                previous_attempt_id: None,
+                restored_checkpoint: MessageField::none(),
+                resume_cursor: None,
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingTimestamp { field: "started_at" })
+    );
+}
+
+#[test]
 fn validate_execution_attempt_ready_accepts_valid_ready_at() {
     let event = v1alpha1::SessionEvent {
         event: Some(
@@ -3210,6 +3238,27 @@ fn validate_execution_attempt_ready_rejects_invalid_ready_at() {
 }
 
 #[test]
+fn validate_execution_attempt_ready_rejects_missing_ready_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptReady {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                ready_attestation_ref: "ready-ref".to_string(),
+                ready_attestation_digest: MessageField::some(digest()),
+                ready_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingTimestamp { field: "ready_at" })
+    );
+}
+
+#[test]
 fn validate_execution_attempt_ended_accepts_valid_ended_at() {
     let event = v1alpha1::SessionEvent {
         event: Some(
@@ -3245,6 +3294,27 @@ fn validate_execution_attempt_ended_rejects_invalid_ended_at() {
     assert_eq!(
         validate_session_event(&event),
         Err(SessionEventValidationError::InvalidTimestamp { field: "ended_at" })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_ended_rejects_missing_ended_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptEnded {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-1".to_string(),
+                outcome: buffa::EnumValue::from(v1alpha1::AttemptOutcome::Failed),
+                detail: None,
+                ended_at: MessageField::none(),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingTimestamp { field: "ended_at" })
     );
 }
 
@@ -3296,6 +3366,35 @@ fn validate_user_message_recorded_rejects_invalid_created_at() {
     assert_eq!(
         validate_session_event(&event),
         Err(SessionEventValidationError::InvalidTimestamp {
+            field: "message.created_at"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_missing_created_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::UserMessageRecorded {
+                session_id: "session-1".to_string(),
+                message: MessageField::some(v1alpha1::CanonicalMessage {
+                    message_id: "message-1".to_string(),
+                    role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+                    content: vec![v1alpha1::ContentBlock {
+                        kind: Some(v1alpha1::content_block::Kind::Text("hi".to_string())),
+                    }],
+                    model: None,
+                    usage: MessageField::none(),
+                    created_at: MessageField::none(),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingTimestamp {
             field: "message.created_at"
         })
     );
@@ -3363,7 +3462,7 @@ fn validate_artifact_recorded_rejects_invalid_created_at() {
 }
 
 #[test]
-fn validate_artifact_recorded_accepts_external_source_with_valid_fetched_at() {
+fn validate_artifact_recorded_rejects_missing_created_at() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::ArtifactRecorded {
@@ -3373,6 +3472,39 @@ fn validate_artifact_recorded_accepts_external_source_with_valid_fetched_at() {
                     preview: None,
                     truncated: None,
                     created_at: MessageField::none(),
+                    source: Some(v1alpha1::artifact_metadata::Source::Stored(Box::new(
+                        v1alpha1::StoredArtifact {
+                            digest: MessageField::some(digest()),
+                            size_bytes: 128,
+                            storage_ref: "blob://artifact-1".to_string(),
+                            mime: "text/plain".to_string(),
+                        },
+                    ))),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingTimestamp {
+            field: "artifact.created_at"
+        })
+    );
+}
+
+#[test]
+fn validate_artifact_recorded_accepts_external_source_with_valid_fetched_at() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ArtifactRecorded {
+                session_id: "session-1".to_string(),
+                artifact: MessageField::some(v1alpha1::ArtifactMetadata {
+                    artifact_id: "artifact-1".to_string(),
+                    preview: None,
+                    truncated: None,
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: "https://example.com/artifact-1".to_string(),
@@ -3401,7 +3533,7 @@ fn validate_artifact_recorded_rejects_external_source_invalid_fetched_at() {
                     artifact_id: "artifact-1".to_string(),
                     preview: None,
                     truncated: None,
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                     source: Some(v1alpha1::artifact_metadata::Source::External(Box::new(
                         v1alpha1::ExternalArtifact {
                             source_url: "https://example.com/artifact-1".to_string(),
@@ -3445,7 +3577,7 @@ fn validate_user_message_recorded_accepts_usage_without_cost() {
                         cache_read_tokens: None,
                         cost: MessageField::none(),
                     }),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -3469,7 +3601,7 @@ fn validate_user_message_recorded_accepts_valid_usage_currency_code() {
                     }],
                     model: None,
                     usage: MessageField::some(token_usage_with_currency("USD")),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),
@@ -3493,7 +3625,7 @@ fn validate_user_message_recorded_rejects_invalid_usage_currency_code() {
                     }],
                     model: None,
                     usage: MessageField::some(token_usage_with_currency("dollars")),
-                    created_at: MessageField::none(),
+                    created_at: MessageField::some(valid_timestamp()),
                 }),
             }
             .into(),

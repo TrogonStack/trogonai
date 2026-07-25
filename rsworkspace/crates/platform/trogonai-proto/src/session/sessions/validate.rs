@@ -132,6 +132,9 @@ pub enum SessionEventValidationError {
     #[error("{field} must be well-formed JSON")]
     InvalidJson { field: &'static str },
 
+    #[error("{field} must be set")]
+    MissingTimestamp { field: &'static str },
+
     #[error("{field} must be a valid timestamp")]
     InvalidTimestamp { field: &'static str },
 
@@ -194,6 +197,16 @@ fn require_valid_timestamp(
     crate::convert::datetime_from_timestamp(timestamp)
         .map(|_| ())
         .map_err(|_| SessionEventValidationError::InvalidTimestamp { field })
+}
+
+fn require_set_timestamp(
+    timestamp: &buffa::MessageField<buffa_types::google::protobuf::Timestamp>,
+    field: &'static str,
+) -> Result<(), SessionEventValidationError> {
+    match timestamp.as_option() {
+        Some(value) => require_valid_timestamp(value, field),
+        None => Err(SessionEventValidationError::MissingTimestamp { field }),
+    }
 }
 
 fn require_iso4217_currency_code(code: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
@@ -263,7 +276,7 @@ fn validate_canonical_message(
     if let Some(usage) = message.usage.as_option() {
         validate_token_usage(usage, "message.usage.cost.currency_code")?;
     }
-    require_valid_timestamp(&message.created_at, "message.created_at")?;
+    require_set_timestamp(&message.created_at, "message.created_at")?;
     Ok(())
 }
 
@@ -503,7 +516,7 @@ fn validate_tool_call_failed(event: &v1alpha1::ToolCallFailed) -> Result<(), Ses
 fn validate_artifact_recorded(event: &v1alpha1::ArtifactRecorded) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.artifact.artifact_id, "artifact.artifact_id")?;
-    require_valid_timestamp(&event.artifact.created_at, "artifact.created_at")?;
+    require_set_timestamp(&event.artifact.created_at, "artifact.created_at")?;
     let Some(source) = event.artifact.source.as_ref() else {
         return Err(SessionEventValidationError::MissingOneof {
             oneof: "artifact_metadata.source",
@@ -554,7 +567,7 @@ fn validate_execution_attempt_started(
     if let Some(checkpoint) = event.restored_checkpoint.as_option() {
         validate_checkpoint(checkpoint)?;
     }
-    require_valid_timestamp(&event.started_at, "started_at")
+    require_set_timestamp(&event.started_at, "started_at")
 }
 
 fn validate_execution_attempt_ready(
@@ -564,7 +577,7 @@ fn validate_execution_attempt_ready(
     require_non_empty(&event.execution_attempt_id, "execution_attempt_id")?;
     require_non_empty(&event.ready_attestation_ref, "ready_attestation_ref")?;
     require_digest(&event.ready_attestation_digest, "ready_attestation_digest")?;
-    require_valid_timestamp(&event.ready_at, "ready_at")
+    require_set_timestamp(&event.ready_at, "ready_at")
 }
 
 fn validate_execution_attempt_ended(
@@ -573,7 +586,7 @@ fn validate_execution_attempt_ended(
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.execution_attempt_id, "execution_attempt_id")?;
     require_known_nonzero(event.outcome, "outcome")?;
-    require_valid_timestamp(&event.ended_at, "ended_at")
+    require_set_timestamp(&event.ended_at, "ended_at")
 }
 
 fn validate_checkpoint_produced(event: &v1alpha1::CheckpointProduced) -> Result<(), SessionEventValidationError> {
