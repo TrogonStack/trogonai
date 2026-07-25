@@ -363,6 +363,11 @@ fn validate_operation_outcome(
 
 fn validate_session_started(event: &v1alpha1::SessionStarted) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
+    if event.execution_plan.plan_bytes.is_empty() {
+        return Err(SessionEventValidationError::EmptyIdentifier {
+            field: "execution_plan.plan_bytes",
+        });
+    }
     require_digest(&event.execution_plan.plan_digest, "execution_plan.plan_digest")?;
     Ok(())
 }

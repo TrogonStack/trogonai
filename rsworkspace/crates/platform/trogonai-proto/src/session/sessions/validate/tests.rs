@@ -768,6 +768,32 @@ fn validate_redaction_applied_accepts_non_empty_redacted_event_ids() {
 }
 
 #[test]
+fn validate_session_started_rejects_empty_plan_bytes() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionStarted {
+                session_id: "session-1".to_string(),
+                execution_plan: MessageField::some(v1alpha1::StoredSessionExecutionPlan {
+                    plan_bytes: Vec::new(),
+                    plan_digest: MessageField::some(v1alpha1::Digest {
+                        algorithm: "sha256".to_string(),
+                        value: vec![0u8; 32],
+                    }),
+                }),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "execution_plan.plan_bytes"
+        })
+    );
+}
+
+#[test]
 fn validate_session_started_rejects_unsupported_digest_algorithm() {
     let event = v1alpha1::SessionEvent {
         event: Some(
