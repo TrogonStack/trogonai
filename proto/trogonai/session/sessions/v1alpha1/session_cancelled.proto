@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// SessionCancelled is the cancellation terminal marker for a session; it is
+// also emitted on the child in the cascade batch after ParentTerminated
+// (PARENT_TERMINAL_CASCADE) or after ParentHistoryInvalidated
+// (PARENT_REWIND_CASCADE) (ADR#0035 facet 6). It is an invariant-bearing
+// transition guarded by WRITE_PRECONDITION = At(current_position).
+message SessionCancelled {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionCancellationReason reason = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable detail; empty when none.
+  string detail = 3;
+}
+
+// SessionCancellationReason is the typed classification of why a session was
+// cancelled.
+enum SessionCancellationReason {
+  SESSION_CANCELLATION_REASON_UNSPECIFIED = 0;
+  // An explicit user cancellation request.
+  SESSION_CANCELLATION_REASON_USER_REQUESTED = 1;
+  // Cascaded from a parent reaching a terminal state.
+  SESSION_CANCELLATION_REASON_PARENT_TERMINAL_CASCADE = 2;
+  // Cascaded from a parent rewind invalidating this child's dispatch point.
+  SESSION_CANCELLATION_REASON_PARENT_REWIND_CASCADE = 3;
+  // Exceeded its time budget.
+  SESSION_CANCELLATION_REASON_TIMEOUT = 4;
+  // Cancelled by policy (for example an admission or safety policy).
+  SESSION_CANCELLATION_REASON_POLICY = 5;
+  // Cancelled as part of an orderly shutdown.
+  SESSION_CANCELLATION_REASON_SHUTDOWN = 6;
+}

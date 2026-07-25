@@ -1,0 +1,34 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// TodoUpdated records the agent's current task/plan list as a full snapshot on
+// change, so the plan is a first-class domain fact rather than something a
+// projection must parse out of a tool call's input. revision is monotonic per
+// session from the single logical writer (the active attempt's loop); the
+// fold keeps the highest-revision update, order-independent and so truly
+// commuting, with ties resolved to the first in fold order (D11). It is a
+// commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+message TodoUpdated {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The complete todo list as of this update; readers replace, not merge.
+  repeated TodoItem items = 2;
+  // Monotonic revision from the single logical writer; the fold keeps the
+  // highest-revision update.
+  uint64 revision = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// TodoItem is one entry in the agent's task/plan list.
+message TodoItem {
+  string id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string content = 2 [features.field_presence = LEGACY_REQUIRED];
+  TodoStatus status = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// TodoStatus is the state of a todo item.
+enum TodoStatus {
+  TODO_STATUS_UNSPECIFIED = 0;
+  TODO_STATUS_PENDING = 1;
+  TODO_STATUS_IN_PROGRESS = 2;
+  TODO_STATUS_COMPLETED = 3;
+}

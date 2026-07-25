@@ -1,0 +1,35 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// ToolCallResult is the typed outcome of a completed tool call: either inline
+// text or a claim-check reference to a stored artifact, plus a status outside
+// the content oneof so an artifact-backed result can also represent an
+// application-level error (D11) -- ToolCallResultStatus.status carries what
+// TextToolResult.is_error used to carry alone, now applicable to either arm.
+message ToolCallResult {
+  oneof kind {
+    TextToolResult text = 1;
+    ArtifactRef artifact_ref = 2;
+  }
+  ToolCallResultStatus status = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ToolCallResultStatus is whether a completed tool call's result represents a
+// genuine success or an application-level error surfaced through its result
+// content (mirrors the MCP tool-result isError flag).
+enum ToolCallResultStatus {
+  TOOL_CALL_RESULT_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_RESULT_STATUS_SUCCESS = 1;
+  TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR = 2;
+}
+
+// TextToolResult is an inline text tool result.
+message TextToolResult {
+  // Result text.
+  string content = 1 [features.field_presence = LEGACY_REQUIRED];
+  // True when content is a truncation of the full result.
+  bool truncated = 2;
+}

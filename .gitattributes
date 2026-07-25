@@ -1,0 +1,3 @@
+# Generated code: collapse in diffs and exclude from language stats.
+rsworkspace/crates/platform/trogonai-proto/src/gen/** linguist-generated=true
+rsworkspace/crates/platform/trogon-semconv/src/gen/** linguist-generated=true

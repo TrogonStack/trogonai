@@ -1,0 +1,25 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// SessionHidden is the terminal visibility-tombstone marker for a session: it
+// removes the session from every default surface and still cascades as a
+// terminal marker, but -- unlike its former name SessionDeleted -- it does not
+// promise erasure the log does not perform; the log is never physically purged
+// (ADR#0035 facet 2, facet 7). Legal or user erasure beyond masking is a named
+// follow-up ADR (D7); the interim story is RedactionApplied plus
+// ArtifactErased. It is an invariant-bearing transition guarded by
+// WRITE_PRECONDITION = At(current_position).
+message SessionHidden {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionHiddenReason reason = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// SessionHiddenReason is why a session was hidden from default surfaces.
+enum SessionHiddenReason {
+  SESSION_HIDDEN_REASON_UNSPECIFIED = 0;
+  // An explicit user request to remove the session from view.
+  SESSION_HIDDEN_REASON_USER_REQUESTED = 1;
+  // Applied by a retention policy rather than a direct user request.
+  SESSION_HIDDEN_REASON_RETENTION_POLICY = 2;
+}

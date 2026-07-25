@@ -109,65 +109,127 @@ Multi-[tenant](../glossary/tenant) scoping is expected to use draft
 resolver and snapshot-key surface would take a `Tenant`, the store would validate
 the resolved subject against it, and a tenant needing hard isolation would opt
 into `TenantBinding::Dedicated`. That type does not exist in the substrate yet;
-until it lands, a session is scoped by its subject alone. Proto lives under
-`proto/trogonai/session/sessions/v1/` (domain `session`, aggregate `sessions`),
-per [ADR#0009](./0009-protocol-buffers-wire-contracts.md).
+until it lands, a session is scoped by its subject alone, and **shared
+multi-tenant deployment of this store is explicitly blocked on [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
+resolver contract landing** -- no `tenant_id` is added speculatively ahead of it.
+Proto lives under `proto/trogonai/session/sessions/v1alpha1/` (domain `session`,
+aggregate `sessions`), per [ADR#0009](./0009-protocol-buffers-wire-contracts.md).
 
-### 2. Append-only mutation, opaque identity, physical-sequence order, and per-command optimistic concurrency
+The `v1alpha1` suffix is the honest stability signal, not a placeholder to drop
+casually: the contract depends on five still-draft ADRs (0026, 0027, 0028, 0029,
+0031) and on the substrate obligations facet 2 lists as prerequisites, so it is
+promoted to `v1` only by a later decision, once this ADR and those dependencies
+are accepted and those obligations are met. `v1alpha1` is also the room in which
+[ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant scoping, once accepted, lands additively rather than as a
+breaking rename. `events.proto` carries a file-level comment naming this
+promotion criteria.
+
+### 2. Append-only mutation, opaque identity, ordinal anchors, and per-command optimistic concurrency
 
 Append is the only mutation primitive. `decide` returns only new events, `evolve`
 is the only place state changes, and `append_stream` is the only write path.
-Every retroactive operation -- rewind, revert, compaction, delete, cancel -- is a
+Every retroactive operation -- rewind, revert, compaction, hide, cancel -- is a
 **new appended event interpreted at replay**, never an edit or a delete of stored
 messages. No command ever purges or trims the stream; the log is keep-forever
-(facet 7), and physical bytes only ever relocate between storage tiers, never leave
-the record. This
-is forced decision #1, and it is what separates this store from the corpus's
-cautionary cases (Goose's `DELETE`+re-`INSERT`, Hermes's flag flips).
+(facet 7), and physical bytes only ever relocate between storage tiers, never
+leave the record. This is forced decision #1, and it is what separates this
+store from the corpus's cautionary cases (Goose's `DELETE`+re-`INSERT`, Hermes's
+flag flips).
 
-Identity and order are separate concerns (forced decision #2). The `SessionId` is
-an opaque addressing key only; the sole monotonic order is the physical JetStream
-stream sequence ([ADR#0013](./0013-origin-stream-sequence-header.md)). The prior art's application-assigned per-session
-`Seq` is dropped -- it is exactly what forced the read-last-sequence-then-lease
-anti-pattern, and JetStream already assigns the authoritative sequence.
+**`SessionOrdinal`: a logical anchor, never a physical JetStream sequence.** The
+`SessionId` is an opaque addressing key; order and durable cross-references are
+separate concerns from identity (forced decision #2). A payload that must
+reference another event's position -- a fork's inherited-prefix boundary, a
+rewind's inclusive keep-through boundary, a compaction's covered range, a checkpoint's
+coverage, a delegated child's dispatch point -- uses `SessionOrdinal`: the
+1-indexed position of an already-appended event within its own subject's fold
+order, derived by counting at fold time, never read from JetStream message
+metadata. Because it is fold-derived rather than physically assigned, it is
+stable across restore, backfill, migration, and cold-tier relocation (facet 7),
+all of which reassign physical stream sequences without rewriting event bytes
+([ADR#0013](./0013-origin-stream-sequence-header.md)). This resolves the tension
+the prior draft left open: a domain payload never repeats a physical position
+that only makes sense in the stream that originally held it.
 
-Optimistic concurrency is applied per command by whether `decide` branches on the
-current head, not uniformly. The rule: guard an append with the head sequence only
-when a stale decision would violate an invariant; otherwise append unconditionally.
+Three construction rules hold for every `SessionOrdinal` field:
 
-- **Commuting happened-facts** -- `UserMessageRecorded`,
-  `AssistantMessageStarted`/`Completed`, the `ToolCall*` events, `ArtifactRecorded`,
-  `FileChanged` -- declare `WRITE_PRECONDITION = Any`. They record that something
-  happened; `decide` does not branch on the exact head, a racing user message and
-  assistant message are both valid, and their order is arrival order. Appends never
-  overwrite, so there is no lost update to prevent -- a head guard here would only
-  force a wasted retry (re-replay, re-decide) on the highest-volume path. `Any`
-  appends to the tail with no server-side guard and never retries; its appends are
-  therefore at-least-once, with duplicates deduped by readers (see below), not
-  prevented at write.
-- **Invariant-bearing transitions** -- the commands recording `SessionClosed`/
-  `SessionCancelled`/`SessionFailed`/`SessionDeleted`, `SessionRewound`, `Compacted`,
-  `DelegationDispatched`, and `SubagentDetached` (named here by the fact each records;
-  the command is the verb form, e.g. `CloseSession` records `SessionClosed`,
-  `DispatchDelegation` records `DelegationDispatched`) -- declare no
-  `WRITE_PRECONDITION`, so the runtime applies the default `At(current_position)`: a
-  command that read state at sequence N fails if any writer appended since (the
-  low-level `stream_store` `WrongExpectedVersion`, surfaced to callers as
-  `JetStreamStoreError::OptimisticConcurrencyConflict`, then `CommandError::Append`,
-  then retried against the new head). Here `decide` genuinely branches on the head --
-  reject a second close, refuse to spawn under a terminal parent (facet 6), validate
-  a rewind target, admit one active compaction -- so a stale decision must be
-  rejected, not appended.
-- **Creation** -- `CreateSession` and a fork's first event (`SessionForked`, facet
-  5) declare `WRITE_PRECONDITION = NoStream` (guard `0`), making creation atomic and
-  exactly-once. `StreamExists` is never used, because it sends no server-side guard.
+1. **Same-stream past reference.** Any event may reference an already-appended
+   event's ordinal on its own stream; the value is settled at the moment it is
+   folded and stays replay-stable forever after.
+2. **Cross-stream reference.** An event may carry another stream's ordinal only
+   when it is copied from that stream's already-settled fold state -- for
+   example, the child copying the parent's dispatch ordinal only after the
+   parent's append has acked (facet 6).
+3. **No self-position naming.** An event never writes its own predicted position
+   into its payload; its ordinal is implied by where it lands in its own
+   stream's fold, never asserted in advance. This is what kills the decide-time
+   counter race a `WRITE_PRECONDITION = Any` guard would otherwise invite.
 
-This refines the corpus's forced decision #3 (a precondition on *every* append) to
-a precondition on every *invariant-bearing* append, on the reasoning that commuting
-facts have no stale-decision failure mode to catch. It still supersedes the prior
-art's pessimistic KV lease, which serialized *all* writes: here only the
-invariant-bearing transitions coordinate, and via OCC rather than a lock. Uniform
-strict OCC and no-OCC-anywhere are both weighed and rejected under Alternatives.
+This does not reintroduce the prior art's application-assigned per-session `Seq`,
+even though both are per-session integers: the prior art's `Seq` was assigned
+*and guarded* at write time -- exactly the read-last-then-lease anti-pattern this
+ADR supersedes. `SessionOrdinal` guards nothing and is assigned by nobody; it
+exists purely as a fold-derived reference to something that already happened.
+Physical JetStream sequence remains authoritative for OCC guards, processor
+checkpoints, and consumption ([ADR#0013](./0013-origin-stream-sequence-header.md));
+a `SessionOrdinal` never substitutes for it, and a physical sequence never
+enters a domain payload.
+
+**Write-precondition classification.** Optimistic concurrency is applied per
+command by a three-way classification of the fact being appended, not uniformly
+(refining forced decision #3). Every command declares exactly one
+`WRITE_PRECONDITION`:
+
+| Precondition | Commands (named by the fact recorded) | Why |
+| --- | --- | --- |
+| `NoStream` (guard `0`) | `CreateSession` records `[SessionStarted]`; `ForkSession` records `[SessionStarted, SessionForked]`; delegated child creation records `[SessionStarted, ParentLinked]` | Creation is atomic and exactly-once; the stream must not already exist. |
+| `At(current_position)` | `SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`, `SessionRewound`, `Compacted`, `ExecutionAttemptStarted`, `ExecutionAttemptReady`, `ExecutionAttemptEnded`, `ToolCallApproved`, `ToolCallDenied`, `OperationReserved`, `OperationOutcomeRecorded`, `OperationCancellationRequested`, `DelegationDispatched`, `ExternalDelegationDispatched`, `ParentTerminated`, `ParentHistoryInvalidated`, `DelegationDetached`, `ParentDetached`, `RedactionApplied`, `ArtifactErased` | `decide` genuinely branches on the current head for each of these: one active attempt, Ready-after-Started, mutually exclusive approve/deny and complete/fail decisions, one terminal outcome per ledger operation, one saga step per dispatch or detach. A stale decision here would violate an invariant, so it must be rejected, not appended. |
+| `Any` (no server-side guard) | `UserMessageRecorded`, `AssistantMessageStarted`, `AssistantMessageCompleted`, `AssistantMessageFailed`, `ToolCallRequested`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `ArtifactRecorded`, `FileChanged`, `CheckpointProduced`, `SystemNoticeRecorded`, `TodoUpdated`, `SessionRenamed`, `SessionArchived`, `SessionUnarchived` | These commute: `decide` does not need the exact head to be correct, appends never overwrite, and the highest-volume path stays retry-free. |
+
+`StreamExists` is never used, because it sends no server-side guard.
+
+Two of these lists need one more rule each, because commuting is not the same
+claim as conflict-free (forced decision #4's correction): a handful of `Any`
+facts can still disagree about a shared entity, and an append-only log cannot
+resolve that by refusing the write. The fold resolves it deterministically
+instead:
+
+- **Per-entity first-terminal-outcome-wins.** `ToolCallCompleted` versus
+  `ToolCallFailed` (keyed by `tool_execution_id`) and `AssistantMessageCompleted`
+  versus `AssistantMessageFailed` (keyed by `message_id`) resolve to whichever
+  reaches the fold first in the stream's total order; a later conflicting
+  outcome is retained on the log (nothing is ever dropped) but is audit-only,
+  surfaced by a projection flag, never folded into state. Because fold order is
+  the stream's own total order, this is replay-deterministic regardless of
+  arrival timing.
+- **`TodoUpdated`: highest-`revision`-wins.** Every update carries a required,
+  monotonic `revision` from the session's single logical writer (the active
+  attempt's loop); the fold keeps whichever update has the highest revision seen
+  so far, independent of arrival order -- which is what makes it truly commuting
+  rather than merely unguarded. Ties resolve to the first occurrence in fold
+  order.
+- **Post-terminal happened-facts remain audit-only**, generalizing the existing
+  rule: a session's first terminal marker is authoritative, and any
+  happened-fact folded after it (a late `ToolCallCompleted`, for instance) is
+  retained on the log but never changes state.
+
+The reasoning above (`ExecutionAttempt*` mint and advance a monotonic attempt
+counter under one-active-attempt and Ready-after-Started invariants;
+`ToolCallApproved`/`Denied` are mutually exclusive human-paced decisions; the
+ledger and delegation events guard reservation and saga invariants) is why those
+events moved out of the corpus-style "commuting happened-fact" bucket the
+original event catalog put them in: all are low-volume, so the contention
+argument for `Any` does not apply to them. The head guard closes concurrent
+races; a sequential crash-then-retry duplicate is closed separately, by the
+identity and dedup contract below.
+
+This refines the corpus's forced decision #3 (a precondition on *every* append)
+to a precondition scoped to what each fact actually needs: creation gets
+`NoStream`, invariant-bearing transitions get `At`, and commuting facts get
+`Any`. It still supersedes the prior art's pessimistic KV lease, which
+serialized *all* writes: here only the invariant-bearing and creation
+transitions coordinate, and via OCC rather than a lock. Uniform strict OCC and
+no-OCC-anywhere are both weighed and rejected under Alternatives.
 
 **Concurrency and turn-taking.** Because the high-volume path uses `Any`, an agent
 and a user appending at the same time both land in arrival order with no conflict
@@ -192,28 +254,88 @@ commands in arrival order) would remove even the lifecycle-path retries, but it 
 an optional latency optimization, not a correctness requirement, and is a Non-Goal
 here.
 
-**At-least-once delivery and idempotency.** Commands are processed at-least-once --
-a NATS processor redelivers a command after a crash before its ack. On the `Any` path
-this makes an append **at-least-once, not exactly-once**: two concurrent deliveries
-sharing an idempotency key can both replay state before either append is visible, both
-conclude the key is new, and both append. A `decide`-time key check is only a cheap
-best-effort filter, never atomic, precisely because `Any` sends no server-side guard.
-So every event carries an idempotency key and **readers dedup by it** -- the fold and
-every projection collapse duplicate keys, the same way they already tolerate
-post-terminal facts (see Consequences). A command that needs exactly-once *append*
-must instead take the guarded (`At(current_position)`) path, where the sequence guard
-makes check-and-append atomic: the losing delivery gets `WrongExpectedVersion`,
-re-replays, sees the key, and no-ops. Exactly-once external *side effects* (tool,
-delegation) are handled separately by [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s
-operation ledger, which reserves the operation id atomically before the effect.
+**Identity and dedup contract.** Commands are processed at-least-once -- a NATS
+processor redelivers a command after a crash before its ack -- so every command
+carries a caller-supplied idempotency key, stable across redelivery, and no
+domain payload gains a separate identity field of its own. The runtime derives
+each appended event's envelope `Event.id` deterministically: UUIDv5 over
+`(resolved stream subject, command type, command idempotency key, index of the
+event within the decision's batch)`. The subject and command type are in the
+derivation because `Nats-Msg-Id` dedup is stream-wide and every session subject
+shares the one physical `SESSION_EVENTS` stream (facet 1): without them, two
+different sessions -- or two different commands -- reusing one idempotency key
+would collide to one id and the second append would be silently swallowed as a
+duplicate. With them, key uniqueness only has to hold per session and command
+type, which the caller can actually guarantee. A redelivered command therefore
+reproduces byte-identical event ids on retry, while distinct events within one
+multi-event batch (a `[SessionStarted, SessionForked]` fork, say) stay distinct
+-- no batch aliasing, and no cross-session aliasing. This is what makes
+the `Any` path's at-least-once append safe: two concurrent redeliveries sharing
+a key both replay state before either append is visible, both conclude the key
+is new, and both append -- but they append the *same* event id, so the fold and
+every projection collapse them as one fact once dedup is in place, rather than
+relying on a `decide`-time key check that is only a best-effort filter under
+`Any`. On the guarded (`At`) path the sequence guard already makes
+check-and-append atomic, so the losing delivery gets `WrongExpectedVersion`,
+re-replays, sees the key already folded, and no-ops.
+
+Publish dedup closes the write side: the append sets the NATS header
+`Nats-Msg-Id` to the event id, and a duplicate acknowledgement inside the
+JetStream dedup window is idempotent success, not an append error. Fold dedup
+closes the read side: `evolve` (native and WASM) must receive the envelope event
+id, and the fold and every projection collapse events with an already-seen id,
+with snapshots persisting that seen-key state across a restore. The seen-key
+state is bounded by a horizon that is not a guess: duplicates originate only
+from command redelivery, so every deployment must configure the command
+transport's maximum redelivery lag to be finite and the retained seen-key
+horizon to cover it (seen-key horizon >= max command redelivery lag >=
+JetStream duplicate window -- a stated configuration invariant, enforced with
+the other substrate obligations below, not hoped for). A duplicate id beyond
+that horizon is impossible by that invariant, not merely unlikely. Entity-keyed
+facts are additionally immune regardless of the id set: a duplicate terminal
+outcome no-ops under first-terminal-outcome-wins per entity id, a repeated
+`TodoUpdated` no-ops under highest-revision-wins, and checkpoint, artifact, and
+operation facts collapse on their own stable ids -- the seen-key horizon is
+defense for the purely arrival-ordered facts (`UserMessageRecorded`,
+`FileChanged`, `SystemNoticeRecorded`). Beyond the dedup window, a guarded
+(`At`) command's retry re-replays and no-ops on its idempotency key as before;
+an `Any` fact past the window relies on this reader-side collapse by identical
+id. `Trogon-Correlation-Id`
+and `Trogon-Causation-Id` are the correlation and causation headers, validated at
+the append boundary (non-empty, header-safe values, per the runtime's existing
+header validation). None of this is optional plumbing layered on later: a
+conflicting fact recorded under a *different* idempotency key is not a duplicate
+at all, and is resolved instead by the fold rules above, not by this contract.
+
+**This is a substrate obligation, not a shipped guarantee.** None of the dedup
+machinery above exists in the runtime today, and an earlier draft of this ADR
+incorrectly asserted that readers already dedup by an event identity that native
+and WASM replay do not currently expose to `evolve`. The corrected claim: this
+store cannot go live until the substrate obligations below are met.
+
+**Substrate obligations (prerequisites to implementation).** The following are
+tracked in the backlog as prerequisites, not covered by this ADR's wire contract
+alone:
+
+- Evolve-visible event identity in both native and WASM replay paths.
+- A deterministic id-derivation hook (the `EventIdentity::event_id` override
+  point already exists in the runtime and is where this plugs in).
+- Duplicate-publish-ack treated as success rather than an append error.
+- A decode-failure metric (facet 3).
+- Command-receipt tests for crash-before-ack, concurrent redelivery, and
+  multi-event batches.
+- Bounded command redelivery enforced at the command transport, with the
+  configuration invariant seen-key horizon >= max command redelivery lag >=
+  JetStream duplicate window validated at deployment, so no duplicate id can
+  outlive the fold's retained seen-key state.
 
 ### 3. Every event is a typed protobuf, schema-validated at the storage boundary
 
-Session events are protobuf messages under `proto/trogonai/session/sessions/v1/`
+Session events are protobuf messages under `proto/trogonai/session/sessions/v1alpha1/`
 (`edition = "2024"`, structurally-required fields tagged
 `[features.field_presence = LEGACY_REQUIRED]`), following the scheduler
 precedent: present-tense `VerbNoun` commands (`CreateSession`, `ForkSession`,
-`RewindSession`, `DeleteSession`, `DispatchDelegation`), past-participle
+`RewindSession`, `HideSession`, `DispatchDelegation`), past-participle
 `NounVerbed` events (`SessionStarted`, `SessionForked`, `SessionRewound`,
 `Compacted`, `ToolCallCompleted`), one `SessionEvent` oneof envelope importing
 every event file, and `state`/`projections`/`checkpoints` sibling subtrees whose
@@ -230,37 +352,122 @@ silent -- following [ADR#0021](./0021-typed-decode-over-passthrough-forwarding.m
 measured, not dropped. Unlike the prior art, no `InvalidEventRejected` event is
 persisted: rejection happens before the write, so there is nothing to record.
 Schema evolution is additive (new optional fields, reserved retired numbers),
-never a per-event version branch. Every event carries a small envelope alongside
-its typed payload -- an event id (which doubles as the append idempotency key of
-facet 2), an append timestamp, and the acting principal ([ADR#0026](./0026-command-authorization-principal.md)) -- so dedup,
-audit, and authorization are answerable from the event itself.
+never a per-event version branch.
+
+Every event carries a small envelope alongside its typed payload: an `Event.id`
+deterministically derived from the command's idempotency key and its batch index
+(facet 2) -- not itself the idempotency key, which lives on the command, not the
+event -- an append timestamp (transport metadata; see the event-time policy
+below), the acting principal ([ADR#0026](./0026-command-authorization-principal.md)),
+and the correlation and causation headers (facet 2). Dedup, audit, and
+authorization are answerable from the envelope; occurrence time, when it
+matters, is answerable from the payload instead.
 
 The prior art's 46-arm payload is ratified as the starting vocabulary checklist,
 not copied verbatim: lifecycle (`SessionStarted`, which stores the
 `StoredSessionExecutionPlan` once per [ADR#0031](./0031-agent-implementation-and-session-plan.md); `SessionClosed`,
-`SessionCancelled`, `SessionFailed`, `SessionDeleted`), the ExecutionAttempt
+`SessionCancelled`, `SessionFailed`, `SessionHidden`), the ExecutionAttempt
 facts ([ADR#0031](./0031-agent-implementation-and-session-plan.md)), conversation (`UserMessageRecorded`,
 `AssistantMessageStarted`/`Completed`), tool lifecycle
-(`ToolCallRequested`/`Approved`/`Started`/`Completed`/`Failed`), artifacts
+(`ToolCallRequested`/`Approved`/`Denied`/`Started`/`Completed`/`Failed`), artifacts
 (`ArtifactRecorded`, claim-check by sha256), file changes, compaction
 (`Compacted`, facet 4), rewind (`SessionRewound`), fork (`SessionForked`, facet
-5), delegation and subagents (facet 6), and the operation-ledger reservations
-that make tool and delegation side effects idempotent -- [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s ledger
+5), delegation, external delegation, and rewind/terminal cascade sagas (facet
+6), redaction and artifact erasure (facet 7), reversible listing state
+(`SessionRenamed`, `SessionArchived`, `SessionUnarchived`), and the
+operation-ledger reservations that make tool and delegation side effects
+idempotent -- [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s ledger
 deduplicates by operation id and digest and reconciles indeterminate outcomes; it
 is not exactly-once execution. Every command is gated before `decide` by the
 proposed `CommandPrincipal`/`CommandAuthorizer` of draft
 [ADR#0026](./0026-command-authorization-principal.md), once those land.
+
+**Checkpoint provenance.** The domain `Checkpoint` embedded in
+`CheckpointProduced` and in `ExecutionAttemptStarted.restored_checkpoint` gains
+its own `checkpoint_id`, `producing_execution_attempt_id`, `covers_through` (a
+`SessionOrdinal`, facet 2), and `session_execution_plan_digest`, alongside its
+existing `reference`, `checkpoint_type`, `digest`, and `implementation_version`.
+`CheckpointProduced` itself slims to `{session_id, checkpoint}`.
+`ExecutionAttemptStarted.restored_checkpoint` stays an embedded `Checkpoint`
+deliberately -- it is attempt evidence of exactly what was restored,
+digest-verified, and now unambiguously joined to its producing event via
+`checkpoint_id`; the validator requires the restored plan digest to match the
+session's plan.
+
+**Tool-fact ownership.** `ToolCallRequested` and the provider-visible
+`ToolUseBlock`/`ToolResultBlock` embedded in message events are not the same
+fact copied twice by accident; each owns a distinct concern and both are kept.
+`ToolCallRequested` owns the execution-request record: what the platform was
+asked to run (name, `input_json` as dispatched, the operation link).
+`ToolUseBlock`/`ToolResultBlock` own the provider-visible transcript form: the
+exact blocks the model emitted or received, required for faithful provider
+replay. They join by `tool_call_id`/`tool_use_id`; equality between the two is
+expected but not structurally enforced, since normalization may differ between
+the execution record and the transcript form. The model-visible context
+compiles from message events; the execution and audit trail folds from
+lifecycle events. No atomic ordering is guaranteed among these `Any` facts --
+every fact is self-contained and joins by id, never by arrival adjacency. (An
+id-only slimming of `ToolCallRequested` was considered and rejected: under
+streaming, `ToolCallRequested` and the approval UI precede
+`AssistantMessageCompleted`, so an id-only request event cannot drive approval
+before the message that would supply the missing fields exists.)
+
+**Event-time policy.** Envelope append time is transport metadata; fold logic
+never depends on it. A payload carries its own occurrence timestamp only where
+the fact has a real external occurrence distinct from when it was appended:
+`ExecutionAttemptStarted.started_at`, `ExecutionAttemptReady.ready_at`,
+`ExecutionAttemptEnded.ended_at` (all required, matching
+[ADR#0031](./0031-agent-implementation-and-session-plan.md)'s attempt shapes),
+plus the existing `CanonicalMessage.created_at`, `ArtifactMetadata.created_at`,
+and `ExternalArtifact.fetched_at`, whose comments are clarified to occurrence
+time, not append time. Everything else relies on append order, not clocks. This
+is a narrow, named exception, not a general license to add timestamps.
+
+**Validation obligations at the append boundary.** `LEGACY_REQUIRED` stays
+exactly as this facet requires: it enforces presence, not semantic validity, so
+a named validator at the append boundary plus `decide`-time state checks carry
+the rest. At minimum the validator rejects:
+
+- Non-empty, correctly shaped identifiers that match the addressed stream where
+  applicable.
+- Nonzero, supported enum values wherever a field is a required enum, including
+  `CascadePolicy` (persisted values only `1` or `2`; the command layer applies
+  the safe default before append, per the [cascade policy](../glossary/cascade-policy)
+  glossary correction).
+- Set oneofs: `ContentBlock.kind`, `ToolCallResult.kind`,
+  `ArtifactMetadata.source`, `OperationOutcomeRecorded.outcome`.
+- Role agreement: `UserMessageRecorded.message.role` is `USER`;
+  `AssistantMessageCompleted.message.role` is `ASSISTANT`.
+- Started-and-completed assistant message id and model agreement.
+- Tool lifecycle id joins across phases.
+- `FILE_CHANGE_KIND_RENAMED` requires `previous_path`; non-renames must omit
+  it.
+- Ordered, in-session compaction ranges (inclusive `covers_from`/`covers_through`).
+- `matched_stop_sequence` present if and only if `FINISH_REASON_STOP_SEQUENCE`.
+- Positive, monotonic attempt numbers and valid previous-attempt lineage.
+- Supported digest algorithms with length checks matching the algorithm
+  (claim-check digests are sha256 in `v1alpha1`; `Digest.algorithm` is the
+  additive escape hatch for a later one).
+- Valid `input_json`, with the operation digest computed over the exact
+  persisted bytes.
+- Valid ISO 4217 currency codes.
+- Valid timestamps.
+- Unique todo ids with valid statuses.
+
+Every unset oneof, unspecified enum, and malformed shape above is rejected
+before append, never persisted and reconciled later.
 
 ### 4. Compaction is a self-sufficient in-stream marker the store only records
 
 Compaction is an upstream agent-loop concern (forced decision #4): the store
 neither triggers nor understands it. The loop decides when the transcript nears
 the context window and how to summarize; the store persists a single `Compacted`
-event carrying the summary content inline plus the kept-tail boundary
-(`from_sequence`, `to_sequence`), ratifying the prior art's `SummaryCreated`
-shape. The model-visible view folds from the newest `Compacted` summary and every
-event after it; the full history below the boundary remains on the stream for
-audit and rewind.
+event carrying the summary content inline plus the covered range
+(`covers_from`, `covers_through`, both a `SessionOrdinal`, facet 2, both
+inclusive): exactly the events the summary replaces in the model-visible view,
+ratifying the prior art's `SummaryCreated` shape. The model-visible view folds
+from the newest `Compacted` summary and every event strictly after
+`covers_through`; the covered events remain on the stream for audit and rewind.
 
 The marker is self-sufficient: no out-of-band sidecar is required to replay
 across a compaction boundary. This resolves the corpus's open sub-question in
@@ -270,101 +477,251 @@ story instead of a second artifact that can go missing. It also corrects the
 platform compactor crate, which overwrote the stored message list wholesale -- the
 exact destructive pattern the corpus warns against.
 
-### 5. Fork is a shared-prefix reference composed at replay time
+### 5. Fork is an atomic, self-contained creation; inheritance is by explicit reference
 
-Fork mints a new logical stream and never lets the copy reference the source id
-(forced decision #5), but it does not physically copy history. `ForkSession`
-appends `SessionForked{session_id, source_session_id, history_base_seq,
-forked_at}` as the first event on the child subject under the `NoStream` guard,
-so the fork point is atomic and exactly-once even under retries. `history_base_seq`
-is resolved at the application boundary (as principal and tenant already are) by
-reading the source subject's current position just before the command; because
-source sequences only grow, a race captures a marginally older or newer prefix,
-never a corrupt one.
+Fork mints a genuinely independent Session, not a lazily-composed replay view of
+the source (forced decision #5). `ForkSession` appends an atomic
+`[SessionStarted, SessionForked]` batch as the first two events on the new child
+subject, under the `NoStream` guard, so the fork point is atomic and
+exactly-once even under retries. `SessionStarted` carries the fork's own new
+`StoredSessionExecutionPlan`, exactly as any other creation does
+([ADR#0031](./0031-agent-implementation-and-session-plan.md)'s per-Session plan
+binding is satisfied, closing a gap the prior design left: a fork used to have
+no plan of its own). `SessionForked`, second in the batch, carries
+`source_session_id`, `context_prefix_boundary` (a `SessionOrdinal` on the source
+stream, inclusive, facet 2), and `reason`.
 
-Replay composition lives in the store's history-load path, transparent to the
-`Decider` trait's single-`StreamId` contract. The positions here are physical
-JetStream stream sequences -- sparse and shared across every subject on
-`SESSION_EVENTS`, not per-subject ordinals -- so the composition is expressed in
-those positions, not small integers: if a child's first event is `SessionForked`,
-the store folds the source-subject events up to and including `history_base_seq`,
-then the child subject in full -- its first event, the `SessionForked` marker, folds
-into `state.forked_from`, and the child's own events follow -- and evolves the
-concatenation; otherwise it does an ordinary subject read. The marker is folded, not
-skipped: reading the child from strictly after it would drop the fork metadata. This composes recursively for fork-of-fork chains.
-Immediately after the `SessionForked` append succeeds, the fork handler folds the
-source prefix **and the marker itself** into one sealing
-[snapshot](../glossary/snapshot) at the marker's returned `StreamPosition`, so the
-snapshot already carries `forked_from`; steady-state replay resumes from it and reads
-only the child events after the marker (`ReadFrom::after` the snapshot position),
-never re-reading the source and never dropping the fork metadata, bounding cost to
-O(1) regardless of fork depth. A crash between the marker append and the snapshot write self-heals: the
-next execution finds the marker without a snapshot, falls back to the full
-two-segment replay, and writes the missing snapshot. This is the corpus's
-converged-on cheaper alternative (Codex CLI's `history_base`), available because
-events are immutable, and it needs no `Trogon-Origin-Stream-Sequence` -- a fork
-mints a new aggregate, it does not migrate an existing one, so [ADR#0013](./0013-origin-stream-sequence-header.md)'s closed
-use-case list is neither stretched nor needed.
+**The child aggregate folds only its own stream.** Fork replay never folds
+source events into child aggregate state; this removes, wholesale, the imported
+plan, attempts, ledger, terminal state, children, and rewind/compaction state
+that a naive prefix-replay would otherwise drag in. Inheritance is instead an
+explicit, named boundary between three categories:
 
-### 6. Subagents are sibling streams with an explicit cascade policy, reconciled by a process manager
+- **Inherited by reference**, through the model-visible context projection
+  keyed by `(source_session_id, context_prefix_boundary)`: conversation
+  messages, compaction summaries, and artifact references within the source
+  prefix.
+- **Reset**: lifecycle, execution plan (the fork stores its own), execution
+  attempts, operation ledger, todo state, delegation links.
+- **Forbidden**: source terminal state, source rewind/compaction markers as
+  aggregate state, source children.
 
-A subagent is its own logical stream linked by two distinct facts (never a
-cross-stream transaction, which `decide` cannot express): the parent records
-`DelegationDispatched{operation_id, child_session_id, dispatched_at_sequence,
-cascade_policy}` (reusing [ADR#0031](./0031-agent-implementation-and-session-plan.md)'s operation-ledger id to dedupe dispatch), and
-the child records `SubagentLinked{parent_session_id, parent_sequence_at_dispatch,
-cascade_policy}` -- `parent_sequence_at_dispatch` is a plain domain field copied
-from the parent's physical sequence, never `Trogon-Origin-Stream-Sequence`. The
-`cascade_policy` is `CASCADE_ON_PARENT_TERMINAL` (the safe default) or
-`INDEPENDENT` (an intentional, recorded orphan) -- closing the industry-wide
-silent-orphan gap (forced decision #6) by making both outcomes explicit facts.
+Fork from a terminal source is legal and needs nothing special: the fork has
+its own fresh lifecycle regardless of what happened to the source afterward.
+Fork-of-fork chains resolve because the context projection walks prefixes
+recursively; a cycle is impossible by construction, since a fork can only ever
+reference an already-existing source's already-settled past, never a session
+that does not yet exist or one still being created. A missing or unreadable
+ancestor at projection time is a typed projection error, not a fold-time crash;
+`ForkSession` itself validates that the source exists at creation time, before
+the child stream is created.
 
-A parent reaches a terminal state through a Session-level event on its own
-subject: `SessionClosed` (normal completion), `SessionCancelled`, `SessionFailed`,
-or `SessionDeleted`, plus the partial-invalidation case `SessionRewound`. Crash
-is not itself a trigger: an `ExecutionAttemptEnded` is per-attempt ([ADR#0031](./0031-agent-implementation-and-session-plan.md)'s
-outcome set is `failed | cancelled | terminated`, and a restart may still
-follow), so a liveness watchdog that concludes no further attempt will run records
-a Session-level `SessionFailed`, and that is what cascades. A reconciler
+A later rewind of the source does not retroactively alter a fork's context:
+`context_prefix_boundary` is an immutable snapshot-in-time reference into a
+keep-forever log (facet 7), not a live pointer. Rewind cascade (facet 6)
+applies to delegated children, never to forks -- a fork's relationship to its
+source is a one-time copy-by-reference at creation, not an ongoing dependency a
+source mutation could invalidate.
+
+**Replay cost is no longer an aggregate concern.** Because the child fold never
+touches the source stream, the old mandatory sealing snapshot is no longer a
+correctness requirement: a fork's own replay cost is O(child events), the same
+as any other Session, regardless of fork depth. The prefix-walk cost that a deep
+fork-of-fork chain does incur lives entirely in the context projection now,
+which caches and checkpoints like any other projection (facet 8) -- it is a
+read-side performance concern, not a write-side correctness one.
+
+### 6. Child sessions: parent-first dispatch, rewind invalidation distinct from termination, and a two-fact detach saga
+
+A child session is its own logical stream linked to its parent by facts
+recorded on each side, never a cross-stream transaction (`decide` cannot express
+one, and JetStream offers no atomic write across subjects).
+
+**Dispatch is parent-first, with crash-safe repair.** `DispatchDelegation`
+(`At`-guarded, on the parent stream) appends `DelegationDispatched{session_id,
+operation_id, child_session_id, cascade_policy}` -- no position field; the
+event's own fold ordinal is the dispatch point, so nothing needs to name it.
+Only after that append acks does child creation happen: the atomic
+`[SessionStarted, ParentLinked]` batch under `NoStream` on the new child
+subject. `ParentLinked` carries `operation_id` (the saga's join key, reusing the
+operation-ledger id) and `parent_dispatched_at`, a `SessionOrdinal` (facet 2)
+copied from the parent's `DelegationDispatched` event only after that parent
+append has acked. `DelegationDispatched.cascade_policy` is the authoritative
+saga input -- the crash-repair path mints the child from the parent fact alone,
+so the parent fact must carry everything creation needs -- and
+`ParentLinked.cascade_policy` is copied verbatim from it by the creation batch;
+`decide` rejects a creation whose copy differs as a typed conflict, so the two
+records cannot diverge. If the process crashes between the parent append and the
+child creation, a reconciler observes a `DelegationDispatched` with no
+corresponding child stream and re-issues child creation; `NoStream` makes that
+repair exactly-once, and a duplicate creation attempt simply no-ops on
+`WrongExpectedVersion`. The reverse ordering -- a child claiming a parent that
+never actually dispatched it -- cannot occur by construction, because nothing
+but this saga produces a `ParentLinked`.
+
+**Acyclicity by construction.** `DispatchDelegation` always mints a fresh
+`child_session_id`; `ParentLinked` is valid only inside the creation batch, so
+re-parenting an already-existing stream is rejected by `decide` (the stream
+already exists, so the `NoStream` batch fails outright). A cycle would require
+an edge into a pre-existing session, which this makes impossible -- the graph is
+a directed tree by construction, not by a runtime cycle check.
+
+**Rewind invalidates history; it does not terminate.** `SessionRewound.keep_through`
+(a `SessionOrdinal`, facet 2) is inclusive: events `[1..keep_through]` remain
+valid, and this replaces the old ambiguous `>= to_sequence` rule. Children are
+affected only if their `parent_dispatched_at` is strictly greater than
+`keep_through` -- a child dispatched at or before the boundary survives
+untouched; only a child dispatched from history that no longer exists is
+invalidated. Because a rewound parent is not terminal and may keep running,
+invalidating such a child is **not** the same event as a terminal cascade: the
+reconciler appends a distinct atomic `[ParentHistoryInvalidated,
+SessionCancelled{reason = PARENT_REWIND_CASCADE}]` batch on the child, new
+event `ParentHistoryInvalidated{session_id, parent_session_id,
+parent_keep_through, triggering_event_id}` naming exactly what happened and why,
+and only when `cascade_policy = CASCADE_ON_PARENT_TERMINAL`; an `INDEPENDENT`
+child records nothing and keeps running through the rewind.
+
+**Terminal cascade stays a separate batch, for a separate cause.** A parent
+reaches a terminal state through a Session-level event on its own subject --
+`SessionClosed`, `SessionCancelled`, `SessionFailed`, or `SessionHidden` -- and
+`ParentTerminated` now carries a typed `cause` (`ParentTerminalCause`:
+`CLOSED`, `CANCELLED`, `FAILED`, `HIDDEN`) plus `triggering_event_id`, so a
+reader no longer has to infer which of the four actually happened. Crash is
+not itself a trigger: an `ExecutionAttemptEnded` is per-attempt, so a liveness
+watchdog that concludes no further attempt will run records a Session-level
+`SessionFailed`, and that is what cascades. A reconciler
 [processor](../glossary/processor) subscribed to `session.sessions.events.>`
-matches those Session-level terminal markers and dispatches
-`ReconcileParentTerminal` to each eligible child -- discovered through the
-parent-to-children lineage projection folded from `DelegationDispatched` -- whose
-`decide` emits one atomic `[SubagentParentTerminated, SessionCancelled]` batch on
-the child's own subject, or a typed no-op error if already terminal. On a
-`SessionRewound` trigger only the children whose `parent_sequence_at_dispatch` is
-at or after the rewound-to sequence are cascade-cancelled; children dispatched
-from still-valid prior history are left untouched.
-
-Cascade is transitive because `SessionCancelled` is itself a terminal marker the
-same reconciler reacts to; this is not free, though: a chain of depth D takes D
+matches these Session-level terminal markers and dispatches a reconcile command
+to each eligible child (discovered through the parent-to-children lineage
+projection folded from `DelegationDispatched`), whose `decide` emits the atomic
+`[ParentTerminated, SessionCancelled]` batch on the child's own subject,
+distinct from the rewind-cascade batch above, or a typed no-op error if already
+terminal. Cascade is transitive, because `SessionCancelled` is itself a
+terminal marker the same reconciler reacts to; a chain of depth D still takes D
 sequential reconciler round-trips, each bounded by the processor's redelivery
-policy, and discovery depends on the lineage projection's freshness.
-`DispatchDelegation` refuses to spawn under an already-terminal parent, closing
-the common ordering of the race inside one stream's OCC (it is one of facet 2's
-`At(current_position)`-guarded transitions, which is what makes the refusal race-safe);
-`DetachSubagent`/`SubagentDetached` (mirrored on both streams, each side needing
-it for its own invariant) records an intentional detach. Crash and downtime are
-covered by bounded processor redelivery plus a scheduled orphan-closure sweep
-that reads already-durable projections and snapshots -- never raw events, so it is
-immune to any retention race and needs no extension to [ADR#0029](./0029-decider-retention-and-truncation-watermark.md). This sweep
-closes logical cascade only; it never purges bytes.
+policy.
 
-### 7. The log is never truncated: keep-forever, with snapshot-bounded replay
+**Detach is two causally linked local facts, not a mirrored write.** The prior
+design wrote the same detach fact onto both streams, violating
+[ADR#0024](./0024-agent-platform-stream-topology.md)'s record-once rule: a fact
+is recorded once, in the stream whose invariant needs it. Detach is now
+genuinely two local facts, one per stream, joined by one durable
+`detach_operation_id` rather than by re-deriving the same event twice: the
+parent records `DelegationDetached{session_id, child_session_id,
+detach_operation_id, reason}` (no `parent_session_id` -- it is implicit in the
+stream the fact lives on), and the child records the new
+`ParentDetached{session_id, parent_session_id, detach_operation_id}`. Each is
+its own invariant-bearing (`At`-guarded) local fact, satisfying [ADR#0024](./0024-agent-platform-stream-topology.md)'s
+record-once rule because neither is a copy of the other -- they are two
+different streams' own truths about the same operation. Crash repair follows
+the same shape as dispatch: the reconciler completes whichever side is missing,
+idempotently, deduping by `detach_operation_id`; a duplicate delivery no-ops
+because `decide` sees the operation id already folded on that side.
+
+**External delegation carries the evidence [ADR#0031](./0031-agent-implementation-and-session-plan.md) requires.** New event
+`ExternalDelegationDispatched{session_id, operation_id, delegate_reference,
+authenticated_remote_subject, authorization_reference, request_digest,
+correlation_id}` (`At`-guarded, on the dispatching session's stream) carries
+exactly the resolved delegate reference, authenticated remote subject,
+authorization reference, request digest, and correlation id
+[ADR#0031](./0031-agent-implementation-and-session-plan.md) requires for an
+[external delegated agent](../glossary/external-delegated-agent).
+
+**Operation outcome is a typed oneof, not a flat enum with conditionally-meaningful
+fields.** `OperationOutcomeRecorded` carries `oneof outcome { OperationSucceeded
+succeeded; OperationFailed failed; OperationCancelled cancelled;
+OperationUnknown unknown; }`, each variant holding exactly the evidence its case
+needs (a response digest and optional artifact reference for success, a failure
+digest for failure, a canceling actor for cancellation). `unknown` is the only
+non-terminal case, and may be superseded exactly once by a determinate outcome
+under the `At` guard; every determinate outcome is terminal, one per
+`operation_id`. The join key across the saga is `operation_id`; `correlation_id`
+is not repeated here because it is only meaningful on the dispatch event that
+carries it.
+
+**Cancellation intent is recorded separately from cancellation outcome.** New
+event `OperationCancellationRequested{session_id, operation_id, reason}`
+records intent to cancel; `decide` rejects it as a typed no-op if the operation
+is already terminal. After intent, the eventual outcome is `cancelled`, or
+`succeeded`/`failed` if the underlying effect won the race; reconciliation
+after a crash follows the ledger, the same durable source of truth the rest of
+the saga uses.
+
+**Parent receipt of a result is a ledger fact, not a side-channel.**
+`SessionClosed` gains an optional `ArtifactRef result_ref`, a claim-check to the
+session's final output. The parent's durable receipt of a child or external
+result is that delegation operation's `OperationOutcomeRecorded` on the
+*parent's own* stream, written by the reconciler; the `At` guard plus
+one-terminal-outcome-per-operation makes redelivery of that receipt idempotent.
+Delivering a result to a still-running attempt in real time is derived from the
+ledger rather than a separate durable event, and can be added additively later
+if needed.
+
+`OperationKind` value 2 is renamed `OPERATION_KIND_CHILD_SESSION_DELEGATION`,
+and gains `OPERATION_KIND_EXTERNAL_DELEGATION = 3`. Model requests explicitly
+do not use the operation ledger in `v1alpha1`: their retry and billing identity
+is `message_id` plus attempt, recorded via the message events and
+`TokenUsage`, not the ledger this facet otherwise governs.
+
+### 7. The log is never truncated: keep-forever, with a read-time redaction and erasure contract
 
 An append-only session log is the immutable source of truth, so it is never
 truncated or purged (forced decision #7): no event ever leaves the log. This is
 "never edit an event" taken to its end -- deletion is just a slower edit -- and it
 matches the two purest event-sourced products in the corpus (T3 Code, OpenCode),
-which also keep history unbounded.
+which also keep history unbounded. Keep-forever is deliberate, not naive, so it
+needs an explicit privacy and redaction contract rather than leaving "delete" to
+mean something the log cannot actually do.
 
-Storage is managed without ever removing a fact:
+**`SessionHidden` replaces `SessionDeleted`.** The event is renamed (file
+`session_hidden.proto`) because the old name promised erasure the log does not
+perform. It is a terminal visibility tombstone with a typed reason
+(`SESSION_HIDDEN_REASON_USER_REQUESTED`, `SESSION_HIDDEN_REASON_RETENTION_POLICY`):
+it removes the session from every default surface and still cascades as a
+terminal marker (facet 6), but nothing about it deletes bytes.
+
+**`RedactionApplied` masks at read time, keep-forever underneath.** Reinstated
+`RedactionApplied{session_id, repeated string redacted_event_ids, reason}`
+(`At`-guarded): the fold and every projection mask the targeted events'
+content at read time, while the original bytes remain on the keep-forever log.
+Because the identity contract (facet 2) makes a redelivered duplicate share one
+deterministic event id, redacting by event id automatically covers every
+duplicate of that event too -- there is no second copy under a different id for
+a masking pass to miss. Redacting a source stream also automatically masks
+every fork's inherited context, because a fork reads source events by
+reference rather than by copy (facet 5): there is exactly one place the bytes
+live, so exactly one redaction covers every view of them.
+
+**`ArtifactErased` separates artifact-byte lifecycle from event-log retention.**
+New event `ArtifactErased{session_id, artifact_id, reason}` (`At`-guarded)
+records out-of-band destruction of claim-checked artifact bytes; the
+artifact's digest and metadata remain on the log as provenance even after the
+bytes themselves are gone.
+
+**Ingress rules keep secrets out in the first place.** Credential-bearing URLs,
+signed URLs, and other secrets are prohibited in durable fields;
+`ExternalArtifact.source_url` must be credential-free, and ingress
+secret-scanning is a command-boundary validation obligation (facet 3), not a
+downstream cleanup step.
+
+**Erasure-grade deletion is explicitly deferred, not silently dropped.** Legal
+or user-requested erasure beyond masking -- per-session encryption and key
+destruction, interacting with the key-custody ADRs -- is deferred to a named
+follow-up ADR. The interim story for `v1alpha1` is redaction masks plus
+artifact-byte erasure, not cryptographic shredding.
+
+**This explicitly supersedes [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
+for session streams.** Session streams never issue the
+[ADR#0029](./0029-decider-retention-and-truncation-watermark.md) purge; its
+`MinimumRequiredSequence` [retention watermark](../glossary/retention-watermark)
+stays a read-only diagnostic for this store, and this ADR states that
+supersession explicitly rather than leaving the two decisions in tension.
+
+Storage is otherwise managed without ever removing a fact:
 
 - **Snapshots bound replay, not storage.** The runtime resumes from the newest
   snapshot and replays only the tail after it (facet 8), so a long session costs
-  O(tail) to load even though its log grows forever. [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s
-  `MinimumRequiredSequence` watermark is kept only as a read-only diagnostic; the
-  session store never issues the purge [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) permits.
+  O(tail) to load even though its log grows forever.
 - **Cold-storage tiering is an optional, reversible, non-semantic relocation.** If a
   deployment must bound the hot JetStream stream, already-immutable old events may be
   copied to the JetStream Object Store, evicted from the hot stream, and restored on
@@ -375,8 +732,8 @@ Storage is managed without ever removing a fact:
 
 Because nothing is ever logically removed, the machinery an archive-then-purge
 design would need -- a verified-archive KV ledger, a fork-lineage watermark term so a
-live child's parent prefix is not purged, and the purge-versus-new-fork race -- simply
-does not arise. A fork's parent prefix is always present.
+live fork's source prefix is not purged, and the purge-versus-new-fork race -- simply
+does not arise. A fork's source prefix is always present.
 
 ### 8. Listing, search, and summaries are rebuildable projections, never the source of truth
 
@@ -388,14 +745,71 @@ projection ([ADR#0014](./0014-command-and-query-naming.md)) -- `get_session`,
 `list_sessions` -- with no query protos, since the projection value is the read
 contract. The model-visible context is compiled deterministically from the event
 log bounded by the latest `Compacted` marker (facet 4), ratifying the prior art's
-context-twin/token-budget compiler as a projection. Any full-text or vector search
-subsystem is a separate, independently bootstrapped projection off the same log,
-out of scope here.
+context-twin/token-budget compiler as a projection, and, for a fork, recursively
+resolving its source's context prefix the same way (facet 5). Any full-text or
+vector search subsystem is a separate, independently bootstrapped projection off
+the same log, out of scope here.
 
 Resume rebuilds a session's state the way the runtime rebuilds any decider
-aggregate: load the newest snapshot for the session, then replay only the tail after
-it (a fork resumes from its sealing snapshot, facet 5), so resume cost tracks
-snapshot cadence, not transcript length.
+aggregate: load the newest snapshot for the session, then replay only the tail
+after it -- a fork resumes purely from its own child-stream snapshot, since it
+never folded source events into its aggregate state to begin with (facet 5) --
+so resume cost tracks snapshot cadence, not transcript length.
+
+### Command-by-command matrix
+
+Every command implied by the 41-arm event catalog, with the state `decide`
+reads, its write precondition (facet 2), the batch it emits, the invariant it
+guards, and its idempotency key. Rows are deliberately terse; exact command
+proto shapes are implementation-level follow-up (Non-Goals below). Execution
+attempts stay inside the Session aggregate rather than a separately-guarded
+attempt aggregate, because a `decide` names exactly one stream and attempt
+facts must be guarded against the same session's lifecycle in one atomic
+decision.
+
+| Command | State read | Precondition | Emitted batch | Invariant | Idempotency key |
+| --- | --- | --- | --- | --- | --- |
+| `CreateSession` | none | `NoStream` | `[SessionStarted]` | stream must not exist | `session_id` |
+| `ForkSession` | source existence | `NoStream` (child) | `[SessionStarted, SessionForked]` | child stream must not exist; source must exist | `session_id` (child) |
+| `DispatchDelegation` | parent head | `At` (parent) | `[DelegationDispatched]` | parent not already terminal | `operation_id` |
+| `CreateChildSession` (saga step) | child stream existence | `NoStream` (child) | `[SessionStarted, ParentLinked]` | child stream must not exist; `parent_dispatched_at` and `cascade_policy` copied verbatim from the parent's `DelegationDispatched` | `operation_id` |
+| `CloseSession` | head | `At` | `[SessionClosed]` | not already terminal | `session_id` + terminal-request id |
+| `CancelSession` | head | `At` | `[SessionCancelled]` | not already terminal | `session_id` + terminal-request id |
+| `FailSession` | head | `At` | `[SessionFailed]` | not already terminal | `session_id` + terminal-request id |
+| `HideSession` | head | `At` | `[SessionHidden]` | none beyond head match | hide-request id |
+| `RewindSession` | head | `At` | `[SessionRewound]` | `keep_through` within current log | rewind-request id |
+| `CompactSession` | head | `At` | `[Compacted]` | `covers_from <= covers_through`, ordered, in-session | compaction-request id |
+| `StartExecutionAttempt` | head, active-attempt state | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number | attempt id |
+| `MarkExecutionAttemptReady` | head, attempt state | `At` | `[ExecutionAttemptReady]` | Ready only after Started | attempt id |
+| `EndExecutionAttempt` | head, attempt state | `At` | `[ExecutionAttemptEnded]` | one outcome per attempt | attempt id |
+| `ApproveToolCall` | head, tool-call state | `At` | `[ToolCallApproved]` | mutually exclusive with deny | `tool_call_id` |
+| `DenyToolCall` | head, tool-call state | `At` | `[ToolCallDenied]` | mutually exclusive with approve; blocks start/complete | `tool_call_id` |
+| `ReserveOperation` | head, ledger state | `At` | `[OperationReserved]` | one reservation per `operation_id` | `operation_id` |
+| `RecordOperationOutcome` | head, ledger state | `At` | `[OperationOutcomeRecorded]` | one terminal outcome per `operation_id`; `unknown` supersedable once | `operation_id` |
+| `RequestOperationCancellation` | head, ledger state | `At` | `[OperationCancellationRequested]` | rejected if operation already terminal | `operation_id` + cancellation-request id |
+| `DispatchExternalDelegation` | head | `At` | `[ExternalDelegationDispatched]` | one dispatch per `operation_id` | `operation_id` |
+| `ReconcileParentTerminal` (reconciler) | child head, parent lineage | `At` (child) | `[ParentTerminated, SessionCancelled]` | no-op if child already terminal | `triggering_event_id` |
+| `ReconcileParentRewind` (reconciler) | child head, parent lineage | `At` (child) | `[ParentHistoryInvalidated, SessionCancelled]` | only if `parent_dispatched_at > keep_through` and cascade policy allows | `triggering_event_id` |
+| `DetachDelegation` (parent side) | parent head | `At` (parent) | `[DelegationDetached]` | one detach per `detach_operation_id` | `detach_operation_id` |
+| `DetachDelegation` (child side / repair) | child head | `At` (child) | `[ParentDetached]` | one detach per `detach_operation_id` | `detach_operation_id` |
+| `ApplyRedaction` | head | `At` | `[RedactionApplied]` | targeted event ids exist in-session | redaction-request id |
+| `EraseArtifact` | head | `At` | `[ArtifactErased]` | artifact exists and is claim-checked | `artifact_id` + erasure-request id |
+| `RecordUserMessage` | none | `Any` | `[UserMessageRecorded]` | role is `USER` | `message_id` |
+| `StartAssistantMessage` | none | `Any` | `[AssistantMessageStarted]` | none | `message_id` |
+| `CompleteAssistantMessage` | none | `Any` | `[AssistantMessageCompleted]` | role is `ASSISTANT`; id/model agree with start | `message_id` |
+| `FailAssistantMessage` | none | `Any` | `[AssistantMessageFailed]` | id references a started message; first terminal outcome per id wins | `message_id` |
+| `RequestToolCall` | none | `Any` | `[ToolCallRequested]` | none | `tool_call_id` |
+| `StartToolCall` | none | `Any` | `[ToolCallStarted]` | `tool_call_id` matches a request | `tool_call_id` |
+| `CompleteToolCall` | none | `Any` | `[ToolCallCompleted]` | first-terminal-outcome-wins vs. `ToolCallFailed` | `tool_execution_id` |
+| `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` | `tool_execution_id` |
+| `RecordArtifact` | none | `Any` | `[ArtifactRecorded]` | source oneof set; MIME fallback rule | `artifact_id` |
+| `RecordFileChange` | none | `Any` | `[FileChanged]` | `RENAMED` requires `previous_path`; others omit it | change id |
+| `ProduceCheckpoint` | none | `Any` | `[CheckpointProduced]` | `checkpoint_id` unique; plan digest matches session | `checkpoint_id` |
+| `RecordSystemNotice` | none | `Any` | `[SystemNoticeRecorded]` | none | notice id |
+| `UpdateTodo` | none | `Any` | `[TodoUpdated]` | `revision` monotonic from single logical writer; highest-revision-wins fold | `session_id` + `revision` |
+| `RenameSession` | none | `Any` | `[SessionRenamed]` | none | rename-request id |
+| `ArchiveSession` | none | `Any` | `[SessionArchived]` | none | archive-request id |
+| `UnarchiveSession` | none | `Any` | `[SessionUnarchived]` | none | unarchive-request id |
 
 ## Alternatives Considered
 
@@ -414,8 +828,9 @@ facts under two subjects (violating [ADR#0024](./0024-agent-platform-stream-topo
 tags them with `Trogon-Origin-Stream-Sequence` to fake provenance for a case
 [ADR#0013](./0013-origin-stream-sequence-header.md) does not authorize (a fork is a new aggregate, not a migration). It also
 pays O(history) cost per fork and needs crash-resumable copy machinery that does
-not exist in `trogon-decider-nats`, for no benefit over the shared-prefix
-reference of facet 5.
+not exist in `trogon-decider-nats`, for no benefit over facet 5's
+reference-by-context-projection, which achieves the same shared prefix without
+importing any of it into child aggregate state.
 
 ### Fork as a content-addressed snapshot share (LangGraph-style)
 
@@ -509,43 +924,82 @@ hot path without inheriting its weak lifecycle guarantees.
   composes with both but is not decided here.
 - **Tenant-to-authorization-principal linkage** -- [ADR#0027](./0027-decider-multi-tenancy-primitive.md) Non-Goal; [ADR#0026](./0026-command-authorization-principal.md)
   owns the principal.
-- **Concrete Rust and proto contracts** -- exact message fields, KV key shapes,
-  and the event-envelope / idempotency-key representation are implementation-level
-  follow-up.
+- **Runtime and command implementation.** Concrete message fields, the event
+  envelope, and the idempotency-key representation are now decided in the
+  `v1alpha1` proto package (facets 1-7 above); what remains implementation-level
+  follow-up is commands, aggregate `initial_state`/`evolve`/`decide`,
+  projections, snapshots, and the substrate obligations facet 2 lists as
+  prerequisites.
 
 ## Consequences
 
 - A Session gains rewind and audit for free from event-sourcing, plus real
-  expected-sequence optimistic concurrency on its invariant-bearing transitions -- a
-  narrower form of the guarantee only one studied product had (OpenCode guarded every
-  append; here only the invariant-bearing transitions are) -- while the high-volume
-  transcript path appends without a head guard and never retries.
-- Because commuting facts append without a head guard, a happened-fact (say a late
-  `ToolCallCompleted`) can land after a terminal marker. The fold treats a session's
-  first terminal marker as authoritative and ignores or reconciles later
-  happened-facts, rather than the store rejecting them at write time; every read
-  model over the transcript must be written to tolerate this.
+  expected-sequence optimistic concurrency on its creation and invariant-bearing
+  transitions -- a narrower form of the guarantee only one studied product had
+  (OpenCode guarded every append; here creation and invariant-bearing
+  transitions are, per the `NoStream`/`At`/`Any` classification of facet 2) --
+  while the high-volume transcript path appends without a head guard and never
+  retries.
+- Durable cross-references (`context_prefix_boundary`, `keep_through`,
+  `covers_from`/`covers_through`, `parent_dispatched_at`) are now `SessionOrdinal`
+  fold-derived positions, not physical JetStream sequences, so they survive
+  restore, backfill, migration, and cold-tier relocation without needing a
+  translation layer (facet 2); [ADR#0013](./0013-origin-stream-sequence-header.md)'s
+  origin-sequence header remains purely a provenance concern for these
+  payloads, never a domain reference.
+- Because commuting facts append without a head guard, two conflicting outcomes
+  for the same entity can both land on the log (a `ToolCallCompleted` and a
+  `ToolCallFailed` for the same `tool_execution_id`, say). The fold resolves
+  these deterministically -- first-terminal-outcome-wins per entity,
+  highest-revision-wins for `TodoUpdated`, first terminal marker wins for the
+  session itself -- rather than the store rejecting either at write time
+  (facet 2); every read model over the transcript must be written to honor
+  these fold rules, not just tolerate late facts.
 - No caller migration is needed on the curated line (greenfield). The platform
   `crates/session` domain model is salvaged; its persistence is rewritten as a
   decider, and the switching subsystem is dropped pending [ADR#0031](./0031-agent-implementation-and-session-plan.md).
-- New standing services appear: a subagent reconciler processor plus a scheduled
-  orphan-closure sweep (facet 6); optional cold-storage tiering (facet 7) adds one
-  more, but only if a deployment chooses to bound the hot stream.
-- Gets harder: adding an event type now carries a proto plus a typed-decode plus a
-  projection-fold obligation, and every command must carry an idempotency key its
-  `decide` dedups on, since an append-only log cannot later edit away a
-  double-appended fact.
+- New standing services appear: a dispatch-and-detach saga reconciler with
+  crash repair for both directions (facet 6), a rewind-invalidation cascade
+  distinct from terminal cascade (facet 6), plus a scheduled orphan-closure
+  sweep; optional cold-storage tiering (facet 7) adds one more, but only if a
+  deployment chooses to bound the hot stream.
+- Gets harder: adding an event type now carries a proto plus a typed-decode plus
+  a projection-fold obligation, and every command must carry an idempotency key
+  its event ids are deterministically derived from (facet 2), which cannot
+  happen until the substrate obligations facet 2 lists (evolve-visible
+  identity, WASM parity, duplicate-ack success) are actually implemented --
+  this store does not go live on wire contract alone.
 - Cascade is eventually consistent: a child spawned concurrently with a parent's
   terminal marker may run a reconciler cycle or two before it is cancelled, and a
   deep collaboration chain cascades in O(depth) reconciler round-trips; callers
-  expecting synchronous cascade are surprised. Graph acyclicity must be enforced
-  at `DispatchDelegation` time, since the store cannot detect a cycle.
-- Fork-of-fork chains cost O(depth) to replay unless sealed, so snapshot-on-fork
-  is mandatory (facet 5). The log grows unbounded -- nothing is ever purged -- so
-  storage is a capacity-planning concern, bounded in replay cost by snapshots and,
-  if a deployment opts in, in hot-stream size by reversible cold-tiering.
-- This decision depends on five still-draft ADRs (0026, 0027, 0028, 0029, 0031);
-  each that changes before acceptance can reopen the facet that builds on it.
+  expecting synchronous cascade are surprised. Graph acyclicity is guaranteed by
+  construction, not by a runtime check (facet 6), and detach is now two
+  independently-guarded local facts joined by `detach_operation_id` rather than
+  a mirrored write, closing the [ADR#0024](./0024-agent-platform-stream-topology.md)
+  record-once violation the prior design had.
+- Fork replay is O(child events) only, regardless of fork depth or
+  fork-of-fork chaining, because the child aggregate never folds source events
+  at all; the sealing snapshot the prior design required is no longer a
+  correctness obligation. The prefix-walk cost of a deep fork-of-fork chain
+  moved to the context projection (facet 5, facet 8), where it is a read-side
+  caching concern like any other projection, not a write-side replay cost. The
+  log grows unbounded -- nothing is ever purged -- so storage is a
+  capacity-planning concern, bounded in replay cost by snapshots and, if a
+  deployment opts in, in hot-stream size by reversible cold-tiering.
+- Privacy now has an explicit contract instead of an absent one: `SessionHidden`
+  is honestly a visibility tombstone, `RedactionApplied` and `ArtifactErased`
+  give the store a read-time masking and artifact-destruction story, and
+  [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s purge is
+  explicitly superseded for session streams (facet 7). Erasure-grade deletion
+  (crypto-shredding) is still a named gap, deferred to a follow-up ADR, not
+  silently unresolved.
+- This decision depends on five still-draft ADRs (0026, 0027, 0028, 0029,
+  0031); each that changes before acceptance can reopen the facet that builds
+  on it. The package is named `v1alpha1`, not `v1`, precisely because of that
+  dependency and because the substrate obligations facet 2 lists are not yet
+  met; promotion to `v1` is a later, separate decision. Shared multi-tenant
+  deployment additionally waits on [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s
+  resolver contract (facet 1).
 
 ## References
 
