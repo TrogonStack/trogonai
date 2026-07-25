@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// ParentLinked is the second event in the atomic [SessionStarted, ParentLinked]
+// creation batch on the child subject under the NoStream precondition,
+// naming the parent whose run delegated it and the cascade policy that
+// governs it (ADR#0035 facet 6). It is the child-side counterpart to the
+// parent's DelegationDispatched, joined by operation_id (the saga join key);
+// parent_dispatched_at is the parent's DelegationDispatched event's own
+// SessionOrdinal, copied onto the child only after the parent append acks
+// (parent-first ordering), never predicted.
+message ParentLinked {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  SessionOrdinal parent_dispatched_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  CascadePolicy cascade_policy = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Operation-ledger id shared with the parent's DelegationDispatched; the saga
+  // join key linking the two sides of the dispatch.
+  string operation_id = 5 [features.field_presence = LEGACY_REQUIRED];
+}

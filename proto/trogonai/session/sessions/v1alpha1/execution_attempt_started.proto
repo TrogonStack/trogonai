@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/session/sessions/v1alpha1/checkpoint.proto";
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// ExecutionAttemptStarted is one attempt's start evidence under the immutable
+// session execution plan; a restart creates a new attempt, never edits the
+// prior one (ADR#0031 §4). It mints and advances this session's monotonic
+// attempt counter under a one-active-attempt invariant, so it is
+// invariant-bearing (WRITE_PRECONDITION = At), not a commuting happened-fact.
+// restored_checkpoint deliberately embeds the full Checkpoint rather than a
+// reference: it is attempt evidence of exactly what was restored,
+// digest-verified and joined unambiguously to its producing event via
+// Checkpoint.checkpoint_id.
+message ExecutionAttemptStarted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string execution_attempt_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  Digest session_execution_plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint64 attempt_number = 4 [features.field_presence = LEGACY_REQUIRED];
+  string previous_attempt_id = 5;
+  Checkpoint restored_checkpoint = 6;
+  string resume_cursor = 7;
+  string host_artifact_ref = 8 [features.field_presence = LEGACY_REQUIRED];
+  Digest host_artifact_digest = 9 [features.field_presence = LEGACY_REQUIRED];
+  string authenticated_remote_subject = 10;
+  string isolation_placement = 11;
+  // Wall-clock instant the attempt actually started: a real external
+  // occurrence distinct from envelope append time (D10).
+  google.protobuf.Timestamp started_at = 12 [features.field_presence = LEGACY_REQUIRED];
+}

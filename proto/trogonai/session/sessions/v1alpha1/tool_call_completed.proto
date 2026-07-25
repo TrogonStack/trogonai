@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/tool_call.proto";
+
+// ToolCallCompleted records that a tool call finished successfully. Per
+// tool_execution_id, this competes with ToolCallFailed under a
+// first-terminal-outcome-wins fold rule: the first of the two to appear in
+// fold order is authoritative, and a later conflicting outcome is retained as
+// audit-only, surfaced by a projection flag, never folded into state (D4). It
+// is a commuting happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+message ToolCallCompleted {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  ToolCallResult result = 4 [features.field_presence = LEGACY_REQUIRED];
+}
