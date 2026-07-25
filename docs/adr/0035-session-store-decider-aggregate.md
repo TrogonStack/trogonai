@@ -277,10 +277,23 @@ Publish dedup closes the write side: the append sets the NATS header
 JetStream dedup window is idempotent success, not an append error. Fold dedup
 closes the read side: `evolve` (native and WASM) must receive the envelope event
 id, and the fold and every projection collapse events with an already-seen id,
-with snapshots persisting the bounded seen-key state they need to keep doing so
-across a restore. Beyond the dedup window, a guarded (`At`) command's retry
-re-replays and no-ops on its idempotency key as before; an `Any` fact past the
-window relies on this reader-side collapse by identical id. `Trogon-Correlation-Id`
+with snapshots persisting that seen-key state across a restore. The seen-key
+state is bounded by a horizon that is not a guess: duplicates originate only
+from command redelivery, so every deployment must configure the command
+transport's maximum redelivery lag to be finite and the retained seen-key
+horizon to cover it (seen-key horizon >= max command redelivery lag >=
+JetStream duplicate window -- a stated configuration invariant, enforced with
+the other substrate obligations below, not hoped for). A duplicate id beyond
+that horizon is impossible by that invariant, not merely unlikely. Entity-keyed
+facts are additionally immune regardless of the id set: a duplicate terminal
+outcome no-ops under first-terminal-outcome-wins per entity id, a repeated
+`TodoUpdated` no-ops under highest-revision-wins, and checkpoint, artifact, and
+operation facts collapse on their own stable ids -- the seen-key horizon is
+defense for the purely arrival-ordered facts (`UserMessageRecorded`,
+`FileChanged`, `SystemNoticeRecorded`). Beyond the dedup window, a guarded
+(`At`) command's retry re-replays and no-ops on its idempotency key as before;
+an `Any` fact past the window relies on this reader-side collapse by identical
+id. `Trogon-Correlation-Id`
 and `Trogon-Causation-Id` are the correlation and causation headers, validated at
 the append boundary (non-empty, header-safe values, per the runtime's existing
 header validation). None of this is optional plumbing layered on later: a
@@ -304,6 +317,10 @@ alone:
 - A decode-failure metric (facet 3).
 - Command-receipt tests for crash-before-ack, concurrent redelivery, and
   multi-event batches.
+- Bounded command redelivery enforced at the command transport, with the
+  configuration invariant seen-key horizon >= max command redelivery lag >=
+  JetStream duplicate window validated at deployment, so no duplicate id can
+  outlive the fold's retained seen-key state.
 
 ### 3. Every event is a typed protobuf, schema-validated at the storage boundary
 

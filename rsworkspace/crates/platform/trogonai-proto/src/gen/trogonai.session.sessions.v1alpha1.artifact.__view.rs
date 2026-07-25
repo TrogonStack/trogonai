@@ -453,7 +453,7 @@ impl ::serde::Serialize for ArtifactRefOwnedView {
 }
 /// ArtifactMetadata is the claim-check record carried by ArtifactRecorded. Its
 /// source arm distinguishes durably-stored bytes (addressable by sha256) from a
-/// degraded external reference whose bytes were never fetched, so required-ness is
+/// degraded external reference whose bytes were not durably stored, so required-ness is
 /// expressed per branch rather than collapsed into always-required fields that a
 /// degraded artifact cannot supply (ADR#0035 facet 3). Media type lives per
 /// branch rather than on this envelope: StoredArtifact.mime is always required
@@ -1390,7 +1390,8 @@ impl ::serde::Serialize for StoredArtifactOwnedView {
     }
 }
 /// ExternalArtifact is the degraded source arm for an artifact whose bytes were
-/// never fetched; only a reference to the source is kept.
+/// not durably stored; the source reference and optional transient fetch
+/// evidence (fetched_at, content_digest) are retained.
 #[derive(Clone, Debug, Default)]
 pub struct ExternalArtifactView<'a> {
     /// The (un-fetchable) source location. Must be credential-free: a
