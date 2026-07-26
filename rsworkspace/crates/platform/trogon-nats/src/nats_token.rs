@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use crate::constants::MAX_NATS_TOKEN_LENGTH;
-use crate::subject_token_violation::SubjectTokenViolation;
+use crate::subject_token_violation::SubjectTokenViolationError;
 use crate::token;
 
 /// A validated single NATS subject token.
@@ -22,19 +22,19 @@ pub struct NatsToken(Arc<str>);
 
 impl NatsToken {
     /// Validate and construct a new single token.
-    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolation> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolationError> {
         let s = s.as_ref();
         if s.is_empty() {
-            return Err(SubjectTokenViolation::Empty);
+            return Err(SubjectTokenViolationError::Empty);
         }
         let mut char_count: usize = 0;
         for ch in s.chars() {
             char_count += 1;
             if char_count > MAX_NATS_TOKEN_LENGTH {
-                return Err(SubjectTokenViolation::TooLong(char_count));
+                return Err(SubjectTokenViolationError::TooLong(char_count));
             }
             if !ch.is_ascii() || ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
-                return Err(SubjectTokenViolation::InvalidCharacter(ch));
+                return Err(SubjectTokenViolationError::InvalidCharacter(ch));
             }
         }
         Ok(Self(s.into()))
@@ -75,19 +75,19 @@ pub struct DottedNatsToken(Arc<str>);
 
 impl DottedNatsToken {
     /// Validate and construct a new dotted token.
-    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolation> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolationError> {
         let s = s.as_ref();
         if s.is_empty() {
-            return Err(SubjectTokenViolation::Empty);
+            return Err(SubjectTokenViolationError::Empty);
         }
         if let Some(ch) = token::has_wildcards_or_whitespace(s) {
-            return Err(SubjectTokenViolation::InvalidCharacter(ch));
+            return Err(SubjectTokenViolationError::InvalidCharacter(ch));
         }
         if token::has_consecutive_or_boundary_dots(s) {
-            return Err(SubjectTokenViolation::InvalidCharacter('.'));
+            return Err(SubjectTokenViolationError::InvalidCharacter('.'));
         }
         if s.len() > MAX_NATS_TOKEN_LENGTH {
-            return Err(SubjectTokenViolation::TooLong(s.len()));
+            return Err(SubjectTokenViolationError::TooLong(s.len()));
         }
         Ok(Self(s.into()))
     }

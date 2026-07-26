@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// SessionRenamed records a change to the session's display title: reversible
+// organization state, distinct from the terminal SessionHidden (D11). It is a
+// commuting happened-fact (WRITE_PRECONDITION = Any).
+message SessionRenamed {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string title = 2 [features.field_presence = LEGACY_REQUIRED];
+}

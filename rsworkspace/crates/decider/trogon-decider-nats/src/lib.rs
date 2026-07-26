@@ -26,7 +26,8 @@ pub use projector::{
     CatchUpError, CatchUpOutcome, CheckpointSequence, ProjectionApply, ProjectionCheckpointStore, Projector,
 };
 pub use provision::{
-    EnsureBucketError, EnsureStreamError, KvConfigMismatch, StreamConfigMismatch, ensure_bucket, ensure_stream,
+    EnsureBucketError, EnsureStreamError, KvConfigMismatchError, StreamConfigMismatchError, ensure_bucket,
+    ensure_stream,
 };
 pub use snapshot_store::{
     NatsSnapshotConfig, SnapshotChange, SnapshotCodecError, SnapshotKvError, SnapshotStoreError, checkpoint_key,

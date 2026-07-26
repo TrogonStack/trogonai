@@ -1,0 +1,21 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// ToolCallDenied records that a requested tool call was refused and never
+// executed -- a human deny or a policy/hook block. Requesting a tool call is only
+// the model's intent; this is the terminal branch when the call is not approved,
+// so a denied call has no ToolCallStarted, no ToolCallCompleted, and reserves no
+// operation in the ledger because nothing ran. Approval and denial are mutually
+// exclusive human-paced decisions guarding a transition whose outcome depends
+// on current lifecycle state, so it is invariant-bearing
+// (WRITE_PRECONDITION = At, ADR#0035 facet 2), not a commuting happened-fact.
+message ToolCallDenied {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Principal, policy, or hook that refused the call.
+  string denied_by = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Human-readable reason for the refusal; empty when none.
+  string reason = 5;
+}

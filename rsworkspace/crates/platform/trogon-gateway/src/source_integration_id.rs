@@ -1,6 +1,6 @@
 use std::fmt;
 
-use trogon_nats::{NatsToken, SubjectTokenViolation};
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
 const MAX_INTEGRATION_ID_LEN: usize = 64;
 
@@ -53,11 +53,11 @@ pub enum SourceIntegrationIdError {
 }
 
 impl SourceIntegrationIdError {
-    fn from_subject_token_violation(violation: SubjectTokenViolation) -> Self {
+    fn from_subject_token_violation(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(length) => Self::TooLong(length),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(length) => Self::TooLong(length),
         }
     }
 }

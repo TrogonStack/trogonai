@@ -187,7 +187,7 @@ pub enum HttpPopError {
     /// `cnf.jwk` either failed to deserialize or named an algorithm the PoP
     /// verifier doesn't support.
     #[error("invalid cnf.jwk")]
-    InvalidConfirmationKey(#[source] InvalidConfirmationKey),
+    InvalidConfirmationKey(#[source] InvalidConfirmationKeyError),
     /// The signature did not verify against `cnf.jwk` over the RFC 9421
     /// canonical signature base.
     #[error("signature did not verify")]
@@ -203,10 +203,10 @@ pub enum HttpPopError {
 }
 
 /// Reason `cnf.jwk` could not be used to verify the HTTP Message Signature.
-/// Mirrors [`crate::nats_pop::InvalidConfirmationKey`]; kept as a separate
+/// Mirrors [`crate::nats_pop::InvalidConfirmationKeyError`]; kept as a separate
 /// type because the two PoP profiles are independent public surfaces.
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidConfirmationKey {
+pub enum InvalidConfirmationKeyError {
     #[error("cnf.jwk did not deserialize")]
     Deserialize(#[source] serde_json::Error),
     #[error("cnf.jwk uses an unsupported algorithm")]
@@ -322,10 +322,10 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                     .await
                     .map_err(HttpPopError::Auth)?;
                 let cnf = verified.claims.cnf.clone().ok_or(HttpPopError::InvalidConfirmationKey(
-                    InvalidConfirmationKey::MissingConfirmationClaim,
+                    InvalidConfirmationKeyError::MissingConfirmationClaim,
                 ))?;
                 let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(|e| {
-                    HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::StructurallyIncomplete(e))
+                    HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::StructurallyIncomplete(e))
                 })?;
                 let presenter = VerifiedPresenter::Auth(VerifiedAuthPresenter {
                     auth: verified,
@@ -574,7 +574,7 @@ fn normalize_field_value(raw: &str) -> String {
 
 fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), HttpPopError> {
     let jwk: Jwk = serde_json::from_value(jwk_val.clone())
-        .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(source)))?;
+        .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(source)))?;
     let alg = match &jwk.algorithm {
         jsonwebtoken::jwk::AlgorithmParameters::EllipticCurve(ec)
             if ec.curve == jsonwebtoken::jwk::EllipticCurve::P256 =>
@@ -593,12 +593,12 @@ fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: 
         }
         _ => {
             return Err(HttpPopError::InvalidConfirmationKey(
-                InvalidConfirmationKey::UnsupportedAlgorithm,
+                InvalidConfirmationKeyError::UnsupportedAlgorithm,
             ));
         }
     };
     let key = DecodingKey::from_jwk(&jwk)
-        .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKey::DecodingKey(source)))?;
+        .map_err(|source| HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::DecodingKey(source)))?;
     let ok = verify(sig_b64, base, &key, alg).map_err(HttpPopError::Verify)?;
     if !ok {
         return Err(HttpPopError::BadSignature);

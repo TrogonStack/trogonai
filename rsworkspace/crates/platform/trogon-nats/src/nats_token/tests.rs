@@ -9,19 +9,22 @@ fn single_valid() {
 
 #[test]
 fn single_empty() {
-    assert_eq!(NatsToken::new(""), Err(SubjectTokenViolation::Empty));
+    assert_eq!(NatsToken::new(""), Err(SubjectTokenViolationError::Empty));
 }
 
 #[test]
 fn single_too_long() {
     let long = "a".repeat(129);
-    assert_eq!(NatsToken::new(&long), Err(SubjectTokenViolation::TooLong(129)));
+    assert_eq!(NatsToken::new(&long), Err(SubjectTokenViolationError::TooLong(129)));
     assert!(NatsToken::new("a".repeat(128)).is_ok());
 }
 
 #[test]
 fn single_rejects_dots() {
-    assert_eq!(NatsToken::new("a.b"), Err(SubjectTokenViolation::InvalidCharacter('.')));
+    assert_eq!(
+        NatsToken::new("a.b"),
+        Err(SubjectTokenViolationError::InvalidCharacter('.'))
+    );
 }
 
 #[test]
@@ -42,7 +45,7 @@ fn single_rejects_whitespace() {
 fn single_rejects_non_ascii() {
     assert_eq!(
         NatsToken::new("séssion"),
-        Err(SubjectTokenViolation::InvalidCharacter('é'))
+        Err(SubjectTokenViolationError::InvalidCharacter('é'))
     );
 }
 
@@ -61,13 +64,16 @@ fn dotted_valid_dotted() {
 
 #[test]
 fn dotted_empty() {
-    assert_eq!(DottedNatsToken::new(""), Err(SubjectTokenViolation::Empty));
+    assert_eq!(DottedNatsToken::new(""), Err(SubjectTokenViolationError::Empty));
 }
 
 #[test]
 fn dotted_too_long() {
     let long = "a".repeat(129);
-    assert_eq!(DottedNatsToken::new(&long), Err(SubjectTokenViolation::TooLong(129)));
+    assert_eq!(
+        DottedNatsToken::new(&long),
+        Err(SubjectTokenViolationError::TooLong(129))
+    );
     assert!(DottedNatsToken::new("a".repeat(128)).is_ok());
 }
 

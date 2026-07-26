@@ -12,4 +12,4 @@ pub use consumer::{
     verify_message_scheduling_support,
 };
 pub use dispatcher::{Clock, DeliveredMessage, DispatchReport, DispatcherConfig, DispatcherHandle, spawn_dispatcher};
-pub use processor::{AckAction, Processed, ProcessedOutcome, RetrySignal, ScheduleProcessor};
+pub use processor::{AckAction, Processed, ProcessedOutcome, RetryableError, ScheduleProcessor};

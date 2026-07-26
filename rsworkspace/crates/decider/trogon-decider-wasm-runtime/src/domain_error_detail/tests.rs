@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn displays_as_code_colon_message() {
-    let detail = DomainErrorDetail {
+    let detail = GuestDomainError {
         code: "already-registered".to_string(),
         message: "schedule already exists".to_string(),
         details: Vec::new(),
@@ -12,7 +12,7 @@ fn displays_as_code_colon_message() {
 
 #[test]
 fn implements_error_trait_without_source() {
-    let detail = DomainErrorDetail {
+    let detail = GuestDomainError {
         code: "code".to_string(),
         message: "message".to_string(),
         details: Vec::new(),
@@ -27,7 +27,7 @@ fn converts_from_wit_domain_error() {
         message: "message".to_string(),
         details: vec![("cause".to_string(), "inner failure".to_string())],
     };
-    let detail = DomainErrorDetail::from(wit_error);
+    let detail = GuestDomainError::from(wit_error);
     assert_eq!(detail.code, "code");
     assert_eq!(detail.message, "message");
     assert_eq!(detail.details, vec![("cause".to_string(), "inner failure".to_string())]);

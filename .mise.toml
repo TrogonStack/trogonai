@@ -1,5 +1,6 @@
 [tools]
 buf = "1.70.0"
+go = "1.26.5"
 "ubi:open-telemetry/weaver" = { version = "0.24.2", exe = "weaver" }
 "cargo:cargo-dylint" = "6.0.1"
 "cargo:dylint-link" = "6.0.1"
@@ -20,7 +21,11 @@ run = "docker compose -f devops/docker/compose/compose.yml up -d"
 
 [tasks.build]
 description = "Build all"
-depends = ["build:rust", "build:docs", "build:web"]
+depends = ["build:rust", "build:go", "build:docs", "build:web"]
+
+[tasks."build:go"]
+dir = "goworkspace"
+run = "go build ./..."
 
 [tasks."build:docs"]
 dir = "docs"
@@ -40,7 +45,11 @@ run = "cargo build"
 
 [tasks.check]
 description = "Check workspaces"
-depends = ["check:rust", "check:web"]
+depends = ["check:rust", "check:go", "check:web"]
+
+[tasks."test:go:race"]
+dir = "goworkspace"
+run = "go test -race ./..."
 
 [tasks."check:rust"]
 dir = "rsworkspace"

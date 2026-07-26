@@ -61,7 +61,7 @@ impl EventDecode for CreatedEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("stream already exists")]
-struct AlreadyExists;
+struct AlreadyExistsError;
 
 #[derive(Debug, Clone)]
 struct CreateCommand {
@@ -86,7 +86,7 @@ impl Decider for CreateCommand {
     type StreamId = str;
     type State = CreateState;
     type Event = CreatedEvent;
-    type DecideError = AlreadyExists;
+    type DecideError = AlreadyExistsError;
     type EvolveError = Infallible;
 
     fn stream_id(&self) -> &Self::StreamId {
@@ -112,7 +112,7 @@ impl Decider for CreateCommand {
             CreateState::Missing => Ok(Decision::event(CreatedEvent {
                 stream_id: command.stream_id.clone(),
             })),
-            CreateState::Created => Err(AlreadyExists),
+            CreateState::Created => Err(AlreadyExistsError),
         }
     }
 }

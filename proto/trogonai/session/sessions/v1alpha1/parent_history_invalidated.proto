@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// ParentHistoryInvalidated is recorded on the child session's stream by the
+// reconciler when the parent rewound past this child's dispatch point; it is
+// emitted as one atomic [ParentHistoryInvalidated, SessionCancelled{reason =
+// PARENT_REWIND_CASCADE}] batch when the child's cascade_policy is
+// CASCADE_ON_PARENT_TERMINAL (an INDEPENDENT child records nothing and keeps
+// running). Rewind cascade is not termination in the same sense as
+// ParentTerminated: it fires because the parent's own history that dispatched
+// this child is no longer valid, not because the parent reached a terminal
+// state (ADR#0035 facet 6). It is an invariant-bearing transition
+// (WRITE_PRECONDITION = At).
+message ParentHistoryInvalidated {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string parent_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The parent's SessionRewound.keep_through boundary that invalidated this
+  // child: this child's ParentLinked.parent_dispatched_at was strictly greater
+  // than it.
+  SessionOrdinal parent_keep_through = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Event id of the parent's SessionRewound that triggered this cascade, for
+  // audit traceability back to the exact triggering fact.
+  string triggering_event_id = 4 [features.field_presence = LEGACY_REQUIRED];
+}

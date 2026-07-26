@@ -39,7 +39,7 @@ use opentelemetry::{KeyValue, global};
 use thiserror::Error;
 use trogon_decider_runtime::{
     AppendStreamRequest, DiscardAndReplaySnapshotFailure, Event, EventId, FailOnSnapshotFailure, Headers,
-    ReadAfterOverflow, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream,
+    ReadAfterOverflowError, ReadFrom, ReadSnapshotRequest, ReadStreamRequest, Snapshot, SnapshotAheadOfStream,
     SnapshotFailure, SnapshotFailureDecision, SnapshotRead, SnapshotTaskScheduler, SnapshotWrite, StreamAppend,
     StreamPosition, StreamRead, StreamWritePrecondition, WriteSnapshotRequest,
 };
@@ -48,7 +48,7 @@ use trogon_semconv::{attribute, metric, span};
 use trogon_std::NowV7;
 use wasmtime::Store;
 
-use crate::{DomainErrorDetail, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
+use crate::{GuestDomainError, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
 
 const METER_NAME: &str = "trogon-decider-wasm-runtime";
 
@@ -152,10 +152,10 @@ pub struct WasmExecutionResult {
 pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError> {
     /// The guest rejected the command as a domain failure.
     #[error("command rejected: {0}")]
-    Rejected(#[source] DomainErrorDetail),
+    Rejected(#[source] GuestDomainError),
     /// The guest faulted while deciding the command.
     #[error("command faulted: {0}")]
-    Faulted(#[source] DomainErrorDetail),
+    Faulted(#[source] GuestDomainError),
     /// The guest's `decide` call reported success but returned zero events,
     /// violating the WIT `decide` contract's non-empty invariant (see
     /// `world.wit`). Rejected before the session is folded, snapshotted, or
@@ -164,10 +164,10 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     EmptyDecision,
     /// The guest could not evolve session state from a replayed or decided event.
     #[error("command state evolution failed: {0}")]
-    Evolve(#[source] DomainErrorDetail),
+    Evolve(#[source] GuestDomainError),
     /// The guest could not compute the command's stream id.
     #[error("command stream id resolution failed: {0}")]
-    StreamId(#[source] DomainErrorDetail),
+    StreamId(#[source] GuestDomainError),
     /// A guest call trapped (fuel exhaustion, memory limit, or ABI failure).
     ///
     /// Distinct from [`Self::Faulted`]: a trap is a host-level wasmtime
@@ -200,7 +200,7 @@ pub enum WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>
     SnapshotAheadOfStream(SnapshotAheadOfStream),
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
     #[error("{0}")]
-    ReadAfterOverflow(#[source] ReadAfterOverflow),
+    ReadAfterOverflow(#[source] ReadAfterOverflowError),
     /// The blocking task running guest calls panicked or was cancelled.
     #[error("guest execution task failed")]
     Blocking(#[source] tokio::task::JoinError),

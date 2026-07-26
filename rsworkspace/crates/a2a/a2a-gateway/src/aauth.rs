@@ -280,7 +280,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         headers: &[(String, String)],
         auth_token: Option<&str>,
         method_dots: &str,
-    ) -> Result<AAuthResolution, AAuthDeny> {
+    ) -> Result<AAuthResolution, AAuthDenyError> {
         if self.mode == AAuthMode::Off {
             return Ok(AAuthResolution::anonymous());
         }
@@ -293,7 +293,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
         };
         let agent = match self.pop_verifier.verify(&req).await {
             Ok(a) => a,
-            Err(e) => return self.deny_or_shadow(AAuthDenyReason::Pop(e), None).await,
+            Err(e) => return self.deny_or_shadow(AAuthDenyReasonError::Pop(e), None).await,
         };
 
         let mut resolution = AAuthResolution::from_agent(&agent);
@@ -309,7 +309,10 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                 Ok(auth) => auth,
                 Err(e) => {
                     return self
-                        .deny_or_shadow(AAuthDenyReason::Auth(e), Some(ChallengeBinding::from_agent(&agent)))
+                        .deny_or_shadow(
+                            AAuthDenyReasonError::Auth(e),
+                            Some(ChallengeBinding::from_agent(&agent)),
+                        )
                         .await;
                 }
             };
@@ -320,7 +323,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
             if auth.claims.agent != agent.claims.sub || auth.claims.agent_jkt != agent.jkt {
                 return self
                     .deny_or_shadow(
-                        AAuthDenyReason::AuthAgentMismatch {
+                        AAuthDenyReasonError::AuthAgentMismatch {
                             agent_sub: agent.claims.sub.clone(),
                             agent_jkt: agent.jkt.clone(),
                             auth_agent: auth.claims.agent.clone(),
@@ -336,7 +339,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
             // exchange -- mint the same `requirement=auth-token` challenge
             // the auth-token-required path uses.
             if !method_dots.is_empty() && !scope_covers_method(&auth.claims.scope, method_dots) {
-                let reason = AAuthDenyReason::ScopeNotCovered {
+                let reason = AAuthDenyReasonError::ScopeNotCovered {
                     scope: auth.claims.scope.clone(),
                     method: method_dots.to_owned(),
                 };
@@ -357,7 +360,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                 Err(e) => {
                     return self
                         .deny_or_shadow(
-                            AAuthDenyReason::MissionMismatch(e),
+                            AAuthDenyReasonError::MissionMismatch(e),
                             Some(ChallengeBinding::from_agent(&agent)),
                         )
                         .await;
@@ -372,7 +375,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                     if let Err(e) = verify_mission_header_matches_claim(&header_ref, claim) {
                         return self
                             .deny_or_shadow(
-                                AAuthDenyReason::MissionMismatch(e),
+                                AAuthDenyReasonError::MissionMismatch(e),
                                 Some(ChallengeBinding::from_agent(&agent)),
                             )
                             .await;
@@ -382,7 +385,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                 (None, Some(claim)) => {
                     return self
                         .deny_or_shadow(
-                            AAuthDenyReason::MissionHeaderMissing {
+                            AAuthDenyReasonError::MissionHeaderMissing {
                                 approver: claim.approver.clone(),
                             },
                             Some(ChallengeBinding::from_agent(&agent)),
@@ -400,9 +403,9 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
 
     async fn deny_or_shadow(
         &self,
-        reason: AAuthDenyReason,
+        reason: AAuthDenyReasonError,
         binding: Option<ChallengeBinding<'_>>,
-    ) -> Result<AAuthResolution, AAuthDeny> {
+    ) -> Result<AAuthResolution, AAuthDenyError> {
         if self.mode == AAuthMode::Shadow {
             // The reason is logged with %{reason} so the typed source chain
             // reaches operators without coupling them to its Display string.
@@ -428,7 +431,7 @@ impl<R: JwksResolver + Clone + 'static, S: ReplayStore> AAuthIngress<R, S> {
                 })
                 .ok()
         });
-        Err(AAuthDeny {
+        Err(AAuthDenyError {
             code: AAUTH_REQUIRED_CODE,
             reason,
             challenge,
@@ -516,7 +519,7 @@ impl AAuthResolution {
 /// verifier rather than a stringified message so callers can pattern-match
 /// the failure mode (PoP vs. auth token) without parsing display text.
 #[derive(Debug, thiserror::Error)]
-pub enum AAuthDenyReason {
+pub enum AAuthDenyReasonError {
     #[error("nats-pop verification: {0}")]
     Pop(#[source] NatsPopError),
     #[error("aa-auth+jwt verification: {0}")]
@@ -537,7 +540,7 @@ pub enum AAuthDenyReason {
     },
     /// The verified `aa-auth+jwt`'s `scope` claim does not cover the invoked
     /// method under the gateway's scope grammar (see [`scope_covers_method`]).
-    /// Distinct from [`AAuthDenyReason::Auth`] because the token itself is
+    /// Distinct from [`AAuthDenyReasonError::Auth`] because the token itself is
     /// valid -- it simply doesn't authorize this method, so the agent needs a
     /// step-up auth token rather than a fresh PoP/agent-token exchange.
     #[error("aa-auth+jwt scope {scope:?} does not cover method {method:?}")]
@@ -557,17 +560,17 @@ pub enum AAuthDenyReason {
 
 #[derive(Debug, thiserror::Error)]
 #[error("aauth denied: {reason}")]
-pub struct AAuthDeny {
+pub struct AAuthDenyError {
     pub code: i32,
     #[source]
-    pub reason: AAuthDenyReason,
+    pub reason: AAuthDenyReasonError,
     /// Minted `aa-resource+jwt` challenge token that the reply must carry as
     /// the `AAuth-Requirement` header. `None` when challenge minting failed
     /// (e.g. agent didn't present a verifiable `cnf.jwk`).
     pub challenge: Option<String>,
 }
 
-impl AAuthDeny {
+impl AAuthDenyError {
     #[must_use]
     pub fn to_requirement_header(&self) -> Option<(String, String)> {
         self.challenge.as_ref().map(|tok| {

@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// SessionForked is the second event in the atomic [SessionStarted, SessionForked]
+// creation batch appended to the child subject under the NoStream precondition,
+// making fork creation atomic and exactly-once (ADR#0035 facet 2). The child
+// aggregate folds only its own stream -- fork replay never folds source events
+// into child aggregate state; conversation messages, compaction summaries, and
+// artifact references within context_prefix_boundary are inherited by reference
+// through the model-visible context projection keyed by (source_session_id,
+// context_prefix_boundary), never by physical copy (ADR#0035 facet 5). A later
+// rewind on the source does not retroactively alter a fork's context prefix: it
+// is an immutable snapshot-in-time reference on a keep-forever log.
+message SessionForked {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string source_session_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Inclusive boundary on the source stream: the last source-stream ordinal
+  // whose conversation messages, compaction summaries, and artifact references
+  // this fork inherits by reference.
+  SessionOrdinal context_prefix_boundary = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Why the fork happened; a command-time input not derivable from the rest of
+  // the log.
+  ForkReason reason = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ForkReason is why a session was forked.
+enum ForkReason {
+  FORK_REASON_UNSPECIFIED = 0;
+  // An explicit user branch.
+  FORK_REASON_MANUAL_BRANCH = 1;
+  // A continuation forked at a compaction boundary.
+  FORK_REASON_COMPACTION_CONTINUATION = 2;
+  // A retry of a prior run from a shared prefix.
+  FORK_REASON_RETRY = 3;
+}

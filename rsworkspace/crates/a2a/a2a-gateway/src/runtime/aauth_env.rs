@@ -11,7 +11,7 @@ use trogon_aauth_verify::{CachedJwksResolver, HttpJwksResolver, SystemTimeSource
 use trogon_std::env::ReadEnv;
 
 use crate::aauth::{
-    AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, ChallengeKidError, GatewayAAuthIngress,
+    AAuthConfig, AAuthDenyReasonError, AAuthIngress, AAuthMode, ChallengeKid, ChallengeKidError, GatewayAAuthIngress,
     GatewayJwksResolver, LeewaySecs, NonNegativeSecs, NonNegativeSecsError, PersonServerAudience,
     PersonServerAudienceError, ResourceIssuer, ResourceIssuerError, StaticJwks,
 };
@@ -153,14 +153,14 @@ pub fn gateway_aauth_from_env<E: ReadEnv>(env: &E) -> Result<Option<GatewayAAuth
 /// Maps a denial reason to the audit `rules_fired` entry dispatch.rs
 /// records for an AAuth denial. Kept outside the `not(coverage)`-gated
 /// dispatch module so this branch stays covered under coverage builds.
-pub fn aauth_deny_rule_fired(reason: &AAuthDenyReason) -> &'static str {
+pub fn aauth_deny_rule_fired(reason: &AAuthDenyReasonError) -> &'static str {
     match reason {
-        AAuthDenyReason::Pop(_) => "gateway.aauth.denied.pop",
-        AAuthDenyReason::Auth(_) => "gateway.aauth.denied.auth",
-        AAuthDenyReason::AuthAgentMismatch { .. } => "gateway.aauth.denied.auth_agent_mismatch",
-        AAuthDenyReason::ScopeNotCovered { .. } => "gateway.aauth.denied.scope",
-        AAuthDenyReason::MissionMismatch(_) => "gateway.aauth.denied.mission",
-        AAuthDenyReason::MissionHeaderMissing { .. } => "gateway.aauth.denied.mission_header_missing",
+        AAuthDenyReasonError::Pop(_) => "gateway.aauth.denied.pop",
+        AAuthDenyReasonError::Auth(_) => "gateway.aauth.denied.auth",
+        AAuthDenyReasonError::AuthAgentMismatch { .. } => "gateway.aauth.denied.auth_agent_mismatch",
+        AAuthDenyReasonError::ScopeNotCovered { .. } => "gateway.aauth.denied.scope",
+        AAuthDenyReasonError::MissionMismatch(_) => "gateway.aauth.denied.mission",
+        AAuthDenyReasonError::MissionHeaderMissing { .. } => "gateway.aauth.denied.mission_header_missing",
     }
 }
 

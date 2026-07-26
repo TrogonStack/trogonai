@@ -53,7 +53,7 @@ pub enum NatsPopError {
     /// `cnf.jwk` either failed to deserialize or named an algorithm the PoP
     /// verifier doesn't support.
     #[error("invalid cnf.jwk")]
-    InvalidConfirmationKey(#[source] InvalidConfirmationKey),
+    InvalidConfirmationKey(#[source] InvalidConfirmationKeyError),
     #[error("agent token: {0}")]
     Agent(#[from] TokenError),
     /// The PoP signature did not verify against `cnf.jwk` over the canonical
@@ -76,7 +76,7 @@ pub enum NatsPopError {
 /// Reason that the agent's `cnf.jwk` could not be used to verify the PoP
 /// signature.
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidConfirmationKey {
+pub enum InvalidConfirmationKeyError {
     /// `cnf.jwk` did not deserialize into a JWK structure.
     #[error("cnf.jwk did not deserialize")]
     Deserialize(#[source] serde_json::Error),
@@ -317,19 +317,19 @@ pub fn content_digest_sha256(payload: &[u8]) -> String {
 
 fn verify_signature_with_jwk(jwk_val: &serde_json::Value, base: &[u8], sig_b64: &str) -> Result<(), NatsPopError> {
     let jwk: Jwk = serde_json::from_value(jwk_val.clone())
-        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::Deserialize(source)))?;
+        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(source)))?;
     let alg = match &jwk.algorithm {
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P256 => Algorithm::ES256,
         AlgorithmParameters::EllipticCurve(ec) if ec.curve == EllipticCurve::P384 => Algorithm::ES384,
         AlgorithmParameters::OctetKeyPair(okp) if okp.curve == EllipticCurve::Ed25519 => Algorithm::EdDSA,
         _ => {
             return Err(NatsPopError::InvalidConfirmationKey(
-                InvalidConfirmationKey::UnsupportedAlgorithm,
+                InvalidConfirmationKeyError::UnsupportedAlgorithm,
             ));
         }
     };
     let key = DecodingKey::from_jwk(&jwk)
-        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKey::DecodingKey(source)))?;
+        .map_err(|source| NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::DecodingKey(source)))?;
     // `verify` operates on the raw signing input (no JWS wrapping). The
     // signature is base64url-no-pad encoded in our envelope.
     let ok = verify(sig_b64, base, &key, alg).map_err(NatsPopError::Verify)?;

@@ -1,7 +1,7 @@
 //! NATS subject token validation (wasm-clean subset of `trogon-nats`).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum SubjectTokenViolation {
+pub enum SubjectTokenViolationError {
     #[error("subject token is empty")]
     Empty,
     #[error("subject token contains invalid character '{0}'")]
@@ -14,24 +14,24 @@ pub enum SubjectTokenViolation {
 pub struct DottedNatsToken(String);
 
 impl DottedNatsToken {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolation> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, SubjectTokenViolationError> {
         let s = s.as_ref();
         if s.is_empty() {
-            return Err(SubjectTokenViolation::Empty);
+            return Err(SubjectTokenViolationError::Empty);
         }
         if s.contains("..") || s.starts_with('.') || s.ends_with('.') {
-            return Err(SubjectTokenViolation::InvalidCharacter('.'));
+            return Err(SubjectTokenViolationError::InvalidCharacter('.'));
         }
         for ch in s.chars() {
             if ch.is_control() || ch.is_whitespace() {
-                return Err(SubjectTokenViolation::InvalidCharacter(ch));
+                return Err(SubjectTokenViolationError::InvalidCharacter(ch));
             }
             if matches!(ch, '*' | '>' | '\0') {
-                return Err(SubjectTokenViolation::InvalidCharacter(ch));
+                return Err(SubjectTokenViolationError::InvalidCharacter(ch));
             }
         }
         if s.len() > 128 {
-            return Err(SubjectTokenViolation::TooLong(s.len()));
+            return Err(SubjectTokenViolationError::TooLong(s.len()));
         }
         Ok(Self(s.to_string()))
     }

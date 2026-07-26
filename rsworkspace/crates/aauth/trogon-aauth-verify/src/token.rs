@@ -106,7 +106,7 @@ pub enum RequestContextError {
     /// structural pre-check) or a `jsonwebtoken` decoding-key construction
     /// failure (e.g. an invalid curve point).
     #[error("cnf.jwk is not valid key material")]
-    InvalidKeyMaterial(#[source] InvalidKeyMaterialSource),
+    InvalidKeyMaterial(#[source] InvalidKeyMaterialSourceError),
     /// Rule 7: `cnf.jwk` (structurally valid, parseable key material) does
     /// not match the key that signed the HTTP request.
     #[error("cnf.jwk does not match the request signing key")]
@@ -129,7 +129,7 @@ pub enum RequestContextError {
 /// deserialized but `jsonwebtoken` rejected the key material itself (e.g. a
 /// curve point that doesn't lie on the curve).
 #[derive(Debug, thiserror::Error)]
-pub enum InvalidKeyMaterialSource {
+pub enum InvalidKeyMaterialSourceError {
     #[error("cnf.jwk did not deserialize into a supported JWK shape")]
     Deserialize(#[source] serde_json::Error),
     #[error("cnf.jwk failed to produce a decoding key")]
@@ -278,9 +278,9 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         // `jsonwebtoken` decoding key is invalid key material, not merely
         // structurally incomplete.
         let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk.clone())
-            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSource::Deserialize(e)))?;
+            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::Deserialize(e)))?;
         DecodingKey::from_jwk(&parsed_jwk)
-            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSource::DecodingKey(e)))?;
+            .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::DecodingKey(e)))?;
         if jkt != ctx.signing_jkt {
             return Err(RequestContextError::ConfirmationKeyMismatch);
         }

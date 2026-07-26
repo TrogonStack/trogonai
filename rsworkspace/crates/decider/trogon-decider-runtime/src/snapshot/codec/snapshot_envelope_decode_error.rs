@@ -1,4 +1,4 @@
-use crate::InvalidStreamPosition;
+use crate::InvalidStreamPositionError;
 
 /// Error returned by [`EncodedSnapshot::from_bytes`](super::EncodedSnapshot::from_bytes)
 /// when the on-the-wire envelope cannot be parsed back into an [`EncodedSnapshot`](super::EncodedSnapshot).
@@ -16,7 +16,7 @@ pub enum SnapshotEnvelopeDecodeError {
     Position {
         /// The underlying position validation failure.
         #[source]
-        source: InvalidStreamPosition,
+        source: InvalidStreamPositionError,
     },
 }
 
@@ -25,7 +25,7 @@ impl SnapshotEnvelopeDecodeError {
         Self::Envelope { source }
     }
 
-    pub(super) fn position_source(source: InvalidStreamPosition) -> Self {
+    pub(super) fn position_source(source: InvalidStreamPositionError) -> Self {
         Self::Position { source }
     }
 }

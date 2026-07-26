@@ -8,7 +8,7 @@
 //! construction.
 
 use trogon_nats::DottedNatsToken;
-use trogon_nats::SubjectTokenViolation;
+use trogon_nats::SubjectTokenViolationError;
 
 /// Error returned when [`A2aPrefix`] validation fails.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -21,12 +21,12 @@ pub enum A2aPrefixError {
     TooLong(usize),
 }
 
-impl From<SubjectTokenViolation> for A2aPrefixError {
-    fn from(violation: SubjectTokenViolation) -> Self {
+impl From<SubjectTokenViolationError> for A2aPrefixError {
+    fn from(violation: SubjectTokenViolationError) -> Self {
         match violation {
-            SubjectTokenViolation::Empty => Self::Empty,
-            SubjectTokenViolation::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
-            SubjectTokenViolation::TooLong(len) => Self::TooLong(len),
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(ch) => Self::InvalidCharacter(ch),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
         }
     }
 }

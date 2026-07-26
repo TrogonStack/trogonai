@@ -2,7 +2,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use trogon_decider_runtime::StreamPosition;
 use trogon_decider_runtime::snapshot::{
-    InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    InvalidSnapshotTypeNameError, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     SnapshotTypeName,
 };
 
@@ -23,7 +23,7 @@ struct TestSnapshotTypeError;
 struct UnavailableSnapshotTypePayload;
 
 impl SnapshotType for TestPayload {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("test.snapshot.v2")

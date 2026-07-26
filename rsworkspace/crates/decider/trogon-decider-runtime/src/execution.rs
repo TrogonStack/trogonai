@@ -14,14 +14,14 @@
 
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflow, ReadFrom, ReadStreamRequest, StreamAppend,
+    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflowError, ReadFrom, ReadStreamRequest, StreamAppend,
     StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
     Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
     ReplayLimit, StreamEvent, WritePrecondition,
 };
-use trogon_decider::{DecisionFailure, evaluate_decision};
+use trogon_decider::{DecisionError, evaluate_decision};
 use trogon_semconv::{attribute, metric, span};
 use trogon_std::{NowV7, UuidV7Generator};
 
@@ -409,7 +409,7 @@ pub enum CommandError<
     SnapshotAheadOfStream(SnapshotAheadOfStream),
     /// The snapshot's recorded position cannot be advanced (u64 overflow).
     #[error("{0}")]
-    ReadAfterOverflow(#[source] ReadAfterOverflow),
+    ReadAfterOverflow(#[source] ReadAfterOverflowError),
     /// The stream read for this command returned more events than the
     /// configured [`ReplayLimit`] allows to replay.
     #[error("{0}")]
@@ -889,8 +889,8 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
         CommandEventPayloadEncodeError<C>: std::error::Error + Send + Sync + 'static,
     {
         let (state, events) = evaluate_decision(state, self.command).map_err(|failure| match failure {
-            DecisionFailure::Decide(error) => AppendDecisionError::Decide(error),
-            DecisionFailure::Evolve(error) => AppendDecisionError::Evolve(error),
+            DecisionError::Decide(error) => AppendDecisionError::Decide(error),
+            DecisionError::Evolve(error) => AppendDecisionError::Evolve(error),
         })?;
         let mut encoded_events = Vec::with_capacity(events.len());
         for event in events.iter() {

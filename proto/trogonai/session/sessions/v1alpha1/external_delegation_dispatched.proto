@@ -1,0 +1,31 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// ExternalDelegationDispatched is the dispatching session's link fact recording
+// a delegation to a delegate outside this platform's session store, carrying
+// exactly the evidence ADR#0031 requires to authorize and reconcile the
+// dispatch: the authenticated remote subject and authorization reference the
+// dispatch was made under, and a digest of the exact request bytes sent
+// (ADR#0035 facet 6). It reuses the operation-ledger id to dedupe dispatch,
+// mirroring DelegationDispatched. It is an invariant-bearing transition
+// (WRITE_PRECONDITION = At), letting the dispatching command refuse to spawn
+// under an already-terminal session race-safely.
+message ExternalDelegationDispatched {
+  string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string operation_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Locator for the external delegate the operation was dispatched to.
+  string delegate_reference = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Authenticated remote subject the dispatch was made under.
+  string authenticated_remote_subject = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Reference to the authorization that permitted this dispatch.
+  string authorization_reference = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the exact request bytes sent to the delegate.
+  Digest request_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Correlation id for tracing this dispatch across the external system;
+  // meaningful here at the dispatch event, not on the eventual outcome (the
+  // outcome joins by operation_id).
+  string correlation_id = 7 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -63,7 +63,7 @@ pub enum LeaseError {
     #[error("lease provision error: incompatible bucket config: {source}")]
     IncompatibleBucketConfig {
         #[source]
-        source: IncompatibleLeaseBucketConfig,
+        source: IncompatibleLeaseBucketConfigError,
     },
 }
 
@@ -88,7 +88,7 @@ pub enum LeaseProvisionError {
 #[error(
     "expected history={expected_history}, max_age={expected_max_age:?}, allow_message_ttl={expected_allow_message_ttl}, subject_delete_marker_ttl={expected_subject_delete_marker_ttl:?}, got history={actual_history}, max_age={actual_max_age:?}, allow_message_ttl={actual_allow_message_ttl}, subject_delete_marker_ttl={actual_subject_delete_marker_ttl:?}"
 )]
-pub struct IncompatibleLeaseBucketConfig {
+pub struct IncompatibleLeaseBucketConfigError {
     expected_history: i64,
     actual_history: i64,
     expected_max_age: Duration,

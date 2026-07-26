@@ -9,7 +9,7 @@
 //! Modules:
 //! - [`aauth`] — AAuth (draft-hardt-aauth-protocol) ingress verifier; turns
 //!   inline `aa-agent+jwt` + PoP + optional `aa-auth+jwt` headers into an
-//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDeny`] carrying a
+//!   [`aauth::AAuthResolution`] or an [`aauth::AAuthDenyError`] carrying a
 //!   `ResourceChallenge` for the reply.
 //! - [`agent_card_surface`] — schema-validates AgentCard JSON before the
 //!   gateway's discover surface returns it, so a stored card that drifted

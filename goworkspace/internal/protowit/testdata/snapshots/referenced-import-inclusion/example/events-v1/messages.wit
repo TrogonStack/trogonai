@@ -1,0 +1,16 @@
+package example:events-v1;
+
+interface messages {
+  record metadata {
+    id: string,
+  }
+
+  record shared {
+    id: string,
+    metadata: option<metadata>,
+  }
+
+  record visible {
+    shared: option<shared>,
+  }
+}

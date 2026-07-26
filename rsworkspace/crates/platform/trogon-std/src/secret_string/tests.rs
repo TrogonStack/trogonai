@@ -8,7 +8,7 @@ fn valid_secret() {
 
 #[test]
 fn empty_secret_rejected() {
-    assert!(matches!(SecretString::new(""), Err(EmptySecret)));
+    assert!(matches!(SecretString::new(""), Err(EmptySecretError)));
 }
 
 #[test]
@@ -26,5 +26,5 @@ fn clone_shares_arc() {
 
 #[test]
 fn error_display() {
-    assert_eq!(EmptySecret.to_string(), "secret must not be empty");
+    assert_eq!(EmptySecretError.to_string(), "secret must not be empty");
 }

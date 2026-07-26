@@ -4,7 +4,8 @@ use async_nats::jetstream::stream::RetentionPolicy;
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::{
-    EnsureBucketError, EnsureStreamError, KvConfigMismatch, StreamConfigMismatch, ensure_bucket, ensure_stream,
+    EnsureBucketError, EnsureStreamError, KvConfigMismatchError, StreamConfigMismatchError, ensure_bucket,
+    ensure_stream,
 };
 
 fn stream_config(name: &str, subject: &str) -> jetstream::stream::Config {
@@ -69,7 +70,7 @@ async fn ensure_stream_rejects_retention_mismatch() {
 
     assert!(matches!(
         error,
-        EnsureStreamError::ConfigMismatch(StreamConfigMismatch::Retention { stream, .. })
+        EnsureStreamError::ConfigMismatch(StreamConfigMismatchError::Retention { stream, .. })
             if stream == "RETENTION_STREAM"
     ));
 }
@@ -94,7 +95,7 @@ async fn ensure_stream_rejects_allow_atomic_publish_mismatch() {
 
     assert!(matches!(
         error,
-        EnsureStreamError::ConfigMismatch(StreamConfigMismatch::AllowAtomicPublish { stream, expected: true, actual: false })
+        EnsureStreamError::ConfigMismatch(StreamConfigMismatchError::AllowAtomicPublish { stream, expected: true, actual: false })
             if stream == "ATOMIC_STREAM"
     ));
 }
@@ -113,7 +114,7 @@ async fn ensure_stream_rejects_missing_subject() {
 
     assert!(matches!(
         error,
-        EnsureStreamError::ConfigMismatch(StreamConfigMismatch::MissingSubject { stream, subject })
+        EnsureStreamError::ConfigMismatch(StreamConfigMismatchError::MissingSubject { stream, subject })
             if stream == "SUBJECT_STREAM" && subject == "subject.stream.two"
     ));
 }
@@ -179,7 +180,7 @@ async fn ensure_bucket_rejects_history_mismatch() {
 
     assert!(matches!(
         error,
-        EnsureBucketError::ConfigMismatch(KvConfigMismatch::History { bucket, expected: 4, actual: 2 })
+        EnsureBucketError::ConfigMismatch(KvConfigMismatchError::History { bucket, expected: 4, actual: 2 })
             if bucket == "history_bucket"
     ));
 }

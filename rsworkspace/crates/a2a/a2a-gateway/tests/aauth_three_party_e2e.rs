@@ -49,7 +49,7 @@ use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 
 use a2a_gateway::aauth::{
-    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReason, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
+    AAUTH_REQUIRED_CODE, AAuthConfig, AAuthDenyReasonError, AAuthIngress, AAuthMode, ChallengeKid, LeewaySecs,
     NonNegativeSecs, PersonServerAudience, ResourceIssuer, StaticJwks,
 };
 use trogon_aauth_person::PersonServer;
@@ -342,7 +342,7 @@ async fn three_party_ps_asserted_access_over_nats() {
         "deny must carry the AAuth required code"
     );
     assert!(
-        matches!(deny.reason, AAuthDenyReason::ScopeNotCovered { .. }),
+        matches!(deny.reason, AAuthDenyReasonError::ScopeNotCovered { .. }),
         "expected ScopeNotCovered, got {:?}",
         deny.reason
     );
@@ -513,7 +513,7 @@ async fn three_party_ps_asserted_access_over_nats() {
         .expect_err("uncovered method must deny even with a valid auth token");
     assert_eq!(scope_deny.code, AAUTH_REQUIRED_CODE);
     assert!(
-        matches!(scope_deny.reason, AAuthDenyReason::ScopeNotCovered { .. }),
+        matches!(scope_deny.reason, AAuthDenyReasonError::ScopeNotCovered { .. }),
         "expected ScopeNotCovered, got {:?}",
         scope_deny.reason
     );

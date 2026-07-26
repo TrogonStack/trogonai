@@ -1,0 +1,23 @@
+package example:events-v1;
+
+interface messages {
+  record transfer {
+    request-id: string,
+    source: option<transfer-source>,
+    destination: option<transfer-destination>,
+  }
+
+  record transfer-alias {
+    id: string,
+  }
+
+  variant transfer-destination {
+    destination-account(string),
+    destination-alias(transfer-alias),
+  }
+
+  variant transfer-source {
+    source-account(string),
+    source-alias(transfer-alias),
+  }
+}

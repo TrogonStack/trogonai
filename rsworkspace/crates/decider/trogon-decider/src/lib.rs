@@ -100,7 +100,7 @@ pub use act::{Act, ActBuilder};
 pub use act::{ActChain, ActRun, First, Steps, Then};
 pub use decision::Decision;
 #[doc(hidden)]
-pub use decision::{DecisionFailure, DecisionResult, evaluate_decision};
+pub use decision::{DecisionError, DecisionResult, evaluate_decision};
 pub use event::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
 pub use events::Events;
 #[cfg(feature = "test-support")]

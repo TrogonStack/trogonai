@@ -1,10 +1,10 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 #[allow(clippy::all)]
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
 mod r#gen;
 
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
 mod codec;
 
 #[cfg(feature = "chrono")]
@@ -15,6 +15,9 @@ pub mod scheduler;
 
 #[cfg(feature = "agents")]
 pub mod agents;
+
+#[cfg(feature = "sessions")]
+pub mod session;
 
 // Thin wrappers that re-export the generated proto packages, emitted as inline
 // module trees that mirror the codegen layout.
@@ -35,7 +38,7 @@ pub mod google {
 }
 
 /// Failure decoding a registered event payload to canonical JSON.
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EventDecodeError {
     #[error("failed to decode '{type_url}' payload as json: {message}")]
@@ -53,7 +56,7 @@ pub enum EventDecodeError {
 /// Returns `Ok(None)` only for unregistered types; a registered type whose payload
 /// fails to decode returns `Err`, so malformed output of a known event is never
 /// mistaken for an unknown type.
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "sessions"))]
 pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<String>, EventDecodeError> {
     static REGISTRY: std::sync::OnceLock<buffa::type_registry::TypeRegistry> = std::sync::OnceLock::new();
 
@@ -63,6 +66,8 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
         r#gen::trogonai::scheduler::schedules::v1::register_types(&mut registry);
         #[cfg(feature = "agents")]
         r#gen::trogonai::agents::agents::v1::register_types(&mut registry);
+        #[cfg(feature = "sessions")]
+        r#gen::trogonai::session::sessions::v1alpha1::register_types(&mut registry);
         registry
     });
 
@@ -83,5 +88,5 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
         })
 }
 
-#[cfg(all(test, any(feature = "schedules", feature = "agents")))]
+#[cfg(all(test, any(feature = "schedules", feature = "agents", feature = "sessions")))]
 mod tests;

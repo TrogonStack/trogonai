@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use trogon_std::{NonZeroDuration, ZeroDuration};
+use trogon_std::{NonZeroDuration, ZeroDurationError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamMaxAge {
@@ -9,7 +9,7 @@ pub enum StreamMaxAge {
 }
 
 impl StreamMaxAge {
-    pub fn from_secs(secs: u64) -> Result<Self, ZeroDuration> {
+    pub fn from_secs(secs: u64) -> Result<Self, ZeroDurationError> {
         Ok(Self::ExpireAfter(NonZeroDuration::from_secs(secs)?))
     }
 }

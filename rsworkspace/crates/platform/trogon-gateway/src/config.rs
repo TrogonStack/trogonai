@@ -25,10 +25,10 @@ use confique::Config;
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_nats::{NatsToken, SubjectTokenViolation};
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
 use trogon_service_config::{NatsArgs, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
-use trogon_std::{NonZeroDuration, ZeroDuration};
+use trogon_std::{NonZeroDuration, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
@@ -38,14 +38,14 @@ use crate::constants::{
 use crate::source_status::SourceStatus;
 
 #[derive(Debug, thiserror::Error)]
-enum DurationTooLong {
+enum DurationTooLongError {
     #[error("must not exceed 1 second")]
     OneSecond,
     #[error("must not exceed {0} seconds")]
     Many(u64),
 }
 
-impl DurationTooLong {
+impl DurationTooLongError {
     fn new(max_secs: u64) -> Self {
         if max_secs == 1 {
             Self::OneSecond
@@ -59,7 +59,7 @@ const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 
 #[derive(Debug, thiserror::Error)]
 #[error("configure exactly one of webhook or socket_mode")]
-struct SlackTransportConflict;
+struct SlackTransportConflictError;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(untagged)]
@@ -178,14 +178,14 @@ pub enum ConfigValidationError {
     InvalidSubjectToken {
         source_name: &'static str,
         field: &'static str,
-        violation: SubjectTokenViolation,
+        violation: SubjectTokenViolationError,
     },
     #[error("{source_name}/{integration}: invalid {field}: {violation:?}")]
     InvalidIntegrationSubjectToken {
         source_name: &'static str,
         integration: String,
         field: &'static str,
-        violation: SubjectTokenViolation,
+        violation: SubjectTokenViolationError,
     },
 }
 
@@ -206,7 +206,7 @@ impl ConfigValidationError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDuration>() {
+        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDurationError>() {
             return Self::ZeroField {
                 source_name: source,
                 field,
@@ -229,7 +229,7 @@ impl ConfigValidationError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDuration>() {
+        if std::any::TypeId::of::<E>() == std::any::TypeId::of::<ZeroDurationError>() {
             return Self::ZeroIntegrationField {
                 source_name: source,
                 integration: integration.as_str().to_string(),
@@ -253,7 +253,7 @@ impl ConfigValidationError {
         }
     }
 
-    fn invalid_subject_token(source: &'static str, field: &'static str, violation: SubjectTokenViolation) -> Self {
+    fn invalid_subject_token(source: &'static str, field: &'static str, violation: SubjectTokenViolationError) -> Self {
         Self::InvalidSubjectToken {
             source_name: source,
             field,
@@ -265,7 +265,7 @@ impl ConfigValidationError {
         source: &'static str,
         integration: &SourceIntegrationId,
         field: &'static str,
-        violation: SubjectTokenViolation,
+        violation: SubjectTokenViolationError,
     ) -> Self {
         Self::InvalidIntegrationSubjectToken {
             source_name: source,
@@ -283,9 +283,9 @@ impl ConfigValidationError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("{}", self.display_errors())]
-pub(crate) struct ValidationErrors(Vec<ConfigValidationError>);
+pub(crate) struct AggregateValidationError(Vec<ConfigValidationError>);
 
-impl ValidationErrors {
+impl AggregateValidationError {
     fn display_errors(&self) -> String {
         let mut out = String::from("config validation errors:\n");
         for error in &self.0 {
@@ -295,7 +295,7 @@ impl ValidationErrors {
     }
 }
 
-impl std::ops::Deref for ValidationErrors {
+impl std::ops::Deref for AggregateValidationError {
     type Target = [ConfigValidationError];
 
     fn deref(&self) -> &Self::Target {
@@ -308,7 +308,7 @@ pub enum ConfigError {
     #[error("failed to load config: {0}")]
     Load(#[source] confique::Error),
     #[error(transparent)]
-    Validation(ValidationErrors),
+    Validation(AggregateValidationError),
 }
 
 #[derive(Config)]
@@ -645,7 +645,7 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs) -> Result<ResolvedConf
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, &env, &mut errors);
 
     if !errors.is_empty() {
-        return Err(ConfigError::Validation(ValidationErrors(errors)));
+        return Err(ConfigError::Validation(AggregateValidationError(errors)));
     }
 
     Ok(ResolvedConfig {
@@ -907,7 +907,7 @@ fn resolve_slack_transport(
                 "slack",
                 id,
                 "transport",
-                SlackTransportConflict,
+                SlackTransportConflictError,
             ));
             None
         }
@@ -1709,7 +1709,7 @@ fn resolve_sentry_integrations(
                 "sentry",
                 &id,
                 "nats_ack_timeout_secs",
-                DurationTooLong::new(SENTRY_MAX_ACK_TIMEOUT_SECS),
+                DurationTooLongError::new(SENTRY_MAX_ACK_TIMEOUT_SECS),
             ));
             continue;
         }

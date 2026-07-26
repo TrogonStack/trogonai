@@ -1,0 +1,37 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
+
+// Checkpoint is a self-describing, out-of-line durable checkpoint: a reference
+// plus a content digest and the implementation version that wrote it, never
+// inline bytes (ADR#0031 §3, §6). It is produced by CheckpointProduced and
+// restored via ExecutionAttemptStarted.restored_checkpoint, where it is
+// deliberately embedded rather than referenced: it is attempt evidence of
+// exactly what was restored, digest-verified, and now joined unambiguously to
+// its producing event via checkpoint_id. The validator requires
+// session_execution_plan_digest to match the session's own plan digest.
+message Checkpoint {
+  // Locator for the checkpoint artifact stored out of line.
+  string reference = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Opaque, implementation-defined checkpoint type.
+  string checkpoint_type = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the checkpoint bytes, verified before restore.
+  Digest digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Implementation version that wrote the checkpoint.
+  string implementation_version = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Stable checkpoint id, joining a restore back to its producing
+  // CheckpointProduced event unambiguously.
+  string checkpoint_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The execution attempt that produced this checkpoint.
+  string producing_execution_attempt_id = 6 [features.field_presence = LEGACY_REQUIRED];
+  // This session's own fold-derived ordinal the checkpoint's state is current
+  // through, so a restore resolves to a checkpoint deterministically rather
+  // than by guessing which checkpoint covers a given position.
+  SessionOrdinal covers_through = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Digest of the session's StoredSessionExecutionPlan at checkpoint time;
+  // validated against the session's plan digest before restore.
+  Digest session_execution_plan_digest = 8 [features.field_presence = LEGACY_REQUIRED];
+}

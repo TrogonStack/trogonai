@@ -8,7 +8,7 @@ LL | impl std::error::Error for ManualError {}
    = note: `#[deny(manual_error_impl)]` on by default
 
 error: manual `std::error::Error` implementation
-  --> $DIR/manual_error_impl.rs:27:6
+  --> $DIR/manual_error_impl.rs:28:6
    |
 LL | impl std::error::Error for ManualWithSource {
    |      ^^^^^^^^^^^^^^^^^

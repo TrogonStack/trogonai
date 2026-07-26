@@ -7,7 +7,7 @@ const MAX_LENGTH: usize = 256;
 pub struct ScheduleId(String);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum ScheduleIdViolation {
+pub enum ScheduleIdViolationError {
     #[error("must not be empty")]
     Empty,
     #[error("must be at most {max} characters, got {actual}")]
@@ -20,24 +20,27 @@ pub enum ScheduleIdViolation {
 #[error("schedule id '{raw}' is invalid: {violation}")]
 pub struct ScheduleIdError {
     raw: String,
-    violation: ScheduleIdViolation,
+    violation: ScheduleIdViolationError,
 }
 
 impl ScheduleId {
     pub fn parse(raw: &str) -> Result<Self, ScheduleIdError> {
         if raw.is_empty() {
-            return Err(ScheduleIdError::new(raw, ScheduleIdViolation::Empty));
+            return Err(ScheduleIdError::new(raw, ScheduleIdViolationError::Empty));
         }
 
         if raw.trim() != raw {
-            return Err(ScheduleIdError::new(raw, ScheduleIdViolation::SurroundingWhitespace));
+            return Err(ScheduleIdError::new(
+                raw,
+                ScheduleIdViolationError::SurroundingWhitespace,
+            ));
         }
 
         let length = raw.chars().count();
         if length > MAX_LENGTH {
             return Err(ScheduleIdError::new(
                 raw,
-                ScheduleIdViolation::TooLong {
+                ScheduleIdViolationError::TooLong {
                     max: MAX_LENGTH,
                     actual: length,
                 },
@@ -67,7 +70,7 @@ impl FromStr for ScheduleId {
 }
 
 impl ScheduleIdError {
-    fn new(raw: &str, violation: ScheduleIdViolation) -> Self {
+    fn new(raw: &str, violation: ScheduleIdViolationError) -> Self {
         Self {
             raw: raw.to_string(),
             violation,

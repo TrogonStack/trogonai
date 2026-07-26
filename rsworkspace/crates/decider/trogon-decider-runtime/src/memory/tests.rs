@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::snapshot::SnapshotPayloadData;
-use crate::{EventId, Headers, InvalidSnapshotTypeName, Snapshot, SnapshotTypeName};
+use crate::{EventId, Headers, InvalidSnapshotTypeNameError, Snapshot, SnapshotTypeName};
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
@@ -57,7 +57,7 @@ impl SnapshotPayloadDecode for TestPayload {
 }
 
 impl SnapshotType for TestPayload {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         SnapshotTypeName::new("test.memory.v1.Snapshot")
@@ -68,14 +68,14 @@ fn write_snapshot(
     store: &InMemoryStore,
     snapshot_id: &str,
     snapshot: Snapshot<TestPayload>,
-) -> Result<WriteSnapshotResponse, SnapshotEncodeError<serde_json::Error, InvalidSnapshotTypeName>> {
+) -> Result<WriteSnapshotResponse, SnapshotEncodeError<serde_json::Error, InvalidSnapshotTypeNameError>> {
     futures::executor::block_on(store.write_snapshot(WriteSnapshotRequest { snapshot_id, snapshot }))
 }
 
 fn read_snapshot(
     store: &InMemoryStore,
     snapshot_id: &str,
-) -> Result<ReadSnapshotResponse<TestPayload>, SnapshotDecodeError<serde_json::Error, InvalidSnapshotTypeName>> {
+) -> Result<ReadSnapshotResponse<TestPayload>, SnapshotDecodeError<serde_json::Error, InvalidSnapshotTypeNameError>> {
     futures::executor::block_on(store.read_snapshot(ReadSnapshotRequest { snapshot_id }))
 }
 

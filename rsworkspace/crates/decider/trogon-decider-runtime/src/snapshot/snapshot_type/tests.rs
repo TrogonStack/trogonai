@@ -2,14 +2,17 @@ use super::*;
 
 #[test]
 fn snapshot_type_name_rejects_empty_value() {
-    assert_eq!(SnapshotTypeName::new("").unwrap_err(), InvalidSnapshotTypeName::Empty);
+    assert_eq!(
+        SnapshotTypeName::new("").unwrap_err(),
+        InvalidSnapshotTypeNameError::Empty
+    );
 }
 
 #[test]
 fn snapshot_type_name_rejects_control_characters() {
     assert_eq!(
         SnapshotTypeName::new("test.snapshot\nv1").unwrap_err(),
-        InvalidSnapshotTypeName::ContainsControlCharacter
+        InvalidSnapshotTypeNameError::ContainsControlCharacter
     );
 }
 
@@ -43,11 +46,11 @@ fn snapshot_type_name_supports_string_conversions_and_views() {
 #[test]
 fn invalid_snapshot_type_name_displays_reason() {
     assert_eq!(
-        InvalidSnapshotTypeName::Empty.to_string(),
+        InvalidSnapshotTypeNameError::Empty.to_string(),
         "snapshot type name cannot be empty"
     );
     assert_eq!(
-        InvalidSnapshotTypeName::ContainsControlCharacter.to_string(),
+        InvalidSnapshotTypeNameError::ContainsControlCharacter.to_string(),
         "snapshot type name cannot contain control characters"
     );
 }

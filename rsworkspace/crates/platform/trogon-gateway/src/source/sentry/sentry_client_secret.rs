@@ -1,12 +1,12 @@
 use std::fmt;
 
-use trogon_std::{EmptySecret, SecretString};
+use trogon_std::{EmptySecretError, SecretString};
 
 #[derive(Clone)]
 pub struct SentryClientSecret(SecretString);
 
 impl SentryClientSecret {
-    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecret> {
+    pub fn new(s: impl AsRef<str>) -> Result<Self, EmptySecretError> {
         SecretString::new(s).map(Self)
     }
 

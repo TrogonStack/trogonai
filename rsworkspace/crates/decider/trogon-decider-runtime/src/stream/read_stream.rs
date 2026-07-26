@@ -21,11 +21,11 @@ impl ReadFrom {
     /// Encapsulates the `+1` arithmetic that snapshot-resume requires when a
     /// snapshot records the position of its last applied event. The result
     /// remains inclusive `Position(p + 1)`, but callers see intent, not math.
-    pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflow> {
+    pub fn after(position: StreamPosition) -> Result<Self, ReadAfterOverflowError> {
         let next = position
             .as_non_zero()
             .checked_add(1)
-            .ok_or(ReadAfterOverflow { position })?;
+            .ok_or(ReadAfterOverflowError { position })?;
         Ok(Self::Position(StreamPosition::new(next)))
     }
 }
@@ -33,7 +33,7 @@ impl ReadFrom {
 /// Error returned when `ReadFrom::after` would overflow `u64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("cannot read after position {position}: u64 overflow")]
-pub struct ReadAfterOverflow {
+pub struct ReadAfterOverflowError {
     /// Position that could not be advanced.
     pub position: StreamPosition,
 }
