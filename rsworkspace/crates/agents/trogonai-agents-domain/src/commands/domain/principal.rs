@@ -38,12 +38,13 @@ impl Principal {
             return Err(PrincipalError::new(raw, PrincipalViolationError::SurroundingWhitespace));
         }
 
-        if raw.len() > MAX_LENGTH {
+        let length = raw.chars().count();
+        if length > MAX_LENGTH {
             return Err(PrincipalError::new(
                 raw,
                 PrincipalViolationError::TooLong {
                     max: MAX_LENGTH,
-                    actual: raw.len(),
+                    actual: length,
                 },
             ));
         }

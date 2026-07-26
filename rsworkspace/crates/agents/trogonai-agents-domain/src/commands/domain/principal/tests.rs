@@ -34,6 +34,15 @@ fn rejects_over_long_principals() {
 }
 
 #[test]
+fn accepts_multibyte_principals_within_the_character_limit() {
+    // 256 multi-byte characters is 512 bytes; the limit counts characters, not bytes.
+    let raw = "é".repeat(MAX_LENGTH);
+    assert!(raw.len() > MAX_LENGTH, "expected the input to exceed the byte limit");
+    let principal = Principal::parse(&raw).unwrap();
+    assert_eq!(principal.as_str(), raw);
+}
+
+#[test]
 fn accepts_a_human_principal() {
     let principal = Principal::parse("operator@tenant_acme").unwrap();
     assert_eq!(principal.as_str(), "operator@tenant_acme");
