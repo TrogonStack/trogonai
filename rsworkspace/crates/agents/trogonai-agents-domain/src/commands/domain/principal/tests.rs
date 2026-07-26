@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn rejects_empty() {
     let error = Principal::parse("").unwrap_err();
-    assert_eq!(error.violation, PrincipalViolation::Empty);
+    assert_eq!(error.violation, PrincipalViolationError::Empty);
 }
 
 #[test]
@@ -15,7 +15,11 @@ fn rejects_surrounding_whitespace() {
         "operator@tenant_acme\n",
     ] {
         let error = Principal::parse(raw).unwrap_err();
-        assert_eq!(error.violation, PrincipalViolation::SurroundingWhitespace, "{raw:?}");
+        assert_eq!(
+            error.violation,
+            PrincipalViolationError::SurroundingWhitespace,
+            "{raw:?}"
+        );
     }
 }
 
@@ -23,7 +27,10 @@ fn rejects_surrounding_whitespace() {
 fn rejects_over_long_principals() {
     let raw = "a".repeat(257);
     let error = Principal::parse(&raw).unwrap_err();
-    assert_eq!(error.violation, PrincipalViolation::TooLong { max: 256, actual: 257 });
+    assert_eq!(
+        error.violation,
+        PrincipalViolationError::TooLong { max: 256, actual: 257 }
+    );
 }
 
 #[test]
@@ -54,7 +61,7 @@ fn supports_standard_string_conversions_and_display() {
     assert_eq!("operator@tenant_acme".parse::<Principal>().unwrap(), principal);
     assert_eq!(principal.as_ref(), "operator@tenant_acme");
     assert_eq!(principal.to_string(), "operator@tenant_acme");
-    assert_eq!(PrincipalViolation::Empty.to_string(), "must not be empty");
+    assert_eq!(PrincipalViolationError::Empty.to_string(), "must not be empty");
     assert_eq!(
         Principal::parse("").unwrap_err().to_string(),
         "principal '' is invalid: must not be empty"

@@ -5,7 +5,7 @@ use std::str::FromStr;
 pub struct AgentId(String);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum AgentIdViolation {
+pub enum AgentIdViolationError {
     #[error("must not be empty")]
     Empty,
     #[error("must not have leading or trailing whitespace")]
@@ -16,17 +16,17 @@ pub enum AgentIdViolation {
 #[error("agent id '{raw}' is invalid: {violation}")]
 pub struct AgentIdError {
     raw: String,
-    violation: AgentIdViolation,
+    violation: AgentIdViolationError,
 }
 
 impl AgentId {
     pub fn parse(raw: &str) -> Result<Self, AgentIdError> {
         if raw.is_empty() {
-            return Err(AgentIdError::new(raw, AgentIdViolation::Empty));
+            return Err(AgentIdError::new(raw, AgentIdViolationError::Empty));
         }
 
         if raw.trim() != raw {
-            return Err(AgentIdError::new(raw, AgentIdViolation::SurroundingWhitespace));
+            return Err(AgentIdError::new(raw, AgentIdViolationError::SurroundingWhitespace));
         }
 
         Ok(Self(raw.to_string()))
@@ -52,7 +52,7 @@ impl FromStr for AgentId {
 }
 
 impl AgentIdError {
-    fn new(raw: &str, violation: AgentIdViolation) -> Self {
+    fn new(raw: &str, violation: AgentIdViolationError) -> Self {
         Self {
             raw: raw.to_string(),
             violation,

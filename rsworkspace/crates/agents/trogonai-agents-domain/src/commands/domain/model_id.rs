@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use super::nonblank::{NonBlankViolation, validate_nonblank};
+use super::nonblank::{NonBlankViolationError, validate_nonblank};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModelId(String);
@@ -10,7 +10,7 @@ pub struct ModelId(String);
 #[error("model id '{raw}' is invalid: {violation}")]
 pub struct ModelIdError {
     raw: String,
-    violation: NonBlankViolation,
+    violation: NonBlankViolationError,
 }
 
 impl ModelId {

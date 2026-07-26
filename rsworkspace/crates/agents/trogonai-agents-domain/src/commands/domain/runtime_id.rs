@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use super::nonblank::{NonBlankViolation, validate_nonblank};
+use super::nonblank::{NonBlankViolationError, validate_nonblank};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RuntimeId(String);
@@ -10,7 +10,7 @@ pub struct RuntimeId(String);
 #[error("runtime id '{raw}' is invalid: {violation}")]
 pub struct RuntimeIdError {
     raw: String,
-    violation: NonBlankViolation,
+    violation: NonBlankViolationError,
 }
 
 impl RuntimeId {

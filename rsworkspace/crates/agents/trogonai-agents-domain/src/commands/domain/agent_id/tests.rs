@@ -3,14 +3,14 @@ use super::*;
 #[test]
 fn rejects_empty() {
     let error = AgentId::parse("").unwrap_err();
-    assert_eq!(error.violation, AgentIdViolation::Empty);
+    assert_eq!(error.violation, AgentIdViolationError::Empty);
 }
 
 #[test]
 fn rejects_surrounding_whitespace() {
     for raw in [" agent-1", "agent-1 ", "\tagent-1", "agent-1\n"] {
         let error = AgentId::parse(raw).unwrap_err();
-        assert_eq!(error.violation, AgentIdViolation::SurroundingWhitespace, "{raw:?}");
+        assert_eq!(error.violation, AgentIdViolationError::SurroundingWhitespace, "{raw:?}");
     }
 }
 
@@ -28,9 +28,9 @@ fn supports_standard_string_conversions_and_display() {
     assert_eq!(id.as_ref(), "agent-1");
     assert_eq!("agent-1".parse::<AgentId>().unwrap().as_str(), "agent-1");
     assert_eq!(id.to_string(), "agent-1");
-    assert_eq!(AgentIdViolation::Empty.to_string(), "must not be empty");
+    assert_eq!(AgentIdViolationError::Empty.to_string(), "must not be empty");
     assert_eq!(
-        AgentIdViolation::SurroundingWhitespace.to_string(),
+        AgentIdViolationError::SurroundingWhitespace.to_string(),
         "must not have leading or trailing whitespace"
     );
     assert_eq!(

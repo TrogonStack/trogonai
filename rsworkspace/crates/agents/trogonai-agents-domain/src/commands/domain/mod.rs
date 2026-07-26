@@ -18,7 +18,7 @@ mod tool_selectors;
 
 pub use agent_charter::AgentCharter;
 pub use agent_definition::AgentDefinition;
-pub use agent_id::{AgentId, AgentIdError, AgentIdViolation};
+pub use agent_id::{AgentId, AgentIdError, AgentIdViolationError};
 pub use agent_name::{AgentName, AgentNameError};
 pub use annotations::{Annotations, AnnotationsError};
 pub use content_digest::{ContentDigest, ContentDigestError};
@@ -27,7 +27,7 @@ pub use labels::{Labels, LabelsError};
 pub use model_id::{ModelId, ModelIdError};
 pub use model_parameters::{ModelParameters, ModelParametersError};
 pub use parent_ref::{ParentRef, ParentRefError};
-pub use principal::{Principal, PrincipalError, PrincipalViolation};
+pub use principal::{Principal, PrincipalError, PrincipalViolationError};
 pub use revision_number::{RevisionNumber, RevisionNumberError};
 pub use runtime_id::{RuntimeId, RuntimeIdError};
 pub use tool_selectors::{ToolSelectors, ToolSelectorsError};

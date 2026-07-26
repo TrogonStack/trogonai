@@ -12,7 +12,7 @@ const MAX_LENGTH: usize = 256;
 pub struct Principal(String);
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum PrincipalViolation {
+pub enum PrincipalViolationError {
     #[error("must not be empty")]
     Empty,
     #[error("must not have leading or trailing whitespace")]
@@ -25,23 +25,23 @@ pub enum PrincipalViolation {
 #[error("principal '{raw}' is invalid: {violation}")]
 pub struct PrincipalError {
     raw: String,
-    violation: PrincipalViolation,
+    violation: PrincipalViolationError,
 }
 
 impl Principal {
     pub fn parse(raw: &str) -> Result<Self, PrincipalError> {
         if raw.is_empty() {
-            return Err(PrincipalError::new(raw, PrincipalViolation::Empty));
+            return Err(PrincipalError::new(raw, PrincipalViolationError::Empty));
         }
 
         if raw.trim() != raw {
-            return Err(PrincipalError::new(raw, PrincipalViolation::SurroundingWhitespace));
+            return Err(PrincipalError::new(raw, PrincipalViolationError::SurroundingWhitespace));
         }
 
         if raw.len() > MAX_LENGTH {
             return Err(PrincipalError::new(
                 raw,
-                PrincipalViolation::TooLong {
+                PrincipalViolationError::TooLong {
                     max: MAX_LENGTH,
                     actual: raw.len(),
                 },
@@ -71,7 +71,7 @@ impl FromStr for Principal {
 }
 
 impl PrincipalError {
-    fn new(raw: &str, violation: PrincipalViolation) -> Self {
+    fn new(raw: &str, violation: PrincipalViolationError) -> Self {
         Self {
             raw: raw.to_string(),
             violation,
