@@ -3,7 +3,6 @@
 include!("trogonai.agents.agents.v1.agent.rs");
 include!("trogonai.agents.agents.v1.agent_provisioned.rs");
 include!("trogonai.agents.agents.v1.events.rs");
-include!("trogonai.agents.agents.v1.provision_agent.rs");
 #[allow(
     non_camel_case_types,
     dead_code,
@@ -24,7 +23,6 @@ pub mod __buffa {
         include!("trogonai.agents.agents.v1.agent.__view.rs");
         include!("trogonai.agents.agents.v1.agent_provisioned.__view.rs");
         include!("trogonai.agents.agents.v1.events.__view.rs");
-        include!("trogonai.agents.agents.v1.provision_agent.__view.rs");
         pub mod oneof {
             #[allow(unused_imports)]
             use super::*;
@@ -46,7 +44,6 @@ pub mod __buffa {
         reg.register_json_any(super::__REVISION_REF_JSON_ANY);
         reg.register_json_any(super::__AGENT_PROVISIONED_JSON_ANY);
         reg.register_json_any(super::__AGENT_EVENT_JSON_ANY);
-        reg.register_json_any(super::__PROVISION_AGENT_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -81,9 +78,5 @@ pub use self::__buffa::view::AgentProvisionedOwnedView;
 pub use self::__buffa::view::AgentEventView;
 #[doc(inline)]
 pub use self::__buffa::view::AgentEventOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::ProvisionAgentView;
-#[doc(inline)]
-pub use self::__buffa::view::ProvisionAgentOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;
