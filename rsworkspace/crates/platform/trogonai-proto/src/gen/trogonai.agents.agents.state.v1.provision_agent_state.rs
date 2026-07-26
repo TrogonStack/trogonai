@@ -139,30 +139,10 @@ pub struct ProvisionedAgent {
     /// Field 3: `parent`
     #[serde(rename = "parent", with = "::buffa::json_helpers::proto_string")]
     pub parent: ::buffa::alloc::string::String,
-    /// Field 4: `owner`
-    #[serde(rename = "owner", with = "::buffa::json_helpers::proto_string")]
-    pub owner: ::buffa::alloc::string::String,
-    /// Field 5: `labels`
-    #[serde(
-        rename = "labels",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub labels: ::buffa::alloc::vec::Vec<super::super::v1::Label>,
-    /// Field 6: `annotations`
-    #[serde(
-        rename = "annotations",
-        skip_serializing_if = "::buffa::__private::HashMap::is_empty",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub annotations: ::buffa::__private::HashMap<
-        ::buffa::alloc::string::String,
-        ::buffa::alloc::string::String,
-    >,
-    /// Field 7: `charter`
+    /// Field 4: `charter`
     #[serde(rename = "charter")]
     pub charter: ::buffa::MessageField<super::super::v1::Charter>,
-    /// Field 8: `content_digest`
+    /// Field 5: `content_digest`
     #[serde(
         rename = "contentDigest",
         alias = "content_digest",
@@ -176,9 +156,6 @@ impl ::core::fmt::Debug for ProvisionedAgent {
             .field("agent_id", &self.agent_id)
             .field("name", &self.name)
             .field("parent", &self.parent)
-            .field("owner", &self.owner)
-            .field("labels", &self.labels)
-            .field("annotations", &self.annotations)
             .field("charter", &self.charter)
             .field("content_digest", &self.content_digest)
             .finish()
@@ -212,21 +189,6 @@ impl ::buffa::Message for ProvisionedAgent {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.owner) as u32;
-        for v in &self.labels {
-            let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        size
-            += ::buffa::map_codec::field_len::<
-                ::buffa::map_codec::Str,
-                ::buffa::map_codec::Str,
-                _,
-            >(&self.annotations, 1u32);
         if self.charter.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.charter.compute_size(__cache);
@@ -248,21 +210,11 @@ impl ::buffa::Message for ProvisionedAgent {
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
         ::buffa::types::put_string_field(2u32, &self.name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
-        ::buffa::types::put_string_field(4u32, &self.owner, buf);
-        for v in &self.labels {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
-            v.write_to(__cache, buf);
-        }
-        ::buffa::map_codec::write_field::<
-            ::buffa::map_codec::Str,
-            ::buffa::map_codec::Str,
-            _,
-        >(&self.annotations, 6u32, buf);
         if self.charter.is_set() {
-            ::buffa::types::put_len_delimited_header(7u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
             self.charter.write_to(__cache, buf);
         }
-        ::buffa::types::put_string_field(8u32, &self.content_digest, buf);
+        ::buffa::types::put_string_field(5u32, &self.content_digest, buf);
     }
     fn merge_field(
         &mut self,
@@ -301,40 +253,13 @@ impl ::buffa::Message for ProvisionedAgent {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.owner, buf)?;
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                let mut elem = ::core::default::Default::default();
-                ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
-                self.labels.push(elem);
-            }
-            6u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::map_codec::merge_entry::<
-                    ::buffa::map_codec::Str,
-                    ::buffa::map_codec::Str,
-                    _,
-                >(&mut self.annotations, buf, ctx)?;
-            }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
                 ::buffa::Message::merge_length_delimited(
                     self.charter.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
             }
-            8u32 => {
+            5u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
@@ -351,9 +276,6 @@ impl ::buffa::Message for ProvisionedAgent {
         self.agent_id.clear();
         self.name.clear();
         self.parent.clear();
-        self.owner.clear();
-        self.labels.clear();
-        self.annotations.clear();
         self.charter = ::buffa::MessageField::none();
         self.content_digest.clear();
     }

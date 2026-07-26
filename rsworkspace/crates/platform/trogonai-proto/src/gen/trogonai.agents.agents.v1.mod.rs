@@ -40,7 +40,6 @@ pub mod __buffa {
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__CHARTER_JSON_ANY);
         reg.register_json_any(super::__MODEL_PARAMETER_JSON_ANY);
-        reg.register_json_any(super::__LABEL_JSON_ANY);
         reg.register_json_any(super::__MODEL_JSON_ANY);
         reg.register_json_any(super::__TOOL_DEPENDENCIES_JSON_ANY);
         reg.register_json_any(super::__DELEGATE_DEPENDENCIES_JSON_ANY);
@@ -58,10 +57,6 @@ pub use self::__buffa::view::CharterOwnedView;
 pub use self::__buffa::view::ModelParameterView;
 #[doc(inline)]
 pub use self::__buffa::view::ModelParameterOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::LabelView;
-#[doc(inline)]
-pub use self::__buffa::view::LabelOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ModelView;
 #[doc(inline)]

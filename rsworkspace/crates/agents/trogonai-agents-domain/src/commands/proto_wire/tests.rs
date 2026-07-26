@@ -32,16 +32,8 @@ fn provision_proto() -> v1::ProvisionAgent {
         agent_id: "agent-1".to_string(),
         name: "reviewer".to_string(),
         parent: "folder-backend".to_string(),
-        owner: "owner@tenant".to_string(),
-        labels: vec![v1::Label {
-            key: "family".to_string(),
-            value: "reviewer".to_string(),
-        }],
-        annotations: [("vertical".to_string(), "software".to_string())].into_iter().collect(),
         charter: MessageField::some(charter()),
-        principal: "operator@tenant".to_string(),
         content_digest: digest('a').as_str().to_string(),
-        transient_annotations: [("request".to_string(), "first".to_string())].into_iter().collect(),
     }
 }
 
@@ -50,19 +42,11 @@ fn provisioned_proto() -> v1::AgentProvisioned {
         agent_id: "agent-1".to_string(),
         name: "reviewer".to_string(),
         parent: "folder-backend".to_string(),
-        owner: "owner@tenant".to_string(),
-        labels: vec![v1::Label {
-            key: "family".to_string(),
-            value: "reviewer".to_string(),
-        }],
-        annotations: [("vertical".to_string(), "software".to_string())].into_iter().collect(),
         charter: MessageField::some(charter()),
-        provisioned_by: "operator@tenant".to_string(),
         revision: MessageField::some(v1::RevisionRef {
             number: 1,
             content_digest: digest('a').as_str().to_string(),
         }),
-        transient_annotations: [("request".to_string(), "first".to_string())].into_iter().collect(),
     }
 }
 
@@ -71,11 +55,10 @@ fn converts_a_complete_provision_command_once() {
     let command = ProvisionAgent::try_from(provision_proto()).unwrap();
 
     assert_eq!(command.agent_id.as_str(), "agent-1");
-    assert_eq!(command.definition.owner().as_str(), "owner@tenant");
-    assert_eq!(command.definition.labels().get("family"), Some("reviewer"));
+    assert_eq!(command.definition.name().as_str(), "reviewer");
+    assert_eq!(command.definition.parent().as_str(), "folder-backend");
     assert_eq!(command.definition.charter().runtime().as_str(), "claude-code");
     assert_eq!(command.content_digest, digest('a'));
-    assert_eq!(command.transient_annotations.get("request"), Some("first"));
 }
 
 #[test]
@@ -86,41 +69,6 @@ fn rejects_a_non_sha256_provision_digest() {
     assert!(matches!(
         ProvisionAgent::try_from(proto),
         Err(CommandWireError::InvalidContentDigest(_))
-    ));
-}
-
-#[test]
-fn rejects_duplicate_label_keys() {
-    let mut proto = provision_proto();
-    proto.labels.push(proto.labels[0].clone());
-
-    assert!(matches!(
-        ProvisionAgent::try_from(proto),
-        Err(CommandWireError::DuplicateValue { field: "labels", .. })
-    ));
-}
-
-#[test]
-fn rejects_invalid_annotation_keys() {
-    let mut proto = provision_proto();
-    proto.annotations.insert("bad key".to_string(), "value".to_string());
-
-    assert!(matches!(
-        ProvisionAgent::try_from(proto),
-        Err(CommandWireError::InvalidAnnotations(_))
-    ));
-}
-
-#[test]
-fn rejects_invalid_transient_annotation_keys() {
-    let mut proto = provision_proto();
-    proto
-        .transient_annotations
-        .insert("bad key".to_string(), "value".to_string());
-
-    assert!(matches!(
-        ProvisionAgent::try_from(proto),
-        Err(CommandWireError::InvalidAnnotations(_))
     ));
 }
 
@@ -250,7 +198,7 @@ fn round_trips_only_persistent_retry_identity_through_state() {
     let state = provisioned_agent_to_state(&identity);
 
     assert_eq!(state.agent_id, "agent-1");
-    assert_eq!(state.annotations.get("vertical").map(String::as_str), Some("software"));
+    assert_eq!(state.name, "reviewer");
     assert_eq!(state.content_digest, digest('a').as_str());
     assert_eq!(provisioned_agent_from_state(&state).unwrap(), identity);
 }

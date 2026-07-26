@@ -6,9 +6,6 @@ fn composes_only_validated_domain_values() {
     let definition = AgentDefinition::new(
         AgentName::parse("reviewer").unwrap(),
         ParentRef::parse("org/root").unwrap(),
-        Principal::parse("owner@tenant").unwrap(),
-        Labels::default(),
-        Annotations::default(),
         AgentCharter::new(
             RuntimeId::parse("runtime").unwrap(),
             ModelId::parse("model").unwrap(),

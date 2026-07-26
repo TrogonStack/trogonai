@@ -23,13 +23,6 @@ message ModelParameter {
   string value = 2 [features.field_presence = LEGACY_REQUIRED];
 }
 
-// Label is selectable metadata. Entries must have unique keys and be ordered
-// by key so guest Wasm receives a deterministic sequence.
-message Label {
-  string key = 1 [features.field_presence = LEGACY_REQUIRED];
-  string value = 2 [features.field_presence = LEGACY_REQUIRED];
-}
-
 // Model is a default, not a constraint; sessions may override it without
 // minting a revision.
 message Model {

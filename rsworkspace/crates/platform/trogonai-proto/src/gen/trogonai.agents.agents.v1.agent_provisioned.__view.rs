@@ -15,37 +15,16 @@ pub struct AgentProvisionedView<'a> {
     ///
     /// Field 3: `parent`
     pub parent: &'a str,
-    /// Opaque owner identity. The human-owner requirement is enforced before
-    /// command dispatch, where principal kind is known.
-    ///
-    /// Field 4: `owner`
-    pub owner: &'a str,
-    /// Selector-only keys (e.g. family); bounded, matchable syntax.
-    ///
-    /// Field 5: `labels`
-    pub labels: ::buffa::RepeatedView<'a, super::super::__buffa::view::LabelView<'a>>,
-    /// Permanent opaque metadata recorded on the event and Agent projection.
-    ///
-    /// Field 6: `annotations` (map)
-    pub annotations: ::buffa::MapView<'a, &'a str, &'a str>,
-    /// Field 7: `charter`
+    /// Field 4: `charter`
     pub charter: ::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'a>>,
-    /// Opaque identity that performed the provisioning operation.
-    ///
-    /// Field 8: `provisioned_by`
-    pub provisioned_by: &'a str,
     /// Implicit revision 1: the provisioned definition, addressed by number
     /// and content digest so downstream readers never need to special-case
     /// the genesis revision.
     ///
-    /// Field 9: `revision`
+    /// Field 5: `revision`
     pub revision: ::buffa::MessageFieldView<
         super::super::__buffa::view::RevisionRefView<'a>,
     >,
-    /// Delivery-scoped metadata; never part of the Agent projection.
-    ///
-    /// Field 10: `transient_annotations` (map)
-    pub transient_annotations: ::buffa::MapView<'a, &'a str, &'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -74,14 +53,6 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_parent(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
     }
-    /**Whether required field `owner` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_owner(&self) -> bool {
-        self.__buffa_required_seen_0 & 8u64 != 0
-    }
     /**Whether required field `charter` is set.
 
 Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
@@ -89,14 +60,6 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_charter(&self) -> bool {
         self.charter.is_set()
-    }
-    /**Whether required field `provisioned_by` was present on the wire.
-
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
-    #[must_use]
-    #[inline]
-    pub const fn has_provisioned_by(&self) -> bool {
-        self.__buffa_required_seen_0 & 16u64 != 0
     }
     /**Whether required field `revision` is set.
 
@@ -163,14 +126,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.owner = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 8u64;
-            }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
                 match view.charter.as_mut() {
@@ -187,15 +142,7 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                     }
                 }
             }
-            8u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.provisioned_by = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 16u64;
-            }
-            9u32 => {
+            5u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
@@ -215,95 +162,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                         );
                     }
                 }
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                let __sub_ctx = ctx.descend()?;
-                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                view.labels
-                    .push(
-                        <super::super::__buffa::view::LabelView as ::buffa::MessageView>::decode_view_ctx(
-                            sub,
-                            __sub_ctx,
-                        )?,
-                    );
-            }
-            6u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                let entry_bytes = ::buffa::types::borrow_bytes(&mut cur)?;
-                let mut entry_cur: &'a [u8] = entry_bytes;
-                let mut key = "";
-                let mut val = "";
-                while !entry_cur.is_empty() {
-                    let entry_tag = ::buffa::encoding::Tag::decode(&mut entry_cur)?;
-                    match entry_tag.field_number() {
-                        1 => {
-                            ::buffa::encoding::check_wire_type(
-                                entry_tag,
-                                ::buffa::encoding::WireType::LengthDelimited,
-                            )?;
-                            key = ::buffa::types::borrow_str(&mut entry_cur)?;
-                        }
-                        2 => {
-                            ::buffa::encoding::check_wire_type(
-                                entry_tag,
-                                ::buffa::encoding::WireType::LengthDelimited,
-                            )?;
-                            val = ::buffa::types::borrow_str(&mut entry_cur)?;
-                        }
-                        _ => {
-                            ::buffa::encoding::skip_field_depth(
-                                entry_tag,
-                                &mut entry_cur,
-                                ctx.depth(),
-                            )?;
-                        }
-                    }
-                }
-                view.annotations.push(key, val);
-            }
-            10u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                let entry_bytes = ::buffa::types::borrow_bytes(&mut cur)?;
-                let mut entry_cur: &'a [u8] = entry_bytes;
-                let mut key = "";
-                let mut val = "";
-                while !entry_cur.is_empty() {
-                    let entry_tag = ::buffa::encoding::Tag::decode(&mut entry_cur)?;
-                    match entry_tag.field_number() {
-                        1 => {
-                            ::buffa::encoding::check_wire_type(
-                                entry_tag,
-                                ::buffa::encoding::WireType::LengthDelimited,
-                            )?;
-                            key = ::buffa::types::borrow_str(&mut entry_cur)?;
-                        }
-                        2 => {
-                            ::buffa::encoding::check_wire_type(
-                                entry_tag,
-                                ::buffa::encoding::WireType::LengthDelimited,
-                            )?;
-                            val = ::buffa::types::borrow_str(&mut entry_cur)?;
-                        }
-                        _ => {
-                            ::buffa::encoding::skip_field_depth(
-                                entry_tag,
-                                &mut entry_cur,
-                                ctx.depth(),
-                            )?;
-                        }
-                    }
-                }
-                view.transient_annotations.push(key, val);
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -328,17 +186,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
             agent_id: self.agent_id.to_string(),
             name: self.name.to_string(),
             parent: self.parent.to_string(),
-            owner: self.owner.to_string(),
-            labels: self
-                .labels
-                .iter()
-                .map(|v| v.to_owned_from_source(__buffa_src))
-                .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
-            annotations: self
-                .annotations
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
             charter: match self.charter.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
@@ -347,7 +194,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            provisioned_by: self.provisioned_by.to_string(),
             revision: match self.revision.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
@@ -356,11 +202,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            transient_annotations: self
-                .transient_annotations
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
             ..::core::default::Default::default()
         })
     }
@@ -374,23 +215,6 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.owner) as u32;
-        for v in &self.labels {
-            let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        #[allow(clippy::for_kv_map)]
-        for (k, v) in &self.annotations {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            size
-                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
-                    + entry_size;
-        }
         if self.charter.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.charter.compute_size(__cache);
@@ -399,7 +223,6 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.provisioned_by) as u32;
         if self.revision.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.revision.compute_size(__cache);
@@ -407,14 +230,6 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
-        }
-        #[allow(clippy::for_kv_map)]
-        for (k, v) in &self.transient_annotations {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            size
-                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
-                    + entry_size;
         }
         size
     }
@@ -429,63 +244,13 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
         ::buffa::types::put_string_field(2u32, &self.name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
-        ::buffa::types::put_string_field(4u32, &self.owner, buf);
-        for v in &self.labels {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
-            v.write_to(__cache, buf);
-        }
-        for (k, v) in &self.annotations {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            ::buffa::encoding::Tag::new(
-                    6u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(entry_size as u64, buf);
-            ::buffa::encoding::Tag::new(
-                    1u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(k, buf);
-            ::buffa::encoding::Tag::new(
-                    2u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(v, buf);
-        }
         if self.charter.is_set() {
-            ::buffa::types::put_len_delimited_header(7u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
             self.charter.write_to(__cache, buf);
         }
-        ::buffa::types::put_string_field(8u32, &self.provisioned_by, buf);
         if self.revision.is_set() {
-            ::buffa::types::put_len_delimited_header(9u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
             self.revision.write_to(__cache, buf);
-        }
-        for (k, v) in &self.transient_annotations {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            ::buffa::encoding::Tag::new(
-                    10u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(entry_size as u64, buf);
-            ::buffa::encoding::Tag::new(
-                    1u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(k, buf);
-            ::buffa::encoding::Tag::new(
-                    2u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(v, buf);
         }
     }
 }
@@ -517,63 +282,14 @@ impl<'__a> ::serde::Serialize for AgentProvisionedView<'__a> {
             __map.serialize_entry("parent", self.parent)?;
         }
         {
-            __map.serialize_entry("owner", self.owner)?;
-        }
-        if !self.labels.is_empty() {
-            __map.serialize_entry("labels", &*self.labels)?;
-        }
-        if !self.annotations.is_empty() {
-            struct _WM<'__a, '__x>(&'__x ::buffa::MapView<'__x, &'__a str, &'__a str>);
-            impl<'__a> ::serde::Serialize for _WM<'__a, '_> {
-                fn serialize<__S: ::serde::Serializer>(
-                    &self,
-                    __s: __S,
-                ) -> ::core::result::Result<__S::Ok, __S::Error> {
-                    use ::serde::ser::SerializeMap as _;
-                    let mut __m = __s
-                        .serialize_map(::core::option::Option::Some(self.0.len()))?;
-                    for (k, v) in self.0.iter_unique() {
-                        __m.serialize_entry(k, v)?;
-                    }
-                    __m.end()
-                }
-            }
-            __map.serialize_entry("annotations", &_WM(&self.annotations))?;
-        }
-        {
             if let ::core::option::Option::Some(__v) = self.charter.as_option() {
                 __map.serialize_entry("charter", __v)?;
             }
         }
         {
-            __map.serialize_entry("provisionedBy", self.provisioned_by)?;
-        }
-        {
             if let ::core::option::Option::Some(__v) = self.revision.as_option() {
                 __map.serialize_entry("revision", __v)?;
             }
-        }
-        if !self.transient_annotations.is_empty() {
-            struct _WM<'__a, '__x>(&'__x ::buffa::MapView<'__x, &'__a str, &'__a str>);
-            impl<'__a> ::serde::Serialize for _WM<'__a, '_> {
-                fn serialize<__S: ::serde::Serializer>(
-                    &self,
-                    __s: __S,
-                ) -> ::core::result::Result<__S::Ok, __S::Error> {
-                    use ::serde::ser::SerializeMap as _;
-                    let mut __m = __s
-                        .serialize_map(::core::option::Option::Some(self.0.len()))?;
-                    for (k, v) in self.0.iter_unique() {
-                        __m.serialize_entry(k, v)?;
-                    }
-                    __m.end()
-                }
-            }
-            __map
-                .serialize_entry(
-                    "transientAnnotations",
-                    &_WM(&self.transient_annotations),
-                )?;
         }
         __map.end()
     }
@@ -684,61 +400,23 @@ impl AgentProvisionedOwnedView {
     pub fn parent(&self) -> &'_ str {
         self.0.reborrow().parent
     }
-    /// Opaque owner identity. The human-owner requirement is enforced before
-    /// command dispatch, where principal kind is known.
-    ///
-    /// Field 4: `owner`
-    #[must_use]
-    pub fn owner(&self) -> &'_ str {
-        self.0.reborrow().owner
-    }
-    /// Selector-only keys (e.g. family); bounded, matchable syntax.
-    ///
-    /// Field 5: `labels`
-    #[must_use]
-    pub fn labels(
-        &self,
-    ) -> &::buffa::RepeatedView<'_, super::super::__buffa::view::LabelView<'_>> {
-        &self.0.reborrow().labels
-    }
-    /// Permanent opaque metadata recorded on the event and Agent projection.
-    ///
-    /// Field 6: `annotations` (map)
-    #[must_use]
-    pub fn annotations(&self) -> &::buffa::MapView<'_, &'_ str, &'_ str> {
-        &self.0.reborrow().annotations
-    }
-    /// Field 7: `charter`
+    /// Field 4: `charter`
     #[must_use]
     pub fn charter(
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'_>> {
         &self.0.reborrow().charter
     }
-    /// Opaque identity that performed the provisioning operation.
-    ///
-    /// Field 8: `provisioned_by`
-    #[must_use]
-    pub fn provisioned_by(&self) -> &'_ str {
-        self.0.reborrow().provisioned_by
-    }
     /// Implicit revision 1: the provisioned definition, addressed by number
     /// and content digest so downstream readers never need to special-case
     /// the genesis revision.
     ///
-    /// Field 9: `revision`
+    /// Field 5: `revision`
     #[must_use]
     pub fn revision(
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::RevisionRefView<'_>> {
         &self.0.reborrow().revision
-    }
-    /// Delivery-scoped metadata; never part of the Agent projection.
-    ///
-    /// Field 10: `transient_annotations` (map)
-    #[must_use]
-    pub fn transient_annotations(&self) -> &::buffa::MapView<'_, &'_ str, &'_ str> {
-        &self.0.reborrow().transient_annotations
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AgentProvisionedView<'static>>>

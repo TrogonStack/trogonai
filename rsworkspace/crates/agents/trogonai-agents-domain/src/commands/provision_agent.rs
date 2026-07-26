@@ -3,20 +3,17 @@ use trogon_decider::{Decider, Decision};
 use trogonai_proto::agents::agents::{state_v1, v1};
 
 use super::CommandWireError;
-use super::domain::{AgentDefinition, AgentId, Annotations, ContentDigest, Principal, RevisionNumber};
+use super::domain::{AgentDefinition, AgentId, ContentDigest, RevisionNumber};
 use super::event_fold::{AgentEventFoldError, ensure_command_identity, provisioned_payload};
 use super::proto_wire::{
-    annotations_to_wire, charter_to_wire, labels_to_wire, provisioned_agent_from_event, provisioned_agent_from_state,
-    provisioned_agent_to_state,
+    charter_to_wire, provisioned_agent_from_event, provisioned_agent_from_state, provisioned_agent_to_state,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionAgent {
     pub agent_id: AgentId,
     pub definition: AgentDefinition,
-    pub principal: Principal,
     pub content_digest: ContentDigest,
-    pub transient_annotations: Annotations,
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -65,16 +62,11 @@ impl Decider for ProvisionAgent {
                         agent_id: command.agent_id.as_str().to_string(),
                         name: definition.name().as_str().to_string(),
                         parent: definition.parent().as_str().to_string(),
-                        owner: definition.owner().as_str().to_string(),
-                        labels: labels_to_wire(definition.labels()),
-                        annotations: annotations_to_wire(definition.annotations()),
                         charter: MessageField::some(charter_to_wire(definition.charter())),
-                        provisioned_by: command.principal.as_str().to_string(),
                         revision: MessageField::some(v1::RevisionRef {
                             number: RevisionNumber::GENESIS.get(),
                             content_digest: command.content_digest.as_str().to_string(),
                         }),
-                        transient_annotations: annotations_to_wire(&command.transient_annotations),
                     }
                     .into(),
                 ),

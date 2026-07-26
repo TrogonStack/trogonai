@@ -13,20 +13,9 @@ message AgentProvisioned {
   // Placement node ref (bare spelling per the spelling rule: unsuffixed
   // `parent` means placement, kinship is always `parent<Type>Id`).
   string parent = 3 [features.field_presence = LEGACY_REQUIRED];
-  // Opaque owner identity. The human-owner requirement is enforced before
-  // command dispatch, where principal kind is known.
-  string owner = 4 [features.field_presence = LEGACY_REQUIRED];
-  // Selector-only keys (e.g. family); bounded, matchable syntax.
-  repeated Label labels = 5;
-  // Permanent opaque metadata recorded on the event and Agent projection.
-  map<string, string> annotations = 6;
-  Charter charter = 7 [features.field_presence = LEGACY_REQUIRED];
-  // Opaque identity that performed the provisioning operation.
-  string provisioned_by = 8 [features.field_presence = LEGACY_REQUIRED];
+  Charter charter = 4 [features.field_presence = LEGACY_REQUIRED];
   // Implicit revision 1: the provisioned definition, addressed by number
   // and content digest so downstream readers never need to special-case
   // the genesis revision.
-  RevisionRef revision = 9 [features.field_presence = LEGACY_REQUIRED];
-  // Delivery-scoped metadata; never part of the Agent projection.
-  map<string, string> transient_annotations = 10;
+  RevisionRef revision = 5 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -6,12 +6,6 @@ use super::*;
 fn agent_provisioned() -> v1::AgentProvisioned {
     v1::AgentProvisioned {
         agent_id: "agent-1".to_string(),
-        annotations: [("example.com/source".to_string(), "import".to_string())]
-            .into_iter()
-            .collect(),
-        transient_annotations: [("example.com/trace".to_string(), "trace-1".to_string())]
-            .into_iter()
-            .collect(),
         ..v1::AgentProvisioned::default()
     }
 }

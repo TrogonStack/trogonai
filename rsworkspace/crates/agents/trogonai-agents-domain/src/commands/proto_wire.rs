@@ -1,14 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use buffa::{MessageField, map_codec::Map as ProtoMap};
+use buffa::MessageField;
 use trogonai_proto::agents::agents::{state_v1, v1};
 
 use super::ProvisionAgent;
 use super::domain::{
-    AgentCharter, AgentDefinition, AgentId, AgentIdError, AgentName, AgentNameError, Annotations, AnnotationsError,
-    ContentDigest, ContentDigestError, DelegateSelectors, DelegateSelectorsError, Labels, LabelsError, ModelId,
-    ModelIdError, ModelParameters, ModelParametersError, ParentRef, ParentRefError, Principal, PrincipalError,
-    RevisionNumber, RevisionNumberError, RuntimeId, RuntimeIdError, ToolSelectors, ToolSelectorsError,
+    AgentCharter, AgentDefinition, AgentId, AgentIdError, AgentName, AgentNameError, ContentDigest, ContentDigestError,
+    DelegateSelectors, DelegateSelectorsError, ModelId, ModelIdError, ModelParameters, ModelParametersError, ParentRef,
+    ParentRefError, RevisionNumber, RevisionNumberError, RuntimeId, RuntimeIdError, ToolSelectors, ToolSelectorsError,
 };
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -25,12 +24,6 @@ pub enum CommandWireError {
     InvalidAgentName(#[from] AgentNameError),
     #[error("invalid parent reference: {0}")]
     InvalidParent(#[from] ParentRefError),
-    #[error("invalid principal: {0}")]
-    InvalidPrincipal(#[from] PrincipalError),
-    #[error("invalid labels: {0}")]
-    InvalidLabels(#[from] LabelsError),
-    #[error("invalid annotations: {0}")]
-    InvalidAnnotations(#[from] AnnotationsError),
     #[error("invalid runtime id: {0}")]
     InvalidRuntime(#[from] RuntimeIdError),
     #[error("invalid model id: {0}")]
@@ -67,14 +60,9 @@ impl TryFrom<v1::ProvisionAgent> for ProvisionAgent {
             definition: definition_from_wire(AgentDefinitionWire {
                 name: &value.name,
                 parent: &value.parent,
-                owner: &value.owner,
-                labels: &value.labels,
-                annotations: &value.annotations,
                 charter,
             })?,
-            principal: Principal::parse(&value.principal)?,
             content_digest: ContentDigest::parse(&value.content_digest)?,
-            transient_annotations: annotations_from_wire(&value.transient_annotations)?,
         })
     }
 }
@@ -96,16 +84,11 @@ pub(super) fn provisioned_agent_from_event(
             actual: revision_number,
         });
     }
-    Principal::parse(&value.provisioned_by)?;
-    annotations_from_wire(&value.transient_annotations)?;
     Ok(ProvisionedAgentIdentity {
         agent_id: AgentId::parse(&value.agent_id)?,
         definition: definition_from_wire(AgentDefinitionWire {
             name: &value.name,
             parent: &value.parent,
-            owner: &value.owner,
-            labels: &value.labels,
-            annotations: &value.annotations,
             charter,
         })?,
         content_digest: ContentDigest::parse(&revision.content_digest)?,
@@ -124,9 +107,6 @@ pub(super) fn provisioned_agent_from_state(
         definition: definition_from_wire(AgentDefinitionWire {
             name: &value.name,
             parent: &value.parent,
-            owner: &value.owner,
-            labels: &value.labels,
-            annotations: &value.annotations,
             charter,
         })?,
         content_digest: ContentDigest::parse(&value.content_digest)?,
@@ -139,9 +119,6 @@ pub(super) fn provisioned_agent_to_state(value: &ProvisionedAgentIdentity) -> st
         agent_id: value.agent_id.as_str().to_string(),
         name: definition.name().as_str().to_string(),
         parent: definition.parent().as_str().to_string(),
-        owner: definition.owner().as_str().to_string(),
-        labels: labels_to_wire(definition.labels()),
-        annotations: annotations_to_wire(definition.annotations()),
         charter: MessageField::some(charter_to_wire(definition.charter())),
         content_digest: value.content_digest.as_str().to_string(),
     }
@@ -150,9 +127,6 @@ pub(super) fn provisioned_agent_to_state(value: &ProvisionedAgentIdentity) -> st
 struct AgentDefinitionWire<'a> {
     name: &'a str,
     parent: &'a str,
-    owner: &'a str,
-    labels: &'a [v1::Label],
-    annotations: &'a ProtoMap<String, String>,
     charter: &'a v1::Charter,
 }
 
@@ -160,20 +134,8 @@ fn definition_from_wire(value: AgentDefinitionWire<'_>) -> Result<AgentDefinitio
     Ok(AgentDefinition::new(
         AgentName::parse(value.name)?,
         ParentRef::parse(value.parent)?,
-        Principal::parse(value.owner)?,
-        Labels::new(string_entries(
-            value.labels.iter().map(|entry| (&entry.key, &entry.value)),
-            "labels",
-        )?)?,
-        annotations_from_wire(value.annotations)?,
         charter_from_wire(value.charter)?,
     ))
-}
-
-fn annotations_from_wire(values: &ProtoMap<String, String>) -> Result<Annotations, CommandWireError> {
-    Ok(Annotations::new(
-        values.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
-    )?)
 }
 
 fn charter_from_wire(value: &v1::Charter) -> Result<AgentCharter, CommandWireError> {
@@ -260,25 +222,6 @@ pub(super) fn charter_to_wire(value: &AgentCharter) -> v1::Charter {
             optional: value.delegates().optional().iter().cloned().collect(),
         }),
     }
-}
-
-pub(super) fn labels_to_wire(value: &Labels) -> Vec<v1::Label> {
-    value
-        .as_map()
-        .iter()
-        .map(|(key, value)| v1::Label {
-            key: key.clone(),
-            value: value.clone(),
-        })
-        .collect()
-}
-
-pub(super) fn annotations_to_wire(value: &Annotations) -> ProtoMap<String, String> {
-    value
-        .as_map()
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
 }
 
 #[cfg(test)]
