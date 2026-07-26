@@ -2,6 +2,8 @@ edition = "2024";
 
 package trogonai.agents.agents.v1;
 
+import "google/protobuf/any.proto";
+
 // Charter is the minimal, versioned declaration of an agent (design Q16):
 // identity, engine, and dependency declarations. Nothing economic, temporal,
 // evaluative, or reputational lives here; those are stances on their own
@@ -16,18 +18,14 @@ message Charter {
   DelegateDependencies delegates = 4 [features.field_presence = LEGACY_REQUIRED];
 }
 
-// ModelParameter is one deterministic model-configuration entry. Entries must
-// have unique keys and be ordered by key before they cross the wire boundary.
-message ModelParameter {
-  string key = 1 [features.field_presence = LEGACY_REQUIRED];
-  string value = 2 [features.field_presence = LEGACY_REQUIRED];
-}
-
 // Model is a default, not a constraint; sessions may override it without
 // minting a revision.
 message Model {
   string id = 1 [features.field_presence = LEGACY_REQUIRED];
-  repeated ModelParameter params = 2;
+  // Model-specific parameters. Each model defines its own message type,
+  // carried opaquely so the charter stays decoupled from any one engine.
+  // Absent when the model runs with its defaults.
+  google.protobuf.Any params = 2;
 }
 
 // ToolDependencies are declarations, not grants. Grants are human-held,
