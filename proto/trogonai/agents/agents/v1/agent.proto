@@ -42,9 +42,3 @@ message DelegateDependencies {
   repeated string required = 1;
   repeated string optional = 2;
 }
-
-// RevisionRef pins a specific revision by number and content digest.
-message RevisionRef {
-  uint64 number = 1 [features.field_presence = LEGACY_REQUIRED];
-  string content_digest = 2 [features.field_presence = LEGACY_REQUIRED];
-}

@@ -17,14 +17,11 @@ pub struct AgentProvisionedView<'a> {
     pub parent: &'a str,
     /// Field 4: `charter`
     pub charter: ::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'a>>,
-    /// Implicit revision 1: the provisioned definition, addressed by number
-    /// and content digest so downstream readers never need to special-case
-    /// the genesis revision.
+    /// SHA-256 digest of the provisioned revision bundle. This genesis event is
+    /// implicitly revision 1, so no revision number is carried.
     ///
-    /// Field 5: `revision`
-    pub revision: ::buffa::MessageFieldView<
-        super::super::__buffa::view::RevisionRefView<'a>,
-    >,
+    /// Field 5: `content_digest`
+    pub content_digest: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -61,13 +58,13 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     pub const fn has_charter(&self) -> bool {
         self.charter.is_set()
     }
-    /**Whether required field `revision` is set.
+    /**Whether required field `content_digest` was present on the wire.
 
-Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_revision(&self) -> bool {
-        self.revision.is_set()
+    pub const fn has_content_digest(&self) -> bool {
+        self.__buffa_required_seen_0 & 8u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
@@ -147,21 +144,8 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                let __sub_ctx = ctx.descend()?;
-                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                match view.revision.as_mut() {
-                    Some(existing) => {
-                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
-                    }
-                    None => {
-                        view.revision = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::RevisionRefView as ::buffa::MessageView>::decode_view_ctx(
-                                sub,
-                                __sub_ctx,
-                            )?,
-                        );
-                    }
-                }
+                view.content_digest = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 8u64;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -194,14 +178,7 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            revision: match self.revision.as_option() {
-                Some(v) => {
-                    ::buffa::MessageField::<
-                        super::super::RevisionRef,
-                    >::some(v.to_owned_from_source(__buffa_src)?)
-                }
-                None => ::buffa::MessageField::none(),
-            },
+            content_digest: self.content_digest.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -223,14 +200,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if self.revision.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.revision.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.content_digest) as u32;
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -248,10 +218,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
             self.charter.write_to(__cache, buf);
         }
-        if self.revision.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
-            self.revision.write_to(__cache, buf);
-        }
+        ::buffa::types::put_string_field(5u32, &self.content_digest, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -287,9 +254,7 @@ impl<'__a> ::serde::Serialize for AgentProvisionedView<'__a> {
             }
         }
         {
-            if let ::core::option::Option::Some(__v) = self.revision.as_option() {
-                __map.serialize_entry("revision", __v)?;
-            }
+            __map.serialize_entry("contentDigest", self.content_digest)?;
         }
         __map.end()
     }
@@ -407,16 +372,13 @@ impl AgentProvisionedOwnedView {
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'_>> {
         &self.0.reborrow().charter
     }
-    /// Implicit revision 1: the provisioned definition, addressed by number
-    /// and content digest so downstream readers never need to special-case
-    /// the genesis revision.
+    /// SHA-256 digest of the provisioned revision bundle. This genesis event is
+    /// implicitly revision 1, so no revision number is carried.
     ///
-    /// Field 5: `revision`
+    /// Field 5: `content_digest`
     #[must_use]
-    pub fn revision(
-        &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::RevisionRefView<'_>> {
-        &self.0.reborrow().revision
+    pub fn content_digest(&self) -> &'_ str {
+        self.0.reborrow().content_digest
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AgentProvisionedView<'static>>>

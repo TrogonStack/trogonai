@@ -27,13 +27,16 @@ pub struct AgentProvisioned {
     /// Field 4: `charter`
     #[serde(rename = "charter")]
     pub charter: ::buffa::MessageField<Charter>,
-    /// Implicit revision 1: the provisioned definition, addressed by number
-    /// and content digest so downstream readers never need to special-case
-    /// the genesis revision.
+    /// SHA-256 digest of the provisioned revision bundle. This genesis event is
+    /// implicitly revision 1, so no revision number is carried.
     ///
-    /// Field 5: `revision`
-    #[serde(rename = "revision")]
-    pub revision: ::buffa::MessageField<RevisionRef>,
+    /// Field 5: `content_digest`
+    #[serde(
+        rename = "contentDigest",
+        alias = "content_digest",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub content_digest: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for AgentProvisioned {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -42,7 +45,7 @@ impl ::core::fmt::Debug for AgentProvisioned {
             .field("name", &self.name)
             .field("parent", &self.parent)
             .field("charter", &self.charter)
-            .field("revision", &self.revision)
+            .field("content_digest", &self.content_digest)
             .finish()
     }
 }
@@ -82,14 +85,7 @@ impl ::buffa::Message for AgentProvisioned {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if self.revision.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.revision.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.content_digest) as u32;
         size
     }
     fn write_to(
@@ -106,10 +102,7 @@ impl ::buffa::Message for AgentProvisioned {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
             self.charter.write_to(__cache, buf);
         }
-        if self.revision.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
-            self.revision.write_to(__cache, buf);
-        }
+        ::buffa::types::put_string_field(5u32, &self.content_digest, buf);
     }
     fn merge_field(
         &mut self,
@@ -159,11 +152,7 @@ impl ::buffa::Message for AgentProvisioned {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.revision.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
+                ::buffa::types::merge_string(&mut self.content_digest, buf)?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -176,7 +165,7 @@ impl ::buffa::Message for AgentProvisioned {
         self.name.clear();
         self.parent.clear();
         self.charter = ::buffa::MessageField::none();
-        self.revision = ::buffa::MessageField::none();
+        self.content_digest.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AgentProvisioned {

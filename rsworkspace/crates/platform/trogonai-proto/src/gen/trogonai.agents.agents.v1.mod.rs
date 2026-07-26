@@ -41,7 +41,6 @@ pub mod __buffa {
         reg.register_json_any(super::__MODEL_JSON_ANY);
         reg.register_json_any(super::__TOOL_DEPENDENCIES_JSON_ANY);
         reg.register_json_any(super::__DELEGATE_DEPENDENCIES_JSON_ANY);
-        reg.register_json_any(super::__REVISION_REF_JSON_ANY);
         reg.register_json_any(super::__AGENT_PROVISIONED_JSON_ANY);
         reg.register_json_any(super::__AGENT_EVENT_JSON_ANY);
     }
@@ -66,10 +65,6 @@ pub use self::__buffa::view::ToolDependenciesOwnedView;
 pub use self::__buffa::view::DelegateDependenciesView;
 #[doc(inline)]
 pub use self::__buffa::view::DelegateDependenciesOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::RevisionRefView;
-#[doc(inline)]
-pub use self::__buffa::view::RevisionRefOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::AgentProvisionedView;
 #[doc(inline)]
