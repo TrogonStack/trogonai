@@ -31,6 +31,10 @@ pub enum ProvisionObjectStoreError {
     Create(#[source] async_nats::jetstream::context::CreateObjectStoreError),
     #[error("failed to get existing object store: {0}")]
     Get(#[source] async_nats::jetstream::context::ObjectStoreError),
+    #[error("failed to read backing stream for bucket: {0}")]
+    GetStream(#[source] async_nats::jetstream::context::GetStreamError),
+    #[error("failed to reconcile bucket retention: {0}")]
+    UpdateStream(#[source] async_nats::jetstream::context::UpdateStreamError),
 }
 
 #[cfg(not(coverage))]
@@ -63,21 +67,55 @@ impl NatsObjectStore {
     /// from [`ClaimRetention`] so the object always outlives the messages that
     /// reference it. Callers cannot forget the retention or let it drift from
     /// the owning stream.
+    ///
+    /// [`provision`](Self::provision) fetches an existing bucket and drops the
+    /// requested config, so a bucket created by an earlier deploy would keep its
+    /// old `max_age`. This reconciles the backing stream's retention on every
+    /// startup, so raising stream retention takes effect instead of silently
+    /// expiring resolvable claims.
     pub async fn provision_claim_bucket(
         js: &async_nats::jetstream::Context,
         bucket: impl Into<String>,
         retention: super::claim_retention::ClaimRetention,
     ) -> Result<Self, ProvisionObjectStoreError> {
-        Self::provision(
+        let bucket = bucket.into();
+        let max_age = retention.bucket_max_age();
+        let store = Self::provision(
             js,
             async_nats::jetstream::object_store::Config {
-                bucket: bucket.into(),
-                max_age: retention.bucket_max_age(),
+                bucket: bucket.clone(),
+                max_age,
                 ..Default::default()
             },
         )
-        .await
+        .await?;
+        reconcile_bucket_max_age(js, &bucket, max_age).await?;
+        Ok(store)
     }
+}
+
+/// Bring the retention of an already-provisioned bucket in line with `max_age`.
+/// A NATS object-store bucket is a stream named `OBJ_<bucket>`; only `max_age`
+/// is touched, leaving every other stream setting untouched.
+#[cfg(not(coverage))]
+async fn reconcile_bucket_max_age(
+    js: &async_nats::jetstream::Context,
+    bucket: &str,
+    max_age: std::time::Duration,
+) -> Result<(), ProvisionObjectStoreError> {
+    let stream = js
+        .get_stream(format!("OBJ_{bucket}"))
+        .await
+        .map_err(ProvisionObjectStoreError::GetStream)?;
+    let mut config = stream.cached_info().config.clone();
+    if config.max_age == max_age {
+        return Ok(());
+    }
+    config.max_age = max_age;
+    js.update_stream(&config)
+        .await
+        .map_err(ProvisionObjectStoreError::UpdateStream)?;
+    Ok(())
 }
 
 #[cfg(not(coverage))]
@@ -99,3 +137,6 @@ impl ObjectStoreGet for NatsObjectStore {
         self.store.get(name).await
     }
 }
+
+#[cfg(all(test, not(coverage), feature = "test-support"))]
+mod integration_tests;
