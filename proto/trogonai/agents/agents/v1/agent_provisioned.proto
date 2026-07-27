@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.agents.agents.v1;
 
 import "trogonai/agents/agents/v1/agent.proto";
+import "trogonai/agents/agents/v1/digest.proto";
 
 // AgentProvisioned is the Agent registry stream's genesis event, minting
 // revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
@@ -10,14 +11,19 @@ import "trogonai/agents/agents/v1/agent.proto";
 message AgentProvisioned {
   string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string display_name = 2 [features.field_presence = LEGACY_REQUIRED];
-  // Placement node ref (bare spelling per the spelling rule: unsuffixed
-  // `parent` means placement, kinship is always `parent<Type>Id`).
+  // Placement node the agent is provisioned under: the node ref that anchors
+  // the agent in the placement hierarchy and scopes ownership and addressing.
+  // Bare spelling is deliberate per the spelling rule: unsuffixed `parent`
+  // always denotes placement, while kinship refs are always `parent<Type>Id`.
+  // Immutable for the agent's v1 lifetime; re-placement mints a new agent
+  // rather than mutating this ref.
   string parent = 3 [features.field_presence = LEGACY_REQUIRED];
   AgentConfiguration configuration = 4 [features.field_presence = LEGACY_REQUIRED];
   // Revision minted by this genesis event, recorded explicitly so no consumer
   // derives it from convention. Always 1; the decider rejects any other value
   // at write time.
   uint64 revision = 5 [features.field_presence = LEGACY_REQUIRED];
-  // SHA-256 digest of the provisioned revision bundle.
-  string content_digest = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Content digest over the provisioned revision bundle, carrying its own
+  // algorithm identifier rather than assuming one by convention.
+  Digest content_digest = 6 [features.field_presence = LEGACY_REQUIRED];
 }

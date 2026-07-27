@@ -10,8 +10,12 @@ pub struct AgentProvisionedView<'a> {
     pub agent_id: &'a str,
     /// Field 2: `display_name`
     pub display_name: &'a str,
-    /// Placement node ref (bare spelling per the spelling rule: unsuffixed
-    /// `parent` means placement, kinship is always `parent<Type>Id`).
+    /// Placement node the agent is provisioned under: the node ref that anchors
+    /// the agent in the placement hierarchy and scopes ownership and addressing.
+    /// Bare spelling is deliberate per the spelling rule: unsuffixed `parent`
+    /// always denotes placement, while kinship refs are always `parent<Type>Id`.
+    /// Immutable for the agent's v1 lifetime; re-placement mints a new agent
+    /// rather than mutating this ref.
     ///
     /// Field 3: `parent`
     pub parent: &'a str,
@@ -25,10 +29,13 @@ pub struct AgentProvisionedView<'a> {
     ///
     /// Field 5: `revision`
     pub revision: u64,
-    /// SHA-256 digest of the provisioned revision bundle.
+    /// Content digest over the provisioned revision bundle, carrying its own
+    /// algorithm identifier rather than assuming one by convention.
     ///
     /// Field 6: `content_digest`
-    pub content_digest: &'a str,
+    pub content_digest: ::buffa::MessageFieldView<
+        super::super::__buffa::view::DigestView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -73,13 +80,13 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_revision(&self) -> bool {
         self.__buffa_required_seen_0 & 8u64 != 0
     }
-    /**Whether required field `content_digest` was present on the wire.
+    /**Whether required field `content_digest` is set.
 
-Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
     pub const fn has_content_digest(&self) -> bool {
-        self.__buffa_required_seen_0 & 16u64 != 0
+        self.content_digest.is_set()
     }
 }
 impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
@@ -167,8 +174,21 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.content_digest = ::buffa::types::borrow_str(&mut cur)?;
-                view.__buffa_required_seen_0 |= 16u64;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.content_digest.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.content_digest = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DigestView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
@@ -202,7 +222,14 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                 None => ::buffa::MessageField::none(),
             },
             revision: self.revision,
-            content_digest: self.content_digest.to_string(),
+            content_digest: match self.content_digest.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Digest,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -225,7 +252,14 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
                     + inner_size;
         }
         size += 1u32 + ::buffa::types::uint64_encoded_len(self.revision) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.content_digest) as u32;
+        if self.content_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.content_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -244,7 +278,10 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
             self.configuration.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(5u32, self.revision, buf);
-        ::buffa::types::put_string_field(6u32, &self.content_digest, buf);
+        if self.content_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            self.content_digest.write_to(__cache, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -287,7 +324,9 @@ impl<'__a> ::serde::Serialize for AgentProvisionedView<'__a> {
                 )?;
         }
         {
-            __map.serialize_entry("contentDigest", self.content_digest)?;
+            if let ::core::option::Option::Some(__v) = self.content_digest.as_option() {
+                __map.serialize_entry("contentDigest", __v)?;
+            }
         }
         __map.end()
     }
@@ -390,8 +429,12 @@ impl AgentProvisionedOwnedView {
     pub fn display_name(&self) -> &'_ str {
         self.0.reborrow().display_name
     }
-    /// Placement node ref (bare spelling per the spelling rule: unsuffixed
-    /// `parent` means placement, kinship is always `parent<Type>Id`).
+    /// Placement node the agent is provisioned under: the node ref that anchors
+    /// the agent in the placement hierarchy and scopes ownership and addressing.
+    /// Bare spelling is deliberate per the spelling rule: unsuffixed `parent`
+    /// always denotes placement, while kinship refs are always `parent<Type>Id`.
+    /// Immutable for the agent's v1 lifetime; re-placement mints a new agent
+    /// rather than mutating this ref.
     ///
     /// Field 3: `parent`
     #[must_use]
@@ -416,12 +459,15 @@ impl AgentProvisionedOwnedView {
     pub fn revision(&self) -> u64 {
         self.0.reborrow().revision
     }
-    /// SHA-256 digest of the provisioned revision bundle.
+    /// Content digest over the provisioned revision bundle, carrying its own
+    /// algorithm identifier rather than assuming one by convention.
     ///
     /// Field 6: `content_digest`
     #[must_use]
-    pub fn content_digest(&self) -> &'_ str {
-        self.0.reborrow().content_digest
+    pub fn content_digest(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
+        &self.0.reborrow().content_digest
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AgentProvisionedView<'static>>>

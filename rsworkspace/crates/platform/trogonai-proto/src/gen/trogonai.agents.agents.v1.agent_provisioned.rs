@@ -22,8 +22,12 @@ pub struct AgentProvisioned {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub display_name: ::buffa::alloc::string::String,
-    /// Placement node ref (bare spelling per the spelling rule: unsuffixed
-    /// `parent` means placement, kinship is always `parent<Type>Id`).
+    /// Placement node the agent is provisioned under: the node ref that anchors
+    /// the agent in the placement hierarchy and scopes ownership and addressing.
+    /// Bare spelling is deliberate per the spelling rule: unsuffixed `parent`
+    /// always denotes placement, while kinship refs are always `parent<Type>Id`.
+    /// Immutable for the agent's v1 lifetime; re-placement mints a new agent
+    /// rather than mutating this ref.
     ///
     /// Field 3: `parent`
     #[serde(rename = "parent", with = "::buffa::json_helpers::proto_string")]
@@ -38,15 +42,12 @@ pub struct AgentProvisioned {
     /// Field 5: `revision`
     #[serde(rename = "revision", with = "::buffa::json_helpers::uint64")]
     pub revision: u64,
-    /// SHA-256 digest of the provisioned revision bundle.
+    /// Content digest over the provisioned revision bundle, carrying its own
+    /// algorithm identifier rather than assuming one by convention.
     ///
     /// Field 6: `content_digest`
-    #[serde(
-        rename = "contentDigest",
-        alias = "content_digest",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub content_digest: ::buffa::alloc::string::String,
+    #[serde(rename = "contentDigest", alias = "content_digest")]
+    pub content_digest: ::buffa::MessageField<Digest>,
 }
 impl ::core::fmt::Debug for AgentProvisioned {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -97,7 +98,14 @@ impl ::buffa::Message for AgentProvisioned {
                     + inner_size;
         }
         size += 1u32 + ::buffa::types::uint64_encoded_len(self.revision) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.content_digest) as u32;
+        if self.content_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.content_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     fn write_to(
@@ -115,7 +123,10 @@ impl ::buffa::Message for AgentProvisioned {
             self.configuration.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(5u32, self.revision, buf);
-        ::buffa::types::put_string_field(6u32, &self.content_digest, buf);
+        if self.content_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            self.content_digest.write_to(__cache, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -172,7 +183,11 @@ impl ::buffa::Message for AgentProvisioned {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.content_digest, buf)?;
+                ::buffa::Message::merge_length_delimited(
+                    self.content_digest.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -186,7 +201,7 @@ impl ::buffa::Message for AgentProvisioned {
         self.parent.clear();
         self.configuration = ::buffa::MessageField::none();
         self.revision = 0u64;
-        self.content_digest.clear();
+        self.content_digest = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AgentProvisioned {
