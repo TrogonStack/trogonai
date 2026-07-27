@@ -105,7 +105,7 @@ async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
             }),
             _ => Ok(()),
         },
-        Dispatch::Response(result, router) => router.respond_with_result(result),
+        Dispatch::Response(result, router) => router.route_with_result(result),
     }
 }
 

@@ -9,6 +9,16 @@ crates_io() {
     jq -r '.crate.max_stable_version // .crate.max_version'
 }
 
+# The SDK pins its schema crate exactly, so a newer schema on crates.io is only
+# adoptable once the SDK itself moves to it. Resolve that pin to avoid reporting
+# schema drift nobody can act on.
+sdk_schema_pin() {
+  curl -sf --retry 3 -A "trogonai-acp-freshness" \
+    "https://crates.io/api/v1/crates/agent-client-protocol/$1/dependencies" |
+    jq -r '.dependencies[] | select(.crate_id == "agent-client-protocol-schema" and .kind == "normal") | .req' |
+    grep -oE '^=[0-9]+\.[0-9]+\.[0-9]+$' | tr -d '='
+}
+
 pinned="$(grep -oE 'agent-client-protocol = \{ version = "=?[0-9]+\.[0-9]+\.[0-9]+"' "$root/rsworkspace/Cargo.toml" |
   grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 if [[ -z "$pinned" ]]; then
@@ -16,28 +26,71 @@ if [[ -z "$pinned" ]]; then
   exit 1
 fi
 
-bundled_schema="$(grep -A2 'name = "agent-client-protocol-schema"' "$root/rsworkspace/Cargo.lock" |
-  grep -oE 'version = "[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+# Every resolved version, not just the first: cargo writes same-name packages
+# oldest-first, so reading one entry hides a forked graph behind a healthy-looking
+# version. Two schema crates is the failure this whole pin exists to prevent.
+lock_package_versions() {
+  awk -F' = ' -v pkg="$1" '
+    /^\[\[package\]\]/ { inpkg = 1; name = ""; next }
+    /^\[/ { inpkg = 0 }
+    inpkg && /^name = / { name = $2; gsub(/"/, "", name); next }
+    inpkg && /^version = / { version = $2; gsub(/"/, "", version); if (name == pkg) print version; next }
+  ' "$2"
+}
+
+mapfile -t schema_versions < <(lock_package_versions agent-client-protocol-schema "$root/rsworkspace/Cargo.lock" | sort -u -V)
+schema_count="${#schema_versions[@]}"
+if ((schema_count == 0)); then
+  bundled_schema="unknown"
+else
+  bundled_schema="$(
+    IFS=,
+    echo "${schema_versions[*]}"
+  )"
+  bundled_schema="${bundled_schema//,/, }"
+fi
 
 latest_sdk="$(crates_io agent-client-protocol)"
 latest_schema="$(crates_io agent-client-protocol-schema)"
+latest_sdk_schema_pin="$(sdk_schema_pin "$latest_sdk" || true)"
 
+# Adoptable schema level: whatever the latest SDK pins, falling back to the
+# newest published schema when the SDK does not pin one exactly.
+schema_target="${latest_sdk_schema_pin:-$latest_schema}"
+
+sdk_drift=false
+if [[ "$pinned" != "$latest_sdk" ]]; then
+  sdk_drift=true
+fi
+schema_forked=false
+schema_drift=false
+if ((schema_count > 1)); then
+  schema_forked=true
+  schema_drift=true
+elif [[ "$bundled_schema" != "$schema_target" ]]; then
+  schema_drift=true
+fi
 drift=false
-if [[ "$pinned" != "$latest_sdk" || "${bundled_schema:-unknown}" != "$latest_schema" ]]; then
+if [[ "$sdk_drift" == "true" || "$schema_drift" == "true" ]]; then
   drift=true
 fi
 
 echo "ACP freshness:"
 echo "  SDK    pinned=$pinned latest=$latest_sdk"
-echo "  schema bundled=${bundled_schema:-unknown} latest=$latest_schema"
-echo "  drift=$drift"
+echo "  schema resolved=$bundled_schema adoptable=$schema_target latest=$latest_schema"
+echo "  drift=$drift (sdk=$sdk_drift schema=$schema_drift forked=$schema_forked)"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "pinned=$pinned"
     echo "latest_sdk=$latest_sdk"
-    echo "bundled_schema=${bundled_schema:-unknown}"
+    echo "bundled_schema=$bundled_schema"
+    echo "schema_count=$schema_count"
     echo "latest_schema=$latest_schema"
+    echo "schema_target=$schema_target"
+    echo "sdk_drift=$sdk_drift"
+    echo "schema_drift=$schema_drift"
+    echo "schema_forked=$schema_forked"
     echo "drift=$drift"
   } >>"$GITHUB_OUTPUT"
 fi
@@ -46,16 +99,35 @@ if [[ "$drift" != "true" || "${ACP_FRESHNESS_FILE_ISSUE:-}" != "true" ]]; then
   exit 0
 fi
 
-title="ACP drift: agent-client-protocol $pinned is behind $latest_sdk"
+if [[ "$sdk_drift" == "true" ]]; then
+  title="ACP drift: agent-client-protocol $pinned is behind $latest_sdk"
+  lead="The pinned \`agent-client-protocol\` version has fallen behind crates.io."
+elif [[ "$schema_forked" == "true" ]]; then
+  title="ACP drift: the graph carries $schema_count agent-client-protocol-schema versions ($bundled_schema)"
+  lead="\`Cargo.lock\` resolves more than one \`agent-client-protocol-schema\` version. Cargo unifies features per crate version, so the schema-level unstable flags the direct dependency turns on no longer reach the types \`agent-client-protocol\` re-exports, and the bridge silently drops every field they gate. Nothing fails to compile. Pin the direct dependency back to the single version the SDK requires."
+else
+  # Direction-neutral: the resolved version can be ahead of the target as easily
+  # as behind it, and calling an ahead version "behind" sends the reader the wrong way.
+  title="ACP drift: agent-client-protocol-schema $bundled_schema does not match the $schema_target that agent-client-protocol $latest_sdk requires"
+  lead="The resolved \`agent-client-protocol-schema\` version is not the schema level \`agent-client-protocol\` $latest_sdk builds on."
+fi
+
+schema_note=""
+if [[ "$schema_target" != "$latest_schema" ]]; then
+  schema_note="
+
+\`agent-client-protocol\` $latest_sdk pins \`agent-client-protocol-schema\` at exactly $schema_target, so schema $latest_schema and anything it adds are not adoptable until the SDK moves. Track the gap in the conformance matrix rather than bumping the schema past the SDK's pin: a mismatched direct dependency puts two schema crates in the graph and the schema-level unstable flags stop reaching the SDK's re-exported types."
+fi
+
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 cat >"$body_file" <<EOF
-The pinned \`agent-client-protocol\` version has fallen behind crates.io.
+$lead
 
-| | pinned | latest |
+| | resolved | target |
 | --- | --- | --- |
 | SDK (\`agent-client-protocol\`) | $pinned | $latest_sdk |
-| Schema (\`agent-client-protocol-schema\`) | ${bundled_schema:-unknown} | $latest_schema |
+| Schema (\`agent-client-protocol-schema\`) | $bundled_schema | $schema_target |$schema_note
 
 A version bump is never just a version change. Per the upgrade ritual in \`docs/architecture/acp-conformance.md\`, the bump PR must:
 

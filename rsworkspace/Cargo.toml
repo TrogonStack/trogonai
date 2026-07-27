@@ -57,7 +57,7 @@ cel-interpreter = "=0.10.0"
 # ACP
 # Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
 # Unstable flags are enabled ahead of stabilization by policy (protocol v2 is watch-only).
-agent-client-protocol = { version = "=1.2.0", features = [
+agent-client-protocol = { version = "=2.0.0", features = [
     "unstable_auth_methods",
     "unstable_elicitation",
     "unstable_end_turn_token_usage",
@@ -66,7 +66,9 @@ agent-client-protocol = { version = "=1.2.0", features = [
 ] }
 # Direct schema dependency exists solely to enable schema-level unstable flags the
 # SDK facade does not forward (cargo feature unification applies them to the SDK's re-exports).
-agent-client-protocol-schema = { version = "=1.4.0", features = [
+# The version must match the SDK's own exact pin, otherwise the graph carries two
+# schema crates and the flags stop reaching the SDK's re-exported types.
+agent-client-protocol-schema = { version = "=1.5.0", features = [
     "unstable_llm_providers",
     "unstable_nes",
     "unstable_plan_operations",
