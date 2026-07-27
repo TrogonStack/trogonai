@@ -603,16 +603,7 @@ impl ResolvedConfig {
     /// expires, the bucket must not either. Returns `None` when no source is
     /// configured.
     pub fn max_stream_max_age(&self) -> Option<StreamMaxAge> {
-        self.stream_max_ages().reduce(|acc, next| match (acc, next) {
-            (StreamMaxAge::NoExpiry, _) | (_, StreamMaxAge::NoExpiry) => StreamMaxAge::NoExpiry,
-            (StreamMaxAge::ExpireAfter(a), StreamMaxAge::ExpireAfter(b)) => {
-                if b > a {
-                    next
-                } else {
-                    acc
-                }
-            }
-        })
+        longest_stream_max_age(self.stream_max_ages())
     }
 
     fn stream_max_ages(&self) -> impl Iterator<Item = StreamMaxAge> + '_ {
@@ -646,6 +637,17 @@ impl ResolvedConfig {
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
     }
+}
+
+/// The longest retention across `ages`. `NoExpiry` dominates any bounded value,
+/// so the claim bucket derived from it never expires while a message can still
+/// be delivered. `None` when the iterator is empty.
+fn longest_stream_max_age(ages: impl Iterator<Item = StreamMaxAge>) -> Option<StreamMaxAge> {
+    ages.reduce(|acc, next| match (acc, next) {
+        (StreamMaxAge::NoExpiry, _) | (_, StreamMaxAge::NoExpiry) => StreamMaxAge::NoExpiry,
+        (StreamMaxAge::ExpireAfter(a), StreamMaxAge::ExpireAfter(b)) if b > a => next,
+        (StreamMaxAge::ExpireAfter(_), StreamMaxAge::ExpireAfter(_)) => acc,
+    })
 }
 
 #[cfg(test)]

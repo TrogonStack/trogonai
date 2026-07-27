@@ -2423,3 +2423,31 @@ signing_secret = "8f7e6d5c4b3a29180f1e2d3c4b5a69788f7e6d5c4b3a29180f1e2d3c4b5a69
         Some(StreamMaxAge::from_secs(7200).expect("non-zero"))
     );
 }
+
+#[test]
+fn longest_stream_max_age_is_none_when_empty() {
+    assert_eq!(longest_stream_max_age(std::iter::empty()), None);
+}
+
+#[test]
+fn longest_stream_max_age_keeps_the_larger_regardless_of_order() {
+    let short = StreamMaxAge::from_secs(3600).expect("non-zero");
+    let long = StreamMaxAge::from_secs(7200).expect("non-zero");
+
+    assert_eq!(longest_stream_max_age([short, long].into_iter()), Some(long));
+    assert_eq!(longest_stream_max_age([long, short].into_iter()), Some(long));
+}
+
+#[test]
+fn longest_stream_max_age_lets_no_expiry_dominate_in_either_position() {
+    let bounded = StreamMaxAge::from_secs(7200).expect("non-zero");
+
+    assert_eq!(
+        longest_stream_max_age([bounded, StreamMaxAge::NoExpiry].into_iter()),
+        Some(StreamMaxAge::NoExpiry)
+    );
+    assert_eq!(
+        longest_stream_max_age([StreamMaxAge::NoExpiry, bounded].into_iter()),
+        Some(StreamMaxAge::NoExpiry)
+    );
+}
