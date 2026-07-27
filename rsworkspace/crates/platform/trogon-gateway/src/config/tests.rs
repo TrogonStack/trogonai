@@ -2394,3 +2394,32 @@ status = "enabled"
         matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: missing transport")))
     );
 }
+
+#[test]
+fn max_stream_max_age_is_none_without_sources() {
+    let f = write_toml(&minimal_toml());
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.max_stream_max_age(), None);
+}
+
+#[test]
+fn max_stream_max_age_picks_the_longest_across_sources() {
+    let toml = r#"
+[sources.github.integrations.primary]
+stream_max_age_secs = 3600
+[sources.github.integrations.primary.webhook]
+webhook_secret = "short-lived"
+
+[sources.slack.integrations.primary]
+stream_max_age_secs = 7200
+[sources.slack.integrations.primary.webhook]
+signing_secret = "8f7e6d5c4b3a29180f1e2d3c4b5a69788f7e6d5c4b3a29180f1e2d3c4b5a6978"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert_eq!(
+        cfg.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(7200).expect("non-zero"))
+    );
+}

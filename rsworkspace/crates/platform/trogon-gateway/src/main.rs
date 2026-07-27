@@ -22,11 +22,11 @@ mod streams;
 use std::io::Write;
 #[cfg(not(coverage))]
 use std::net::SocketAddr;
-#[cfg(not(coverage))]
-use std::time::Duration;
 
 #[cfg(not(coverage))]
-use crate::constants::{CLAIM_CHECK_BUCKET, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
+use crate::constants::{
+    CLAIM_CHECK_BUCKET, CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL,
+};
 #[cfg(not(coverage))]
 use anyhow::Context;
 #[cfg(not(coverage))]
@@ -34,7 +34,7 @@ use tokio::task::JoinSet;
 #[cfg(not(coverage))]
 use tracing::{error, info};
 #[cfg(not(coverage))]
-use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, NatsJetStreamClient, NatsObjectStore};
+use trogon_nats::jetstream::{ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore};
 #[cfg(not(coverage))]
 use trogon_nats::{connect, wait_for_server_info};
 #[cfg(not(coverage))]
@@ -90,15 +90,16 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         "NATS connected"
     );
     let js_context = async_nats::jetstream::new(nats.clone());
-    let object_store = NatsObjectStore::provision(
-        &js_context,
-        async_nats::jetstream::object_store::Config {
-            bucket: CLAIM_CHECK_BUCKET.to_string(),
-            max_age: Duration::from_secs(8 * 24 * 60 * 60),
-            ..Default::default()
-        },
-    )
-    .await?;
+    // Size the claim bucket TTL from the longest stream it serves so a message
+    // still on the stream can always resolve its claim. `has_any_source` is
+    // enforced above, so `max_stream_max_age` is always `Some` here; the fallback
+    // never expires rather than risk reclaiming a live claim.
+    let claim_retention = resolved
+        .max_stream_max_age()
+        .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
+        .unwrap_or(ClaimRetention::EventSourced);
+    let object_store =
+        NatsObjectStore::provision_claim_bucket(&js_context, CLAIM_CHECK_BUCKET, claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;

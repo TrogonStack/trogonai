@@ -58,6 +58,26 @@ impl NatsObjectStore {
             Err(err) => Err(ProvisionObjectStoreError::Create(err)),
         }
     }
+
+    /// Provision a bucket that backs claim-check payloads, sizing its `max_age`
+    /// from [`ClaimRetention`] so the object always outlives the messages that
+    /// reference it. Callers cannot forget the retention or let it drift from
+    /// the owning stream.
+    pub async fn provision_claim_bucket(
+        js: &async_nats::jetstream::Context,
+        bucket: impl Into<String>,
+        retention: super::claim_retention::ClaimRetention,
+    ) -> Result<Self, ProvisionObjectStoreError> {
+        Self::provision(
+            js,
+            async_nats::jetstream::object_store::Config {
+                bucket: bucket.into(),
+                max_age: retention.bucket_max_age(),
+                ..Default::default()
+            },
+        )
+        .await
+    }
 }
 
 #[cfg(not(coverage))]
