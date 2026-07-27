@@ -1,10 +1,38 @@
 use std::error::Error;
 use std::future::Future;
+use std::time::Duration;
 
 use tokio::io::AsyncRead;
 
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateKeyValueErrorKind;
+
+/// Decide the `max_age` a claim bucket should reconcile to, growing only.
+///
+/// A claim object must outlive every message that can still reference it, and
+/// source streams themselves never shrink retention (`get_or_create_stream`).
+/// Shrinking the bucket would expire live claims, so the bucket only ever
+/// widens: `Some(new)` when `desired` is longer than `current`, `None` when it
+/// is equal or shorter. `Duration::ZERO` is NATS's "no expiry", i.e. the
+/// longest possible retention, so it dominates any finite value in both
+/// directions.
+// Only `reconcile_bucket_max_age` (cfg `not(coverage)`) and the unit tests call
+// this; a coverage build without tests would otherwise see it as dead.
+#[cfg_attr(coverage, allow(dead_code))]
+fn widened_max_age(current: Duration, desired: Duration) -> Option<Duration> {
+    let current_never_expires = current.is_zero();
+    let desired_never_expires = desired.is_zero();
+
+    if current_never_expires {
+        None
+    } else if desired_never_expires {
+        Some(Duration::ZERO)
+    } else if desired > current {
+        Some(desired)
+    } else {
+        None
+    }
+}
 
 pub trait ObjectStorePut: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
@@ -71,8 +99,10 @@ impl NatsObjectStore {
     /// [`provision`](Self::provision) fetches an existing bucket and drops the
     /// requested config, so a bucket created by an earlier deploy would keep its
     /// old `max_age`. This reconciles the backing stream's retention on every
-    /// startup, so raising stream retention takes effect instead of silently
-    /// expiring resolvable claims.
+    /// startup, growing it so raising stream retention takes effect. It never
+    /// shrinks the bucket: source streams do not shrink their own retention, so
+    /// a lowered config must not expire claims that older, still-deliverable
+    /// messages reference.
     pub async fn provision_claim_bucket(
         js: &async_nats::jetstream::Context,
         bucket: impl Into<String>,
@@ -94,24 +124,25 @@ impl NatsObjectStore {
     }
 }
 
-/// Bring the retention of an already-provisioned bucket in line with `max_age`.
+/// Grow the retention of an already-provisioned bucket toward `max_age`.
 /// A NATS object-store bucket is a stream named `OBJ_<bucket>`; only `max_age`
-/// is touched, leaving every other stream setting untouched.
+/// is touched, leaving every other stream setting untouched. The retention only
+/// widens (see [`widened_max_age`]), so a lowered config is a no-op.
 #[cfg(not(coverage))]
 async fn reconcile_bucket_max_age(
     js: &async_nats::jetstream::Context,
     bucket: &str,
-    max_age: std::time::Duration,
+    max_age: Duration,
 ) -> Result<(), ProvisionObjectStoreError> {
     let stream = js
         .get_stream(format!("OBJ_{bucket}"))
         .await
         .map_err(ProvisionObjectStoreError::GetStream)?;
     let mut config = stream.cached_info().config.clone();
-    if config.max_age == max_age {
+    let Some(widened) = widened_max_age(config.max_age, max_age) else {
         return Ok(());
-    }
-    config.max_age = max_age;
+    };
+    config.max_age = widened;
     js.update_stream(&config)
         .await
         .map_err(ProvisionObjectStoreError::UpdateStream)?;
@@ -137,6 +168,9 @@ impl ObjectStoreGet for NatsObjectStore {
         self.store.get(name).await
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(all(test, not(coverage), feature = "test-support"))]
 mod integration_tests;

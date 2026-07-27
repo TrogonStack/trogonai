@@ -43,6 +43,14 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
     assert_ne!(long.bucket_max_age(), short.bucket_max_age());
     NatsObjectStore::provision_claim_bucket(&js, BUCKET, long)
         .await
-        .expect("re-provision");
+        .expect("re-provision wider");
+    assert_eq!(backing_stream_max_age(&js).await, long.bucket_max_age());
+
+    // Re-provisioning with a shorter retention must NOT shrink the bucket:
+    // older, still-deliverable messages could reference claims that would
+    // otherwise expire early.
+    NatsObjectStore::provision_claim_bucket(&js, BUCKET, short)
+        .await
+        .expect("re-provision narrower");
     assert_eq!(backing_stream_max_age(&js).await, long.bucket_max_age());
 }
