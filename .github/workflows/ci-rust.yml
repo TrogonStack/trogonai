@@ -10,7 +10,6 @@ on:
       - 'rsworkspace/**'
       - 'LICENSE'
       - '.mise.toml'
-      - 'rust-toolchain.toml'
       - '.config/mise/tasks/**'
       - '.github/actions/enforce-cargo-license/**'
       - '.github/actions/setup-rust/**'
