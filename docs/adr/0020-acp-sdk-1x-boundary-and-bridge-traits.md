@@ -81,6 +81,47 @@ The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
 `acp-nats`. That module is the single SDK-connection-aware part of the crate;
 the NATS routing core remains free of connection machinery.
 
+### 4. Scope correction: the HTTP/WebSocket boundary was never evaluated
+
+> Added 2026-07-27.
+
+Decision 1 above asks one question, "should the official transports replace the
+NATS transport", and answers it correctly: no. But `agent-client-protocol-http`
+is named in the Context and then never assessed on its own terms, and decision 1
+already concedes that the WebSocket duplex in `acp-nats-server` and stdio in
+`acp-nats-stdio` *are* true byte-stream boundaries. Those are precisely the
+boundaries that crate serves. The question that went unasked is therefore
+"should the official HTTP/WebSocket transport serve our byte-stream boundary",
+and nothing in the original reasoning answers it.
+
+The consequence is measurable. `acp-nats-server/src/transport.rs` hand-rolls the
+draft remote transport in 1,507 lines against an official crate that uses the
+same header names (`acp-connection-id`, `acp-session-id`), the same
+initialize-creates-the-connection contract, the same session-scoped method list,
+and the same web framework. Reuse there would delete most of that file.
+
+This ADR is not reversed, because the reuse is not currently a good trade:
+
+- Four behaviors we depend on have no equivalent in the official crate, and
+  three of them are places where we are *ahead* of it, not merely different:
+  `Acp-Protocol-Version` validation (the transport spec says clients SHOULD send
+  it and upstream does not read it at all), server-side `Origin` enforcement on
+  every verb rather than only the WebSocket upgrade, and a graceful drain hook.
+  The fourth, UUIDv7 connection ids, is a preference.
+- `ConnectionRegistry` is entirely `pub(crate)`, so none of the four can be
+  layered on from outside `into_router()`. Closing them means upstream PRs or a
+  fork.
+- At 2.0.0 the crate has no other dependents on crates.io. Trading tested code
+  for an unexercised major version is the wrong direction today, and gets less
+  wrong every release.
+
+What changes now is only that the gap is tracked instead of invisible: the
+`## Companion crates` table in `docs/architecture/acp-conformance.md` records
+every companion crate and why it is or is not adopted, and the freshness task
+reads that table so a companion release reaches us the same way a core release
+does. Revisit when the four gaps close or when adoption elsewhere demonstrates
+the crate is exercised.
+
 ## Consequences
 
 - The bridge's method surface is defined in one place (the bridge traits), and
@@ -94,3 +135,7 @@ the NATS routing core remains free of connection machinery.
   work apply at the boundaries without constraining the NATS leg.
 - We keep full control of JetStream durability semantics, backpressure, and
   keepalives, which the SDK transport abstraction does not model.
+- The hand-rolled remote transport stays, but it is now a tracked deviation
+  rather than an unexamined one: the conformance doc records every companion
+  crate and the freshness task watches them, so the decision gets re-tested on
+  each upstream release instead of drifting (see decision 4).

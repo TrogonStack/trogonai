@@ -18,6 +18,22 @@ Upstream repositories: [spec/schema](https://github.com/agentclientprotocol/agen
 
 The SDK's exact schema pin caps our effective spec level. The direct schema dependency exists only to turn on schema-level unstable flags the SDK facade does not forward, and it works because cargo unifies features on a single schema crate. Pinning it past the SDK's requirement would put two schema crates in the graph, at which point the flags no longer apply to the types the SDK actually re-exports, so schema releases above the SDK's pin are tracked as gaps here rather than adopted early.
 
+## Companion crates
+
+The Rust SDK repository publishes more than the core crate, and every companion releases in lockstep with it (identical version numbers on identical dates since 1.0.0). Tracking only `agent-client-protocol` therefore hides capability that upstream already ships. The freshness task reads the recorded versions straight out of this table, so it stays the one place they live.
+
+| Crate | Latest | Adopted | Position |
+| --- | --- | --- | --- |
+| `agent-client-protocol` | 2.0.0 | yes | The core dependency this document tracks. |
+| `agent-client-protocol-schema` | 1.6.0 | yes (1.5.0) | Capped by the SDK's exact pin, see above. |
+| `agent-client-protocol-derive` | 2.0.0 | transitive | Pulled in by the core crate; no direct dependency. |
+| `agent-client-protocol-http` | 2.0.0 | no | Official axum-based Streamable HTTP + WebSocket transport, overlapping `acp-nats-server/src/transport.rs`. Not adopted: `AcpHttpServer` has no `Acp-Protocol-Version` validation, no shutdown/drain hook, no connection-id override (hardcoded UUIDv4, so `AcpConnectionId` would stop governing the wire), and enforces `Origin` server-side only on the WebSocket upgrade path, leaving POST/GET/DELETE to browser-honored CORS. The hand-rolled transport does all four. Revisit once those gaps close upstream; the swap seam is `AcpHttpServer::new(factory)` taking `Fn() -> impl ConnectTo<Client>`. Two adoption costs to weigh then: the `server` feature enables `serde_json/preserve_order` workspace-wide, and at 2.0.0 the crate has no other crates.io dependents. |
+| `agent-client-protocol-polyfill` | 2.0.0 | no | MCP-over-ACP polyfill for agents that accept HTTP but not ACP-transport MCP servers. Relevant only once `mcp/connect`, `mcp/message`, and `mcp/disconnect` are routed (see the MCP-over-ACP row below). |
+| `agent-client-protocol-rmcp` | 3.0.0 | no | Bridges `rmcp`-based MCP servers into the SDK's MCP server framework. Candidate for `crates/mcp`, not for the ACP bridge. |
+| `agent-client-protocol-conductor` | 2.0.0 | no | Binary and library for stdio proxy chains using the `_proxy/successor` envelope. Different problem shape from a message-bus bridge. |
+| `agent-client-protocol-tokio` | 0.11.1 | no | Not updated since 2026-04-21 and superseded by the core crate's own runtime-agnostic surface. Treated as dormant; a release would be worth investigating. |
+| `agent-client-protocol-trace-viewer` | 2.0.0 | no | Developer tooling, no runtime role. |
+
 ## Policy
 
 Opt in to unstable spec features ahead of stabilization. The default for every unstable feature is to enable the flag, wire the routing, and test it. Opting out is the exception and requires a rationale in the matrix below.
@@ -28,7 +44,9 @@ The [bridge](../glossary/bridge) decodes every message into typed SDK structs an
 
 ## Conformance matrix
 
-Status values: `implemented` (routed, typed, tested), `capabilities implemented` (capability payloads round-trip, but the methods behind them are not routed), `unwired` (SDK flag enabled but no routing), `dropped` (peers may send it, the bridge strips or rejects it), `unrepresentable` (pinned SDK cannot express it), `not supported` (deliberate opt-out with rationale), `watch-only` (tracked for adoption, deliberately not implemented while upstream still churns).
+Status values: `implemented` (routed, typed, tested), `capabilities implemented` (capability payloads round-trip, but the methods behind them are not routed), `half-wired` (one half of the path is routed and tested, but the end-to-end flow cannot complete in a release build, so the surface does not work in production), `unwired` (SDK flag enabled but no routing), `dropped` (peers may send it, the bridge strips or rejects it), `unrepresentable` (pinned SDK cannot express it), `not supported` (deliberate opt-out with rationale), `watch-only` (tracked for adoption, deliberately not implemented while upstream still churns).
+
+A green test suite does not earn a status of `implemented`. `half-wired` exists because a surface can be fully unit-tested on both sides of a seam that nothing connects in a release build.
 
 ### Agent-side methods (client to agent)
 
@@ -53,7 +71,7 @@ Status values: `implemented` (routed, typed, tested), `capabilities implemented`
 | `session/close` | stable (0.12.2) | implemented | |
 | `session/delete` | stable (0.13.6) | implemented | routed end to end with tests, span `acp.session.delete` |
 | JSON-RPC request cancellation | stable (1.2.0) | implemented | boundary honors `$/cancel_request`: bridge-side work is dropped and the request answers with `request_cancelled` (tested); prompt-turn cancellation on the runner side remains `session/cancel` per spec |
-| JSON-RPC batches (inbound) | stable (SDK 2.0.0) | implemented | the SDK splits an inbound batch into independent dispatches and regroups the replies into one response array, so every routed method works inside a batch and unrouted ones still answer `method_not_found`; round-trip tested at the boundary. NATS carries one JSON-RPC message per subject message, so a batch never reaches the runner as a batch, and the bridge never emits one: the SDK sends typed requests and notifications individually |
+| JSON-RPC batches (inbound) | stable (SDK 2.0.0) | implemented | the SDK splits an inbound batch into independent dispatches and regroups the replies into one response array, so every routed method works inside a batch and unrouted ones still answer `method_not_found`; round-trip tested at the boundary. NATS carries one JSON-RPC message per subject message, so a batch never reaches the runner as a batch, and the bridge never emits one: the SDK sends typed requests and notifications individually. **Two boundaries, two implementations:** WebSocket and stdio forward each line whole (`acp-nats-server/src/connection.rs:122`), so they use the SDK path the boundary test covers. `POST /acp` does not: `IncomingHttpMessage::parse_all` unbundles the array first (`transport.rs:664`), then `http_post` loops each element through its own round trip and rebuilds the response array by hand. The SDK grouping is unreachable on the HTTP path and therefore untested there. One divergence follows from that hand-rolled regroup: a batch yielding exactly one JSON outcome answers with a bare response object rather than a one-element array (`transport.rs`, `match json_outcomes.len()`), which JSON-RPC 2.0 batch semantics do not allow. Not yet reproduced against a live server; verify before relying on batch behavior over HTTP |
 | `ext/*` (extension methods) | stable | implemented | passthrough |
 
 ### Client-side methods (agent to client)
@@ -71,7 +89,8 @@ Status values: `implemented` (routed, typed, tested), `capabilities implemented`
 | `terminal/kill` | stable | implemented | |
 | `elicitation/create` | unstable | implemented | `unstable_elicitation` SDK flag; routed both through the bridge-owned `ClientHandler::elicitation_create` and the SDK byte-stream boundary (`AgentRequest::CreateElicitationRequest`); `ElicitationScope::Request` (pre-session, no session id) is not routable since all NATS client subjects and `NatsClientProxy` construction are session-scoped |
 | `elicitation/complete` (notification) | unstable | implemented | `unstable_elicitation` SDK flag; routed as a `ClientHandler::elicitation_complete` notification |
-| `ext/*` | stable | implemented | passthrough, plus bullard-specific `ext/session/prompt_response` |
+| `ext/*` | stable | implemented | passthrough |
+| `ext/session/prompt_response` (bridge extension, not spec) | n/a | half-wired | The receive half is routed and unit-tested: `acp-nats/src/client/ext_session_prompt_response.rs` decodes the notification and correlates it on `meta.prompt_id`. The completion half does not exist in a release build. `PendingSessionPromptResponseWaiters::register_waiter` is the only method that inserts into the waiter map and it has been `#[cfg(test)]` since the module landed in #477, so `resolve_waiter` always returns `false` and every notification is logged and dropped at `ext_session_prompt_response.rs:96`. Nothing inserts into the `timed_out` map in any build either, so `PROMPT_TIMEOUT_WARNING_SUPPRESSION_WINDOW` never suppresses and that warning fires once per dropped response. Completing this needs a production registration site on the prompt path. The machinery is deliberately retained, not deleted: the problem it solves is real, since a notification can arrive on a session subject with no live caller and outlive the caller that was waiting for it. |
 
 ### Payload-level capabilities
 
@@ -99,6 +118,7 @@ A version bump of `agent-client-protocol` (or the schema it bundles) is never ju
 2. For each added or stabilized method: add subject mapping in `acp-nats/src/nats/parsing.rs`, a handler (bridge trait method plus its match arm in the boundary dispatch and [NATS](../glossary/nats) dispatch), and tests, or add a matrix row with an opt-out rationale. The byte-stream boundary no longer needs per-method registrations: `connect_agent_boundary` routes through the SDK's `ClientRequest`/`ClientNotification` enums, so a method missing from its match answers `method_not_found` instead of being silently unreachable (see [ADR#0020](../adr/0020-acp-sdk-1x-boundary-and-bridge-traits.md), amendment of 2026-07-09).
 3. For each added field or `session/update` variant: add a round-trip test through the bridge. Typed re-encode means unmapped fields are silently dropped, so a green compile proves nothing about coverage.
 4. For each new unstable flag: enable it per the opt-in policy and wire it. A flag that only exists in a schema release above the SDK's exact pin cannot be enabled; move the direct schema dependency in lockstep with the SDK's requirement and record the gap as a matrix row instead.
-5. Update this document (matrix and spec position table) in the same PR.
+5. Update the `## Companion crates` table with the new versions, and re-evaluate every row marked `no`. Companions release in lockstep with the core crate, so a bump is exactly when a gap that blocked adoption may have closed. The freshness task parses that table, so leaving it stale disables the check.
+6. Update this document (matrix and spec position table) in the same PR.
 
 The scheduled freshness workflow (`.github/workflows/acp-freshness.yml`) embeds this checklist in the issue it files when drift is detected.
