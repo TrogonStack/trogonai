@@ -41,3 +41,4 @@ future implementation work.
 - [ADR#0033: Two-Tier Key Custody Product Model](./0033-two-tier-key-custody-product-model.md)
 - [ADR#0034: Rust Crate Domain Grouping](./0034-rust-crate-domain-grouping.md)
 - [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](./0035-session-store-decider-aggregate.md)
+- [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
