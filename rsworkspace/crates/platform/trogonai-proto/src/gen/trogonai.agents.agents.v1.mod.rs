@@ -37,9 +37,6 @@ pub mod __buffa {
     /// Register this package's `Any` type entries and extension entries.
     pub fn register_types(reg: &mut ::buffa::type_registry::TypeRegistry) {
         reg.register_json_any(super::__CHARTER_JSON_ANY);
-        reg.register_json_any(super::__MODEL_JSON_ANY);
-        reg.register_json_any(super::__TOOL_DEPENDENCIES_JSON_ANY);
-        reg.register_json_any(super::__DELEGATE_DEPENDENCIES_JSON_ANY);
         reg.register_json_any(super::__AGENT_PROVISIONED_JSON_ANY);
         reg.register_json_any(super::__AGENT_EVENT_JSON_ANY);
     }
@@ -48,18 +45,6 @@ pub mod __buffa {
 pub use self::__buffa::view::CharterView;
 #[doc(inline)]
 pub use self::__buffa::view::CharterOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::ModelView;
-#[doc(inline)]
-pub use self::__buffa::view::ModelOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::ToolDependenciesView;
-#[doc(inline)]
-pub use self::__buffa::view::ToolDependenciesOwnedView;
-#[doc(inline)]
-pub use self::__buffa::view::DelegateDependenciesView;
-#[doc(inline)]
-pub use self::__buffa::view::DelegateDependenciesOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::AgentProvisionedView;
 #[doc(inline)]

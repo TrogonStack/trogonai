@@ -2,9 +2,9 @@
 // source: trogonai/agents/agents/v1/agent.proto
 
 /// Charter is the minimal, versioned declaration of an agent (design Q16):
-/// identity, engine, and dependency declarations. Nothing economic, temporal,
-/// evaluative, or reputational lives here; those are stances on their own
-/// planes (policy, evaluation, scheduling), selector-bound and human-owned.
+/// identity, engine, and the engine-owned configuration. Nothing economic,
+/// temporal, evaluative, or reputational lives here; those are stances on their
+/// own planes (policy, evaluation, scheduling), selector-bound and human-owned.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -15,25 +15,23 @@ pub struct Charter {
     /// Field 1: `runtime`
     #[serde(rename = "runtime", with = "::buffa::json_helpers::proto_string")]
     pub runtime: ::buffa::alloc::string::String,
-    /// Default model; a per-session override does not mint a revision.
+    /// Runtime-owned configuration: model, parameters, and dependency
+    /// declarations. The runtime named above defines the message type carried
+    /// here and validates its contents. Absent means the runtime runs with its
+    /// defaults.
     ///
-    /// Field 2: `model`
-    #[serde(rename = "model")]
-    pub model: ::buffa::MessageField<Model>,
-    /// Field 3: `tools`
-    #[serde(rename = "tools")]
-    pub tools: ::buffa::MessageField<ToolDependencies>,
-    /// Field 4: `delegates`
-    #[serde(rename = "delegates")]
-    pub delegates: ::buffa::MessageField<DelegateDependencies>,
+    /// Field 2: `configuration`
+    #[serde(
+        rename = "configuration",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub configuration: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
 }
 impl ::core::fmt::Debug for Charter {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("Charter")
             .field("runtime", &self.runtime)
-            .field("model", &self.model)
-            .field("tools", &self.tools)
-            .field("delegates", &self.delegates)
+            .field("configuration", &self.configuration)
             .finish()
     }
 }
@@ -63,25 +61,9 @@ impl ::buffa::Message for Charter {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.runtime) as u32;
-        if self.model.is_set() {
+        if self.configuration.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.model.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        if self.tools.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.tools.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        if self.delegates.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.delegates.compute_size(__cache);
+            let inner_size = self.configuration.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
@@ -97,17 +79,9 @@ impl ::buffa::Message for Charter {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.runtime, buf);
-        if self.model.is_set() {
+        if self.configuration.is_set() {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
-            self.model.write_to(__cache, buf);
-        }
-        if self.tools.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
-            self.tools.write_to(__cache, buf);
-        }
-        if self.delegates.is_set() {
-            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
-            self.delegates.write_to(__cache, buf);
+            self.configuration.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -134,29 +108,7 @@ impl ::buffa::Message for Charter {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.model.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
-            }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.tools.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
-            }
-            4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.delegates.get_or_insert_default(),
+                    self.configuration.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
@@ -169,9 +121,7 @@ impl ::buffa::Message for Charter {
     }
     fn clear(&mut self) {
         self.runtime.clear();
-        self.model = ::buffa::MessageField::none();
-        self.tools = ::buffa::MessageField::none();
-        self.delegates = ::buffa::MessageField::none();
+        self.configuration = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for Charter {
@@ -192,405 +142,5 @@ pub const __CHARTER_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::ty
     type_url: "type.googleapis.com/trogonai.agents.agents.v1.Charter",
     to_json: ::buffa::type_registry::any_to_json::<Charter>,
     from_json: ::buffa::type_registry::any_from_json::<Charter>,
-    is_wkt: false,
-};
-/// Model is a default, not a constraint; sessions may override it without
-/// minting a revision.
-#[derive(Clone, PartialEq, Default)]
-#[derive(::serde::Serialize, ::serde::Deserialize)]
-#[serde(default)]
-pub struct Model {
-    /// Field 1: `id`
-    #[serde(rename = "id", with = "::buffa::json_helpers::proto_string")]
-    pub id: ::buffa::alloc::string::String,
-    /// Model-specific parameters. Each model defines its own message type,
-    /// carried opaquely so the charter stays decoupled from any one engine.
-    /// Absent when the model runs with its defaults.
-    ///
-    /// Field 2: `params`
-    #[serde(
-        rename = "params",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
-    )]
-    pub params: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
-}
-impl ::core::fmt::Debug for Model {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("Model")
-            .field("id", &self.id)
-            .field("params", &self.params)
-            .finish()
-    }
-}
-impl Model {
-    /// Protobuf type URL for this message, for use with `Any::pack` and
-    /// `Any::unpack_if`.
-    ///
-    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.Model";
-}
-::buffa::impl_default_instance!(Model);
-impl ::buffa::MessageName for Model {
-    const PACKAGE: &'static str = "trogonai.agents.agents.v1";
-    const NAME: &'static str = "Model";
-    const FULL_NAME: &'static str = "trogonai.agents.agents.v1.Model";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.Model";
-}
-impl ::buffa::Message for Model {
-    /// Returns the total encoded size in bytes.
-    ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
-    #[allow(clippy::let_and_return)]
-    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.id) as u32;
-        if self.params.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.params.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        size
-    }
-    fn write_to(
-        &self,
-        __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
-    ) {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.id, buf);
-        if self.params.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
-            self.params.write_to(__cache, buf);
-        }
-    }
-    fn merge_field(
-        &mut self,
-        tag: ::buffa::encoding::Tag,
-        buf: &mut impl ::buffa::bytes::Buf,
-        ctx: ::buffa::DecodeContext<'_>,
-    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-        #[allow(unused_imports)]
-        use ::buffa::bytes::Buf as _;
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        match tag.field_number() {
-            1u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(&mut self.id, buf)?;
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.params.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
-            }
-            _ => {
-                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
-            }
-        }
-        ::core::result::Result::Ok(())
-    }
-    fn clear(&mut self) {
-        self.id.clear();
-        self.params = ::buffa::MessageField::none();
-    }
-}
-impl ::buffa::json_helpers::ProtoElemJson for Model {
-    fn serialize_proto_json<S: ::serde::Serializer>(
-        v: &Self,
-        s: S,
-    ) -> ::core::result::Result<S::Ok, S::Error> {
-        ::serde::Serialize::serialize(v, s)
-    }
-    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
-        d: D,
-    ) -> ::core::result::Result<Self, D::Error> {
-        <Self as ::serde::Deserialize>::deserialize(d)
-    }
-}
-#[doc(hidden)]
-pub const __MODEL_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.agents.agents.v1.Model",
-    to_json: ::buffa::type_registry::any_to_json::<Model>,
-    from_json: ::buffa::type_registry::any_from_json::<Model>,
-    is_wkt: false,
-};
-/// ToolDependencies are declarations, not grants. Grants are human-held,
-/// evaluated live at every tool call on the Grants stream (design Q8/Q16).
-#[derive(Clone, PartialEq, Default)]
-#[derive(::serde::Serialize, ::serde::Deserialize)]
-#[serde(default)]
-pub struct ToolDependencies {
-    /// Field 1: `required`
-    #[serde(
-        rename = "required",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub required: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
-    /// Field 2: `optional`
-    #[serde(
-        rename = "optional",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub optional: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
-}
-impl ::core::fmt::Debug for ToolDependencies {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("ToolDependencies")
-            .field("required", &self.required)
-            .field("optional", &self.optional)
-            .finish()
-    }
-}
-impl ToolDependencies {
-    /// Protobuf type URL for this message, for use with `Any::pack` and
-    /// `Any::unpack_if`.
-    ///
-    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.ToolDependencies";
-}
-::buffa::impl_default_instance!(ToolDependencies);
-impl ::buffa::MessageName for ToolDependencies {
-    const PACKAGE: &'static str = "trogonai.agents.agents.v1";
-    const NAME: &'static str = "ToolDependencies";
-    const FULL_NAME: &'static str = "trogonai.agents.agents.v1.ToolDependencies";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.ToolDependencies";
-}
-impl ::buffa::Message for ToolDependencies {
-    /// Returns the total encoded size in bytes.
-    ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
-    #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        for v in &self.required {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        for v in &self.optional {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        size
-    }
-    fn write_to(
-        &self,
-        _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
-    ) {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        for v in &self.required {
-            ::buffa::types::put_string_field(1u32, v, buf);
-        }
-        for v in &self.optional {
-            ::buffa::types::put_string_field(2u32, v, buf);
-        }
-    }
-    fn merge_field(
-        &mut self,
-        tag: ::buffa::encoding::Tag,
-        buf: &mut impl ::buffa::bytes::Buf,
-        ctx: ::buffa::DecodeContext<'_>,
-    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-        #[allow(unused_imports)]
-        use ::buffa::bytes::Buf as _;
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        match tag.field_number() {
-            1u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                self.required.push(::buffa::types::decode_string(buf)?);
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                self.optional.push(::buffa::types::decode_string(buf)?);
-            }
-            _ => {
-                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
-            }
-        }
-        ::core::result::Result::Ok(())
-    }
-    fn clear(&mut self) {
-        self.required.clear();
-        self.optional.clear();
-    }
-}
-impl ::buffa::json_helpers::ProtoElemJson for ToolDependencies {
-    fn serialize_proto_json<S: ::serde::Serializer>(
-        v: &Self,
-        s: S,
-    ) -> ::core::result::Result<S::Ok, S::Error> {
-        ::serde::Serialize::serialize(v, s)
-    }
-    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
-        d: D,
-    ) -> ::core::result::Result<Self, D::Error> {
-        <Self as ::serde::Deserialize>::deserialize(d)
-    }
-}
-#[doc(hidden)]
-pub const __TOOL_DEPENDENCIES_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.agents.agents.v1.ToolDependencies",
-    to_json: ::buffa::type_registry::any_to_json::<ToolDependencies>,
-    from_json: ::buffa::type_registry::any_from_json::<ToolDependencies>,
-    is_wkt: false,
-};
-/// DelegateDependencies are declarations, not permissions.
-#[derive(Clone, PartialEq, Default)]
-#[derive(::serde::Serialize, ::serde::Deserialize)]
-#[serde(default)]
-pub struct DelegateDependencies {
-    /// Field 1: `required`
-    #[serde(
-        rename = "required",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub required: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
-    /// Field 2: `optional`
-    #[serde(
-        rename = "optional",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
-        deserialize_with = "::buffa::json_helpers::null_as_default"
-    )]
-    pub optional: ::buffa::alloc::vec::Vec<::buffa::alloc::string::String>,
-}
-impl ::core::fmt::Debug for DelegateDependencies {
-    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-        f.debug_struct("DelegateDependencies")
-            .field("required", &self.required)
-            .field("optional", &self.optional)
-            .finish()
-    }
-}
-impl DelegateDependencies {
-    /// Protobuf type URL for this message, for use with `Any::pack` and
-    /// `Any::unpack_if`.
-    ///
-    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
-    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.DelegateDependencies";
-}
-::buffa::impl_default_instance!(DelegateDependencies);
-impl ::buffa::MessageName for DelegateDependencies {
-    const PACKAGE: &'static str = "trogonai.agents.agents.v1";
-    const NAME: &'static str = "DelegateDependencies";
-    const FULL_NAME: &'static str = "trogonai.agents.agents.v1.DelegateDependencies";
-    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.agents.agents.v1.DelegateDependencies";
-}
-impl ::buffa::Message for DelegateDependencies {
-    /// Returns the total encoded size in bytes.
-    ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
-    #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        for v in &self.required {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        for v in &self.optional {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
-        size
-    }
-    fn write_to(
-        &self,
-        _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
-    ) {
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        for v in &self.required {
-            ::buffa::types::put_string_field(1u32, v, buf);
-        }
-        for v in &self.optional {
-            ::buffa::types::put_string_field(2u32, v, buf);
-        }
-    }
-    fn merge_field(
-        &mut self,
-        tag: ::buffa::encoding::Tag,
-        buf: &mut impl ::buffa::bytes::Buf,
-        ctx: ::buffa::DecodeContext<'_>,
-    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
-        #[allow(unused_imports)]
-        use ::buffa::bytes::Buf as _;
-        #[allow(unused_imports)]
-        use ::buffa::Enumeration as _;
-        match tag.field_number() {
-            1u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                self.required.push(::buffa::types::decode_string(buf)?);
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                self.optional.push(::buffa::types::decode_string(buf)?);
-            }
-            _ => {
-                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
-            }
-        }
-        ::core::result::Result::Ok(())
-    }
-    fn clear(&mut self) {
-        self.required.clear();
-        self.optional.clear();
-    }
-}
-impl ::buffa::json_helpers::ProtoElemJson for DelegateDependencies {
-    fn serialize_proto_json<S: ::serde::Serializer>(
-        v: &Self,
-        s: S,
-    ) -> ::core::result::Result<S::Ok, S::Error> {
-        ::serde::Serialize::serialize(v, s)
-    }
-    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
-        d: D,
-    ) -> ::core::result::Result<Self, D::Error> {
-        <Self as ::serde::Deserialize>::deserialize(d)
-    }
-}
-#[doc(hidden)]
-pub const __DELEGATE_DEPENDENCIES_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
-    type_url: "type.googleapis.com/trogonai.agents.agents.v1.DelegateDependencies",
-    to_json: ::buffa::type_registry::any_to_json::<DelegateDependencies>,
-    from_json: ::buffa::type_registry::any_from_json::<DelegateDependencies>,
     is_wkt: false,
 };
