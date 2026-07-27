@@ -4,9 +4,9 @@ package trogonai.agents.agents.v1;
 
 import "trogonai/agents/agents/v1/agent.proto";
 
-// AgentProvisioned is the Agent registry stream's genesis event; implicitly revision 1.
-// No limits, no rubrics, no grants live here (design Q15/Q16); those are
-// stances on their own planes.
+// AgentProvisioned is the Agent registry stream's genesis event, minting
+// revision 1. No limits, no rubrics, no grants live here (design Q15/Q16);
+// those are stances on their own planes.
 message AgentProvisioned {
   string agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string name = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -14,7 +14,10 @@ message AgentProvisioned {
   // `parent` means placement, kinship is always `parent<Type>Id`).
   string parent = 3 [features.field_presence = LEGACY_REQUIRED];
   AgentConfiguration configuration = 4 [features.field_presence = LEGACY_REQUIRED];
-  // SHA-256 digest of the provisioned revision bundle. This genesis event is
-  // implicitly revision 1, so no revision number is carried.
-  string content_digest = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Revision minted by this genesis event, recorded explicitly so no consumer
+  // derives it from convention. Always 1; the decider rejects any other value
+  // at write time.
+  uint64 revision = 5 [features.field_presence = LEGACY_REQUIRED];
+  // SHA-256 digest of the provisioned revision bundle.
+  string content_digest = 6 [features.field_presence = LEGACY_REQUIRED];
 }
