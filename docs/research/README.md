@@ -24,3 +24,4 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [netclaw-dev/netclaw](https://github.com/netclaw-dev/netclaw)
 - [openclaw/openclaw](https://github.com/openclaw/openclaw)
 - [diggerhq/opencomputer](https://github.com/diggerhq/opencomputer)
+- [Mesh-LLM/mesh-llm](https://github.com/Mesh-LLM/mesh-llm)
