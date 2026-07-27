@@ -1,7 +1,7 @@
 use buffa::Message as _;
 use trogon_decider_runtime::{
     EventData, EventDecode, EventDecodeOutcome, EventEncode, EventIdentity, EventPayloadError, EventType,
-    InvalidSnapshotTypeName, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
+    InvalidSnapshotTypeNameError, SnapshotPayloadData, SnapshotPayloadDecode, SnapshotPayloadEncode, SnapshotType,
     SnapshotTypeName,
 };
 
@@ -91,7 +91,7 @@ fn credential_event_case_type(event: &CredentialEventCase) -> &'static str {
 }
 
 impl SnapshotType for state_v1::CredentialStateSnapshot {
-    type Error = InvalidSnapshotTypeName;
+    type Error = InvalidSnapshotTypeNameError;
 
     fn snapshot_type() -> Result<SnapshotTypeName, Self::Error> {
         proto_snapshot_type::<Self>()

@@ -40,8 +40,8 @@ twilight-gateway = { workspace = true }
 twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-semconv = { workspace = true }
-trogonai-proto = { path = "../trogonai-proto", features = ["gateway"] }
-trogon-decider-nats = { path = "../trogon-decider-nats" }
+trogonai-proto = { workspace = true, features = ["gateway"] }
+trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-service-config = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http"] }
@@ -55,6 +55,6 @@ testcontainers-modules = "0.15"
 time = { workspace = true }
 tower = "0.5"
 tracing-subscriber = { workspace = true }
-trogon-decider = { path = "../trogon-decider", features = ["test-support"] }
+trogon-decider = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

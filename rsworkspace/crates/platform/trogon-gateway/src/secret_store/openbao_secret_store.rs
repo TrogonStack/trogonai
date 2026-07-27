@@ -6,7 +6,7 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use trogon_std::{EmptySecret, SecretString};
+use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
 use super::{
@@ -288,7 +288,7 @@ pub enum OpenBaoSecretStoreConfigError {
     #[error("invalid OpenBao address: {0}")]
     InvalidAddress(#[source] url::ParseError),
     #[error("invalid OpenBao token: {0}")]
-    EmptyToken(#[source] EmptySecret),
+    EmptyToken(#[source] EmptySecretError),
 }
 
 impl SecretStorePut for OpenBaoSecretStore {

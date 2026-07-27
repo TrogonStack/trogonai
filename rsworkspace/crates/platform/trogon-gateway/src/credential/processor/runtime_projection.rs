@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 use trogon_decider_nats::StreamStoreError;
 use trogon_decider_runtime::{
-    EventDecodeOutcome, InvalidStreamPosition, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition, StreamRead,
+    EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition, StreamRead,
 };
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStreamInfo,
@@ -341,9 +341,9 @@ pub enum RuntimeProjectionRefreshError {
         source: Box<dyn Error + Send + Sync>,
     },
     #[error("runtime projection stream position is invalid: {source}")]
-    InvalidStreamPosition {
+    InvalidStreamPositionError {
         #[source]
-        source: InvalidStreamPosition,
+        source: InvalidStreamPositionError,
     },
     #[error("runtime projection could not be built: {source}")]
     BuildProjection {
@@ -1083,7 +1083,7 @@ fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, Cred
 }
 
 fn position(value: u64) -> Result<StreamPosition, RuntimeProjectionRefreshError> {
-    StreamPosition::try_new(value).map_err(|source| RuntimeProjectionRefreshError::InvalidStreamPosition { source })
+    StreamPosition::try_new(value).map_err(|source| RuntimeProjectionRefreshError::InvalidStreamPositionError { source })
 }
 
 fn merge_projection(
