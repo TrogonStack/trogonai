@@ -45,3 +45,4 @@ future implementation work.
 - [ADR#0037: Agent Identity Governance: Decentralized Verification under Governed Authority](./0037-agent-identity-governance.md)
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
+- [ADR#0040: Contract Field Vocabulary: Identifiers, Handles, and Display Labels](./0040-contract-field-vocabulary.md)

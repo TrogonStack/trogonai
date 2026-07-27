@@ -15,7 +15,7 @@ and [ADR#0025](./0025-agent-definition-data-ownership.md) define the agent
 record and its configuration but say nothing about how an agent is
 *cryptographically* identified, nor how a consumer proves that an action came
 from a given agent. Today the genesis `AgentProvisioned` event carries an
-opaque `agent_id` string, `name`, `parent`, an `AgentConfiguration`, a
+opaque `agent_id` string, `display_name`, `parent`, an `AgentConfiguration`, a
 `revision`, and a `content_digest`. Nothing ties the agent to a verifying
 key, so the registry
 holds agents with no cryptographic anchor: an `agent_id` alone proves nothing.

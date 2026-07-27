@@ -167,7 +167,7 @@ fn tool_call_requested() -> v1alpha1::ToolCallRequested {
         session_id: "session-1".to_string(),
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
-        name: "search".to_string(),
+        tool_name: "search".to_string(),
         input_json: "{}".to_string(),
         parent_tool_use_id: None,
         operation_id: None,
@@ -439,7 +439,7 @@ fn todo_updated() -> v1alpha1::TodoUpdated {
 fn session_renamed() -> v1alpha1::SessionRenamed {
     v1alpha1::SessionRenamed {
         session_id: "session-1".to_string(),
-        title: "New title".to_string(),
+        display_name: "New title".to_string(),
     }
 }
 

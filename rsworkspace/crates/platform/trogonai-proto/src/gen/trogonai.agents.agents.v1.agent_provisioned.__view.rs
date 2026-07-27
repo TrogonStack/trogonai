@@ -8,8 +8,8 @@
 pub struct AgentProvisionedView<'a> {
     /// Field 1: `agent_id`
     pub agent_id: &'a str,
-    /// Field 2: `name`
-    pub name: &'a str,
+    /// Field 2: `display_name`
+    pub display_name: &'a str,
     /// Placement node ref (bare spelling per the spelling rule: unsuffixed
     /// `parent` means placement, kinship is always `parent<Type>Id`).
     ///
@@ -41,12 +41,12 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_agent_id(&self) -> bool {
         self.__buffa_required_seen_0 & 1u64 != 0
     }
-    /**Whether required field `name` was present on the wire.
+    /**Whether required field `display_name` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_name(&self) -> bool {
+    pub const fn has_display_name(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
     }
     /**Whether required field `parent` was present on the wire.
@@ -122,7 +122,7 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.name = ::buffa::types::borrow_str(&mut cur)?;
+                view.display_name = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 2u64;
             }
             3u32 => {
@@ -191,7 +191,7 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
         let _ = __buffa_src;
         ::core::result::Result::Ok(super::super::AgentProvisioned {
             agent_id: self.agent_id.to_string(),
-            name: self.name.to_string(),
+            display_name: self.display_name.to_string(),
             parent: self.parent.to_string(),
             configuration: match self.configuration.as_option() {
                 Some(v) => {
@@ -214,7 +214,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.display_name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
         if self.configuration.is_set() {
             let __slot = __cache.reserve();
@@ -237,7 +237,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.name, buf);
+        ::buffa::types::put_string_field(2u32, &self.display_name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
         if self.configuration.is_set() {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
@@ -269,7 +269,7 @@ impl<'__a> ::serde::Serialize for AgentProvisionedView<'__a> {
             __map.serialize_entry("agentId", self.agent_id)?;
         }
         {
-            __map.serialize_entry("name", self.name)?;
+            __map.serialize_entry("displayName", self.display_name)?;
         }
         {
             __map.serialize_entry("parent", self.parent)?;
@@ -385,10 +385,10 @@ impl AgentProvisionedOwnedView {
     pub fn agent_id(&self) -> &'_ str {
         self.0.reborrow().agent_id
     }
-    /// Field 2: `name`
+    /// Field 2: `display_name`
     #[must_use]
-    pub fn name(&self) -> &'_ str {
-        self.0.reborrow().name
+    pub fn display_name(&self) -> &'_ str {
+        self.0.reborrow().display_name
     }
     /// Placement node ref (bare spelling per the spelling rule: unsuffixed
     /// `parent` means placement, kinship is always `parent<Type>Id`).

@@ -15,9 +15,13 @@ pub struct AgentProvisioned {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub agent_id: ::buffa::alloc::string::String,
-    /// Field 2: `name`
-    #[serde(rename = "name", with = "::buffa::json_helpers::proto_string")]
-    pub name: ::buffa::alloc::string::String,
+    /// Field 2: `display_name`
+    #[serde(
+        rename = "displayName",
+        alias = "display_name",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub display_name: ::buffa::alloc::string::String,
     /// Placement node ref (bare spelling per the spelling rule: unsuffixed
     /// `parent` means placement, kinship is always `parent<Type>Id`).
     ///
@@ -48,7 +52,7 @@ impl ::core::fmt::Debug for AgentProvisioned {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("AgentProvisioned")
             .field("agent_id", &self.agent_id)
-            .field("name", &self.name)
+            .field("display_name", &self.display_name)
             .field("parent", &self.parent)
             .field("configuration", &self.configuration)
             .field("revision", &self.revision)
@@ -82,7 +86,7 @@ impl ::buffa::Message for AgentProvisioned {
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.display_name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
         if self.configuration.is_set() {
             let __slot = __cache.reserve();
@@ -104,7 +108,7 @@ impl ::buffa::Message for AgentProvisioned {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.name, buf);
+        ::buffa::types::put_string_field(2u32, &self.display_name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
         if self.configuration.is_set() {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
@@ -136,7 +140,7 @@ impl ::buffa::Message for AgentProvisioned {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.name, buf)?;
+                ::buffa::types::merge_string(&mut self.display_name, buf)?;
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -178,7 +182,7 @@ impl ::buffa::Message for AgentProvisioned {
     }
     fn clear(&mut self) {
         self.agent_id.clear();
-        self.name.clear();
+        self.display_name.clear();
         self.parent.clear();
         self.configuration = ::buffa::MessageField::none();
         self.revision = 0u64;
