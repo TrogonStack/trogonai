@@ -42,3 +42,6 @@ future implementation work.
 - [ADR#0034: Rust Crate Domain Grouping](./0034-rust-crate-domain-grouping.md)
 - [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](./0035-session-store-decider-aggregate.md)
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
+- [ADR#0037: Agent Identity Governance: Decentralized Verification under Governed Authority](./0037-agent-identity-governance.md)
+- [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
+- [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
