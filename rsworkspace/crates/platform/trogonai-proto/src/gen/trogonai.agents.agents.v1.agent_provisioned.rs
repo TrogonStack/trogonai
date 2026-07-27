@@ -24,9 +24,9 @@ pub struct AgentProvisioned {
     /// Field 3: `parent`
     #[serde(rename = "parent", with = "::buffa::json_helpers::proto_string")]
     pub parent: ::buffa::alloc::string::String,
-    /// Field 4: `charter`
-    #[serde(rename = "charter")]
-    pub charter: ::buffa::MessageField<Charter>,
+    /// Field 4: `configuration`
+    #[serde(rename = "configuration")]
+    pub configuration: ::buffa::MessageField<AgentConfiguration>,
     /// SHA-256 digest of the provisioned revision bundle. This genesis event is
     /// implicitly revision 1, so no revision number is carried.
     ///
@@ -44,7 +44,7 @@ impl ::core::fmt::Debug for AgentProvisioned {
             .field("agent_id", &self.agent_id)
             .field("name", &self.name)
             .field("parent", &self.parent)
-            .field("charter", &self.charter)
+            .field("configuration", &self.configuration)
             .field("content_digest", &self.content_digest)
             .finish()
     }
@@ -77,9 +77,9 @@ impl ::buffa::Message for AgentProvisioned {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
-        if self.charter.is_set() {
+        if self.configuration.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.charter.compute_size(__cache);
+            let inner_size = self.configuration.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
@@ -98,9 +98,9 @@ impl ::buffa::Message for AgentProvisioned {
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
         ::buffa::types::put_string_field(2u32, &self.name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
-        if self.charter.is_set() {
+        if self.configuration.is_set() {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
-            self.charter.write_to(__cache, buf);
+            self.configuration.write_to(__cache, buf);
         }
         ::buffa::types::put_string_field(5u32, &self.content_digest, buf);
     }
@@ -142,7 +142,7 @@ impl ::buffa::Message for AgentProvisioned {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 ::buffa::Message::merge_length_delimited(
-                    self.charter.get_or_insert_default(),
+                    self.configuration.get_or_insert_default(),
                     buf,
                     ctx,
                 )?;
@@ -164,7 +164,7 @@ impl ::buffa::Message for AgentProvisioned {
         self.agent_id.clear();
         self.name.clear();
         self.parent.clear();
-        self.charter = ::buffa::MessageField::none();
+        self.configuration = ::buffa::MessageField::none();
         self.content_digest.clear();
     }
 }

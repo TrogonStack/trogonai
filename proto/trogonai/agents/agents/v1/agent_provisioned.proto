@@ -13,7 +13,7 @@ message AgentProvisioned {
   // Placement node ref (bare spelling per the spelling rule: unsuffixed
   // `parent` means placement, kinship is always `parent<Type>Id`).
   string parent = 3 [features.field_presence = LEGACY_REQUIRED];
-  Charter charter = 4 [features.field_presence = LEGACY_REQUIRED];
+  AgentConfiguration configuration = 4 [features.field_presence = LEGACY_REQUIRED];
   // SHA-256 digest of the provisioned revision bundle. This genesis event is
   // implicitly revision 1, so no revision number is carried.
   string content_digest = 5 [features.field_presence = LEGACY_REQUIRED];

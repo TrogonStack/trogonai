@@ -15,8 +15,10 @@ pub struct AgentProvisionedView<'a> {
     ///
     /// Field 3: `parent`
     pub parent: &'a str,
-    /// Field 4: `charter`
-    pub charter: ::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'a>>,
+    /// Field 4: `configuration`
+    pub configuration: ::buffa::MessageFieldView<
+        super::super::__buffa::view::AgentConfigurationView<'a>,
+    >,
     /// SHA-256 digest of the provisioned revision bundle. This genesis event is
     /// implicitly revision 1, so no revision number is carried.
     ///
@@ -50,13 +52,13 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_parent(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
     }
-    /**Whether required field `charter` is set.
+    /**Whether required field `configuration` is set.
 
 Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_charter(&self) -> bool {
-        self.charter.is_set()
+    pub const fn has_configuration(&self) -> bool {
+        self.configuration.is_set()
     }
     /**Whether required field `content_digest` was present on the wire.
 
@@ -125,13 +127,13 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
                 )?;
                 let __sub_ctx = ctx.descend()?;
                 let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                match view.charter.as_mut() {
+                match view.configuration.as_mut() {
                     Some(existing) => {
                         ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
                     }
                     None => {
-                        view.charter = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::CharterView as ::buffa::MessageView>::decode_view_ctx(
+                        view.configuration = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::AgentConfigurationView as ::buffa::MessageView>::decode_view_ctx(
                                 sub,
                                 __sub_ctx,
                             )?,
@@ -170,10 +172,10 @@ impl<'a> ::buffa::MessageView<'a> for AgentProvisionedView<'a> {
             agent_id: self.agent_id.to_string(),
             name: self.name.to_string(),
             parent: self.parent.to_string(),
-            charter: match self.charter.as_option() {
+            configuration: match self.configuration.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
-                        super::super::Charter,
+                        super::super::AgentConfiguration,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -192,9 +194,9 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.agent_id) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.parent) as u32;
-        if self.charter.is_set() {
+        if self.configuration.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = self.charter.compute_size(__cache);
+            let inner_size = self.configuration.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
@@ -214,9 +216,9 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentProvisionedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.agent_id, buf);
         ::buffa::types::put_string_field(2u32, &self.name, buf);
         ::buffa::types::put_string_field(3u32, &self.parent, buf);
-        if self.charter.is_set() {
+        if self.configuration.is_set() {
             ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
-            self.charter.write_to(__cache, buf);
+            self.configuration.write_to(__cache, buf);
         }
         ::buffa::types::put_string_field(5u32, &self.content_digest, buf);
     }
@@ -249,8 +251,8 @@ impl<'__a> ::serde::Serialize for AgentProvisionedView<'__a> {
             __map.serialize_entry("parent", self.parent)?;
         }
         {
-            if let ::core::option::Option::Some(__v) = self.charter.as_option() {
-                __map.serialize_entry("charter", __v)?;
+            if let ::core::option::Option::Some(__v) = self.configuration.as_option() {
+                __map.serialize_entry("configuration", __v)?;
             }
         }
         {
@@ -365,12 +367,14 @@ impl AgentProvisionedOwnedView {
     pub fn parent(&self) -> &'_ str {
         self.0.reborrow().parent
     }
-    /// Field 4: `charter`
+    /// Field 4: `configuration`
     #[must_use]
-    pub fn charter(
+    pub fn configuration(
         &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CharterView<'_>> {
-        &self.0.reborrow().charter
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::AgentConfigurationView<'_>,
+    > {
+        &self.0.reborrow().configuration
     }
     /// SHA-256 digest of the provisioned revision bundle. This genesis event is
     /// implicitly revision 1, so no revision number is carried.
