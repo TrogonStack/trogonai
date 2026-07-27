@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.agents.agents.v1;
+
+import "google/protobuf/any.proto";
+
+// AgentConfiguration is the minimal, versioned declaration of an agent
+// (design Q16): identity, engine, and the engine-owned settings. Nothing
+// economic, temporal, evaluative, or reputational lives here; those are stances
+// on their own planes (policy, evaluation, scheduling), selector-bound and
+// human-owned.
+message AgentConfiguration {
+  // Execution engine. Immutable for the agent's v1 lifetime; switching
+  // engines mints a new sibling agent rather than a revision (design Q24).
+  string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Runtime-owned settings: model, parameters, and dependency declarations.
+  // The runtime named above defines the message type carried here and
+  // validates its contents. Absent means the runtime runs with its defaults.
+  google.protobuf.Any settings = 2;
+}

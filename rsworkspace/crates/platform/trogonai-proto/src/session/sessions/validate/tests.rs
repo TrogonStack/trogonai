@@ -1641,7 +1641,7 @@ fn validate_tool_call_requested_accepts_valid_event() {
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
-                name: "search".to_string(),
+                tool_name: "search".to_string(),
                 input_json: "{}".to_string(),
                 parent_tool_use_id: None,
                 operation_id: None,
@@ -1775,7 +1775,7 @@ fn validate_session_renamed_accepts_valid_event() {
         event: Some(
             v1alpha1::SessionRenamed {
                 session_id: "session-1".to_string(),
-                title: "New title".to_string(),
+                display_name: "New title".to_string(),
             }
             .into(),
         ),
@@ -1790,7 +1790,7 @@ fn validate_session_renamed_rejects_empty_title() {
         event: Some(
             v1alpha1::SessionRenamed {
                 session_id: "session-1".to_string(),
-                title: String::new(),
+                display_name: String::new(),
             }
             .into(),
         ),
@@ -1798,7 +1798,7 @@ fn validate_session_renamed_rejects_empty_title() {
 
     assert_eq!(
         validate_session_event(&event),
-        Err(SessionEventValidationError::EmptyIdentifier { field: "title" })
+        Err(SessionEventValidationError::EmptyIdentifier { field: "display_name" })
     );
 }
 
@@ -3154,7 +3154,7 @@ fn validate_tool_call_requested_rejects_invalid_input_json() {
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
-                name: "search".to_string(),
+                tool_name: "search".to_string(),
                 input_json: "{not json".to_string(),
                 parent_tool_use_id: None,
                 operation_id: None,

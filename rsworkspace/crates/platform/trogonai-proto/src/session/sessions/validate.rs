@@ -485,7 +485,7 @@ fn validate_tool_call_requested(event: &v1alpha1::ToolCallRequested) -> Result<(
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    require_non_empty(&event.name, "name")?;
+    require_non_empty(&event.tool_name, "tool_name")?;
     require_valid_json(&event.input_json, "input_json")
 }
 
@@ -739,7 +739,7 @@ fn validate_todo_updated(event: &v1alpha1::TodoUpdated) -> Result<(), SessionEve
 
 fn validate_session_renamed(event: &v1alpha1::SessionRenamed) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
-    require_non_empty(&event.title, "title")
+    require_non_empty(&event.display_name, "display_name")
 }
 
 fn validate_session_archived(event: &v1alpha1::SessionArchived) -> Result<(), SessionEventValidationError> {

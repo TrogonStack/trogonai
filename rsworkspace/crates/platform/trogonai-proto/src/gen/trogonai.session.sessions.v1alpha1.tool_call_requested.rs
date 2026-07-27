@@ -3,7 +3,7 @@
 
 /// ToolCallRequested records that a tool call was requested, in arrival order.
 /// It owns the execution-request record: what the platform was asked to run
-/// (name, input_json as dispatched, operation link), distinct from
+/// (tool_name, input_json as dispatched, operation link), distinct from
 /// ToolUseBlock/ToolResultBlock, which own the provider-visible transcript
 /// form. The two join by tool_call_id/tool_use_id; equality is expected but
 /// not structurally required, since normalization may differ. This event
@@ -36,9 +36,13 @@ pub struct ToolCallRequested {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub tool_execution_id: ::buffa::alloc::string::String,
-    /// Field 4: `name`
-    #[serde(rename = "name", with = "::buffa::json_helpers::proto_string")]
-    pub name: ::buffa::alloc::string::String,
+    /// Field 4: `tool_name`
+    #[serde(
+        rename = "toolName",
+        alias = "tool_name",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub tool_name: ::buffa::alloc::string::String,
     /// Field 5: `input_json`
     #[serde(
         rename = "inputJson",
@@ -71,7 +75,7 @@ impl ::core::fmt::Debug for ToolCallRequested {
             .field("session_id", &self.session_id)
             .field("tool_call_id", &self.tool_call_id)
             .field("tool_execution_id", &self.tool_execution_id)
-            .field("name", &self.name)
+            .field("tool_name", &self.tool_name)
             .field("input_json", &self.input_json)
             .field("parent_tool_use_id", &self.parent_tool_use_id)
             .field("operation_id", &self.operation_id)
@@ -129,7 +133,7 @@ impl ::buffa::Message for ToolCallRequested {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u32;
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.input_json) as u32;
         if let Some(ref v) = self.parent_tool_use_id {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -149,7 +153,7 @@ impl ::buffa::Message for ToolCallRequested {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
-        ::buffa::types::put_string_field(4u32, &self.name, buf);
+        ::buffa::types::put_string_field(4u32, &self.tool_name, buf);
         ::buffa::types::put_string_field(5u32, &self.input_json, buf);
         if let Some(ref v) = self.parent_tool_use_id {
             ::buffa::types::put_string_field(6u32, v, buf);
@@ -195,7 +199,7 @@ impl ::buffa::Message for ToolCallRequested {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.name, buf)?;
+                ::buffa::types::merge_string(&mut self.tool_name, buf)?;
             }
             5u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -238,7 +242,7 @@ impl ::buffa::Message for ToolCallRequested {
         self.session_id.clear();
         self.tool_call_id.clear();
         self.tool_execution_id.clear();
-        self.name.clear();
+        self.tool_name.clear();
         self.input_json.clear();
         self.parent_tool_use_id = ::core::option::Option::None;
         self.operation_id = ::core::option::Option::None;

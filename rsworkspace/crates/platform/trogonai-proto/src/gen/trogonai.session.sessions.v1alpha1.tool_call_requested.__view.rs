@@ -3,7 +3,7 @@
 
 /// ToolCallRequested records that a tool call was requested, in arrival order.
 /// It owns the execution-request record: what the platform was asked to run
-/// (name, input_json as dispatched, operation link), distinct from
+/// (tool_name, input_json as dispatched, operation link), distinct from
 /// ToolUseBlock/ToolResultBlock, which own the provider-visible transcript
 /// form. The two join by tool_call_id/tool_use_id; equality is expected but
 /// not structurally required, since normalization may differ. This event
@@ -19,8 +19,8 @@ pub struct ToolCallRequestedView<'a> {
     pub tool_call_id: &'a str,
     /// Field 3: `tool_execution_id`
     pub tool_execution_id: &'a str,
-    /// Field 4: `name`
-    pub name: &'a str,
+    /// Field 4: `tool_name`
+    pub tool_name: &'a str,
     /// Field 5: `input_json`
     pub input_json: &'a str,
     /// Field 6: `parent_tool_use_id`
@@ -59,12 +59,12 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_tool_execution_id(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
     }
-    /**Whether required field `name` was present on the wire.
+    /**Whether required field `tool_name` was present on the wire.
 
 Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
     #[must_use]
     #[inline]
-    pub const fn has_name(&self) -> bool {
+    pub const fn has_tool_name(&self) -> bool {
         self.__buffa_required_seen_0 & 8u64 != 0
     }
     /**Whether required field `input_json` was present on the wire.
@@ -132,7 +132,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallRequestedView<'a> {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                view.name = ::buffa::types::borrow_str(&mut cur)?;
+                view.tool_name = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 8u64;
             }
             5u32 => {
@@ -180,7 +180,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallRequestedView<'a> {
             session_id: self.session_id.to_string(),
             tool_call_id: self.tool_call_id.to_string(),
             tool_execution_id: self.tool_execution_id.to_string(),
-            name: self.name.to_string(),
+            tool_name: self.tool_name.to_string(),
             input_json: self.input_json.to_string(),
             parent_tool_use_id: self.parent_tool_use_id.map(|s| s.to_string()),
             operation_id: self.operation_id.map(|s| s.to_string()),
@@ -198,7 +198,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallRequestedView<'a> {
         size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u32;
         size
             += 1u32 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_name) as u32;
         size += 1u32 + ::buffa::types::string_encoded_len(&self.input_json) as u32;
         if let Some(ref v) = self.parent_tool_use_id {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -219,7 +219,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallRequestedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
-        ::buffa::types::put_string_field(4u32, &self.name, buf);
+        ::buffa::types::put_string_field(4u32, &self.tool_name, buf);
         ::buffa::types::put_string_field(5u32, &self.input_json, buf);
         if let Some(ref v) = self.parent_tool_use_id {
             ::buffa::types::put_string_field(6u32, v, buf);
@@ -257,7 +257,7 @@ impl<'__a> ::serde::Serialize for ToolCallRequestedView<'__a> {
             __map.serialize_entry("toolExecutionId", self.tool_execution_id)?;
         }
         {
-            __map.serialize_entry("name", self.name)?;
+            __map.serialize_entry("toolName", self.tool_name)?;
         }
         {
             __map.serialize_entry("inputJson", self.input_json)?;
@@ -376,10 +376,10 @@ impl ToolCallRequestedOwnedView {
     pub fn tool_execution_id(&self) -> &'_ str {
         self.0.reborrow().tool_execution_id
     }
-    /// Field 4: `name`
+    /// Field 4: `tool_name`
     #[must_use]
-    pub fn name(&self) -> &'_ str {
-        self.0.reborrow().name
+    pub fn tool_name(&self) -> &'_ str {
+        self.0.reborrow().tool_name
     }
     /// Field 5: `input_json`
     #[must_use]
