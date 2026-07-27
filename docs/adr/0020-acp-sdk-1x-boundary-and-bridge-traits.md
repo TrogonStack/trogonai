@@ -67,6 +67,15 @@ delegation, per the zero-cost passthrough rule in `rsworkspace/crates/AGENTS.md`
 > semantics are unchanged; the per-method surface lives only in the bridge
 > trait and one match expression.
 
+> Amended 2026-07-27: this decision survives the SDK 2.0 major bump unchanged.
+> 2.0 rewrites the transport boundary around batch-aware frames and renames the
+> response-router methods, but because the adapter delegates through the
+> `ClientRequest`/`ClientNotification` enums rather than the low-level channel,
+> the entire migration was one method rename. Inbound JSON-RPC batches now work
+> through the bridge for free: the SDK splits them into independent dispatches
+> and regroups the replies, so the NATS leg keeps carrying one message per
+> subject message.
+
 The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
 `acp-nats-stdio`, so they live in one place: the `boundary` module of
 `acp-nats`. That module is the single SDK-connection-aware part of the crate;

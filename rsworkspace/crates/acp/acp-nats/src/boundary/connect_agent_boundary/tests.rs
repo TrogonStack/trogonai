@@ -110,6 +110,53 @@ async fn initialize_round_trips_through_boundary() {
     assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
 }
 
+#[tokio::test]
+async fn jsonrpc_batch_round_trips_as_a_single_grouped_response() {
+    let (client_io, server_io) = tokio::io::duplex(8192);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary(
+        Arc::new(StubAgent),
+        async_compat::Compat::new(server_write),
+        async_compat::Compat::new(server_read),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        let batch = serde_json::json!([
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1}},
+            {"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}},
+            {"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": "/tmp", "mcpServers": []}},
+            {"jsonrpc": "2.0", "id": 3, "method": "session/set_mode", "params": {"sessionId": "s1", "modeId": "ask"}},
+        ]);
+        writer.write_all(format!("{batch}\n").as_bytes()).await.unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let entries = value.as_array().expect("batch requests answer with one response array");
+        assert_eq!(entries.len(), 3, "the notification must not produce an entry: {line}");
+
+        let by_id: std::collections::HashMap<u64, &serde_json::Value> = entries
+            .iter()
+            .map(|entry| (entry["id"].as_u64().unwrap(), entry))
+            .collect();
+        assert_eq!(by_id[&1]["result"]["protocolVersion"], 1);
+        assert_eq!(by_id[&2]["result"]["sessionId"], "sess-1");
+        assert_eq!(
+            by_id[&3]["error"]["code"],
+            i32::from(agent_client_protocol::ErrorCode::MethodNotFound),
+            "unrouted methods keep answering method_not_found inside a batch: {line}"
+        );
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}
+
 struct PendingPromptAgent;
 
 #[async_trait::async_trait]
