@@ -597,6 +597,32 @@ pub struct ResolvedConfig {
 }
 
 impl ResolvedConfig {
+    /// The longest `stream_max_age` across every configured source. The shared
+    /// claim-check bucket must outlive the longest-retained message, so its TTL
+    /// is derived from this maximum. `NoExpiry` dominates: if any stream never
+    /// expires, the bucket must not either. Returns `None` when no source is
+    /// configured.
+    pub fn max_stream_max_age(&self) -> Option<StreamMaxAge> {
+        longest_stream_max_age(self.stream_max_ages())
+    }
+
+    fn stream_max_ages(&self) -> impl Iterator<Item = StreamMaxAge> + '_ {
+        self.discord
+            .iter()
+            .map(|c| c.stream_max_age)
+            .chain(self.github.iter().map(|i| i.config.stream_max_age))
+            .chain(self.slack.iter().map(|i| i.config.stream_max_age))
+            .chain(self.telegram.iter().map(|i| i.config.stream_max_age))
+            .chain(self.twitter.iter().map(|i| i.config.stream_max_age))
+            .chain(self.gitlab.iter().map(|i| i.config.stream_max_age))
+            .chain(self.incidentio.iter().map(|i| i.config.stream_max_age))
+            .chain(self.linear.iter().map(|i| i.config.stream_max_age))
+            .chain(self.microsoft_graph.iter().map(|i| i.config.stream_max_age))
+            .chain(self.notion.iter().map(|i| i.config.stream_max_age))
+            .chain(self.sentry.iter().map(|i| i.config.stream_max_age))
+            .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
+    }
+
     pub fn has_any_source(&self) -> bool {
         !self.github.is_empty()
             || self.discord.is_some()
@@ -611,6 +637,17 @@ impl ResolvedConfig {
             || !self.sentry.is_empty()
             || !self.datadog.is_empty()
     }
+}
+
+/// The longest retention across `ages`. `NoExpiry` dominates any bounded value,
+/// so the claim bucket derived from it never expires while a message can still
+/// be delivered. `None` when the iterator is empty.
+fn longest_stream_max_age(ages: impl Iterator<Item = StreamMaxAge>) -> Option<StreamMaxAge> {
+    ages.reduce(|acc, next| match (acc, next) {
+        (StreamMaxAge::NoExpiry, _) | (_, StreamMaxAge::NoExpiry) => StreamMaxAge::NoExpiry,
+        (StreamMaxAge::ExpireAfter(a), StreamMaxAge::ExpireAfter(b)) if b > a => next,
+        (StreamMaxAge::ExpireAfter(_), StreamMaxAge::ExpireAfter(_)) => acc,
+    })
 }
 
 #[cfg(test)]

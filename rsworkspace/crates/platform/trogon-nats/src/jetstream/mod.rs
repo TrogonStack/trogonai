@@ -1,4 +1,5 @@
 pub mod claim_check;
+pub mod claim_retention;
 #[cfg(not(coverage))]
 pub mod client;
 pub mod create_conflicts;
@@ -15,6 +16,7 @@ pub use claim_check::{
     ClaimCheckPublisher, ClaimResolveError, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY, MaxPayload,
     is_claim, resolve_claim,
 };
+pub use claim_retention::ClaimRetention;
 #[cfg(not(coverage))]
 pub use client::{
     ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,

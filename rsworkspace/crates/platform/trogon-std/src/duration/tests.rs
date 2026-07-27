@@ -12,6 +12,13 @@ fn from_secs_zero_rejected() {
 }
 
 #[test]
+fn from_secs_const_valid() {
+    // Call at runtime (not in a `const` binding) so the body is covered.
+    let d = NonZeroDuration::from_secs_const(10);
+    assert_eq!(Duration::from(d), Duration::from_secs(10));
+}
+
+#[test]
 fn from_millis_valid() {
     let d = NonZeroDuration::from_millis(500).unwrap();
     assert_eq!(Duration::from(d), Duration::from_millis(500));

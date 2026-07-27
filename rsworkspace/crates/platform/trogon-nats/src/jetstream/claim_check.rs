@@ -182,7 +182,8 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
         );
 
         // Store-then-publish: if publish fails, the object becomes orphaned.
-        // Cleanup relies on the object store bucket's TTL — see #101.
+        // Cleanup relies on the object store bucket's retention, which is sized
+        // from the owning stream via `ClaimRetention`.
         let mut cursor = std::io::Cursor::new(payload);
         if let Err(e) = self.store.put(&key, &mut cursor).await {
             error!(error = %e, "claim check: failed to store payload in object store");
