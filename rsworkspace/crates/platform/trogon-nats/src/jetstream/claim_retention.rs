@@ -16,10 +16,12 @@ use super::stream_max_age::StreamMaxAge;
 pub enum ClaimRetention {
     /// Claim objects are transport for a bounded stream. The bucket expires
     /// objects after the stream's retention plus a `grace` window, so a message
-    /// still on the stream can always resolve its claim.
+    /// still on the stream can always resolve its claim. `grace` is non-zero: an
+    /// object is stored just before its message is published, so it is slightly
+    /// older, and an equal TTL would expire it while the message is still live.
     TracksStream {
         stream_max_age: NonZeroDuration,
-        grace: Duration,
+        grace: NonZeroDuration,
     },
     /// Claim objects are the payload of an event-sourced stream. They never
     /// expire: the bytes live as long as the log references them and are
@@ -32,7 +34,7 @@ impl ClaimRetention {
     /// to [`ClaimRetention::TracksStream`]; a stream that never expires maps to
     /// [`ClaimRetention::EventSourced`], so the bucket never expires either and
     /// a claim can always be resolved.
-    pub fn tracking(stream_max_age: StreamMaxAge, grace: Duration) -> Self {
+    pub fn tracking(stream_max_age: StreamMaxAge, grace: NonZeroDuration) -> Self {
         match stream_max_age {
             StreamMaxAge::NoExpiry => Self::EventSourced,
             StreamMaxAge::ExpireAfter(stream_max_age) => Self::TracksStream { stream_max_age, grace },
@@ -44,7 +46,7 @@ impl ClaimRetention {
     /// case.
     pub fn bucket_max_age(&self) -> Duration {
         match self {
-            Self::TracksStream { stream_max_age, grace } => Duration::from(*stream_max_age) + *grace,
+            Self::TracksStream { stream_max_age, grace } => Duration::from(*stream_max_age) + Duration::from(*grace),
             Self::EventSourced => Duration::ZERO,
         }
     }

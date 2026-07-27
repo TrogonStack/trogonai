@@ -5,7 +5,7 @@ use trogon_std::NonZeroDuration;
 use super::ClaimRetention;
 use crate::jetstream::stream_max_age::StreamMaxAge;
 
-const GRACE: Duration = Duration::from_secs(24 * 60 * 60);
+const GRACE: NonZeroDuration = NonZeroDuration::from_secs_const(24 * 60 * 60);
 
 #[test]
 fn tracking_a_bounded_stream_expires_after_retention_plus_grace() {
@@ -18,7 +18,10 @@ fn tracking_a_bounded_stream_expires_after_retention_plus_grace() {
             grace: GRACE,
         }
     );
-    assert_eq!(retention.bucket_max_age(), Duration::from_secs(604_800) + GRACE);
+    assert_eq!(
+        retention.bucket_max_age(),
+        Duration::from_secs(604_800) + Duration::from(GRACE)
+    );
 }
 
 #[test]
