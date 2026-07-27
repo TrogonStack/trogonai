@@ -1,0 +1,26 @@
+# Research sources
+
+Repos we lean on most for research. One deduplicated list across all corpora.
+
+- [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) / [claude-agent-sdk-typescript](https://github.com/anthropics/claude-agent-sdk-typescript)
+- [openai/codex](https://github.com/openai/codex)
+- [openai/openai-agents-python](https://github.com/openai/openai-agents-python)
+- [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
+- [google/adk-python](https://github.com/google/adk-python)
+- [a2aproject/A2A](https://github.com/a2aproject/A2A)
+- [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)
+- [block/goose](https://github.com/block/goose)
+- [block/buzz](https://github.com/block/buzz)
+- [xai-org/grok-build](https://github.com/xai-org/grok-build)
+- [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- [anomalyco/opencode](https://github.com/anomalyco/opencode)
+- [pingdotgg/t3code](https://github.com/pingdotgg/t3code)
+- [cloudflare/agents](https://github.com/cloudflare/agents)
+- [aws/bedrock-agentcore-sdk-python](https://github.com/aws/bedrock-agentcore-sdk-python)
+- [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI)
+- [agentjido/jido](https://github.com/agentjido/jido)
+- [kagent-dev/kagent](https://github.com/kagent-dev/kagent)
+- [vercel/ai](https://github.com/vercel/ai)
+- [netclaw-dev/netclaw](https://github.com/netclaw-dev/netclaw)
+- [openclaw/openclaw](https://github.com/openclaw/openclaw)
+- [diggerhq/opencomputer](https://github.com/diggerhq/opencomputer)
