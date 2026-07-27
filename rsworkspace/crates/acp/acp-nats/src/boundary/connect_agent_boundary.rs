@@ -2,7 +2,7 @@ use super::boundary_exit::BoundaryExit;
 use super::eof_signal_reader::EofSignalReader;
 use crate::agent_handler::AgentHandler;
 use agent_client_protocol::schema::v1::{CancelRequestNotification, ClientNotification, ClientRequest};
-use agent_client_protocol::{Agent, ByteStreams, Client, ConnectionTo, Dispatch, Error, Responder, Result};
+use agent_client_protocol::{Agent, ByteStreams, Client, ConnectTo, ConnectionTo, Dispatch, Error, Responder, Result};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -137,7 +137,7 @@ where
 {
     let (incoming, eof_rx) = EofSignalReader::new(incoming);
 
-    let builder = Agent
+    Agent
         .builder()
         .on_receive_notification(
             async move |_notif: CancelRequestNotification, _cx| Ok(()),
@@ -151,13 +151,59 @@ where
                 }
             },
             agent_client_protocol::on_receive_dispatch!(),
-        );
-
-    builder
+        )
         .connect_with(ByteStreams::new(outgoing, incoming), async move |cx| {
             tokio::select! {
                 result = main_fn(cx) => result.map(BoundaryExit::Main),
                 _ = eof_rx => Ok(BoundaryExit::TransportClosed),
+            }
+        })
+        .await
+}
+
+/// Connects an [`AgentHandler`] implementation to any SDK transport.
+///
+/// Same dispatch wiring as [`connect_agent_boundary`], but the transport is
+/// supplied as a [`ConnectTo`] implementation instead of a byte-stream pair, so
+/// boundaries that are not byte streams (an SDK-owned HTTP/WebSocket server, an
+/// in-process [`Channel`](agent_client_protocol::Channel)) can reuse the same
+/// bridge dispatch.
+///
+/// Closure detection differs by necessity. The byte-stream variant wraps the
+/// reader to catch both clean EOF and read errors; here the transport is opaque,
+/// so closure comes from [`ConnectionTo::incoming_closed`], which fires on clean
+/// EOF only. A transport error instead surfaces as an `Err` out of this
+/// function, so the connection still ends, just through the error path rather
+/// than as [`BoundaryExit::TransportClosed`].
+pub async fn connect_agent_boundary_with<A, C, T>(
+    agent: Arc<A>,
+    transport: C,
+    main_fn: impl AsyncFnOnce(ConnectionTo<Client>) -> Result<T>,
+) -> Result<BoundaryExit<T>>
+where
+    A: AgentHandler + Send + Sync + 'static,
+    C: ConnectTo<Agent>,
+{
+    Agent
+        .builder()
+        .on_receive_notification(
+            async move |_notif: CancelRequestNotification, _cx| Ok(()),
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_dispatch(
+            {
+                let agent = agent.clone();
+                async move |dispatch: Dispatch<ClientRequest, ClientNotification>, cx| {
+                    handle_client_dispatch(agent.clone(), dispatch, cx).await
+                }
+            },
+            agent_client_protocol::on_receive_dispatch!(),
+        )
+        .connect_with(transport, async move |cx| {
+            let closed = cx.clone();
+            tokio::select! {
+                result = main_fn(cx) => result.map(BoundaryExit::Main),
+                () = closed.incoming_closed() => Ok(BoundaryExit::TransportClosed),
             }
         })
         .await

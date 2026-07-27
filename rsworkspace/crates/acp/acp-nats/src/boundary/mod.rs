@@ -6,6 +6,6 @@ mod eof_signal_reader;
 
 pub use abort_on_drop::AbortOnDrop;
 pub use boundary_exit::BoundaryExit;
-pub use connect_agent_boundary::connect_agent_boundary;
+pub use connect_agent_boundary::{connect_agent_boundary, connect_agent_boundary_with};
 pub use connection_client::ConnectionClient;
 pub use eof_signal_reader::EofSignalReader;
