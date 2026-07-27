@@ -1,6 +1,6 @@
 use std::fmt;
 
-use trogon_std::{EmptySecret, SecretString};
+use trogon_std::{EmptySecretError, SecretString};
 
 #[derive(Clone)]
 pub struct SecretVerifier(SecretString);
@@ -24,5 +24,5 @@ impl fmt::Debug for SecretVerifier {
 #[derive(Debug, thiserror::Error)]
 pub enum SecretVerifierError {
     #[error("{0}")]
-    Empty(#[source] EmptySecret),
+    Empty(#[source] EmptySecretError),
 }

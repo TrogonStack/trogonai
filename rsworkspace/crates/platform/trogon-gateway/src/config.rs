@@ -3466,11 +3466,11 @@ token = "file-token"
     #[test]
     fn config_error_display_validation() {
         let err = ConfigError::Validation(ValidationErrors(vec![
-            ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDuration),
+            ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDurationError),
             ConfigValidationError::invalid_subject_token(
                 "discord",
                 "subject_prefix",
-                SubjectTokenViolation::InvalidCharacter('.'),
+                SubjectTokenViolationError::InvalidCharacter('.'),
             ),
         ]));
         let display = format!("{err}");
@@ -3511,7 +3511,7 @@ status = "maybe"
             "incidentio",
             &id,
             "subject_prefix",
-            SubjectTokenViolation::InvalidCharacter('.'),
+            SubjectTokenViolationError::InvalidCharacter('.'),
         );
 
         assert_eq!(
@@ -3542,7 +3542,7 @@ status = "maybe"
         let err = ConfigError::Validation(ValidationErrors(vec![ConfigValidationError::invalid(
             "discord",
             "stream_max_age_secs",
-            ZeroDuration,
+            ZeroDurationError,
         )]));
         let _: &dyn std::error::Error = &err;
     }
