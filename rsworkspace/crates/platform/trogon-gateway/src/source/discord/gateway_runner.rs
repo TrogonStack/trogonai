@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use futures_core::Stream;
 use tracing::{info, warn};
-use trogon_std::EmptySecret;
+use trogon_std::EmptySecretError;
 use twilight_gateway::{Message, Shard, ShardId};
 
 use crate::credential::commands::domain::{CredentialKind, SourceKind};
@@ -94,7 +94,7 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum DiscordRuntimeCredentialError {
     #[error("discord runtime bot token is invalid")]
-    InvalidBotToken(#[source] EmptySecret),
+    InvalidBotToken(#[source] EmptySecretError),
     #[error("discord runtime bot token resolution failed: {0}")]
     Resolve(#[from] RuntimeCredentialError),
 }

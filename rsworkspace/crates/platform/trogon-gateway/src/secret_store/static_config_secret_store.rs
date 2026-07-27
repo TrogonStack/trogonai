@@ -1,7 +1,7 @@
 use std::env;
 use std::fmt;
 
-use trogon_std::{EmptySecret, SecretString};
+use trogon_std::{EmptySecretError, SecretString};
 
 use super::SecretMaterial;
 use crate::credential::commands::domain::{
@@ -75,7 +75,7 @@ impl StaticConfigSecretStore {
         };
         let material = SecretString::new(raw_value)
             .map(SecretMaterial::plaintext)
-            .map_err(StaticConfigSecretStoreError::EmptySecret)?;
+            .map_err(StaticConfigSecretStoreError::EmptySecretError)?;
         let reference = Self::credential_ref(&scope, kind)?;
 
         Ok(StaticConfigSecret::new(reference, material))
@@ -116,7 +116,7 @@ pub enum StaticConfigSecretStoreError {
     #[error("env var '{name}' is not valid unicode")]
     InvalidUnicodeEnv { name: String },
     #[error("{0}")]
-    EmptySecret(#[source] EmptySecret),
+    EmptySecretError(#[source] EmptySecretError),
     #[error("credential is verifier-only: {credential}")]
     VerifierOnly { credential: CredentialRef },
     #[error("invalid credential id: {0}")]
@@ -161,6 +161,6 @@ mod tests {
             StaticConfigSecretInput::Literal(String::new()),
         );
 
-        assert!(matches!(result, Err(StaticConfigSecretStoreError::EmptySecret(_))));
+        assert!(matches!(result, Err(StaticConfigSecretStoreError::EmptySecretError(_))));
     }
 }
