@@ -12,6 +12,7 @@ use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_ag
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::schema::v1::SessionNotification;
 use agent_client_protocol::{Agent, Client, ConnectTo, Result};
+use opentelemetry::metrics::Meter;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, warn};
@@ -44,15 +45,27 @@ pub struct NatsAgentComponent<N, J> {
     nats: N,
     js: J,
     config: acp_nats::Config,
+    meter: Meter,
     shutdown_rx: watch::Receiver<bool>,
 }
 
 impl<N, J> NatsAgentComponent<N, J> {
-    pub const fn new(nats: N, js: J, config: acp_nats::Config, shutdown_rx: watch::Receiver<bool>) -> Self {
+    /// The factory this is built from runs once per connection, so anything
+    /// process-wide is a caller's responsibility rather than something to look up
+    /// here. `meter` is that: the instrumentation scope is a property of the
+    /// service, not of a connection, so it is created once and cloned in.
+    pub const fn new(
+        nats: N,
+        js: J,
+        config: acp_nats::Config,
+        meter: Meter,
+        shutdown_rx: watch::Receiver<bool>,
+    ) -> Self {
         Self {
             nats,
             js,
             config,
+            meter,
             shutdown_rx,
         }
     }
@@ -76,10 +89,13 @@ where
             nats,
             js,
             config,
+            meter,
             mut shutdown_rx,
         } = self;
 
-        let meter = trogon_telemetry::meter("acp-nats-server");
+        // Per-connection by necessity: this channel feeds notifications to *this*
+        // connection's SDK handle, and the bridge owns per-connection state
+        // (pending prompt waiters, background tasks) keyed to that sender.
         let (notification_tx, notification_rx) = mpsc::channel::<SessionNotification>(NOTIFICATION_CHANNEL_CAPACITY);
         let bridge = Arc::new(Bridge::new(
             nats.clone(),

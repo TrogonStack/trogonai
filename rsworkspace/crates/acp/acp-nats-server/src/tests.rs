@@ -1048,12 +1048,15 @@ fn build_upstream_app(nats_mock: AdvancedMockNatsClient) -> (axum::Router, watch
     let (shutdown_tx, _) = watch::channel(false);
     let config = test_config();
     let shutdown_for_factory = shutdown_tx.clone();
+    // Created once and cloned in: the factory below runs per connection.
+    let meter = trogon_telemetry::meter("acp-nats-server");
 
     let router = agent_client_protocol_http::AcpHttpServer::new(move || {
         crate::component::NatsAgentComponent::new(
             nats_mock.clone(),
             MockJs::new(),
             config.clone(),
+            meter.clone(),
             shutdown_for_factory.subscribe(),
         )
     })
@@ -1118,7 +1121,13 @@ async fn draining_closes_an_upstream_transport_connection_cleanly() {
     let _injector = nats_mock.inject_messages();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let component = crate::component::NatsAgentComponent::new(nats_mock, MockJs::new(), test_config(), shutdown_rx);
+    let component = crate::component::NatsAgentComponent::new(
+        nats_mock,
+        MockJs::new(),
+        test_config(),
+        trogon_telemetry::meter("acp-nats-server"),
+        shutdown_rx,
+    );
     let (_channel, connection) =
         agent_client_protocol::ConnectTo::<agent_client_protocol::Client>::into_channel_and_future(component);
 
