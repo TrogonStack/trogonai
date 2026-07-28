@@ -5,12 +5,8 @@ use trogon_nats::jetstream::{
     JetStreamGetKeyValue, JetStreamGetStream, is_create_key_value_already_exists, is_create_stream_already_exists,
 };
 
+use crate::constants::{COMMAND_SNAPSHOT_BUCKET, EVENTS_STREAM, EVENTS_SUBJECT_PATTERN};
 use crate::error::SchedulerError;
-
-pub const EVENTS_STREAM: &str = "SCHEDULER_EVENTS";
-pub const EVENTS_SUBJECT_PREFIX: &str = "scheduler.schedules.events.";
-pub const EVENTS_SUBJECT_PATTERN: &str = "scheduler.schedules.events.>";
-pub const COMMAND_SNAPSHOT_BUCKET: &str = "scheduler_command_snapshots";
 
 // The schedules read-model bucket, its key scheme, and the catch-up checkpoint
 // live with the projection that owns that storage layout; see

@@ -7,6 +7,7 @@ extern crate rustc_middle;
 extern crate rustc_session;
 extern crate rustc_span;
 
+mod constant_outside_constants_module;
 mod error_string_comparison;
 mod error_type_naming;
 mod function_local_macro_rules;
@@ -32,6 +33,7 @@ dylint_linting::dylint_library!();
 pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore) {
     dylint_linting::init_config(sess);
     lint_store.register_lints(&[
+        CONSTANT_OUTSIDE_CONSTANTS_MODULE,
         ERROR_STRING_COMPARISON,
         ERROR_TYPE_NAMING,
         FUNCTION_LOCAL_MACRO_RULES,
@@ -49,6 +51,53 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a module-level (or crate-root) `const` declared in any file other
+    /// than a `constants.rs`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// Constants live in a `constants` module, so a module's tunable values
+    /// (ports, buffer sizes, header names, bounds) are discoverable in one place
+    /// instead of scattered across the modules that happen to use them. A crate
+    /// may have more than one: a crate-root `constants.rs` plus a nested
+    /// `constants.rs` per submodule group is the intended shape (for example
+    /// `src/constants.rs` alongside `src/source/<name>/constants.rs`). Spreading
+    /// `const` items through the rest of the tree hides that configuration
+    /// surface and invites the same value to be redefined in two files. Constants inside a function body are local implementation
+    /// details and are left alone; associated consts (`impl`/`trait`) are not
+    /// free items and are never considered. `static` items are a different
+    /// construct and are out of scope. Test and benchmark sources (`tests.rs`,
+    /// `*_tests.rs`, anything under a `tests/`/`benches/` directory, and inline
+    /// `tests`/`benches` modules and the not-for-prod test-support module family
+    /// `test_support`/`mocks`/`fixtures`/`testkit`/`*_harness`) carry fixtures and
+    /// per-case values rather than crate configuration, so they are exempt. Generated files (those carrying
+    /// an `@generated` marker near the top) are exempt too, since their contents
+    /// are dictated by codegen and cannot be hand-edited.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// // in transport.rs
+    /// const MAX_INSPECTED_BODY: usize = 1024 * 1024;
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// // in constants.rs
+    /// pub const MAX_INSPECTED_BODY: usize = 1024 * 1024;
+    ///
+    /// // in transport.rs
+    /// use constants::MAX_INSPECTED_BODY;
+    /// ```
+    pub CONSTANT_OUTSIDE_CONSTANTS_MODULE,
+    Deny,
+    "declare module-level constants in a `constants` module, not elsewhere",
 }
 
 rustc_session::declare_lint! {
@@ -605,6 +654,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
     }
 
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
+        constant_outside_constants_module::check_item(cx, item);
         error_type_naming::check_item(cx, item);
         inline_module_block::check_item(cx, item);
         manual_error_impl::check_item(cx, item);
@@ -613,6 +663,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 }
 
 rustc_session::impl_lint_pass!(TrogonLints => [
+    CONSTANT_OUTSIDE_CONSTANTS_MODULE,
     ERROR_STRING_COMPARISON,
     ERROR_TYPE_NAMING,
     FUNCTION_LOCAL_MACRO_RULES,

@@ -30,6 +30,7 @@ use trogon_nats::jetstream::{
 };
 
 use crate::commands::domain::ScheduleId;
+use crate::constants::MISSING_CHECKPOINT_DELIVERY_CEILING;
 use crate::processor::execution::checkpoints::ProcessingFailureRecord;
 use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleKey, lane_route_from_stream_event};
 
@@ -244,12 +245,6 @@ async fn run<P, U, S, E, M>(
         }
     }
 }
-
-/// Deliveries after which a missing-checkpoint record stops retrying and is
-/// poisoned with a durable failure record. With the consumer's `max_deliver: -1`
-/// and the 30s nak-delay cap this bounds the retry window to roughly an hour
-/// instead of occupying an ack-pending slot forever.
-const MISSING_CHECKPOINT_DELIVERY_CEILING: i64 = 120;
 
 async fn process_one<P, U, S, E, M>(
     processor: Arc<ScheduleProcessor<P, U, S, E>>,

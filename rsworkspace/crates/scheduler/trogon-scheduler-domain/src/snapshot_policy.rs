@@ -1,14 +1,9 @@
 //! Host-runtime snapshot policy for scheduler commands.
 
-use std::num::NonZeroU64;
-
 use trogon_decider_runtime::{CommandSnapshotPolicy, FrequencySnapshot};
 
+use crate::constants::COMMAND_SNAPSHOT_POLICY;
 use crate::{PauseSchedule, RemoveSchedule, ResumeSchedule};
-
-const COMMAND_SNAPSHOT_EVERY: NonZeroU64 = NonZeroU64::new(32).unwrap();
-
-pub const COMMAND_SNAPSHOT_POLICY: FrequencySnapshot = FrequencySnapshot::new(COMMAND_SNAPSHOT_EVERY);
 
 impl CommandSnapshotPolicy for PauseSchedule {
     type SnapshotPolicy = FrequencySnapshot;

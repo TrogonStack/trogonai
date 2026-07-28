@@ -33,7 +33,7 @@ use crate::stream_store::{StreamSubjectResolver, append_stream as append_subject
 use tracing::Instrument;
 
 #[cfg(not(coverage))]
-const METER_NAME: &str = "trogon-decider-nats";
+use crate::constants::METER_NAME;
 
 #[cfg(not(coverage))]
 struct StoreMetrics {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-const GO_DURATION_MAX_NANOS: u128 = i64::MAX as u128;
+use crate::constants::GO_DURATION_MAX_NANOS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum GoDurationError {

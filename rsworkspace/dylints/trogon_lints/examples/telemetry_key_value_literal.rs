@@ -4,7 +4,7 @@
 
 use opentelemetry::KeyValue;
 
-const MESSAGING_SYSTEM: &str = "messaging.system";
+static MESSAGING_SYSTEM: &str = "messaging.system";
 
 fn inline_key() -> KeyValue {
     KeyValue::new("messaging.system", "nats")

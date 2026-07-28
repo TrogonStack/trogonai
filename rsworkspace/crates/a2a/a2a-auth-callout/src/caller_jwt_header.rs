@@ -2,8 +2,6 @@ use std::fmt;
 
 use crate::jwt::{JwtError, MintedUserJwt};
 
-pub const CALLER_JWT_HEADER_NAME: &str = "A2a-Caller-Jwt";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallerJwtHeaderValue(String);
 

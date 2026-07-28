@@ -26,10 +26,7 @@ use trogon_identity_types::aauth::headers::Capabilities;
 use trogon_identity_types::aauth::mission::MissionHeader;
 use trogon_identity_types::aauth::{MissionRef, headers as aauth_headers};
 
-/// Anti-replay code returned on enforce-mode AAuth failure. JSON-RPC clients
-/// see this code; A2A ingress callers see a status reply carrying the
-/// `AAuth-Requirement` header.
-pub const AAUTH_REQUIRED_CODE: i32 = -32_118;
+pub use crate::constants::AAUTH_REQUIRED_CODE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AAuthMode {

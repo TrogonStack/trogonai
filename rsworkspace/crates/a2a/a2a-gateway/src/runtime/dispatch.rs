@@ -69,26 +69,13 @@ use crate::runtime::streaming::maybe_spawn_streaming_ingress_pump;
 use crate::runtime::tier1::{enrich_audit_caller, tier1_declarative_context_from_ingress};
 use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
-const ANONYMOUS_CALLER: &str = "_";
-const MESSAGE_SEND_METHOD_DOTS: &str = "message.send";
-const JWT_AUDIENCE_ENV: &str = "A2A_GATEWAY_JWT_AUDIENCE";
-
-const SPAN_GATEWAY_INGRESS_DISPATCH: &str = "gateway.ingress.dispatch";
-const ATTR_CALLER_ID: &str = "caller_id";
-const ATTR_AGENT_SUBJECT: &str = "agent_subject";
-const ATTR_ROUTING_OUTCOME: &str = "routing_outcome";
-const ATTR_AAUTH_AGENT_ID: &str = "aauth_agent_id";
-
-const ROUTING_IGNORED_NO_REPLY: &str = "ignored_no_reply";
-const ROUTING_AAUTH_DENIED: &str = "aauth_denied";
-const ROUTING_TIER1_DENIED: &str = "tier1_denied";
-const ROUTING_POLICY_DENIED: &str = "policy_denied";
-const ROUTING_TIER3_REFUSED: &str = "tier3_refused";
-const ROUTING_TIER3_ENGINE_ERROR: &str = "tier3_engine_error";
-const ROUTING_FORWARDED: &str = "forwarded";
-const ROUTING_FORWARD_FAILED: &str = "forward_failed";
-const ROUTING_DEADLINE_EXCEEDED: &str = "deadline_exceeded";
-const ROUTING_INGRESS_ERROR: &str = "ingress_error";
+use crate::constants::MESSAGE_SEND_METHOD_DOTS;
+use crate::constants::{
+    ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
+    ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
+    ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
+    ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
+};
 
 /// Run a single ingress envelope through the full gateway dispatch
 /// chain. Returns once the reply (or detached audit publish) has
@@ -360,7 +347,7 @@ async fn dispatch_routed<E: ReadEnv>(
         headers_owned.insert(aauth_headers::ACCESS, jti);
     }
 
-    if audit_caller_id != ANONYMOUS_CALLER {
+    if audit_caller_id != ANONYMOUS_CALLER_SLUG {
         tracing::Span::current().record(ATTR_CALLER_ID, audit_caller_id.as_str());
     }
 
@@ -892,7 +879,7 @@ async fn run_tier1_spicedb<'a, E: ReadEnv>(
     env: &E,
 ) -> Tier1SpiceDbStepOutcome {
     let publisher_account = env
-        .var(JWT_AUDIENCE_ENV)
+        .var(ENV_GATEWAY_JWT_AUDIENCE)
         .unwrap_or_else(|_| config.a2a_prefix.as_str().to_owned());
     let caller_slug_str = caller_slug.unwrap_or("");
     let principal = tier1_principal_from_caller(caller_slug_str, publisher_account.as_str());

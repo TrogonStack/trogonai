@@ -8,8 +8,6 @@ use super::bundle::{
     Tier1DeclarativeRuleId, Tier1DeclarativeSchemaError, Tier1ResourceKind,
 };
 
-pub const TIER1_BUNDLE_EXTENSION: &str = "tier1.toml";
-
 #[derive(Debug, thiserror::Error)]
 pub enum Tier1DeclarativeLoadError {
     /// An existing path was configured but it is not a directory. We

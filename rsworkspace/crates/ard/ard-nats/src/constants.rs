@@ -1,0 +1,2 @@
+pub const CATALOG_KV_BUCKET: &str = "ARD_CATALOG";
+pub const CATALOG_EVENT_STREAM: &str = "ARD_CATALOG_EVENTS";

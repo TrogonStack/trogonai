@@ -5,7 +5,7 @@
 
 use opentelemetry::metrics::{Counter, Meter};
 
-const ACP_REQUESTS: &str = "acp.requests";
+static ACP_REQUESTS: &str = "acp.requests";
 
 fn inline_build(meter: &Meter) -> Counter<u64> {
     meter

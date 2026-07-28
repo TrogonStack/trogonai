@@ -25,6 +25,7 @@
 //! - [`login`] -- "Third-Party Login".
 //! - [`server`] -- [`server::PersonServer`], the transport-agnostic facade.
 //! - [`http`] -- `axum::Router` binding.
+//! - [`constants`] -- crate-wide constants.
 //!
 //! # Deviations from the draft
 //!
@@ -72,6 +73,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod agent;
+pub mod constants;
 pub mod decision;
 pub mod error;
 pub mod http;

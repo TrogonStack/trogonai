@@ -2,6 +2,7 @@
 
 //! ARD-compatible HTTP registry runtime.
 
+pub mod constants;
 pub mod explore_request;
 pub mod extract;
 pub mod facet_field;

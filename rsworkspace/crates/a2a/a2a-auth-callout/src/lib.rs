@@ -7,6 +7,7 @@
 pub mod account_resolver;
 pub mod bridge_mint;
 pub mod caller_jwt_header;
+pub mod constants;
 pub mod credentials;
 pub mod denial_category;
 pub mod denial_claims;
@@ -25,7 +26,8 @@ pub mod test_support;
 pub use account_resolver::{AccountResolver, AccountResolverError, RequestedAccount, StaticAccountResolver};
 
 pub use bridge_mint::{BridgeAuthScheme, BridgeClientInfo, BridgeConnectOpts, BridgeMintRequest, BridgeMintResponse};
-pub use caller_jwt_header::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue};
+pub use caller_jwt_header::CallerJwtHeaderValue;
+pub use constants::CALLER_JWT_HEADER_NAME;
 pub use denial_category::DenialCategory;
 pub use denial_reason::DenialReason;
 pub use error::AuthCalloutError;

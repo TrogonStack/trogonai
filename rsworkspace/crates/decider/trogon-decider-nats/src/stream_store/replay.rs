@@ -25,8 +25,7 @@ use trogon_decider_runtime::StreamEvent;
 use trogon_semconv::{metric, span};
 
 use super::{ReadStreamError, StreamMessage, StreamStoreError, record_stream_message};
-
-const METER_NAME: &str = "trogon-decider-nats";
+use crate::constants::METER_NAME;
 
 struct ReplayMetrics {
     replay_duration: Histogram<f64>,

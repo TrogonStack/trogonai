@@ -23,7 +23,7 @@ use trogon_nats::jetstream::{
 };
 use trogon_semconv::metric;
 
-const METER_NAME: &str = "trogon-decider-nats";
+use crate::constants::METER_NAME;
 
 struct SnapshotStoreMetrics {
     kv_read_failures: Counter<u64>,
@@ -311,8 +311,7 @@ impl<PayloadError, SnapshotTypeError> From<SnapshotCodecError<PayloadError, Snap
     }
 }
 
-const SNAPSHOT_DATA_KEY_NAMESPACE: &str = "snapshots.data";
-const SNAPSHOT_CHECKPOINT_KEY_NAMESPACE: &str = "snapshots.checkpoint";
+use crate::constants::{SNAPSHOT_CHECKPOINT_KEY_NAMESPACE, SNAPSHOT_DATA_KEY_NAMESPACE};
 
 type SnapshotTypeError<T> = <T as SnapshotType>::Error;
 type SnapshotEncodePayloadError<T> = <T as SnapshotPayloadEncode>::Error;

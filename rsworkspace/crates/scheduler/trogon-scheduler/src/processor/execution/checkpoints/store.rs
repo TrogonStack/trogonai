@@ -13,6 +13,7 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys,
 };
 
+use crate::constants::CHECKPOINT_KEY_PREFIX;
 use crate::processor::execution::reconciliation::{ScheduleKey, ScheduleSubject};
 
 use super::ScheduleCheckpointRecord;
@@ -20,8 +21,6 @@ use super::codec::{
     CheckpointCodecError, decode_checkpoint_envelope, decode_checkpoint_record, encode_checkpoint_record,
 };
 use super::failure::{ProcessingFailureRecord, encode_failure_record};
-
-const CHECKPOINT_KEY_PREFIX: &str = "v1.";
 
 /// Error raised while reading or writing scheduler checkpoints.
 #[derive(Debug, thiserror::Error)]

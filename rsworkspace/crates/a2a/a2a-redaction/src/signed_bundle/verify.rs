@@ -3,14 +3,10 @@ use sha2::{Digest, Sha256};
 
 use super::digest::Sha256Digest;
 use super::error::SignatureVerificationError;
-use super::manifest::{SIGNED_BUNDLE_VERSION, SignedBundleManifest};
+use super::manifest::SignedBundleManifest;
 use super::public_key::Ed25519PublicKey;
+use crate::constants::{SIGNED_BUNDLE_SIGNATURE_DOMAIN, SIGNED_BUNDLE_VERSION};
 use crate::skill_id::SkillId;
-
-/// Domain-separation tag the verifier and signer agree on. Including the tag
-/// in the signed message prevents a confused-deputy attack where a signature
-/// produced for some other Ed25519 message could be replayed here.
-const SIGNED_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"a2a-redaction/signed-bundle/v1";
 
 /// Construct the canonical signed message for a bundle.
 ///

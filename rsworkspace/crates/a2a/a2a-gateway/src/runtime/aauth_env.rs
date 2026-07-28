@@ -16,26 +16,13 @@ use crate::aauth::{
     PersonServerAudienceError, ResourceIssuer, ResourceIssuerError, StaticJwks,
 };
 
-pub const ENV_AAUTH_MODE: &str = "A2A_GATEWAY_AAUTH_MODE";
-pub const ENV_AAUTH_JWKS_PATH: &str = "A2A_GATEWAY_AAUTH_JWKS_PATH";
-pub const ENV_AAUTH_JWKS_DISCOVERY: &str = "A2A_GATEWAY_AAUTH_JWKS_DISCOVERY";
-pub const ENV_AAUTH_JWKS_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_JWKS_TTL_SECS";
-pub const ENV_AAUTH_JWKS_ALLOWED_ISSUERS: &str = "A2A_GATEWAY_AAUTH_JWKS_ALLOWED_ISSUERS";
-pub const ENV_AAUTH_RESOURCE_ISS: &str = "A2A_GATEWAY_AAUTH_RESOURCE_ISS";
-pub const ENV_AAUTH_PERSON_SERVER_AUD: &str = "A2A_GATEWAY_AAUTH_PERSON_SERVER_AUD";
-pub const ENV_AAUTH_CHALLENGE_KID: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KID";
-pub const ENV_AAUTH_CHALLENGE_KEY_PATH: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_KEY_PATH";
-pub const ENV_AAUTH_LEEWAY_SECS: &str = "A2A_GATEWAY_AAUTH_LEEWAY_SECS";
-pub const ENV_AAUTH_CHALLENGE_TTL_SECS: &str = "A2A_GATEWAY_AAUTH_CHALLENGE_TTL_SECS";
-pub const ENV_AAUTH_MAX_SKEW_SECS: &str = "A2A_GATEWAY_AAUTH_MAX_SKEW_SECS";
-
-/// Audit `caller_source` recorded once a verified `aa-auth+jwt` principal
-/// supersedes the JWT-header caller identity for the remainder of dispatch.
-pub const AAUTH_CALLER_SOURCE: &str = "aauth";
-
-const DEFAULT_LEEWAY_SECS: u64 = 60;
-const DEFAULT_CHALLENGE_TTL_SECS: i64 = 300;
-const DEFAULT_MAX_SKEW_SECS: i64 = 60;
+pub use crate::constants::{
+    AAUTH_CALLER_SOURCE, ENV_AAUTH_CHALLENGE_KEY_PATH, ENV_AAUTH_CHALLENGE_KID, ENV_AAUTH_CHALLENGE_TTL_SECS,
+    ENV_AAUTH_JWKS_ALLOWED_ISSUERS, ENV_AAUTH_JWKS_DISCOVERY, ENV_AAUTH_JWKS_PATH, ENV_AAUTH_JWKS_TTL_SECS,
+    ENV_AAUTH_LEEWAY_SECS, ENV_AAUTH_MAX_SKEW_SECS, ENV_AAUTH_MODE, ENV_AAUTH_PERSON_SERVER_AUD,
+    ENV_AAUTH_RESOURCE_ISS,
+};
+use crate::constants::{DEFAULT_CHALLENGE_TTL_SECS, DEFAULT_LEEWAY_SECS, DEFAULT_MAX_SKEW_SECS};
 
 /// Every variant names the exact env var an operator needs to fix -- shadow
 /// and enforce mode must never silently fall back to a Noop/Off layer just

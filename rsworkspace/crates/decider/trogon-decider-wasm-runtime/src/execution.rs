@@ -48,9 +48,8 @@ use trogon_semconv::{attribute, metric, span};
 use trogon_std::NowV7;
 use wasmtime::Store;
 
+use crate::constants::METER_NAME;
 use crate::{GuestDomainError, OpaqueSnapshotPayload, WasmDeciderEngine, WasmDeciderModule, WasmSnapshotId};
-
-const METER_NAME: &str = "trogon-decider-wasm-runtime";
 
 struct WasmExecutionMetrics {
     execution_duration: Histogram<f64>,

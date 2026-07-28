@@ -7,7 +7,7 @@ use async_nats::HeaderMap;
 use async_nats::header::{IntoHeaderValue, NATS_MESSAGE_ID};
 use bytes::Bytes;
 
-use crate::constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS;
+use crate::constants::{HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS, INITIAL_RETRY_DELAY, MAX_RETRY_DELAY};
 use crate::push::delivery_semantics::DeliverySemantics;
 use crate::push::dispatch_error::{DispatchError, NatsPublishDispatchError};
 use crate::push::dispatcher::{PushDispatcher, maybe_terminal_push_idempotency_key};
@@ -16,9 +16,6 @@ use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::push::push_notification_target::{PushNotificationTarget, PushNotificationTargetError};
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::task_id::A2aTaskId;
-
-const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 pub struct NatsPublishPushDispatcher<N> {
     nats: N,

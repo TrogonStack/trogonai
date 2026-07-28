@@ -14,11 +14,9 @@ use super::nats_permission_claims::NatsPermissionClaims;
 use super::{
     AccountName, CallerId, ExternalSubject, JwtError, MintedUserJwt, SpiceDbPrincipal, UserJwtClaims, UserJwtSubject,
 };
+use crate::constants::{HEADER_ALGORITHM, HEADER_TYPE};
 use crate::permissions::IssuedPermissions;
 use crate::signing_key_source::{MintingMaterial, SigningKeyHandle, SigningKeySource};
-
-const HEADER_TYPE: &str = "JWT";
-const HEADER_ALGORITHM: &str = "ed25519-nkey";
 
 #[derive(Serialize, Deserialize)]
 struct NatsJwtHeader {

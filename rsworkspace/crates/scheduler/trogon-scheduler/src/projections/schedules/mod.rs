@@ -17,14 +17,14 @@ use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetS
 use crate::kv::open_events_stream;
 use crate::{
     ScheduleEventCase,
+    constants::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, SCHEDULES_CHECKPOINT_KEY},
     error::SchedulerError,
-    kv::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
     projections_v1, v1,
 };
 
 #[cfg(not(coverage))]
 use storage::get_or_create_schedules_bucket;
-use storage::{SCHEDULES_CHECKPOINT_KEY, read_model_key};
+use storage::read_model_key;
 
 /// The read model's KV storage contract (bucket, key scheme, checkpoint key),
 /// owned by the projection that defines that layout.

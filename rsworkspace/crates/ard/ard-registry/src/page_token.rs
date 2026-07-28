@@ -4,6 +4,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
+use crate::constants::PAGE_TOKEN_VERSION;
+
 /// Error returned when decoding a pagination token fails.
 #[derive(Debug, thiserror::Error)]
 pub enum PageTokenError {
@@ -21,8 +23,6 @@ struct PageTokenPayload {
     version: u8,
     offset: u64,
 }
-
-const PAGE_TOKEN_VERSION: u8 = 1;
 
 /// Encode a byte offset into an opaque page token.
 pub fn encode_page_token(offset: u64) -> String {

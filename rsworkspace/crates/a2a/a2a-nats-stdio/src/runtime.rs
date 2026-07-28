@@ -23,7 +23,7 @@ use trogon_std::signal::shutdown_signal;
 #[cfg(not(coverage))]
 use crate::io_loop::run_io_loop;
 
-pub(crate) const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
+use crate::constants::ENV_A2A_AGENT_ID;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {

@@ -7,6 +7,7 @@
 
 pub mod commands;
 pub mod config;
+pub mod constants;
 pub mod error;
 pub mod kv;
 pub mod nats;
@@ -26,8 +27,8 @@ pub use commands::{
     ResumeScheduleError, ScheduleNextOccurrence, ScheduleNextOccurrenceError,
 };
 pub use config::ScheduleWriteCondition;
+pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 pub use error::{ScheduleSpecError, SchedulerError};
-pub use projections::storage::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};
 #[cfg(all(feature = "postgres", not(coverage)))]
 pub use projections::{PostgresSchedulesProjection, SchedulesProjector};
 

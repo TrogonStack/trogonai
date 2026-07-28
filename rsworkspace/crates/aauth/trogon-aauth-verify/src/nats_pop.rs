@@ -15,6 +15,7 @@ use jsonwebtoken::{
 use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::{NatsSignatureEnvelope, headers};
 
+use crate::constants::{MIN_REPLAY_TTL_SECS, NATS_SECURITY_HEADERS};
 use crate::jwks::JwksResolver;
 use crate::replay::{ReplayError, ReplayStore};
 use crate::time_source::TimeSource;
@@ -100,31 +101,6 @@ pub struct NatsRequest<'a> {
     pub headers: NatsHeaders<'a>,
 }
 
-/// Floor for the replay-store TTL. The derived TTL is
-/// `max(MIN_REPLAY_TTL_SECS, max_skew_secs * 2)` so a zero-skew configuration
-/// still keeps nonce entries long enough to refuse the same signed request
-/// arriving twice — without this floor a `max_skew_secs = 0` deployment would
-/// install nonces with a zero-second TTL and lose replay protection on the
-/// next GC pass.
-const MIN_REPLAY_TTL_SECS: i64 = 60;
-
-/// Security-sensitive headers that drive PoP verification. If any appears more
-/// than once (case-insensitive) in a request, the verifier refuses rather
-/// than silently picking one value and letting the rest go unauthenticated.
-const SECURITY_HEADERS: &[&str] = &[
-    headers::NATS_TOKEN,
-    headers::NATS_SIG_INPUT,
-    headers::NATS_SIG,
-    headers::NATS_SIG_CREATED,
-    headers::NATS_SIG_NONCE,
-    headers::CONTENT_DIGEST,
-    // Not part of the PoP envelope, but verification reads one value while
-    // downstream consumers could read another -- the same smuggling shape
-    // the six envelope headers are guarded against.
-    headers::NATS_AUTH_TOKEN,
-    headers::MISSION,
-];
-
 /// Header view: pick the first value for a given case-insensitive name.
 pub struct NatsHeaders<'a> {
     items: &'a [(String, String)],
@@ -158,7 +134,7 @@ impl<'a> NatsHeaders<'a> {
     /// insensitive) found in this view, if any. Used by both the
     /// constructor and the verifier so the check is unconditional.
     fn ensure_no_duplicate_security_headers(&self) -> Result<(), NatsPopError> {
-        for &name in SECURITY_HEADERS {
+        for &name in NATS_SECURITY_HEADERS {
             let count = self.items.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).count();
             if count > 1 {
                 return Err(NatsPopError::DuplicateHeader(name));

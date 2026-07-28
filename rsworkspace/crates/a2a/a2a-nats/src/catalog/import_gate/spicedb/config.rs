@@ -3,11 +3,8 @@ use std::time::Duration;
 
 use trogon_std::env::ReadEnv;
 
-pub const ENV_SPICEDB_ENDPOINT: &str = "A2A_SPICEDB_ENDPOINT";
-pub const ENV_SPICEDB_TOKEN: &str = "A2A_SPICEDB_TOKEN";
-pub const ENV_SPICEDB_ZEDTOKEN_TTL_SECS: &str = "A2A_SPICEDB_ZEDTOKEN_TTL_SECS";
-
-const DEFAULT_ZEDTOKEN_TTL_SECS: u64 = 30;
+use crate::constants::DEFAULT_ZEDTOKEN_TTL_SECS;
+pub use crate::constants::{ENV_SPICEDB_ENDPOINT, ENV_SPICEDB_TOKEN, ENV_SPICEDB_ZEDTOKEN_TTL_SECS};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpiceDbEndpoint(String);

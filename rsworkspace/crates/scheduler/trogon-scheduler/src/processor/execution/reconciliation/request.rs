@@ -12,27 +12,12 @@ use super::{
     GoDurationError, RRuleWakeupPayload, RRuleWakeupPayloadEncodeError, ScheduleKey, ScheduleSubject,
     format_go_duration,
 };
-
-const NATS_SCHEDULE_HEADER: &str = "Nats-Schedule";
-const NATS_SCHEDULE_TIME_ZONE_HEADER: &str = "Nats-Schedule-Time-Zone";
-const NATS_SCHEDULE_TARGET_HEADER: &str = "Nats-Schedule-Target";
-const NATS_SCHEDULE_TTL_HEADER: &str = "Nats-Schedule-TTL";
-const NATS_SCHEDULE_SOURCE_HEADER: &str = "Nats-Schedule-Source";
-const CONTENT_TYPE_HEADER: &str = "Content-Type";
-const TROGON_SCHEDULE_KEY_HEADER: &str = "Trogon-Schedule-Key";
-const TROGON_SCHEDULE_ID_B64_HEADER: &str = "Trogon-Schedule-Id-B64";
-const TROGON_SCHEDULE_OCCURRENCE_SEQUENCE_HEADER: &str = "Trogon-Schedule-Occurrence-Sequence";
-const TROGON_SCHEDULE_OCCURRENCE_AT_HEADER: &str = "Trogon-Schedule-Occurrence-At";
-const TROGON_SCHEDULE_RESERVED_PREFIX: &str = "Trogon-Schedule";
-
-const NATS_RESERVED_HEADERS: [&str; 6] = [
-    "Nats-Msg-Id",
-    "Nats-Schedule",
-    "Nats-Schedule-Source",
-    "Nats-Schedule-Target",
-    "Nats-Schedule-Time-Zone",
-    "Nats-Schedule-TTL",
-];
+use crate::constants::{
+    CONTENT_TYPE_HEADER, NATS_RESERVED_HEADERS, NATS_SCHEDULE_HEADER, NATS_SCHEDULE_SOURCE_HEADER,
+    NATS_SCHEDULE_TARGET_HEADER, NATS_SCHEDULE_TIME_ZONE_HEADER, NATS_SCHEDULE_TTL_HEADER,
+    TROGON_SCHEDULE_ID_B64_HEADER, TROGON_SCHEDULE_KEY_HEADER, TROGON_SCHEDULE_OCCURRENCE_AT_HEADER,
+    TROGON_SCHEDULE_OCCURRENCE_SEQUENCE_HEADER, TROGON_SCHEDULE_RESERVED_PREFIX,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScheduleRequestError {
