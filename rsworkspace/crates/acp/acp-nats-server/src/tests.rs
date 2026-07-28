@@ -1104,3 +1104,35 @@ async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
 
     shutdown_tx.send(true).unwrap();
 }
+
+/// Drives a component connection to completion via the drain signal.
+///
+/// The round-trip test above leaves the connection open, so the teardown path
+/// (drain the client proxy, flush bridge background work, report the close) is
+/// never reached there. `into_channel_and_future` is the same entry point
+/// `AcpHttpServer` uses per connection, so this exercises production wiring
+/// rather than a stand-in.
+#[tokio::test]
+async fn draining_closes_an_upstream_transport_connection_cleanly() {
+    let nats_mock = AdvancedMockNatsClient::new();
+    let _injector = nats_mock.inject_messages();
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let component = crate::component::NatsAgentComponent::new(nats_mock, MockJs::new(), test_config(), shutdown_rx);
+    let (_channel, connection) =
+        agent_client_protocol::ConnectTo::<agent_client_protocol::Client>::into_channel_and_future(component);
+
+    let handle = tokio::spawn(connection);
+
+    // Let the bridge and client proxy come up before asking them to stop, so the
+    // drain branch wins the select rather than racing startup.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    shutdown_tx.send(true).unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("draining must close the connection")
+        .expect("the connection task must not panic");
+
+    assert!(result.is_ok(), "a drained connection is a clean close: {result:?}");
+}

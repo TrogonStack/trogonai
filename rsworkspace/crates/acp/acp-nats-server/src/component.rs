@@ -8,7 +8,7 @@
 //! JetStream-durable design ADR#0020 preserves while the byte-stream boundary
 //! becomes upstream's problem.
 
-use acp_nats::boundary::{AbortOnDrop, ConnectionClient, connect_agent_boundary_with};
+use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary_with};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::schema::v1::SessionNotification;
 use agent_client_protocol::{Agent, Client, ConnectTo, Result};
@@ -119,9 +119,10 @@ where
                     }
                 };
 
-                if !client_task.is_finished() {
-                    client_task.abort_and_wait().await;
-                }
+                // No `is_finished` guard: `abort_and_wait` already no-ops on a
+                // finished task, which is the property that keeps a caller from
+                // re-awaiting an already-awaited handle.
+                client_task.abort_and_wait().await;
                 outcome
             }
         })
@@ -131,43 +132,27 @@ where
         // the dispatch loop; drain them before the connection's NATS client drops.
         bridge.drain_background_tasks().await;
 
-        match outcome {
-            Ok(_) => {
-                info!("ACP connection closed");
-                Ok(())
-            }
-            Err(error) => {
-                warn!(error = %error, "ACP connection closed with error");
-                Err(error)
-            }
+        connection_outcome(outcome)
+    }
+}
+
+/// Collapses a boundary exit into the transport-facing connection result.
+///
+/// Both `BoundaryExit` variants are ordinary closes: the peer hung up, or the
+/// bridge decided to stop. Only a boundary error is a failure the transport
+/// needs to see.
+fn connection_outcome(outcome: Result<BoundaryExit<()>>) -> Result<()> {
+    match outcome {
+        Ok(_) => {
+            info!("ACP connection closed");
+            Ok(())
+        }
+        Err(error) => {
+            warn!(error = %error, "ACP connection closed with error");
+            Err(error)
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::client_task_outcome;
-
-    /// A panicking client proxy must not read as a clean disconnect.
-    #[tokio::test]
-    async fn a_panicked_client_proxy_becomes_an_error() {
-        let join_error = tokio::spawn(async { panic!("client proxy exploded") })
-            .await
-            .expect_err("the task panicked, so joining must fail");
-        assert!(join_error.is_panic());
-
-        let outcome = client_task_outcome(Err(join_error));
-
-        let error = outcome.expect_err("a JoinError must surface as a connection error");
-        assert_eq!(
-            error.code,
-            agent_client_protocol::ErrorCode::InternalError,
-            "the SDK transport should see an internal error, not a clean close"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_clean_client_proxy_exit_stays_ok() {
-        assert!(client_task_outcome(Ok(())).is_ok());
-    }
-}
+mod tests;
