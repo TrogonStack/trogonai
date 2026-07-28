@@ -199,10 +199,27 @@ Companion crates past their recorded version:
 $companion_table"
 fi
 
+# Stated unconditionally, not just when it wins the title. An unreadable table means
+# companion checking is off entirely, and that fact must not be buried because a core
+# or schema bump happens to be the more eye-catching headline: with no rows parsed
+# there is also no companion table below, so without this the issue would say nothing
+# about companions at all. A check that can go quiet unnoticed is the failure this
+# whole task exists to prevent.
+companion_unparsed_note=""
+if [[ "$companion_unparsed" == "true" ]]; then
+  companion_unparsed_note="> [!WARNING]
+> Companion crate checking is currently disabled. No rows could be read from the
+> \`## Companion crates\` table in \`docs/architecture/acp-conformance.md\`, so none of
+> the companion versions were compared. Restore that table, or update the parser in
+> \`.config/mise/tasks/acp-freshness\`, before trusting this issue to be complete.
+
+"
+fi
+
 body_file="$(mktemp)"
 trap 'rm -f "$body_file"' EXIT
 cat >"$body_file" <<EOF
-$lead
+$companion_unparsed_note$lead
 
 | | resolved | target |
 | --- | --- | --- |
