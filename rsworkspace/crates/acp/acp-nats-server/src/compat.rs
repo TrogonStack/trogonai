@@ -15,13 +15,13 @@
 //! - `X-Accel-Buffering: no` on the SSE stream, so a reverse proxy does not
 //!   buffer a long-lived response.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::header::{CONTENT_TYPE, HOST, ORIGIN};
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE, HOST, ORIGIN};
 use axum::http::uri::{Authority, Uri};
 use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::Next;
@@ -38,13 +38,33 @@ use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, X_
 /// SHOULD-level header check would be the worse trade.
 const MAX_INSPECTED_BODY: usize = 1024 * 1024;
 
+/// Connections retained before the oldest is evicted.
+///
+/// `DELETE` is the only close this layer can observe: upstream keeps connection
+/// lifetime private, so a connection that ends by peer drop, client crash, or
+/// process drain never reports it. Without a cap, every such connection would
+/// leave an entry behind and repeated `initialize` calls would grow the map for
+/// the life of the process.
+///
+/// Evicting is safe because a missing entry means validation is skipped for that
+/// connection, which is already how an id this layer never saw initialize is
+/// treated. The cost of eviction is a missed check, not a rejected request.
+const MAX_TRACKED_CONNECTIONS: usize = 4096;
+
+/// Bounded insertion-ordered map of connection id to negotiated version.
+#[derive(Default)]
+struct VersionTable {
+    versions: HashMap<String, u16>,
+    oldest_first: VecDeque<String>,
+}
+
 /// Protocol version each connection negotiated, keyed by connection id.
 ///
 /// Upstream mints the connection id and keeps the negotiated version private, so
 /// the only place both appear together is the `initialize` response: the id in a
 /// header, the version in the body. This records that pairing as it passes.
 #[derive(Clone, Default)]
-pub struct NegotiatedVersions(Arc<Mutex<HashMap<String, u16>>>);
+pub struct NegotiatedVersions(Arc<Mutex<VersionTable>>);
 
 impl NegotiatedVersions {
     pub fn new() -> Self {
@@ -52,25 +72,48 @@ impl NegotiatedVersions {
     }
 
     fn record(&self, connection_id: String, version: u16) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(connection_id, version);
+        let mut table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+
+        // Re-initializing a known connection updates in place: pushing again would
+        // let one id occupy several eviction slots and evict live connections early.
+        if table.versions.insert(connection_id.clone(), version).is_some() {
+            return;
+        }
+
+        table.oldest_first.push_back(connection_id);
+
+        while table.oldest_first.len() > MAX_TRACKED_CONNECTIONS {
+            if let Some(evicted) = table.oldest_first.pop_front() {
+                table.versions.remove(&evicted);
+            }
+        }
     }
 
     fn get(&self, connection_id: &str) -> Option<u16> {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .versions
             .get(connection_id)
             .copied()
     }
 
     fn forget(&self, connection_id: &str) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(connection_id);
+        let mut table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if table.versions.remove(connection_id).is_some() {
+            table.oldest_first.retain(|id| id != connection_id);
+        }
+    }
+
+    #[cfg(test)]
+    fn tracked(&self) -> usize {
+        let table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        debug_assert_eq!(
+            table.versions.len(),
+            table.oldest_first.len(),
+            "the eviction queue must mirror the map"
+        );
+        table.versions.len()
     }
 }
 
@@ -144,14 +187,24 @@ fn origin_rejection(bind_host: IpAddr, request: &Request) -> Option<Response> {
     } else if bind_host.is_unspecified() {
         is_loopback_host(&origin_host) || matches_request_host()
     } else {
-        origin_host.eq_ignore_ascii_case(&bind_host.to_string()) || matches_request_host()
+        unbracket(&origin_host).eq_ignore_ascii_case(&bind_host.to_string()) || matches_request_host()
     };
 
     if allowed { None } else { Some(forbidden()) }
 }
 
 fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+    matches!(unbracket(host), "localhost" | "127.0.0.1" | "::1")
+}
+
+/// Strips the brackets `Uri::host()` keeps around an IPv6 literal.
+///
+/// `IpAddr::to_string()` produces none, so a bracketed `[2001:db8::1]` would never
+/// equal the bind address it names.
+fn unbracket(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host)
 }
 
 /// Validates `Acp-Protocol-Version` and learns each connection's negotiated version.
@@ -163,7 +216,8 @@ fn is_loopback_host(host: &str) -> bool {
 ///
 /// Response side: the `initialize` reply is the one message carrying both the
 /// connection id and the negotiated version, so it is inspected to populate the
-/// map. `DELETE` drops the entry so ids cannot accumulate.
+/// map. `DELETE` drops the entry; every other kind of close is invisible here, so
+/// the table is bounded by eviction rather than by clients behaving well.
 pub async fn track_protocol_version(versions: NegotiatedVersions, request: Request, next: Next) -> Response {
     let provided = request
         .headers()
@@ -227,11 +281,26 @@ async fn learn_negotiated_version(versions: &NegotiatedVersions, response: Respo
         return response;
     }
 
+    // Check the declared length before touching the body. `to_bytes` is destructive,
+    // so discovering the cap by failing it would leave nothing to forward.
+    let declared_too_large = response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some_and(|length| length > MAX_INSPECTED_BODY);
+    if declared_too_large {
+        return response;
+    }
+
     let (parts, body) = response.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, MAX_INSPECTED_BODY).await else {
-        // Oversized or broken bodies are forwarded as-is rather than failed: this
-        // layer is an observer, and an unread version simply skips validation.
-        return (parts, Body::empty()).into_response();
+        // The body is consumed by now, so it cannot be forwarded. Returning the
+        // original parts with an empty body would hand the client a response whose
+        // `Content-Length` disagrees with its payload: a truncated reply that still
+        // looks successful. An explicit failure is the lesser harm.
+        warn!("Could not read an initialize response body; failing rather than truncating it");
+        return StatusCode::BAD_GATEWAY.into_response();
     };
 
     if let Some(version) = serde_json::from_slice::<serde_json::Value>(&bytes)

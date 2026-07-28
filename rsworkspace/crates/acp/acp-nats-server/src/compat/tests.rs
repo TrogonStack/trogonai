@@ -268,3 +268,153 @@ async fn a_json_response_is_left_alone() {
 
     assert!(response.headers().get(X_ACCEL_BUFFERING_HEADER).is_none());
 }
+
+/// Upstream reports no close except `DELETE`, so the table must bound itself
+/// rather than trust clients to terminate cleanly.
+#[test]
+fn the_version_table_evicts_the_oldest_connection_past_the_cap() {
+    let versions = NegotiatedVersions::new();
+
+    for n in 0..MAX_TRACKED_CONNECTIONS + 10 {
+        versions.record(format!("conn-{n}"), 1);
+    }
+
+    assert_eq!(
+        versions.tracked(),
+        MAX_TRACKED_CONNECTIONS,
+        "an unclean close must not grow the table without bound"
+    );
+    assert_eq!(versions.get("conn-0"), None, "the oldest entries are evicted");
+    assert_eq!(
+        versions.get(&format!("conn-{}", MAX_TRACKED_CONNECTIONS + 9)),
+        Some(1),
+        "the newest entry survives"
+    );
+}
+
+/// Re-recording a known id must not consume extra eviction slots, or one noisy
+/// connection would push out live ones.
+#[test]
+fn re_recording_a_connection_does_not_consume_extra_slots() {
+    let versions = NegotiatedVersions::new();
+
+    for _ in 0..MAX_TRACKED_CONNECTIONS * 2 {
+        versions.record("conn-1".to_owned(), 1);
+    }
+
+    assert_eq!(versions.tracked(), 1);
+    assert_eq!(versions.get("conn-1"), Some(1));
+}
+
+#[test]
+fn forgetting_a_connection_clears_both_the_map_and_the_queue() {
+    let versions = NegotiatedVersions::new();
+    versions.record("conn-1".to_owned(), 1);
+    versions.record("conn-2".to_owned(), 1);
+
+    versions.forget("conn-1");
+
+    // `tracked` asserts the queue and map stay the same length, so a stale queue
+    // entry left behind by `forget` would fail here.
+    assert_eq!(versions.tracked(), 1);
+    assert_eq!(versions.get("conn-1"), None);
+    assert_eq!(versions.get("conn-2"), Some(1));
+}
+
+/// `Uri::host()` brackets an IPv6 literal; `IpAddr::to_string()` does not, so the
+/// bind-host comparison needs them normalized or a global IPv6 bind never matches.
+#[tokio::test]
+async fn a_bracketed_ipv6_origin_matches_a_global_ipv6_bind() {
+    let bind: IpAddr = "2001:db8::1".parse().unwrap();
+
+    assert_eq!(
+        origin_status(bind, Method::POST, &[("origin", "http://[2001:db8::1]:8080")]).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        origin_status(bind, Method::POST, &[("origin", "http://[2001:db8::2]:8080")]).await,
+        StatusCode::FORBIDDEN,
+        "a different IPv6 host must still be rejected"
+    );
+}
+
+fn oversized_app(versions: NegotiatedVersions, declared_len: usize, body: &'static str) -> Router {
+    Router::new()
+        .route(
+            "/acp",
+            post(move || async move {
+                (
+                    [
+                        (CONTENT_TYPE, "application/json".to_owned()),
+                        (CONTENT_LENGTH, declared_len.to_string()),
+                        (HeaderName::from_static(ACP_CONNECTION_ID_HEADER), "conn-1".to_owned()),
+                    ],
+                    body,
+                )
+            }),
+        )
+        .layer(axum::middleware::from_fn(move |request, next| {
+            track_protocol_version(versions.clone(), request, next)
+        }))
+}
+
+/// A body too large to inspect must be forwarded untouched. Reading it to discover
+/// the cap would consume it, and the old code then returned the original
+/// `Content-Length` with an empty payload, i.e. a truncated reply that looked OK.
+#[tokio::test]
+async fn an_oversized_body_is_forwarded_intact_rather_than_truncated() {
+    let versions = NegotiatedVersions::new();
+    let response = oversized_app(versions.clone(), MAX_INSPECTED_BODY + 1, INITIALIZE_REPLY)
+        .oneshot(request_with(Method::POST, &[]))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK, "a valid response must not be failed");
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        bytes.as_ref(),
+        INITIALIZE_REPLY.as_bytes(),
+        "the payload must survive an inspection it was too large for"
+    );
+    assert_eq!(
+        versions.get("conn-1"),
+        None,
+        "skipping inspection means skipping validation, not corrupting the reply"
+    );
+}
+
+/// The path that actually used to corrupt a response: a streamed body has no
+/// `Content-Length`, so the cap is only discovered by reading, and by then the body
+/// is gone. Failing explicitly beats returning stale parts with an empty payload.
+#[tokio::test]
+async fn an_unreadable_body_fails_instead_of_truncating() {
+    let versions = NegotiatedVersions::new();
+    let app = Router::new()
+        .route(
+            "/acp",
+            post(|| async {
+                // 2 MiB in 64 KiB chunks, streamed, so nothing declares the length.
+                let stream = futures_util::stream::iter(
+                    (0..32).map(|_| Ok::<_, std::io::Error>(bytes::Bytes::from(vec![b'x'; 64 * 1024]))),
+                );
+                (
+                    [
+                        (CONTENT_TYPE, "application/json"),
+                        (HeaderName::from_static(ACP_CONNECTION_ID_HEADER), "conn-1"),
+                    ],
+                    Body::from_stream(stream),
+                )
+            }),
+        )
+        .layer(axum::middleware::from_fn(move |request, next| {
+            track_protocol_version(versions.clone(), request, next)
+        }));
+
+    let response = app.oneshot(request_with(Method::POST, &[])).await.unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_GATEWAY,
+        "a consumed body must surface as a failure, not a successful-looking truncation"
+    );
+}
