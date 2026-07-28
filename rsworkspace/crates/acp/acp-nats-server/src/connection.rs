@@ -4,7 +4,6 @@ use agent_client_protocol::schema::v1::SessionNotification;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::watch;
@@ -72,7 +71,7 @@ pub async fn handle<N, J>(
 
         let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
             nats_client,
-            Rc::new(ConnectionClient::new(cx)),
+            Arc::new(ConnectionClient::new(cx)),
             bridge,
         )));
 

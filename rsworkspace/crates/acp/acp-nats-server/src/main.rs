@@ -117,9 +117,13 @@ fn build_connection_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
         .map_err(|error| anyhow::anyhow!("failed to create per-connection runtime: {error}"))
 }
 
-/// Runs a single-threaded tokio runtime with a
-/// `LocalSet`. All WebSocket connections are processed here because the ACP
-/// `Agent` trait is `?Send`, requiring `spawn_local` / `Rc`.
+/// Runs a single-threaded tokio runtime with a `LocalSet`.
+///
+/// The client proxy no longer needs this: `acp_nats::client::run` is `Send` and
+/// spawns with `tokio::spawn`. What still lives here are the hand-rolled
+/// connection actors, whose byte pumps and per-connection state are driven with
+/// `spawn_local`. Replacing those with an SDK-owned transport would retire this
+/// thread entirely.
 fn run_connection_thread<N, J>(
     rt: tokio::runtime::Runtime,
     manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,

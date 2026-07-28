@@ -22,7 +22,6 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::IpAddr;
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -1119,7 +1118,7 @@ pub async fn run_http_connection<N, J>(
 
         let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
             nats_client,
-            Rc::new(ConnectionClient::new(cx)),
+            Arc::new(ConnectionClient::new(cx)),
             bridge,
         )));
 

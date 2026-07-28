@@ -5,7 +5,6 @@ mod config;
 use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
 use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
 use agent_client_protocol::schema::v1::SessionNotification;
-use std::rc::Rc;
 use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
@@ -102,7 +101,7 @@ where
 
         let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
             nats_client,
-            Rc::new(ConnectionClient::new(cx)),
+            Arc::new(ConnectionClient::new(cx)),
             bridge,
         )));
         info!("ACP bridge running on stdio with NATS client proxy");
