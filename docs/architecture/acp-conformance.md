@@ -20,7 +20,9 @@ The SDK's exact schema pin caps our effective spec level. The direct schema depe
 
 ## Companion crates
 
-The Rust SDK repository publishes more than the core crate, and every companion releases in lockstep with it (identical version numbers on identical dates since 1.0.0). Tracking only `agent-client-protocol` therefore hides capability that upstream already ships. The freshness task reads the recorded versions straight out of this table, so it stays the one place they live.
+The Rust SDK repository publishes more than the core crate, so tracking only `agent-client-protocol` hides capability that upstream already ships. The freshness task reads the recorded versions straight out of this table, so it stays the one place they live.
+
+Most companions release in lockstep with the core crate: `-http`, `-conductor`, `-polyfill`, `-derive`, and `-trace-viewer` have carried the core's exact version number on the same day since 1.0.0, so a core bump is a reliable signal that they moved too. Three do not follow that pattern and must be read on their own terms: `-schema` lives in the spec repository and versions independently (the SDK pins it exactly, see above), `-rmcp` carries its own major (3.0.0), and `-tokio` has not released since 2026-04-21.
 
 | Crate | Latest | Adopted | Position |
 | --- | --- | --- | --- |

@@ -39,17 +39,7 @@ async fn main() -> anyhow::Result<()> {
     let stdin = async_compat::Compat::new(tokio::io::stdin());
     let stdout = async_compat::Compat::new(tokio::io::stdout());
 
-    let local = tokio::task::LocalSet::new();
-    let result = local
-        .run_until(run_bridge(
-            nats_client,
-            js_client,
-            &config,
-            stdout,
-            stdin,
-            shutdown_signal(),
-        ))
-        .await;
+    let result = run_bridge(nats_client, js_client, &config, stdout, stdin, shutdown_signal()).await;
 
     if let Err(ref e) = result {
         error!(error = %e, "ACP bridge stopped with error");
@@ -99,7 +89,7 @@ where
             notification_rx,
         ));
 
-        let mut client_task = AbortOnDrop::new(tokio::task::spawn_local(client::run(
+        let mut client_task = AbortOnDrop::new(tokio::spawn(client::run(
             nats_client,
             Arc::new(ConnectionClient::new(cx)),
             bridge,

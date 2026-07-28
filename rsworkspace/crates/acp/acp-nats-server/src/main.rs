@@ -2,9 +2,13 @@
 
 mod acp_connection_id;
 // Bridge-backed component for the SDK's own HTTP/WebSocket transport.
-// Proven end-to-end by `tests::upstream_http_transport_round_trips_initialize_through_the_bridge`
-// and wired into `main` by the transport cutover, which retires `transport`
-// and `connection` together with the tests bound to their internals.
+//
+// NOT yet serving traffic: `main` below still routes through `transport`. This is
+// staged, exercised only by
+// `tests::upstream_http_transport_round_trips_initialize_through_the_bridge`,
+// which proves an `initialize` crosses the SDK transport and the NATS bridge.
+// Wiring it into `main` retires `transport` and `connection` along with the tests
+// bound to their internals, so the cutover lands as its own change.
 #[cfg_attr(not(test), allow(dead_code))]
 mod component;
 mod config;

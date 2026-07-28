@@ -105,7 +105,14 @@ while IFS=$'\t' read -r name recorded; do
   agent-client-protocol | agent-client-protocol-schema | agent-client-protocol-derive) continue ;;
   esac
   companion_checked=$((companion_checked + 1))
-  latest="$(crates_io "$name" || echo unknown)"
+  # Fail rather than fall back to a sentinel. A sentinel never equals the recorded
+  # version, so a transient crates.io blip or a rate limit would read as a release
+  # and open or rewrite a drift issue. The core and schema lookups above already
+  # abort on fetch failure; match them.
+  if ! latest="$(crates_io "$name")" || [[ -z "$latest" ]]; then
+    echo "Failed to look up $name on crates.io; refusing to report a fetch failure as drift" >&2
+    exit 1
+  fi
   echo "  companion $name recorded=$recorded latest=$latest"
   if [[ "$latest" != "$recorded" ]]; then
     companion_drift=true

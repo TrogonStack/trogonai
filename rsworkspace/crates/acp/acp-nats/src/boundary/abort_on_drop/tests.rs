@@ -44,3 +44,18 @@ async fn finished_task_reports_finished() {
     let _ = guard.handle_mut().await;
     assert!(guard.is_finished());
 }
+
+/// Regression: `abort_and_wait` after the handle has already been awaited.
+///
+/// A caller that races `handle_mut()` in a `select!` and then unconditionally
+/// cleans up hits this sequence on the task's normal-exit path. Awaiting a
+/// `JoinHandle` twice panics, so `abort_and_wait` must tolerate an
+/// already-awaited handle rather than relying on every call site to guard it.
+#[tokio::test]
+async fn abort_and_wait_tolerates_an_already_awaited_handle() {
+    let mut guard = AbortOnDrop::new(tokio::spawn(async {}));
+    let _ = guard.handle_mut().await;
+    assert!(guard.is_finished());
+
+    guard.abort_and_wait().await;
+}

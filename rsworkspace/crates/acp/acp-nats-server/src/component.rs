@@ -99,7 +99,9 @@ where
                     }
                 }
 
-                client_task.abort_and_wait().await;
+                if !client_task.is_finished() {
+                    client_task.abort_and_wait().await;
+                }
                 Ok(())
             }
         })
