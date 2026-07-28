@@ -418,3 +418,41 @@ async fn an_unreadable_body_fails_instead_of_truncating() {
         "a consumed body must surface as a failure, not a successful-looking truncation"
     );
 }
+
+/// A present-but-unparseable header is a client bug, not the same as sending none.
+/// The hand-rolled transport answered `400` here and parsing straight to an
+/// `Option` would silently accept it.
+#[tokio::test]
+async fn a_malformed_protocol_version_header_is_rejected() {
+    for malformed in ["not-a-number", "", "1.0", "-1", "99999999999"] {
+        let status = versions_app(NegotiatedVersions::new(), INITIALIZE_REPLY, "application/json")
+            .oneshot(request_with(
+                Method::POST,
+                &[
+                    (ACP_CONNECTION_ID_HEADER, "conn-1"),
+                    (ACP_PROTOCOL_VERSION_HEADER, malformed),
+                ],
+            ))
+            .await
+            .unwrap()
+            .status();
+
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{malformed:?} is not a protocol version and must not be treated as absent"
+        );
+    }
+}
+
+/// Absent stays absent: the header is a SHOULD, so omitting it is legal.
+#[tokio::test]
+async fn an_absent_protocol_version_header_is_allowed() {
+    let status = versions_app(NegotiatedVersions::new(), INITIALIZE_REPLY, "application/json")
+        .oneshot(request_with(Method::POST, &[(ACP_CONNECTION_ID_HEADER, "conn-1")]))
+        .await
+        .unwrap()
+        .status();
+
+    assert_eq!(status, StatusCode::OK);
+}

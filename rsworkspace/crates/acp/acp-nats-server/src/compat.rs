@@ -209,21 +209,30 @@ fn unbracket(host: &str) -> &str {
 
 /// Validates `Acp-Protocol-Version` and learns each connection's negotiated version.
 ///
-/// Request side: a header that disagrees with what the connection negotiated is a
-/// client bug, answered with `400` rather than silently served. A header on a
-/// connection we have not seen initialize is allowed through, since upstream owns
-/// connection lifetime and may know ids this layer does not.
+/// Request side: a header that is present but not a number, or that disagrees with
+/// what the connection negotiated, is a client bug and is answered with `400`
+/// rather than silently served. A well-formed header on a connection we have not
+/// seen initialize is allowed through, since upstream owns connection lifetime and
+/// may know ids this layer does not.
 ///
 /// Response side: the `initialize` reply is the one message carrying both the
 /// connection id and the negotiated version, so it is inspected to populate the
 /// map. `DELETE` drops the entry; every other kind of close is invisible here, so
 /// the table is bounded by eviction rather than by clients behaving well.
 pub async fn track_protocol_version(versions: NegotiatedVersions, request: Request, next: Next) -> Response {
-    let provided = request
-        .headers()
-        .get(ACP_PROTOCOL_VERSION_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u16>().ok());
+    // Absent and malformed are different answers. Parsing straight to an `Option`
+    // would conflate them and let a garbage header through as though the client had
+    // sent nothing, which is exactly the validation this layer exists to restore.
+    let provided = match request.headers().get(ACP_PROTOCOL_VERSION_HEADER) {
+        None => None,
+        Some(value) => {
+            let Some(version) = value.to_str().ok().and_then(|value| value.trim().parse::<u16>().ok()) else {
+                warn!("Rejected request with a malformed Acp-Protocol-Version header");
+                return (StatusCode::BAD_REQUEST, "invalid Acp-Protocol-Version header").into_response();
+            };
+            Some(version)
+        }
+    };
 
     let connection_id = request
         .headers()

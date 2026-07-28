@@ -315,7 +315,6 @@ dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-http",
  "anyhow",
- "async-compat",
  "async-nats",
  "axum",
  "bytes",
@@ -323,7 +322,6 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -334,7 +332,6 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trogon-telemetry",
- "uuid",
 ]
 
 [[package]]
