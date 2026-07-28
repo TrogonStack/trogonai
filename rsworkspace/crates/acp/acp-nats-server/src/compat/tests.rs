@@ -456,3 +456,55 @@ async fn an_absent_protocol_version_header_is_allowed() {
 
     assert_eq!(status, StatusCode::OK);
 }
+
+/// Binding to `0.0.0.0` has its own policy: there is no single address to compare
+/// against, so loopback is allowed and anything else must match the request's own
+/// `Host`. This is the bound-to-all-interfaces production shape.
+#[tokio::test]
+async fn an_unspecified_bind_allows_loopback_or_the_request_host() {
+    const UNSPECIFIED: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+
+    assert_eq!(
+        origin_status(UNSPECIFIED, Method::POST, &[("origin", "http://localhost:8080")]).await,
+        StatusCode::OK,
+        "loopback is allowed when bound to every interface"
+    );
+    assert_eq!(
+        origin_status(
+            UNSPECIFIED,
+            Method::POST,
+            &[("origin", "http://acp.example"), ("host", "acp.example")]
+        )
+        .await,
+        StatusCode::OK,
+        "an origin matching the request host is allowed"
+    );
+    assert_eq!(
+        origin_status(
+            UNSPECIFIED,
+            Method::POST,
+            &[("origin", "http://evil.example"), ("host", "acp.example")]
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "an origin matching neither loopback nor the request host is rejected"
+    );
+    assert_eq!(
+        origin_status(UNSPECIFIED, Method::POST, &[("origin", "http://evil.example")]).await,
+        StatusCode::FORBIDDEN,
+        "with no Host to compare against, a non-loopback origin is rejected"
+    );
+}
+
+/// `DELETE` can name a connection this layer never recorded, so `forget` must be a
+/// no-op rather than disturbing the eviction queue.
+#[test]
+fn forgetting_an_untracked_connection_is_a_no_op() {
+    let versions = NegotiatedVersions::new();
+    versions.record("conn-1".to_owned(), 1);
+
+    versions.forget("never-recorded");
+
+    assert_eq!(versions.tracked(), 1, "an unknown id must not disturb the table");
+    assert_eq!(versions.get("conn-1"), Some(1));
+}
