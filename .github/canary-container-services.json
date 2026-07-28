@@ -3,5 +3,10 @@
     "image": "trogonai/trogon-gateway",
     "context": "./rsworkspace",
     "dockerfile": "./devops/docker/compose/services/trogon-gateway/Dockerfile"
+  },
+  "chat-bridge-telegram": {
+    "image": "trogonai/chat-bridge-telegram",
+    "context": "./rsworkspace",
+    "dockerfile": "./devops/docker/compose/services/chat-bridge-telegram/Dockerfile"
   }
 }

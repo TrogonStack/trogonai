@@ -1,0 +1,15 @@
+[package]
+name = "trogon-chat"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
