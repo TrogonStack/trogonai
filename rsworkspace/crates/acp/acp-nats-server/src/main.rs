@@ -1,31 +1,19 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod acp_connection_id;
-// Bridge-backed component for the SDK's own HTTP/WebSocket transport.
-//
-// NOT yet serving traffic: `main` below still routes through `transport`. This is
-// staged, exercised only by
-// `tests::upstream_http_transport_round_trips_initialize_through_the_bridge`,
-// which proves an `initialize` crosses the SDK transport and the NATS bridge.
-// Wiring it into `main` retires `transport` and `connection` along with the tests
-// bound to their internals, so the cutover lands as its own change.
-#[cfg_attr(not(test), allow(dead_code))]
+mod compat;
 mod component;
 mod config;
-mod connection;
 mod constants;
-mod transport;
 
-use tokio::sync::{mpsc, watch};
-use tracing::info;
-use transport::{AppState, ManagerRequest};
+use component::NatsAgentComponent;
+use tokio::sync::watch;
 
 #[cfg(not(coverage))]
 use {
     acp_nats::nats,
     clap::Parser,
     std::net::SocketAddr,
-    tracing::error,
+    tracing::{error, info},
     trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
     trogon_telemetry::{ResourceAttribute, ServiceName},
 };
@@ -52,34 +40,12 @@ async fn main() -> anyhow::Result<()> {
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(js_context);
 
     let (shutdown_tx, _) = watch::channel(false);
-    let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
-    let connection_runtime = build_connection_runtime()?;
-
-    let conn_thread = std::thread::Builder::new().name(THREAD_NAME.into()).spawn(move || {
-        run_connection_thread(
-            connection_runtime,
-            manager_rx,
-            nats_client,
-            js_client,
-            server_config.acp,
-        )
-    })?;
-
-    let state = AppState {
-        bind_host: server_config.host,
-        manager_tx,
-        shutdown_tx: shutdown_tx.clone(),
-    };
-
-    let app = trogon_std::telemetry::http::instrument_router(
-        axum::Router::new()
-            .route(
-                ACP_ENDPOINT,
-                axum::routing::get(transport::get)
-                    .post(transport::post)
-                    .delete(transport::delete),
-            )
-            .with_state(state),
+    let app = build_router(
+        nats_client,
+        js_client,
+        server_config.acp,
+        server_config.host,
+        &shutdown_tx,
     );
 
     let addr = SocketAddr::from((server_config.host, server_config.port));
@@ -87,25 +53,21 @@ async fn main() -> anyhow::Result<()> {
 
     info!(address = %addr, "Listening for ACP transport connections");
 
+    let drain_tx = shutdown_tx.clone();
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown_signal().await;
             info!("Shutdown signal received, stopping server");
-            let _ = shutdown_tx.send(true);
+            // Every live connection selects on this, so signalling here is what
+            // ends them: `axum` only stops accepting, it cannot close an
+            // in-flight SSE or WebSocket stream on its own.
+            let _ = drain_tx.send(true);
         })
         .await;
 
     match &result {
         Ok(()) => info!("ACP remote transport bridge stopped"),
         Err(e) => error!(error = %e, "ACP remote transport bridge stopped with error"),
-    }
-
-    // `serve` returning drops the Router (and its AppState.conn_tx), which
-    // closes the channel and lets the connection thread's recv-loop exit and
-    // drain active connections. Wait for that drain to finish before tearing
-    // down telemetry.
-    if let Err(e) = conn_thread.join() {
-        error!("Connection thread panicked: {e:?}");
     }
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
@@ -118,102 +80,44 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(coverage)]
 fn main() {}
 
-use constants::{ACP_ENDPOINT, THREAD_NAME};
-
-fn build_connection_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| anyhow::anyhow!("failed to create per-connection runtime: {error}"))
-}
-
-/// Runs a single-threaded tokio runtime with a `LocalSet`.
+/// Builds the served router: the SDK's transport, plus the behaviors it omits.
 ///
-/// The client proxy no longer needs this: `acp_nats::client::run` is `Send` and
-/// spawns with `tokio::spawn`. What still lives here are the hand-rolled
-/// connection actors, whose byte pumps and per-connection state are driven with
-/// `spawn_local`. Replacing those with an SDK-owned transport would retire this
-/// thread entirely.
-fn run_connection_thread<N, J>(
-    rt: tokio::runtime::Runtime,
-    manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
+/// The factory runs once per connection, so process-wide values (the NATS
+/// clients, the config, the instrumentation scope) are created here and cloned
+/// in rather than resolved per connection.
+fn build_router<N, J>(
     nats_client: N,
     js_client: J,
-    config: acp_nats::Config,
-) where
+    acp_config: acp_nats::Config,
+    bind_host: std::net::IpAddr,
+    shutdown_tx: &watch::Sender<bool>,
+) -> axum::Router
+where
     N: acp_nats::RequestClient
         + acp_nats::PublishClient
         + acp_nats::FlushClient
         + acp_nats::SubscribeClient
         + Clone
         + Send
+        + Sync
         + 'static,
-    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Send + 'static,
+    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + Clone + Send + Sync + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
 {
-    let local = tokio::task::LocalSet::new();
-    rt.block_on(local.run_until(process_connections(manager_rx, nats_client, js_client, config)));
+    let meter = trogon_telemetry::meter("acp-nats-server");
+    let shutdown_for_factory = shutdown_tx.clone();
 
-    // run_until returns once process_connections completes, but
-    // sub-tasks spawned by connection handlers (pumps,
-    // AgentSideConnection internals) may still be live on the
-    // LocalSet. Drive them for a bounded window so WebSocket close
-    // frames are sent and per-connection cleanup finishes, without
-    // blocking forever on stuck sub-tasks (e.g. a hanging NATS
-    // request that never resolves).
-    let drain = std::time::Duration::from_secs(5);
-    rt.block_on(local.run_until(async { tokio::time::sleep(drain).await }));
-    info!("Local thread exiting");
-}
-
-async fn process_connections<N, J>(
-    mut manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
-    nats_client: N,
-    js_client: J,
-    config: acp_nats::Config,
-) where
-    N: acp_nats::RequestClient
-        + acp_nats::PublishClient
-        + acp_nats::FlushClient
-        + acp_nats::SubscribeClient
-        + Clone
-        + Send
-        + 'static,
-    J: acp_nats::JetStreamPublisher + acp_nats::JetStreamGetStream + 'static,
-    trogon_nats::jetstream::JsMessageOf<J>: trogon_nats::jetstream::JsRequestMessage,
-{
-    let mut websocket_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let mut http_connection_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let mut http_connections = std::collections::HashMap::new();
-
-    while let Some(request) = manager_rx.recv().await {
-        transport::process_manager_request(
-            request,
-            &mut http_connections,
-            &mut websocket_handles,
-            &mut http_connection_handles,
-            &nats_client,
-            &js_client,
-            &config,
+    let server = agent_client_protocol_http::AcpHttpServer::new(move || {
+        NatsAgentComponent::new(
+            nats_client.clone(),
+            js_client.clone(),
+            acp_config.clone(),
+            meter.clone(),
+            shutdown_for_factory.subscribe(),
         )
-        .await;
-    }
+    });
 
-    let active = websocket_handles.iter().filter(|h| !h.is_finished()).count()
-        + http_connection_handles.iter().filter(|h| !h.is_finished()).count();
-    info!(
-        active_connections = active,
-        "Connection channel closed, draining active connections"
-    );
-
-    for handle in websocket_handles {
-        let _ = handle.await;
-    }
-    for handle in http_connection_handles {
-        let _ = handle.await;
-    }
-
-    info!("All connections drained");
+    trogon_std::telemetry::http::instrument_router(compat::apply_layers(server.into_router(), bind_host))
 }
 
 #[cfg(test)]

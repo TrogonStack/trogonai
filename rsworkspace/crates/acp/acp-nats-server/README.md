@@ -14,7 +14,7 @@ graph LR
 
 ## Features
 
-- Streamable HTTP transport on `/acp` with a connection-scoped SSE stream
+- Streamable HTTP transport on `/acp` with connection-scoped and session-scoped SSE streams
 - WebSocket upgrade on `/acp`
 - Multiple concurrent ACP connections sharing the same NATS bridge
 - OpenTelemetry integration (logs, metrics, traces)
@@ -57,11 +57,11 @@ curl -N \
   http://127.0.0.1:8080/acp
 ```
 
-`POST /acp` returns `200 OK` with JSON only for `initialize`; follow-up POST requests return `202 Accepted` immediately and their JSON-RPC responses arrive on the connection-scoped `GET /acp` stream. Session-scoped POST requests must include both `Acp-Connection-Id` and `Acp-Session-Id`. `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`.
+`POST /acp` returns `200 OK` with JSON only for `initialize`; follow-up POST requests return `202 Accepted` immediately and their JSON-RPC responses arrive on a `GET /acp` stream. Which stream depends on the message: anything carrying a `sessionId` goes to that session's stream, so a `GET` wanting session traffic (a `session/update`, a `session/load` reply) must send `Acp-Session-Id`; everything else goes to the connection stream. A session-scoped `POST` may send `Acp-Session-Id`, but the session is otherwise recovered from `params.sessionId`. `DELETE /acp` terminates a connection. The WebSocket upgrade response and HTTP initialize response both include `Acp-Connection-Id`; a *failed* `initialize` returns none, since no connection survives it.
 
 After `initialize`, the ACP transport spec says HTTP clients SHOULD send `Acp-Protocol-Version` on `POST`/`GET`/`DELETE`. The server validates it when present and rejects mismatches against the negotiated ACP protocol version for that connection.
 
-When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`.
+When clients send an `Origin` header, `/acp` validates it against the bound host and rejects disallowed origins with `403 Forbidden`. Browser WebSocket upgrades are refused outright: the underlying transport rejects any upgrade carrying an `Origin`. Non-browser clients send none and are unaffected.
 
 ## Configuration
 
