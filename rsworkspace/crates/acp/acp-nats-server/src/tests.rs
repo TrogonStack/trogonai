@@ -1041,3 +1041,66 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         .expect("server task did not shut down");
     conn_thread.join().unwrap();
 }
+
+/// Builds the router from the SDK's own HTTP transport, driving the NATS bridge
+/// through `NatsAgentComponent` instead of the hand-rolled connection actors.
+fn build_upstream_app(nats_mock: AdvancedMockNatsClient) -> (axum::Router, watch::Sender<bool>) {
+    let (shutdown_tx, _) = watch::channel(false);
+    let config = test_config();
+    let shutdown_for_factory = shutdown_tx.clone();
+
+    let router = agent_client_protocol_http::AcpHttpServer::new(move || {
+        crate::component::NatsAgentComponent::new(
+            nats_mock.clone(),
+            MockJs::new(),
+            config.clone(),
+            shutdown_for_factory.subscribe(),
+        )
+    })
+    .with_options(agent_client_protocol_http::ServerOptions {
+        path: ACP_ENDPOINT.to_string(),
+        cors: agent_client_protocol_http::CorsOptions::Disabled,
+        health_endpoint: false,
+    })
+    .into_router();
+
+    (router, shutdown_tx)
+}
+
+/// The adoption gate: an `initialize` must round-trip from a real HTTP request,
+/// through the SDK-owned transport, across the NATS bridge, and back.
+#[tokio::test]
+async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
+    let nats_mock = AdvancedMockNatsClient::new();
+    let _injector = nats_mock.inject_messages();
+    nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+    let (app, shutdown_tx) = build_upstream_app(nats_mock);
+
+    let response = app
+        .clone()
+        .oneshot(http_post_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().get(ACP_CONNECTION_ID_HEADER).is_some(),
+        "upstream transport must return a connection id"
+    );
+
+    let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
+    assert_eq!(body["id"], 1, "response must correlate to the request id");
+    assert_eq!(
+        body["result"]["protocolVersion"], 0,
+        "the bridge's NATS reply must reach the HTTP caller"
+    );
+
+    shutdown_tx.send(true).unwrap();
+}

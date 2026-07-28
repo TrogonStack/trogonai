@@ -1,6 +1,12 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod acp_connection_id;
+// Bridge-backed component for the SDK's own HTTP/WebSocket transport.
+// Proven end-to-end by `tests::upstream_http_transport_round_trips_initialize_through_the_bridge`
+// and wired into `main` by the transport cutover, which retires `transport`
+// and `connection` together with the tests bound to their internals.
+#[cfg_attr(not(test), allow(dead_code))]
+mod component;
 mod config;
 mod connection;
 mod constants;
