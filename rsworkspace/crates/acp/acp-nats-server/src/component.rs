@@ -14,11 +14,30 @@ use agent_client_protocol::schema::v1::SessionNotification;
 use agent_client_protocol::{Agent, Client, ConnectTo, Result};
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 
 /// Matches the capacity the hand-rolled transport used for the same channel.
 const NOTIFICATION_CHANNEL_CAPACITY: usize = 64;
+
+/// Maps the client proxy's join result onto the connection's outcome.
+///
+/// A `JoinError` means the proxy panicked or was cancelled out from under us, so
+/// the connection did not close cleanly. Reporting `Ok` there would tell the SDK
+/// transport the peer disconnected normally and lose the failure, which is what
+/// the WebSocket and stdio paths avoid by inspecting this result.
+fn client_task_outcome(result: std::result::Result<(), tokio::task::JoinError>) -> Result<()> {
+    match result {
+        Ok(()) => {
+            info!("Client proxy stopped");
+            Ok(())
+        }
+        Err(source) => {
+            error!(error = %source, "Client proxy ended with error");
+            Err(agent_client_protocol::Error::into_internal_error(source))
+        }
+    }
+}
 
 /// One ACP connection's worth of bridge, awaiting a transport to drive it.
 pub struct NatsAgentComponent<N, J> {
@@ -92,17 +111,18 @@ where
                 // Hold the connection open until the peer disconnects (handled by
                 // `connect_agent_boundary_with`), the client proxy stops, or the
                 // process is draining. Returning here tears the connection down.
-                tokio::select! {
-                    _ = client_task.handle_mut() => {}
+                let outcome = tokio::select! {
+                    result = client_task.handle_mut() => client_task_outcome(result),
                     _ = shutdown_rx.wait_for(|draining| *draining) => {
                         info!("Draining ACP connection for shutdown");
+                        Ok(())
                     }
-                }
+                };
 
                 if !client_task.is_finished() {
                     client_task.abort_and_wait().await;
                 }
-                Ok(())
+                outcome
             }
         })
         .await;
@@ -121,5 +141,33 @@ where
                 Err(error)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_task_outcome;
+
+    /// A panicking client proxy must not read as a clean disconnect.
+    #[tokio::test]
+    async fn a_panicked_client_proxy_becomes_an_error() {
+        let join_error = tokio::spawn(async { panic!("client proxy exploded") })
+            .await
+            .expect_err("the task panicked, so joining must fail");
+        assert!(join_error.is_panic());
+
+        let outcome = client_task_outcome(Err(join_error));
+
+        let error = outcome.expect_err("a JoinError must surface as a connection error");
+        assert_eq!(
+            error.code,
+            agent_client_protocol::ErrorCode::InternalError,
+            "the SDK transport should see an internal error, not a clean close"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_clean_client_proxy_exit_stays_ok() {
+        assert!(client_task_outcome(Ok(())).is_ok());
     }
 }
