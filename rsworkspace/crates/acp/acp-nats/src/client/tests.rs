@@ -10,6 +10,7 @@ use agent_client_protocol::schema::v1::{
 use async_nats::header::HeaderMap;
 use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 use trogon_std::time::SystemClock;
@@ -396,7 +397,7 @@ async fn mock_client_request_permission_returns_err() {
 async fn run_returns_early_when_subscribe_fails() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
+    let client = Arc::new(MockClient::new());
 
     run(nats, client, bridge).await;
 }
@@ -408,7 +409,7 @@ async fn run_processes_messages_then_exits_when_stream_ends() {
         .run_until(async {
             let nats = MockNatsClient::new();
             let bridge = make_bridge(nats.clone());
-            let client = Rc::new(MockClient::new());
+            let client = Arc::new(MockClient::new());
 
             let notification = SessionNotification::new(
                 "sess1",
@@ -1023,8 +1024,8 @@ async fn dispatch_client_method_dispatches_elicitation_complete() {
 async fn process_message_invalid_subject_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(0usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", None);
     process_message(msg, &nats, client, bridge, &in_flight, 256).await;
@@ -1036,8 +1037,8 @@ async fn process_message_invalid_subject_no_reply_does_not_publish() {
 async fn process_message_invalid_subject_with_reply_is_ignored() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(0usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", Some("_INBOX.reply"));
     process_message(msg, &nats, client, bridge, &in_flight, 256).await;
@@ -1049,8 +1050,8 @@ async fn process_message_invalid_subject_with_reply_is_ignored() {
 async fn process_message_backpressure_no_reply_does_not_publish() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let msg = make_msg("acp.session.sess1.client.session.update", None, b"{}", None);
     process_message(msg, &nats, client, bridge, &in_flight, 1).await;
@@ -1062,8 +1063,8 @@ async fn process_message_backpressure_no_reply_does_not_publish() {
 async fn process_message_backpressure_with_reply_publishes_error() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1086,8 +1087,8 @@ async fn process_message_backpressure_with_reply_flush_failure_exercises_warn_pa
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_flush();
     let bridge = make_bridge_advanced(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1110,8 +1111,8 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_publish();
     let bridge = make_bridge_advanced(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1133,8 +1134,8 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
 async fn process_message_backpressure_first_serialize_fails_uses_fallback() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
-    let client = Rc::new(MockClient::new());
-    let in_flight = Rc::new(Cell::new(1usize));
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(1));
 
     let (headers, payload) = crate::client::test_support::encode_wire_request(
         "fs/read_text_file",
@@ -1159,8 +1160,8 @@ async fn process_message_valid_dispatch_spawns_task() {
         .run_until(async {
             let nats = MockNatsClient::new();
             let bridge = make_bridge(nats.clone());
-            let client = Rc::new(MockClient::new());
-            let in_flight = Rc::new(Cell::new(0usize));
+            let client = Arc::new(MockClient::new());
+            let in_flight = Arc::new(AtomicUsize::new(0));
 
             let notification = SessionNotification::new(
                 "sess1",
@@ -1182,4 +1183,28 @@ async fn process_message_valid_dispatch_spawns_task() {
             assert_eq!(client.notifications.lock().unwrap().len(), 1);
         })
         .await;
+}
+
+/// Compile-time guard: the client proxy must stay `Send`.
+///
+/// The SDK's `ConnectTo::connect_to` returns `impl Future<Output = Result<()>> + Send`,
+/// so anything that drives the bridge from an SDK-owned transport has to be `Send`
+/// end to end. This test asserts the property rather than the mechanism: reintroducing
+/// an `Rc`, a `Cell`, or a `spawn_local` anywhere under `client::run` fails to compile
+/// here instead of surfacing as an unsatisfiable bound at a distant call site.
+#[test]
+fn client_proxy_stays_send_for_sdk_transports() {
+    const fn assert_send<T: Send>() {}
+    fn assert_send_val<T: Send>(_: &T) {}
+
+    assert_send::<crate::boundary::ConnectionClient>();
+    assert_send::<Arc<MockClient>>();
+
+    let nats = MockNatsClient::new();
+    let bridge = make_bridge(nats.clone());
+    let client = Arc::new(MockClient::new());
+
+    let future = run(nats, client, bridge);
+    assert_send_val(&future);
+    drop(future);
 }

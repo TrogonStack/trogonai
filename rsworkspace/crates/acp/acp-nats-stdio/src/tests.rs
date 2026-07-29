@@ -59,17 +59,7 @@ async fn run_bridge_shuts_down_on_signal() {
     let stdin = async_compat::Compat::new(reader);
     let stdout = async_compat::Compat::new(writer2);
 
-    let local = tokio::task::LocalSet::new();
-    let result = local
-        .run_until(run_bridge(
-            mock,
-            MockJs::new(),
-            &config,
-            stdout,
-            stdin,
-            std::future::ready(()),
-        ))
-        .await;
+    let result = run_bridge(mock, MockJs::new(), &config, stdout, stdin, std::future::ready(())).await;
 
     assert!(result.is_ok());
 }
@@ -92,17 +82,7 @@ async fn run_bridge_exits_on_io_close() {
     let stdin = async_compat::Compat::new(reader);
     let stdout = async_compat::Compat::new(writer2);
 
-    let local = tokio::task::LocalSet::new();
-    let result = local
-        .run_until(run_bridge(
-            mock,
-            MockJs::new(),
-            &config,
-            stdout,
-            stdin,
-            std::future::pending(),
-        ))
-        .await;
+    let result = run_bridge(mock, MockJs::new(), &config, stdout, stdin, std::future::pending()).await;
 
     assert!(result.is_ok());
 }

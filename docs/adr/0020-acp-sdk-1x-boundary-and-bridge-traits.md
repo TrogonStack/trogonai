@@ -81,6 +81,79 @@ The adapters are shared by `acp-nats-server` (WebSocket and HTTP duplex) and
 `acp-nats`. That module is the single SDK-connection-aware part of the crate;
 the NATS routing core remains free of connection machinery.
 
+### 4. Scope correction: the HTTP/WebSocket boundary was never evaluated
+
+> Added 2026-07-27.
+
+Decision 1 above asks one question, "should the official transports replace the
+NATS transport", and answers it correctly: no. But `agent-client-protocol-http`
+is named in the Context and then never assessed on its own terms, and decision 1
+already concedes that the WebSocket duplex in `acp-nats-server` and stdio in
+`acp-nats-stdio` *are* true byte-stream boundaries. Those are precisely the
+boundaries that crate serves. The question that went unasked is therefore
+"should the official HTTP/WebSocket transport serve our byte-stream boundary",
+and nothing in the original reasoning answers it.
+
+The consequence is measurable. `acp-nats-server/src/transport.rs` hand-rolls the
+draft remote transport in 1,507 lines against an official crate that uses the
+same header names (`acp-connection-id`, `acp-session-id`), the same
+initialize-creates-the-connection contract, the same session-scoped method list,
+and the same web framework. Reuse there would delete most of that file.
+
+This ADR is not reversed, because the reuse is not currently a good trade:
+
+- Four behaviors we depend on have no equivalent in the official crate, and
+  three of them are places where we are *ahead* of it, not merely different:
+  `Acp-Protocol-Version` validation (the transport spec says clients SHOULD send
+  it and upstream does not read it at all), server-side `Origin` enforcement on
+  every verb rather than only the WebSocket upgrade, and a graceful drain hook.
+  The fourth, UUIDv7 connection ids, is a preference.
+- `ConnectionRegistry` is entirely `pub(crate)`, so none of the four can be
+  layered on from outside `into_router()`. Closing them means upstream PRs or a
+  fork.
+- At 2.0.0 the crate has no other dependents on crates.io. Trading tested code
+  for an unexercised major version is the wrong direction today, and gets less
+  wrong every release.
+
+What changes now is only that the gap is tracked instead of invisible: the
+`## Companion crates` table in `docs/architecture/acp-conformance.md` records
+every companion crate and why it is or is not adopted, and the freshness task
+reads that table so a companion release reaches us the same way a core release
+does. Revisit when the four gaps close or when adoption elsewhere demonstrates
+the crate is exercised.
+
+### 5. The HTTP/WebSocket boundary now uses the official transport
+
+> Added 2026-07-28. Supersedes the "not currently a good trade" conclusion in
+> decision 4, which was argued from a blocker that turned out not to exist.
+
+Decision 4 read the `Send` bound on `ConnectTo` as a structural obstacle. It is
+not: every `ClientHandler` implementation was already `Send + Sync`, and the
+`!Send`-ness came from one `Rc`, one `Cell`, and two `spawn_local` calls, all
+incidental. Converting them was mechanical, removed a scalability ceiling where
+all client-side work for every connection shared one thread, and retired the
+`LocalSet` from `acp-nats-stdio` entirely.
+
+With that gone, `acp-nats-server` serves `AcpHttpServer` over a per-connection
+`NatsAgentComponent`, and `transport.rs` plus `connection.rs` are deleted: 3,052
+lines including their tests. `compat.rs` layers back the three behaviors upstream
+omits, and both `main` and the tests build the router through the same function
+so the served and tested stacks cannot drift.
+
+Decision 1 stands unchanged and is the point: the NATS leg is still hand-rolled,
+because its wire format carries no JSON-RPC envelope at all (method identity is
+the subject token, the id is a header, the body is bare params) and no
+byte-stream transport can express that. What moved upstream is only the part that
+was always a byte-stream boundary.
+
+Two costs were accepted rather than solved. Connection ids are now UUIDv4 because
+`ConnectionRegistry::next_connection_id` is private, so `AcpConnectionId` no
+longer governs the wire and was deleted. And a browser WebSocket upgrade is
+rejected, because `ServerOptions::default` refuses any request carrying an
+`Origin` header on that path; non-browser clients are unaffected. Both are
+recorded, with the rest of the observable differences, under "Remote transport
+behavior changes" in the conformance doc.
+
 ## Consequences
 
 - The bridge's method surface is defined in one place (the bridge traits), and
@@ -94,3 +167,9 @@ the NATS routing core remains free of connection machinery.
   work apply at the boundaries without constraining the NATS leg.
 - We keep full control of JetStream durability semantics, backpressure, and
   keepalives, which the SDK transport abstraction does not model.
+- The remote transport is upstream's as of decision 5, so HTTP, WebSocket, and
+  stdio all share one framing implementation and batch handling lives in exactly
+  one place. The NATS leg remains ours for the reason decision 1 gives.
+- Companion crates are tracked in the conformance doc and watched by the
+  freshness task, so an upstream release re-tests these decisions instead of
+  letting them drift.
