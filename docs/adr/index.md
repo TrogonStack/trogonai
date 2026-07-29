@@ -46,3 +46,4 @@ future implementation work.
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
 - [ADR#0040: Contract Field Vocabulary: Identifiers, Handles, and Display Labels](./0040-contract-field-vocabulary.md)
+- [ADR#0041: Canonical MCP JSON-RPC Bodies over NATS (Draft)](./0041-canonical-mcp-jsonrpc-bodies-over-nats.md)

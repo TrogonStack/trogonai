@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::Message;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::StreamExt;
 use jsonrpc_nats::{Direction, TransportError, jsonrpc_publish_with_timeout, jsonrpc_request_raw};
 use rmcp::model::{JsonRpcMessage, RequestId};
@@ -118,6 +119,7 @@ where
 impl<R, N> Transport<R> for NatsTransport<R, N>
 where
     R: ServiceRole,
+    R::Not: rmcp::model::GetExtensions,
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     N::RequestError: 'static,
     N::PublishError: 'static,
@@ -304,80 +306,91 @@ fn method_for_message<R: ServiceRole>(item: &TxJsonRpcMessage<R>) -> Result<Stri
         .ok_or(NatsTransportError::MissingMethod)
 }
 
-fn method_suffix(method: &str) -> Result<&'static str, NatsTransportError> {
-    match method {
-        "initialize" => Ok("initialize"),
-        "ping" => Ok("ping"),
-        "completion/complete" => Ok("completion.complete"),
-        "logging/setLevel" => Ok("logging.set_level"),
-        "prompts/list" => Ok("prompts.list"),
-        "prompts/get" => Ok("prompts.get"),
-        "resources/list" => Ok("resources.list"),
-        "resources/templates/list" => Ok("resources.templates.list"),
-        "resources/read" => Ok("resources.read"),
-        "resources/subscribe" => Ok("resources.subscribe"),
-        "resources/unsubscribe" => Ok("resources.unsubscribe"),
-        "tools/list" => Ok("tools.list"),
-        "tools/call" => Ok("tools.call"),
-        "tasks/get" => Ok("tasks.get"),
-        "tasks/list" => Ok("tasks.list"),
-        "tasks/result" => Ok("tasks.result"),
-        "tasks/cancel" => Ok("tasks.cancel"),
-        "notifications/cancelled" => Ok("notifications.cancelled"),
-        "notifications/progress" => Ok("notifications.progress"),
-        "notifications/message" => Ok("notifications.message"),
-        "notifications/resources/updated" => Ok("notifications.resources.updated"),
-        "notifications/resources/list_changed" => Ok("notifications.resources.list_changed"),
-        "notifications/tools/list_changed" => Ok("notifications.tools.list_changed"),
-        "notifications/prompts/list_changed" => Ok("notifications.prompts.list_changed"),
-        "notifications/elicitation/complete" => Ok("notifications.elicitation.complete"),
-        "sampling/createMessage" => Ok("sampling.create_message"),
-        "roots/list" => Ok("roots.list"),
-        "elicitation/create" => Ok("elicitation.create"),
-        "notifications/initialized" => Ok("notifications.initialized"),
-        "notifications/roots/list_changed" => Ok("notifications.roots.list_changed"),
-        _ => Err(NatsTransportError::UnsupportedMethod {
-            method: method.to_string(),
-        }),
-    }
+macro_rules! method_table {
+    ($(($method:literal, $suffix:literal)),+ $(,)?) => {
+        fn method_suffix(method: &str) -> Result<String, NatsTransportError> {
+            match method {
+                $($method => Ok($suffix.to_string()),)+
+                _ => Ok(custom_method_suffix(method)),
+            }
+        }
+
+        fn method_from_suffix(suffix: &str) -> Result<String, NatsTransportError> {
+            match suffix {
+                $($suffix => Ok($method.to_string()),)+
+                _ => method_from_custom_suffix(suffix),
+            }
+        }
+
+        #[cfg(test)]
+        pub(crate) const METHOD_TABLE: &[(&str, &str)] = &[
+            $(($method, $suffix)),+
+        ];
+    };
 }
 
-fn method_from_suffix(suffix: &str) -> Result<&'static str, NatsTransportError> {
-    match suffix {
-        "initialize" => Ok("initialize"),
-        "ping" => Ok("ping"),
-        "completion.complete" => Ok("completion/complete"),
-        "logging.set_level" => Ok("logging/setLevel"),
-        "prompts.list" => Ok("prompts/list"),
-        "prompts.get" => Ok("prompts/get"),
-        "resources.list" => Ok("resources/list"),
-        "resources.templates.list" => Ok("resources/templates/list"),
-        "resources.read" => Ok("resources/read"),
-        "resources.subscribe" => Ok("resources/subscribe"),
-        "resources.unsubscribe" => Ok("resources/unsubscribe"),
-        "tools.list" => Ok("tools/list"),
-        "tools.call" => Ok("tools/call"),
-        "tasks.get" => Ok("tasks/get"),
-        "tasks.list" => Ok("tasks/list"),
-        "tasks.result" => Ok("tasks/result"),
-        "tasks.cancel" => Ok("tasks/cancel"),
-        "notifications.cancelled" => Ok("notifications/cancelled"),
-        "notifications.progress" => Ok("notifications/progress"),
-        "notifications.message" => Ok("notifications/message"),
-        "notifications.resources.updated" => Ok("notifications/resources/updated"),
-        "notifications.resources.list_changed" => Ok("notifications/resources/list_changed"),
-        "notifications.tools.list_changed" => Ok("notifications/tools/list_changed"),
-        "notifications.prompts.list_changed" => Ok("notifications/prompts/list_changed"),
-        "notifications.elicitation.complete" => Ok("notifications/elicitation/complete"),
-        "sampling.create_message" => Ok("sampling/createMessage"),
-        "roots.list" => Ok("roots/list"),
-        "elicitation.create" => Ok("elicitation/create"),
-        "notifications.initialized" => Ok("notifications/initialized"),
-        "notifications.roots.list_changed" => Ok("notifications/roots/list_changed"),
-        _ => Err(NatsTransportError::UnsupportedMethod {
+fn custom_method_suffix(method: &str) -> String {
+    let encoded = if method.is_empty() {
+        "_".to_string()
+    } else {
+        URL_SAFE_NO_PAD.encode(method.as_bytes())
+    };
+    format!("custom.{encoded}")
+}
+
+fn method_from_custom_suffix(suffix: &str) -> Result<String, NatsTransportError> {
+    let encoded = suffix
+        .strip_prefix("custom.")
+        .ok_or_else(|| NatsTransportError::UnsupportedMethod {
             method: suffix.to_string(),
-        }),
-    }
+        })?;
+    let bytes = if encoded == "_" {
+        Vec::new()
+    } else {
+        URL_SAFE_NO_PAD
+            .decode(encoded)
+            .map_err(|_| NatsTransportError::InvalidCustomMethodSuffix {
+                suffix: suffix.to_string(),
+            })?
+    };
+    String::from_utf8(bytes).map_err(|_| NatsTransportError::InvalidCustomMethodSuffix {
+        suffix: suffix.to_string(),
+    })
+}
+
+method_table! {
+    ("initialize", "initialize"),
+    ("ping", "ping"),
+    ("server/discover", "server.discover"),
+    ("completion/complete", "completion.complete"),
+    ("logging/setLevel", "logging.set_level"),
+    ("prompts/list", "prompts.list"),
+    ("prompts/get", "prompts.get"),
+    ("resources/list", "resources.list"),
+    ("resources/templates/list", "resources.templates.list"),
+    ("resources/read", "resources.read"),
+    ("subscriptions/listen", "subscriptions.listen"),
+    ("resources/subscribe", "resources.subscribe"),
+    ("resources/unsubscribe", "resources.unsubscribe"),
+    ("tools/list", "tools.list"),
+    ("tools/call", "tools.call"),
+    ("tasks/get", "tasks.get"),
+    ("tasks/update", "tasks.update"),
+    ("tasks/cancel", "tasks.cancel"),
+    ("notifications/cancelled", "notifications.cancelled"),
+    ("notifications/progress", "notifications.progress"),
+    ("notifications/message", "notifications.message"),
+    ("notifications/resources/updated", "notifications.resources.updated"),
+    ("notifications/resources/list_changed", "notifications.resources.list_changed"),
+    ("notifications/tools/list_changed", "notifications.tools.list_changed"),
+    ("notifications/prompts/list_changed", "notifications.prompts.list_changed"),
+    ("notifications/tasks", "notifications.tasks"),
+    ("notifications/subscriptions/acknowledged", "notifications.subscriptions.acknowledged"),
+    ("sampling/createMessage", "sampling.create_message"),
+    ("roots/list", "roots.list"),
+    ("elicitation/create", "elicitation.create"),
+    ("notifications/initialized", "notifications.initialized"),
+    ("notifications/roots/list_changed", "notifications.roots.list_changed"),
 }
 
 fn method_from_subject<R: ServiceRole>(subject: &str) -> Result<String, NatsTransportError> {
@@ -392,7 +405,7 @@ fn method_from_subject<R: ServiceRole>(subject: &str) -> Result<String, NatsTran
         .split_once('.')
         .map(|(_, method_suffix)| method_suffix)
         .unwrap_or(suffix);
-    Ok(method_from_suffix(suffix)?.to_string())
+    method_from_suffix(suffix)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -425,6 +438,8 @@ pub enum NatsTransportError {
     MissingMethod,
     #[error("unsupported MCP method for NATS routing: {method}")]
     UnsupportedMethod { method: String },
+    #[error("invalid encoded custom MCP method suffix: {suffix}")]
+    InvalidCustomMethodSuffix { suffix: String },
     #[error("missing reply subject for MCP response")]
     MissingReplySubject,
     #[error("MCP NATS inbound queue is closed")]

@@ -86,6 +86,7 @@ struct MockResponse {
 #[derive(Clone)]
 pub struct AdvancedMockNatsClient {
     base: MockNatsClient,
+    requests: Arc<Mutex<Vec<PublishedMessage>>>,
     request_responses: Arc<Mutex<std::collections::HashMap<String, MockResponse>>>,
     should_fail_request: Arc<Mutex<bool>>,
     should_hang_request: Arc<Mutex<bool>>,
@@ -115,6 +116,7 @@ impl AdvancedMockNatsClient {
     pub fn new() -> Self {
         Self {
             base: MockNatsClient::new(),
+            requests: Arc::new(Mutex::new(Vec::new())),
             request_responses: Arc::new(Mutex::new(std::collections::HashMap::new())),
             should_fail_request: Arc::new(Mutex::new(false)),
             should_hang_request: Arc::new(Mutex::new(false)),
@@ -173,6 +175,24 @@ impl AdvancedMockNatsClient {
 
     pub fn published_headers(&self) -> Vec<async_nats::HeaderMap> {
         self.base.published_headers()
+    }
+
+    pub fn requested_headers(&self) -> Vec<async_nats::HeaderMap> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|message| message.headers.clone())
+            .collect()
+    }
+
+    pub fn requested_payloads(&self) -> Vec<bytes::Bytes> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|message| message.payload.clone())
+            .collect()
     }
 
     pub fn subscribed_to(&self) -> Vec<String> {
@@ -268,10 +288,15 @@ impl RequestClient for AdvancedMockNatsClient {
     async fn request_with_headers<S: ToSubject + Send>(
         &self,
         subject: S,
-        _headers: async_nats::HeaderMap,
-        _payload: bytes::Bytes,
+        headers: async_nats::HeaderMap,
+        payload: bytes::Bytes,
     ) -> Result<async_nats::Message, MockError> {
         let subject = subject.to_subject().to_string();
+        self.requests.lock().unwrap().push(PublishedMessage {
+            subject: subject.clone(),
+            payload,
+            headers,
+        });
         let should_hang = *self.should_hang_request.lock().unwrap();
         if should_hang {
             *self.should_hang_request.lock().unwrap() = false;

@@ -3,7 +3,7 @@ use proptest::prelude::*;
 use crate::direction::Direction;
 use crate::id::{RequestId, ResponseId};
 use crate::message::Message;
-use crate::{decode, encode, from_json_value, to_json_value};
+use crate::{decode, decode_canonical, encode, encode_canonical, from_json_value, to_json_value};
 
 fn arb_request_id() -> impl Strategy<Value = RequestId> {
     prop_oneof![
@@ -56,6 +56,16 @@ fn arb_message() -> impl Strategy<Value = Message> {
     ]
 }
 
+fn is_canonical_message(message: &Message) -> bool {
+    match message {
+        Message::Request { params, .. } | Message::Notification { params, .. } => {
+            params.is_object() || params.is_array()
+        }
+        Message::Success { id, .. } => !matches!(id, ResponseId::Null),
+        Message::Error { .. } => true,
+    }
+}
+
 proptest! {
     #[test]
     fn decode_encode_roundtrip_preserves_message(message in arb_message()) {
@@ -75,6 +85,21 @@ proptest! {
         let parsed = from_json_value(&json).unwrap();
         prop_assert_eq!(&parsed, &message);
         prop_assert_eq!(to_json_value(&parsed), json);
+    }
+
+    #[test]
+    fn canonical_wire_roundtrip_preserves_message(
+        message in arb_message().prop_filter("canonical message", is_canonical_message)
+    ) {
+        let wire = encode_canonical(&message).unwrap();
+        let direction = match message {
+            Message::Request { .. } | Message::Notification { .. } => Direction::Request,
+            Message::Success { .. } | Message::Error { .. } => Direction::Response,
+        };
+        let method = message.method();
+        let decoded = decode_canonical(direction, method, &wire.headers, &wire.body).unwrap();
+        prop_assert!(wire.headers.is_empty());
+        prop_assert_eq!(decoded, message);
     }
 
     #[test]

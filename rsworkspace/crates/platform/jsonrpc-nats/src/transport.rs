@@ -1,9 +1,8 @@
 //! Shared JSON-RPC over NATS transport helpers.
 //!
-//! Domain crates inject subject routing and typed params/results; these helpers
-//! own header merge, core request/reply, and fire-and-forget publish on the
-//! content-mode wire. Canonical JSON-RPC reconstruction stays at protocol edges
-//! (stdio, HTTP/SSE, WebSocket listeners) via the codec — not in domain code.
+//! Domain crates supply subject routing and encoded bodies. These helpers own
+//! header merge, core request/reply, and fire-and-forget publish for both legacy
+//! content-mode and canonical encodings.
 
 use std::time::Duration;
 
@@ -19,6 +18,20 @@ use crate::direction::Direction;
 use crate::error::CodecError;
 use crate::id::RequestId;
 use crate::message::Message;
+
+/// Overlay every header from an encoded message onto a base header map.
+pub fn merge_headers(mut base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
+    for (name, values) in overlay.iter() {
+        let Some((first, rest)) = values.split_first() else {
+            continue;
+        };
+        base.insert(name.clone(), first.clone());
+        for value in rest {
+            base.append(name.clone(), value.clone());
+        }
+    }
+    base
+}
 
 /// Overlay `Jsonrpc-*` headers from an encoded message onto a base header map.
 pub fn merge_jsonrpc_headers(mut base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
@@ -51,9 +64,8 @@ pub enum TransportError {
 
 /// Core NATS request/reply at the byte level: send `headers`/`body` with a
 /// timeout and return the raw response headers and body. Callers decode the
-/// response into their own representation — the generic [`Message`] (see
-/// [`jsonrpc_request_with_timeout`]) or a domain-typed message — so the typed
-/// decode stays out of the shared transport.
+/// response into their own representation, either the generic [`Message`] (see
+/// [`jsonrpc_request_with_timeout`]) or a domain-typed message.
 pub async fn jsonrpc_request_raw<N>(
     client: &N,
     subject: &str,
@@ -107,7 +119,7 @@ where
     }
 }
 
-/// Publish a content-mode encoded JSON-RPC notification or response.
+/// Publish an encoded JSON-RPC notification or response.
 pub async fn jsonrpc_publish<N>(
     client: &N,
     subject: &str,
@@ -117,7 +129,7 @@ pub async fn jsonrpc_publish<N>(
 where
     N: PublishClient + FlushClient,
 {
-    let headers = merge_jsonrpc_headers(base_headers, encoded.headers);
+    let headers = merge_headers(base_headers, encoded.headers);
     client
         .publish_with_headers(subject.to_string(), headers, encoded.body)
         .await
@@ -130,8 +142,8 @@ where
     })
 }
 
-/// Publish a content-mode encoded JSON-RPC message (notification or response)
-/// with a deadline covering both the publish and the flush.
+/// Publish an encoded JSON-RPC message with a deadline covering both the
+/// publish and the flush.
 pub async fn jsonrpc_publish_with_timeout<N>(
     client: &N,
     subject: &str,

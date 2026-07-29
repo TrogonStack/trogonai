@@ -5,7 +5,9 @@ use crate::constants::{HEADER_ERROR_CODE, HEADER_ID};
 use crate::direction::Direction;
 use crate::error::CodecError;
 use crate::id::encode_id_literal;
-use crate::{decode, encode, from_json_value};
+use crate::{
+    decode, decode_canonical, decode_canonical_value, encode, encode_canonical, encode_canonical_value, from_json_value,
+};
 use async_nats::header::HeaderMap;
 
 #[test]
@@ -166,4 +168,311 @@ fn from_json_value_parses_request_with_id() {
 fn from_json_value_rejects_error_without_code() {
     let value = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "error": { "message": "boom" } });
     assert!(matches!(from_json_value(&value), Err(CodecError::Deserialize(_))));
+}
+
+#[test]
+fn canonical_request_uses_complete_body_without_jsonrpc_headers() {
+    let message = Message::Request {
+        id: RequestId::String("request-1".to_string()),
+        method: "tools/list".to_string(),
+        params: serde_json::json!({"cursor": "next"}),
+    };
+
+    let wire = encode_canonical(&message).unwrap();
+
+    assert!(wire.headers.get(HEADER_ID).is_none());
+    assert!(wire.headers.get(HEADER_ERROR_CODE).is_none());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire.body).unwrap(),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "request-1",
+            "method": "tools/list",
+            "params": {"cursor": "next"}
+        })
+    );
+    assert_eq!(
+        decode_canonical(Direction::Request, Some("tools/list"), &wire.headers, &wire.body).unwrap(),
+        message
+    );
+}
+
+#[test]
+fn canonical_notification_uses_complete_body() {
+    let message = Message::Notification {
+        method: "notifications/progress".to_string(),
+        params: serde_json::json!({"progressToken": 7, "progress": 1}),
+    };
+
+    let wire = encode_canonical(&message).unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire.body).unwrap(),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/progress",
+            "params": {"progressToken": 7, "progress": 1}
+        })
+    );
+    assert_eq!(
+        decode_canonical(
+            Direction::Request,
+            Some("notifications/progress"),
+            &wire.headers,
+            &wire.body,
+        )
+        .unwrap(),
+        message
+    );
+}
+
+#[test]
+fn canonical_success_uses_complete_body_without_jsonrpc_headers() {
+    let message = Message::Success {
+        id: ResponseId::Number(9),
+        result: serde_json::json!({"resultType": "complete"}),
+    };
+
+    let wire = encode_canonical(&message).unwrap();
+
+    assert!(wire.headers.get(HEADER_ID).is_none());
+    assert!(wire.headers.get(HEADER_ERROR_CODE).is_none());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire.body).unwrap(),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "result": {"resultType": "complete"}
+        })
+    );
+    assert_eq!(
+        decode_canonical(Direction::Response, None, &wire.headers, &wire.body).unwrap(),
+        message
+    );
+}
+
+#[test]
+fn canonical_error_uses_complete_body_without_jsonrpc_headers() {
+    let message = Message::Error {
+        id: ResponseId::Number(9),
+        code: -32602,
+        message: "invalid params".to_string(),
+        data: Some(serde_json::json!({"field": "name"})),
+    };
+
+    let wire = encode_canonical(&message).unwrap();
+
+    assert!(wire.headers.get(HEADER_ID).is_none());
+    assert!(wire.headers.get(HEADER_ERROR_CODE).is_none());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&wire.body).unwrap(),
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "error": {
+                "code": -32602,
+                "message": "invalid params",
+                "data": {"field": "name"}
+            }
+        })
+    );
+    assert_eq!(
+        decode_canonical(Direction::Response, None, &wire.headers, &wire.body).unwrap(),
+        message
+    );
+}
+
+#[test]
+fn canonical_decode_rejects_method_projection_mismatch() {
+    let message = Message::Request {
+        id: RequestId::Number(1),
+        method: "tools/list".to_string(),
+        params: serde_json::json!({}),
+    };
+    let wire = encode_canonical(&message).unwrap();
+
+    assert!(matches!(
+        decode_canonical(Direction::Request, Some("resources/list"), &wire.headers, &wire.body),
+        Err(CodecError::MethodProjectionMismatch { projected, actual })
+            if projected == "resources/list" && actual == "tools/list"
+    ));
+}
+
+#[test]
+fn canonical_value_codec_preserves_absent_params_and_extension_members() {
+    let value = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "ping",
+        "x-vendor": {"trace": true}
+    });
+
+    let wire = encode_canonical_value(&value).unwrap();
+
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&wire.body).unwrap(), value);
+    assert_eq!(
+        decode_canonical_value(Direction::Request, Some("ping"), &wire.headers, &wire.body).unwrap(),
+        value
+    );
+}
+
+#[test]
+fn canonical_value_codec_rejects_invalid_jsonrpc_envelopes() {
+    let cases = [
+        (
+            "scalar params",
+            Direction::Request,
+            Some("ping"),
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": null}),
+        ),
+        (
+            "non-string method",
+            Direction::Request,
+            Some("ping"),
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": 7}),
+        ),
+        (
+            "notification with result",
+            Direction::Request,
+            Some("notify"),
+            serde_json::json!({"jsonrpc": "2.0", "method": "notify", "result": {}}),
+        ),
+        (
+            "request with error",
+            Direction::Request,
+            Some("ping"),
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "ping",
+                "error": {"code": -32603, "message": "boom"}
+            }),
+        ),
+        (
+            "response with params",
+            Direction::Response,
+            None,
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "params": {}, "result": {}}),
+        ),
+        (
+            "response without id",
+            Direction::Response,
+            None,
+            serde_json::json!({"jsonrpc": "2.0", "result": {}}),
+        ),
+        (
+            "success response with null id",
+            Direction::Response,
+            None,
+            serde_json::json!({"jsonrpc": "2.0", "id": null, "result": {}}),
+        ),
+        (
+            "response with result and error",
+            Direction::Response,
+            None,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {},
+                "error": {"code": -32603, "message": "boom"}
+            }),
+        ),
+        (
+            "response without result or error",
+            Direction::Response,
+            None,
+            serde_json::json!({"jsonrpc": "2.0", "id": 1}),
+        ),
+        (
+            "non-object error",
+            Direction::Response,
+            None,
+            serde_json::json!({"jsonrpc": "2.0", "id": 1, "error": "boom"}),
+        ),
+        (
+            "out-of-range error code",
+            Direction::Response,
+            None,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": 2147483648_i64, "message": "boom"}
+            }),
+        ),
+        (
+            "non-integer error code",
+            Direction::Response,
+            None,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": 1.5, "message": "boom"}
+            }),
+        ),
+        (
+            "non-string error message",
+            Direction::Response,
+            None,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": -32603, "message": 7}
+            }),
+        ),
+    ];
+
+    for (name, direction, method, value) in cases {
+        assert!(encode_canonical_value(&value).is_err(), "encode accepted {name}");
+        let body = serde_json::to_vec(&value).unwrap();
+        assert!(
+            decode_canonical_value(direction, method, &HeaderMap::new(), &body).is_err(),
+            "decode accepted {name}"
+        );
+    }
+}
+
+#[test]
+fn canonical_decode_accepts_matching_optional_legacy_projections() {
+    let message = Message::Error {
+        id: ResponseId::String("request-2".to_string()),
+        code: -32603,
+        message: "internal".to_string(),
+        data: None,
+    };
+    let wire = encode_canonical(&message).unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ID, "\"request-2\"");
+    headers.insert(HEADER_ERROR_CODE, "-32603");
+
+    assert_eq!(
+        decode_canonical(Direction::Response, None, &headers, &wire.body).unwrap(),
+        message
+    );
+}
+
+#[test]
+fn canonical_decode_rejects_mismatched_optional_legacy_projections() {
+    let message = Message::Error {
+        id: ResponseId::Number(3),
+        code: -32603,
+        message: "internal".to_string(),
+        data: None,
+    };
+    let wire = encode_canonical(&message).unwrap();
+    let mut id_headers = HeaderMap::new();
+    id_headers.insert(HEADER_ID, "4");
+    assert!(matches!(
+        decode_canonical(Direction::Response, None, &id_headers, &wire.body),
+        Err(CodecError::IdProjectionMismatch { .. })
+    ));
+
+    let mut code_headers = HeaderMap::new();
+    code_headers.insert(HEADER_ERROR_CODE, "-32602");
+    assert!(matches!(
+        decode_canonical(Direction::Response, None, &code_headers, &wire.body),
+        Err(CodecError::ErrorCodeProjectionMismatch {
+            projected: -32602,
+            actual: -32603
+        })
+    ));
 }

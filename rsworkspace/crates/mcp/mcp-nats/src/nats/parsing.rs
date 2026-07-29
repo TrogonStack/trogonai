@@ -1,116 +1,78 @@
 use crate::McpPeerId;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServerRequestMethod {
-    Initialize,
-    Ping,
-    Complete,
-    SetLoggingLevel,
-    ListPrompts,
-    GetPrompt,
-    ListResources,
-    ListResourceTemplates,
-    ReadResource,
-    SubscribeResource,
-    UnsubscribeResource,
-    ListTools,
-    CallTool,
-    GetTask,
-    ListTasks,
-    GetTaskResult,
-    CancelTask,
+macro_rules! suffix_method {
+    ($name:ident { $($variant:ident => $suffix:literal),+ $(,)? }) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum $name {
+            $($variant),+
+        }
+
+        impl $name {
+            fn from_suffix(suffix: &str) -> Option<Self> {
+                match suffix {
+                    $($suffix => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+
+            #[cfg(test)]
+            pub(crate) const SUFFIXES: &[&str] = &[$($suffix),+];
+        }
+    };
 }
 
-impl ServerRequestMethod {
-    fn from_suffix(suffix: &str) -> Option<Self> {
-        match suffix {
-            "initialize" => Some(Self::Initialize),
-            "ping" => Some(Self::Ping),
-            "completion.complete" => Some(Self::Complete),
-            "logging.set_level" => Some(Self::SetLoggingLevel),
-            "prompts.list" => Some(Self::ListPrompts),
-            "prompts.get" => Some(Self::GetPrompt),
-            "resources.list" => Some(Self::ListResources),
-            "resources.templates.list" => Some(Self::ListResourceTemplates),
-            "resources.read" => Some(Self::ReadResource),
-            "resources.subscribe" => Some(Self::SubscribeResource),
-            "resources.unsubscribe" => Some(Self::UnsubscribeResource),
-            "tools.list" => Some(Self::ListTools),
-            "tools.call" => Some(Self::CallTool),
-            "tasks.get" => Some(Self::GetTask),
-            "tasks.list" => Some(Self::ListTasks),
-            "tasks.result" => Some(Self::GetTaskResult),
-            "tasks.cancel" => Some(Self::CancelTask),
-            _ => None,
-        }
+suffix_method! {
+    ServerRequestMethod {
+        Initialize => "initialize",
+        Ping => "ping",
+        Discover => "server.discover",
+        Complete => "completion.complete",
+        SetLoggingLevel => "logging.set_level",
+        ListPrompts => "prompts.list",
+        GetPrompt => "prompts.get",
+        ListResources => "resources.list",
+        ListResourceTemplates => "resources.templates.list",
+        ReadResource => "resources.read",
+        SubscriptionsListen => "subscriptions.listen",
+        SubscribeResource => "resources.subscribe",
+        UnsubscribeResource => "resources.unsubscribe",
+        ListTools => "tools.list",
+        CallTool => "tools.call",
+        GetTask => "tasks.get",
+        UpdateTask => "tasks.update",
+        CancelTask => "tasks.cancel",
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServerNotificationMethod {
-    Cancelled,
-    Progress,
-    LoggingMessage,
-    ResourceUpdated,
-    ResourceListChanged,
-    ToolListChanged,
-    PromptListChanged,
-    ElicitationCompleted,
-}
-
-impl ServerNotificationMethod {
-    fn from_suffix(suffix: &str) -> Option<Self> {
-        match suffix {
-            "notifications.cancelled" => Some(Self::Cancelled),
-            "notifications.progress" => Some(Self::Progress),
-            "notifications.message" => Some(Self::LoggingMessage),
-            "notifications.resources.updated" => Some(Self::ResourceUpdated),
-            "notifications.resources.list_changed" => Some(Self::ResourceListChanged),
-            "notifications.tools.list_changed" => Some(Self::ToolListChanged),
-            "notifications.prompts.list_changed" => Some(Self::PromptListChanged),
-            "notifications.elicitation.complete" => Some(Self::ElicitationCompleted),
-            _ => None,
-        }
+suffix_method! {
+    ServerNotificationMethod {
+        Cancelled => "notifications.cancelled",
+        Progress => "notifications.progress",
+        LoggingMessage => "notifications.message",
+        ResourceUpdated => "notifications.resources.updated",
+        ResourceListChanged => "notifications.resources.list_changed",
+        ToolListChanged => "notifications.tools.list_changed",
+        PromptListChanged => "notifications.prompts.list_changed",
+        TaskStatus => "notifications.tasks",
+        SubscriptionsAcknowledged => "notifications.subscriptions.acknowledged",
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientRequestMethod {
-    Ping,
-    CreateMessage,
-    ListRoots,
-    CreateElicitation,
-}
-
-impl ClientRequestMethod {
-    fn from_suffix(suffix: &str) -> Option<Self> {
-        match suffix {
-            "ping" => Some(Self::Ping),
-            "sampling.create_message" => Some(Self::CreateMessage),
-            "roots.list" => Some(Self::ListRoots),
-            "elicitation.create" => Some(Self::CreateElicitation),
-            _ => None,
-        }
+suffix_method! {
+    ClientRequestMethod {
+        Ping => "ping",
+        CreateMessage => "sampling.create_message",
+        ListRoots => "roots.list",
+        CreateElicitation => "elicitation.create",
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientNotificationMethod {
-    Cancelled,
-    Progress,
-    Initialized,
-    RootsListChanged,
-}
-
-impl ClientNotificationMethod {
-    fn from_suffix(suffix: &str) -> Option<Self> {
-        match suffix {
-            "notifications.cancelled" => Some(Self::Cancelled),
-            "notifications.progress" => Some(Self::Progress),
-            "notifications.initialized" => Some(Self::Initialized),
-            "notifications.roots.list_changed" => Some(Self::RootsListChanged),
-            _ => None,
-        }
+suffix_method! {
+    ClientNotificationMethod {
+        Cancelled => "notifications.cancelled",
+        Progress => "notifications.progress",
+        Initialized => "notifications.initialized",
+        RootsListChanged => "notifications.roots.list_changed",
     }
 }
 
