@@ -23,6 +23,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
 
+use crate::constants::{SCHEDULES_CHECKPOINT_ID, SELECT_ALL_PROJECTIONS, SELECT_PROJECTION_BY_ID};
 use crate::queries::ScheduleId;
 use crate::{error::SchedulerError, projections_v1};
 
@@ -30,9 +31,6 @@ use projections_v1::__buffa::oneof::delivery::Kind as DeliveryKind;
 use projections_v1::__buffa::oneof::delivery::nats_message::source::Kind as SourceKind;
 use projections_v1::__buffa::oneof::schedule::Kind as ScheduleKind;
 use projections_v1::__buffa::oneof::schedule_status::Kind as ScheduleStatusKind;
-
-/// This projection's id in the shared `jetstream_projection_checkpoint` table.
-const SCHEDULES_CHECKPOINT_ID: &str = "schedules_read_model";
 
 /// A schedules read model stored in a Postgres table.
 #[derive(Clone)]
@@ -61,19 +59,6 @@ impl PostgresSchedulesProjection {
         &self.pool
     }
 }
-
-macro_rules! select_columns {
-    () => {
-        "SELECT schedule_id, status, completed, next_occurrence_at, last_occurrence_at, \
-         schedule_kind, at_at, every_seconds, cron_expr, rrule, rrule_dtstart, timezone, rrule_rdate, rrule_exdate, \
-         delivery_kind, delivery_subject, delivery_ttl_seconds, delivery_source_subject, \
-         message_content_type, message_body, message_headers \
-         FROM schedules_projection"
-    };
-}
-
-const SELECT_PROJECTION_BY_ID: &str = concat!(select_columns!(), " WHERE schedule_id = $1");
-const SELECT_ALL_PROJECTIONS: &str = concat!(select_columns!(), " ORDER BY schedule_id");
 
 fn malformed(context: &'static str) -> SchedulerError {
     SchedulerError::kv_source(

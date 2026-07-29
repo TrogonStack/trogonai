@@ -11,10 +11,8 @@ use tokio::sync::mpsc;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
+use crate::constants::{INVALID_PARAMS, METHOD_NOT_FOUND};
 use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, OutboundResponse, RpcId};
-
-const METHOD_NOT_FOUND: i32 = -32601;
-const INVALID_PARAMS: i32 = -32602;
 
 fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
     let (code, message) = match &err {

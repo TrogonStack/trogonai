@@ -40,10 +40,10 @@ pub use trogon_nats::{NatsAuth, NatsConfig};
 pub use trogon_std::StdJsonSerialize;
 
 pub fn spawn_notification_forwarder(
-    client: impl crate::ClientHandler + 'static,
+    client: impl crate::ClientHandler + Send + 'static,
     mut rx: tokio::sync::mpsc::Receiver<agent_client_protocol::schema::v1::SessionNotification>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         while let Some(notif) = rx.recv().await {
             if client.session_notification(notif).await.is_err() {
                 break;

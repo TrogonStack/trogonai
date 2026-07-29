@@ -9,9 +9,7 @@ use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
 
 use super::config::DiscordConfig;
-use super::constants::{NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
-
-const GATEWAY_OP_DISPATCH: u8 = 0;
+use super::constants::{GATEWAY_OP_DISPATCH, NATS_HEADER_EVENT_NAME, NATS_HEADER_GUILD_ID};
 
 pub async fn provision<C: JetStreamContext>(js: &C, config: &DiscordConfig) -> Result<(), C::Error> {
     js.get_or_create_stream(async_nats::jetstream::stream::Config {

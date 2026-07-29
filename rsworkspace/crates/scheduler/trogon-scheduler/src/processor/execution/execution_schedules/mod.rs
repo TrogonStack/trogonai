@@ -16,9 +16,8 @@ use bytes::Bytes;
 use std::future::IntoFuture;
 use trogon_nats::jetstream::{JetStreamPublisher, JetStreamSubjectPurger, PurgeOutcome};
 
+use crate::constants::NATS_MSG_ID_HEADER;
 use crate::processor::execution::reconciliation::{DispatchRequest, ScheduleRequest, ScheduleSubject};
-
-const NATS_MSG_ID_HEADER: &str = "Nats-Msg-Id";
 
 /// Error raised while writing an execution-schedule operation. Every variant is
 /// a transient NATS failure: the record must not be acknowledged and should be

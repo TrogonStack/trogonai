@@ -33,7 +33,7 @@ use trogon_std::{NonZeroDuration, ZeroDurationError};
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
     DEFAULT_LINEAR_TIMESTAMP_TOLERANCE_SECS, DEFAULT_NATS_ACK_TIMEOUT_SECS, DEFAULT_SLACK_TIMESTAMP_MAX_DRIFT_SECS,
-    DEFAULT_STREAM_MAX_AGE_SECS,
+    DEFAULT_STREAM_MAX_AGE_SECS, SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
 
@@ -54,8 +54,6 @@ impl DurationTooLongError {
         }
     }
 }
-
-const SENTRY_MAX_ACK_TIMEOUT_SECS: u64 = 1;
 
 #[derive(Debug, thiserror::Error)]
 #[error("configure exactly one of webhook or socket_mode")]

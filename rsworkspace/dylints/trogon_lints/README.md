@@ -12,6 +12,22 @@ its normal toolchain.
 Each rule's default level is declared in `src/lib.rs`, so policy lives in the
 lint crate rather than in per-invocation flags.
 
+- `constant_outside_constants_module` (`deny`): requires module-level (and
+  crate-root) `const` items to live in a `constants` module (`constants.rs`), so
+  a module's tunable values are discoverable in one place instead of scattered
+  across the modules that use them. A crate may have more than one (a crate-root
+  `constants.rs` plus a nested `constants.rs` per submodule group). Constants
+  inside a
+  function body are local implementation details and are left alone; associated
+  consts (`impl`/`trait`) are not free items and are never considered; `static`
+  items are out of scope. Test and benchmark sources (`tests.rs`, `*_tests.rs`,
+  anything under a Cargo `tests/` or `benches/` directory, and inline
+  `tests`/`benches` modules and the not-for-prod test-support module family
+  (`test_support`, `mocks`, `fixtures`, `testkit`, `*_harness`)) carry fixtures
+  rather than crate configuration and are exempt, as are generated files (those carrying an `@generated` marker near
+  the top, e.g. proto codegen); suppress a justified exception with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(constant_outside_constants_module))]`
+  at the site.
 - `error_string_comparison` (`deny`): prevents semantic checks against strings
   derived from `std::error::Error::to_string`.
 - `function_local_use` (`deny`): requires `use` imports to live at module level

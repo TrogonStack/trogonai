@@ -41,7 +41,7 @@ async fn connect_js() -> (async_nats::Client, jetstream::Context) {
 }
 
 async fn reset_state(js: &jetstream::Context) {
-    let _ = js.delete_stream(trogon_scheduler::kv::EVENTS_STREAM).await;
+    let _ = js.delete_stream(trogon_scheduler::constants::EVENTS_STREAM).await;
     if let Ok(kv) = js.get_key_value(trogon_scheduler::SCHEDULES_BUCKET).await {
         let mut keys = kv.keys().await.unwrap();
         while let Some(result) = futures::StreamExt::next(&mut keys).await {
@@ -49,7 +49,10 @@ async fn reset_state(js: &jetstream::Context) {
             let _ = kv.purge(key).await;
         }
     }
-    if let Ok(kv) = js.get_key_value(trogon_scheduler::kv::COMMAND_SNAPSHOT_BUCKET).await {
+    if let Ok(kv) = js
+        .get_key_value(trogon_scheduler::constants::COMMAND_SNAPSHOT_BUCKET)
+        .await
+    {
         let mut keys = kv.keys().await.unwrap();
         while let Some(result) = futures::StreamExt::next(&mut keys).await {
             let key = result.unwrap();

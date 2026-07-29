@@ -20,25 +20,10 @@ use trogon_std::NonZeroDuration;
 
 use super::config::{TwitterConfig, TwitterConsumerSecret};
 use super::constants::{
-    HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE, NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
+    ACCOUNT_ACTIVITY_EVENT_TYPES, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_EVENT_TYPE,
+    NATS_HEADER_PAYLOAD_KIND, NATS_HEADER_REJECT_REASON,
 };
 use super::signature;
-
-const ACCOUNT_ACTIVITY_EVENT_TYPES: &[&str] = &[
-    "tweet_create_events",
-    "favorite_events",
-    "follow_events",
-    "unfollow_events",
-    "block_events",
-    "unblock_events",
-    "mute_events",
-    "unmute_events",
-    "user_event",
-    "direct_message_events",
-    "direct_message_indicate_typing_events",
-    "direct_message_mark_read_events",
-    "tweet_delete_events",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RejectReason {

@@ -73,6 +73,140 @@ pub const NATS_MSG_ID_HEADER: &str = "Nats-Msg-Id";
 
 pub const ENV_MAX_CONCURRENT_CLIENT_TASKS: &str = "A2A_MAX_CONCURRENT_CLIENT_TASKS";
 
+// -- catalog::nats_kv --
+
+pub const A2A_AGENT_CARDS: &str = "A2A_AGENT_CARDS";
+
+pub(crate) const MAX_VALUE_SIZE: i32 = 65536;
+
+// -- catalog::import_gate::spicedb::config --
+
+#[cfg(feature = "spicedb")]
+pub const ENV_SPICEDB_ENDPOINT: &str = "A2A_SPICEDB_ENDPOINT";
+#[cfg(feature = "spicedb")]
+pub const ENV_SPICEDB_TOKEN: &str = "A2A_SPICEDB_TOKEN";
+#[cfg(feature = "spicedb")]
+pub const ENV_SPICEDB_ZEDTOKEN_TTL_SECS: &str = "A2A_SPICEDB_ZEDTOKEN_TTL_SECS";
+
+#[cfg(feature = "spicedb")]
+pub(crate) const DEFAULT_ZEDTOKEN_TTL_SECS: u64 = 30;
+
+// -- catalog::import_gate::spicedb --
+
+#[cfg(feature = "spicedb")]
+pub(crate) const FEDERATED_AGENT_CARD_RESOURCE_TYPE: &str = "agent_card";
+#[cfg(feature = "spicedb")]
+pub(crate) const FEDERATED_IMPORT_PERMISSION: &str = "view";
+
+// -- catalog::spicedb_permission --
+
+#[cfg(feature = "spicedb")]
+pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
+#[cfg(feature = "spicedb")]
+pub const ENV_TIER1_SPICEDB_ENDPOINT: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT";
+#[cfg(feature = "spicedb")]
+pub const ENV_TIER1_SPICEDB_TOKEN: &str = "A2A_GATEWAY_TIER1_SPICEDB_TOKEN";
+#[cfg(feature = "spicedb")]
+pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS";
+
+#[cfg(feature = "spicedb")]
+pub(crate) const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
+#[cfg(feature = "spicedb")]
+pub(crate) const SESSION_CACHE_CAPACITY: u64 = 4096;
+
+// -- error --
+
+/// A2A-defined: requested task ID is unknown to the agent.
+pub const TASK_NOT_FOUND: i32 = -32001;
+
+/// A2A-defined: task exists but is not in a cancelable state (already terminal or interrupted).
+pub const TASK_NOT_CANCELABLE: i32 = -32002;
+
+/// A2A-defined: agent does not support push notifications.
+pub const PUSH_NOTIFICATION_NOT_SUPPORTED: i32 = -32003;
+
+/// A2A-defined: operation not supported by this agent's declared capabilities.
+pub const UNSUPPORTED_OPERATION: i32 = -32004;
+
+/// A2A-defined: requested content media type is not supported.
+pub const CONTENT_TYPE_NOT_SUPPORTED: i32 = -32005;
+
+/// A2A-defined: agent response is malformed or otherwise invalid.
+pub const INVALID_AGENT_RESPONSE: i32 = -32006;
+
+/// A2A-defined: agent does not have an extended AgentCard configured to return.
+pub const EXTENDED_AGENT_CARD_NOT_CONFIGURED: i32 = -32007;
+
+/// A2A-defined: client required an extension the agent does not support.
+pub const EXTENSION_SUPPORT_REQUIRED: i32 = -32008;
+
+/// A2A-defined: client requested an A2A protocol version this agent cannot serve.
+pub const VERSION_NOT_SUPPORTED: i32 = -32009;
+
+/// Binding-specific: no agent replicas are reachable on the agent subject (no responders).
+pub const AGENT_UNAVAILABLE: i32 = -32050;
+
+// -- gateway_ingress --
+
+/// Recognized dotted method suffix tokens after `{prefix}.agents.{agent_id}.` /
+/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
+///
+/// Listed longest-first to ensure deterministic matching.
+pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
+    &["message", "stream"],
+    &["message", "send"],
+    &["tasks", "resubscribe"],
+    &["tasks", "cancel"],
+    &["tasks", "list"],
+    &["tasks", "get"],
+    &["push", "set"],
+    &["push", "get"],
+    &["push", "list"],
+    &["push", "delete"],
+    &["card"],
+];
+
+// -- jetstream::consumers --
+
+pub(crate) const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
+
+// -- push::dispatcher (http, jetstream, nats) --
+
+pub(crate) const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
+pub(crate) const MAX_RETRY_DELAY: Duration = Duration::from_secs(3);
+
+// -- push::dlq --
+
+pub const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
+
+// -- push::push_idempotency_key --
+
+pub(crate) const TERMINAL_KIND: &str = "terminal";
+pub(crate) const DLQ_KIND: &str = "dlq";
+
+// -- push::push_notification_target --
+
+pub(crate) const SUBJECT_SCHEME_PREFIX: &str = "subject:";
+pub(crate) const JETSTREAM_SCHEME_PREFIX: &str = "jetstream:";
+
+// -- push::push_payload --
+
+pub const PUSH_IDEMPOTENCY_JSON_FIELD: &str = "_a2aPushIdempotencyKey";
+
+// -- server::* (per-operation JSON-RPC method names) --
+
+pub(crate) const AGENT_CARD_METHOD: &str = "agent/getAuthenticatedExtendedCard";
+pub(crate) const MESSAGE_SEND_METHOD: &str = "message/send";
+pub(crate) const MESSAGE_STREAM_METHOD: &str = "message/stream";
+pub(crate) const PUSH_DELETE_METHOD: &str = "tasks/pushNotificationConfig/delete";
+pub(crate) const PUSH_GET_METHOD: &str = "tasks/pushNotificationConfig/get";
+pub(crate) const PUSH_LIST_METHOD: &str = "tasks/pushNotificationConfig/list";
+pub(crate) const PUSH_SET_METHOD: &str = "tasks/pushNotificationConfig/set";
+pub(crate) const TASKS_CANCEL_METHOD: &str = "tasks/cancel";
+pub(crate) const TASKS_GET_METHOD: &str = "tasks/get";
+pub(crate) const TASKS_LIST_METHOD: &str = "tasks/list";
+pub(crate) const TASKS_RESUBSCRIBE_METHOD: &str = "tasks/resubscribe";
+
 #[cfg(test)]
 pub const TEST_TASK_TIMEOUT: Duration = Duration::from_secs(5);
 

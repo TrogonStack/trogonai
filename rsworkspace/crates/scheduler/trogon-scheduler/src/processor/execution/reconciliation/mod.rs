@@ -7,10 +7,13 @@ mod schedule_key;
 mod schedule_subject;
 
 pub(crate) use crate::commands::domain::RecurrenceError as RRuleExpansionError;
+pub(crate) use crate::constants::CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE;
+#[cfg(test)]
+pub(crate) use crate::constants::EVENT_SUBJECT_PREFIX;
+#[cfg(test)]
+pub(crate) use crate::constants::RRULE_WAKEUP_SUBJECT_PREFIX;
 pub(crate) use go_duration::{GoDurationError, format_go_duration};
-pub(crate) use reconcile::{
-    CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE, ReconcileAction, ReconcileError, Reconciliation, ScheduleChange, reconcile,
-};
+pub(crate) use reconcile::{ReconcileAction, ReconcileError, Reconciliation, ScheduleChange, reconcile};
 pub(crate) use recorded_events::{
     DecodedScheduleEvent, ScheduleEventDecodeError, delivery_from_proto, lane_route_from_stream_event,
     message_from_proto, schedule_change_from_stream_event, schedule_from_proto, schedule_id_from,
@@ -21,8 +24,4 @@ pub(crate) use rrule_wakeup_payload::{
     RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, RRuleWakeupPayloadEncodeError,
 };
 pub(crate) use schedule_key::{ScheduleKey, StreamRoutingId};
-#[cfg(test)]
-pub(crate) use schedule_subject::EVENT_SUBJECT_PREFIX;
-#[cfg(test)]
-pub(crate) use schedule_subject::RRULE_WAKEUP_SUBJECT_PREFIX;
 pub(crate) use schedule_subject::ScheduleSubject;

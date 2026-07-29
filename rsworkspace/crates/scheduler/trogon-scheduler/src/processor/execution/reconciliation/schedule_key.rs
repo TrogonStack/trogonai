@@ -1,8 +1,7 @@
 use uuid::Uuid;
 
 use crate::commands::domain::ScheduleId;
-
-const SCHEDULER_SCHEDULE_NAMESPACE: Uuid = Uuid::from_u128(0x1f8e_7d6c_5b4a_4938_8271_6050_4f3e_2d1c);
+use crate::constants::SCHEDULER_SCHEDULE_NAMESPACE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScheduleKey(Uuid);

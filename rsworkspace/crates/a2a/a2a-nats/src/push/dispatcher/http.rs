@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use a2a::types::TaskPushNotificationConfig;
 
-use crate::constants::HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS;
+use crate::constants::{HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS, INITIAL_RETRY_DELAY, MAX_RETRY_DELAY};
 use crate::push::authentication_header::authorization_header_value;
 use crate::push::delivery_semantics::DeliverySemantics;
 use crate::push::dispatch_error::DispatchError;
@@ -13,9 +13,6 @@ use crate::push::push_notification_target::{PushNotificationTarget, PushNotifica
 use crate::push::target::WebhookUrl;
 use crate::push::terminal_push_task_state::TerminalPushTaskState;
 use crate::task_id::A2aTaskId;
-
-const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 pub struct HttpPushDispatcher {
     client: reqwest::Client,

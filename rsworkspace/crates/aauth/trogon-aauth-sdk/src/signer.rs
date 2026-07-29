@@ -12,14 +12,10 @@ use trogon_aauth_verify::nats_pop::content_digest_sha256;
 use trogon_identity_types::aauth::NatsSignatureEnvelope;
 use trogon_identity_types::aauth::headers;
 
+use crate::constants::SIG_INPUT;
 use crate::error::AgentSignerError;
 use rand_core::{OsRng, RngCore};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Order of covered components in the `AAuth-Sig-Input` header. Must match
-/// `NatsSignatureEnvelope::canonical_base` and what `NatsPopVerifier` expects.
-const SIG_INPUT: &str =
-    "(\"@subject\" \"@reply\" \"content-digest\" \"aauth-token\" \"aauth-sig-created\" \"aauth-sig-nonce\")";
 
 /// The six NATS headers produced by a signed request, in the order the
 /// verifier expects to find them (order doesn't matter on the wire, but a

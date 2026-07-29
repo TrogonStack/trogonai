@@ -5,13 +5,9 @@
 use trogon_identity_types::aauth::person_server::{ClarificationRequired, InteractionRequestType};
 use trogon_identity_types::aauth::{AgentClaims, ResourceClaims};
 
+use crate::constants::MAX_CLARIFICATION_ROUNDS;
 use crate::error::PendingRequestError;
 use crate::mission::MissionId;
-
-/// Maximum clarification round-trips per pending request, per "Clarification
-/// Limits": "PSes SHOULD enforce a maximum number of clarification rounds
-/// (e.g., 5) to prevent indefinite chat loops."
-pub const MAX_CLARIFICATION_ROUNDS: u32 = 5;
 
 /// Opaque pending-request identifier, used as the last path segment of the
 /// `Location` URL returned on a `202`, per "Pending Response".

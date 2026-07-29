@@ -14,21 +14,9 @@ use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
 use tokio::sync::RwLock;
 
+use crate::constants::{DEFAULT_MAX_ENTRIES, DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS, MAX_INVALIDATE_RETRIES};
 use crate::jwks::{JwksError, JwksResolver};
 use crate::time_source::TimeSource;
-
-/// Default positive TTL for cached JWK sets. Matches the documented OpenAI
-/// Workload Identity Federation discovery cache.
-pub const DEFAULT_TTL_SECS: i64 = 600;
-/// Default negative TTL for cached failures. Short enough that a transient
-/// outage at the upstream IdP self-heals quickly without becoming a tight loop.
-pub const DEFAULT_NEGATIVE_TTL_SECS: i64 = 30;
-/// Hard cap on the number of distinct issuers held in the cache. `iss` is
-/// pulled from the JWT payload before signature verification, so an attacker
-/// can drive arbitrary distinct strings into this map. The cap prevents
-/// unbounded growth; once reached, a single existing entry is evicted to make
-/// room for the new one.
-pub const DEFAULT_MAX_ENTRIES: usize = 1024;
 
 enum CachedEntry {
     Hit {
@@ -120,11 +108,6 @@ impl<R: JwksResolver, T: TimeSource> CachedJwksResolver<R, T> {
         guard.remove(iss);
     }
 }
-
-/// Maximum number of resolve retries when a concurrent `invalidate*` lands
-/// while a fetch is in flight. Bounded so an adversarial invalidate loop
-/// cannot pin a caller in an unbounded retry cycle.
-const MAX_INVALIDATE_RETRIES: usize = 3;
 
 #[async_trait]
 impl<R: JwksResolver, T: TimeSource> JwksResolver for CachedJwksResolver<R, T> {

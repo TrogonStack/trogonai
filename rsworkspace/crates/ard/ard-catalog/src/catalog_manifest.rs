@@ -5,7 +5,8 @@ use crate::catalog_entry_wire::CatalogEntryWire;
 use crate::catalog_host::CatalogHost;
 use crate::catalog_host_wire::CatalogHostWire;
 use crate::catalog_manifest_schema::{CatalogManifestValidateError, validate_ai_catalog_value};
-use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError, SPEC_VERSION};
+use crate::catalog_manifest_wire::{CatalogManifestWire, CatalogManifestWireError};
+use crate::constants::SPEC_VERSION;
 
 /// Error returned when parsing a JSON manifest through schema and domain validation.
 #[derive(Debug, thiserror::Error)]

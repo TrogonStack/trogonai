@@ -75,6 +75,11 @@ agent-client-protocol-schema = { version = "=1.5.0", features = [
     "unstable_nes",
     "unstable_plan_operations",
 ] }
+# Official HTTP/WebSocket transport from the SDK repository, released in lockstep with
+# the core crate. Server side only: the `client` feature pulls reqwest 0.13 and
+# async-tungstenite, both conflicting with the workspace's exact pins.
+# Enables serde_json/preserve_order graph-wide through feature unification.
+agent-client-protocol-http = { version = "=2.0.0", default-features = false, features = ["server"] }
 
 # MCP
 rmcp = { version = "3.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }

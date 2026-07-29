@@ -4,17 +4,10 @@ use trogon_decider_runtime::StreamPosition;
 use crate::commands::domain::{
     Delivery, Schedule, ScheduleEventStatus, ScheduleId, ScheduleMessage, ScheduleOccurrenceSequence,
 };
+use crate::constants::{CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE, PAST_AT_GRACE};
 use crate::processor::execution::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleStatus};
 
 use super::{DispatchRequest, ScheduleRequest, ScheduleRequestError, ScheduleSubject};
-
-pub(crate) const CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE: &str = "trogon.scheduler.corrupt-checkpoint";
-
-/// One-shot schedules past-due by no more than this window still publish: the
-/// execution stream fires an `@at` in the past immediately, so a schedule that
-/// is late only because of processing lag is delivered instead of silently
-/// expired. Anything older (e.g. replayed history) expires without publishing.
-const PAST_AT_GRACE: chrono::Duration = chrono::Duration::minutes(5);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduleDefinition {

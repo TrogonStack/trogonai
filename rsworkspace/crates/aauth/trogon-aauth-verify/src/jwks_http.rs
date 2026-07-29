@@ -13,14 +13,8 @@ use std::time::Duration;
 
 use trogon_identity_types::aauth::{DWK_AGENT, DWK_PERSON, DWK_RESOURCE};
 
+use crate::constants::{DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_REQUEST_TIMEOUT};
 use crate::jwks::{JwksError, JwksResolver};
-
-/// Default cap on a single well-known JWKS response body. JWKS documents are
-/// small (a handful of public keys); this is generous headroom while still
-/// refusing an issuer that tries to stream gigabytes at the verifier.
-pub const DEFAULT_MAX_RESPONSE_BYTES: u64 = 256 * 1024;
-/// Default request timeout for a single well-known fetch attempt.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Non-zero response-size cap for a single well-known JWKS fetch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -28,13 +28,10 @@ use crate::catalog::import_gate::{
     spicedb_subject_from_principal as import_gate_spicedb_subject_from_principal,
 };
 
-pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
-pub const ENV_TIER1_SPICEDB_ENDPOINT: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT";
-pub const ENV_TIER1_SPICEDB_TOKEN: &str = "A2A_GATEWAY_TIER1_SPICEDB_TOKEN";
-pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS";
-
-const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
-const SESSION_CACHE_CAPACITY: u64 = 4096;
+use crate::constants::{DEFAULT_TIER1_ZEDTOKEN_TTL_SECS, SESSION_CACHE_CAPACITY};
+pub use crate::constants::{
+    ENV_TIER1_SPICEDB_ENABLED, ENV_TIER1_SPICEDB_ENDPOINT, ENV_TIER1_SPICEDB_TOKEN, ENV_TIER1_ZEDTOKEN_TTL_SECS,
+};
 
 /// Bounded LRU of fresh zed-token snapshots, keyed by the
 /// `(principal, account)` pair. The cache lets the

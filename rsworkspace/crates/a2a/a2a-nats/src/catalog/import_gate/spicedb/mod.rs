@@ -27,9 +27,7 @@ use crate::agent_id::A2aAgentId;
 use super::error::ImportGateError;
 use super::gate::ImportGate;
 use super::principal::{ImportedAccountName, SpiceDbPrincipal};
-
-const FEDERATED_AGENT_CARD_RESOURCE_TYPE: &str = "agent_card";
-const FEDERATED_IMPORT_PERMISSION: &str = "view";
+use crate::constants::{FEDERATED_AGENT_CARD_RESOURCE_TYPE, FEDERATED_IMPORT_PERMISSION};
 
 pub struct SpiceDbImportGate {
     client: Option<Arc<dyn BulkImportPermissionCheck>>,

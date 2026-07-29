@@ -11,7 +11,7 @@ use a2a_nats::{
 };
 use trogon_std::env::ReadEnv;
 
-pub const ENV_A2A_AGENT_ID: &str = "A2A_AGENT_ID";
+use crate::constants::ENV_A2A_AGENT_ID;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {

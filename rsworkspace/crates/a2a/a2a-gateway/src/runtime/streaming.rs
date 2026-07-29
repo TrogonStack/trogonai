@@ -20,9 +20,7 @@ use crate::gw_ingress_stream::{
 use crate::gw_ingress_stream::{StreamingIngressKind, StreamingIngressSpawnError, req_id_from_headers_or_payload};
 use crate::runtime::env::json_rpc_params;
 
-/// Method-dots string for the unary version of `message/send`.
-const MESSAGE_STREAM_METHOD_DOTS: &str = "message.stream";
-const TASKS_RESUBSCRIBE_METHOD_DOTS: &str = "tasks.resubscribe";
+use crate::constants::{MESSAGE_STREAM_METHOD_DOTS, TASKS_RESUBSCRIBE_METHOD_DOTS};
 
 /// Outcome of [`maybe_spawn_streaming_ingress_pump`].
 ///

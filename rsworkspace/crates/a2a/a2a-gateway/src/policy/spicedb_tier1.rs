@@ -32,10 +32,10 @@ use authzed::v1::{
 use tonic::Status;
 use trogon_std::env::ReadEnv;
 
-pub const ENV_TIER1_SPICEDB_ENABLED: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENABLED";
-pub const ENV_TIER1_SPICEDB_ENDPOINT: &str = "A2A_GATEWAY_TIER1_SPICEDB_ENDPOINT";
-pub const ENV_TIER1_SPICEDB_TOKEN: &str = "A2A_GATEWAY_TIER1_SPICEDB_TOKEN";
-pub const ENV_TIER1_ZEDTOKEN_TTL_SECS: &str = "A2A_GATEWAY_TIER1_ZEDTOKEN_TTL_SECS";
+use crate::constants::DEFAULT_TIER1_ZEDTOKEN_TTL_SECS;
+pub use crate::constants::{
+    ENV_TIER1_SPICEDB_ENABLED, ENV_TIER1_SPICEDB_ENDPOINT, ENV_TIER1_SPICEDB_TOKEN, ENV_TIER1_ZEDTOKEN_TTL_SECS,
+};
 
 pub type Tier1SessionKey = SpiceDbSessionKey;
 pub type SpiceDbTier1SessionCache = SpiceDbSessionCache;
@@ -468,8 +468,6 @@ fn tier1_enabled<E: ReadEnv>(env: &E) -> bool {
         Err(_) => false,
     }
 }
-
-const DEFAULT_TIER1_ZEDTOKEN_TTL_SECS: u64 = 60;
 
 fn tier1_zed_token_ttl<E: ReadEnv>(env: &E) -> Result<u64, Tier1SpiceDbBuildError> {
     match env.var(ENV_TIER1_ZEDTOKEN_TTL_SECS) {

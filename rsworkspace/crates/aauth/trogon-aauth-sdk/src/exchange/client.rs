@@ -493,7 +493,7 @@ async fn event_from_response(response: reqwest::Response) -> Result<ExchangeEven
         429 => Ok(ExchangeEvent::SlowDown),
         500 => Ok(ExchangeEvent::ServerError),
         503 => Ok(ExchangeEvent::ServiceUnavailable {
-            retry_after_secs: retry_after.unwrap_or(super::core::DEFAULT_POLL_INTERVAL_SECS),
+            retry_after_secs: retry_after.unwrap_or(crate::constants::DEFAULT_POLL_INTERVAL_SECS),
         }),
         other => Err(ExchangeError::UnexpectedStatus(other)),
     }

@@ -12,6 +12,7 @@
 //! failure, codec failure, and storage failure without losing the concrete
 //! source error.
 
+use crate::constants::METER_NAME;
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
     AppendStreamRequest, AppendStreamResponse, ReadAfterOverflowError, ReadFrom, ReadStreamRequest, StreamAppend,
@@ -38,8 +39,6 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-
-const METER_NAME: &str = "trogon-decider-runtime";
 
 /// Counters recorded for command execution's replay, snapshot read, and
 /// snapshot write phases.

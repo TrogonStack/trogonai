@@ -313,8 +313,8 @@ version = "0.1.0"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
+ "agent-client-protocol-http",
  "anyhow",
- "async-compat",
  "async-nats",
  "axum",
  "bytes",
@@ -322,7 +322,6 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "reqwest 0.12.28",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -333,7 +332,6 @@ dependencies = [
  "trogon-nats",
  "trogon-std",
  "trogon-telemetry",
- "uuid",
 ]
 
 [[package]]
@@ -414,6 +412,23 @@ checksum = "3abd4080f51e4f24f5042beb7fb7a66ede29a2dc1c2582c329532e1c27264ddc"
 dependencies = [
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "agent-client-protocol-http"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b4d8db045bc66b84526dfe4ef2ffb87d651b81c4ff945f91c63a2bc677a582c"
+dependencies = [
+ "agent-client-protocol",
+ "async-stream",
+ "axum",
+ "futures",
+ "serde_json",
+ "tokio",
+ "tower-http 0.7.0",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -920,6 +935,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
 dependencies = [
  "axum-core",
+ "axum-macros",
  "base64 0.22.1",
  "bytes",
  "form_urlencoded",
@@ -966,6 +982,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7aa268c23bfbbd2c4363b9cd302a4f504fb2a9dfe7e3451d66f35dd392e20aca"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

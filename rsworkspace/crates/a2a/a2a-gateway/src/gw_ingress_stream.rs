@@ -24,19 +24,12 @@ use futures::StreamExt;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
 
-pub const ENV_GATEWAY_STREAMING_INGRESS: &str = "A2A_GATEWAY_STREAMING_INGRESS";
-pub const ENV_GATEWAY_STREAMING_MAX_ACK_PENDING: &str = "A2A_GATEWAY_STREAMING_MAX_ACK_PENDING";
-pub const ENV_GATEWAY_STREAMING_MAX_INFLIGHT: &str = "A2A_GATEWAY_STREAMING_MAX_INFLIGHT";
-
-pub const DEFAULT_STREAMING_MAX_ACK_PENDING: i64 = 32;
-pub const DEFAULT_STREAMING_MAX_INFLIGHT: usize = 32;
-
-/// Cap on JetStream redelivery attempts before the streaming ingress pump
-/// Term's a message that the caller reply persistently rejects. Mirrors the
-/// 3-attempt budget the egress planner uses so the two pumps behave the
-/// same under a permanently broken reply subject (bad ACL, closed inbox).
 #[cfg(not(coverage))]
-const STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS: i64 = 3;
+use crate::constants::STREAMING_INGRESS_MAX_FORWARD_ATTEMPTS;
+pub use crate::constants::{
+    DEFAULT_STREAMING_MAX_ACK_PENDING, DEFAULT_STREAMING_MAX_INFLIGHT, ENV_GATEWAY_STREAMING_INGRESS,
+    ENV_GATEWAY_STREAMING_MAX_ACK_PENDING, ENV_GATEWAY_STREAMING_MAX_INFLIGHT,
+};
 
 /// JetStream max-ack-pending for a streaming pump. Floored at 1 so a config
 /// can't construct a value that stalls the consumer with zero unacked slots.

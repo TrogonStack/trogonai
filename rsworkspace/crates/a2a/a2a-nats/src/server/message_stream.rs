@@ -4,6 +4,7 @@ use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
 use crate::a2a_prefix::A2aPrefix;
+use crate::constants::MESSAGE_STREAM_METHOD as METHOD;
 use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
@@ -12,8 +13,6 @@ use crate::server::wire::{
     encode_error_reply, encode_success_reply, is_notification, parse_request_params, request_id,
 };
 use crate::task_id::A2aTaskId;
-
-const METHOD: &str = "message/stream";
 
 /// Handles `message/stream`.
 ///

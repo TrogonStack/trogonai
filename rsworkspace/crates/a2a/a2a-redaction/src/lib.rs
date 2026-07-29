@@ -6,6 +6,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod a2a_method;
+pub mod constants;
 pub mod error;
 pub mod noop;
 pub mod redactor;
@@ -17,6 +18,7 @@ pub mod wasm;
 pub mod wasm_bundle_path;
 
 pub use a2a_method::{A2aMethod, ParseA2aMethodError};
+pub use constants::TIER3_REFUSE_SENTINEL;
 pub use error::RedactionError;
 pub use noop::NoopRedactor;
 pub use redactor::Redactor;
@@ -26,6 +28,6 @@ pub use skill_manifest::{
     JsonPathExpr, SkillCategory, SkillManifest, SkillManifestError, SkillManifestRegistry, SkillManifestVersion,
     SkillMethodMatcher, SkillSelectionPlan,
 };
-pub use tier3_sentinel::{TIER3_REFUSE_SENTINEL, output_is_tier3_refusal, tier3_refusal_reason_tag};
+pub use tier3_sentinel::{output_is_tier3_refusal, tier3_refusal_reason_tag};
 pub use wasm::WasmRedactorHost;
 pub use wasm_bundle_path::WasmBundlePath;

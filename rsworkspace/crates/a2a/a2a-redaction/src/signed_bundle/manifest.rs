@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use super::digest::Sha256Digest;
 use super::error::SignatureVerificationError;
 use super::signature::Ed25519Signature;
+use crate::constants::SIGNED_BUNDLE_VERSION;
 use crate::skill_id::SkillId;
-
-pub const SIGNED_BUNDLE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignedBundleManifest {

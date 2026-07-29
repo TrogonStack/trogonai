@@ -2,7 +2,7 @@ use std::fmt;
 
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
-const MAX_INTEGRATION_ID_LEN: usize = 64;
+use crate::constants::MAX_INTEGRATION_ID_LEN;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceIntegrationId(NatsToken);

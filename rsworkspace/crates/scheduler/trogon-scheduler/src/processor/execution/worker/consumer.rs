@@ -24,20 +24,9 @@ use async_nats::jetstream::consumer::pull;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 use async_nats::jetstream::{self, AckKind, stream};
 
-use super::dispatcher::DeliveredMessage;
+use crate::constants::{SCHEDULE_EVENT_CONSUMER, SCHEDULE_EVENT_FILTER};
 
-/// Event stream the scheduler consumes persisted schedule events from.
-pub const SCHEDULE_EVENT_STREAM: &str = "SCHEDULER_SCHEDULE_EVENTS";
-/// Subject the scheduler consumer filters on. Keyed by `ScheduleKey`, never the
-/// raw `ScheduleId`. Must stay `{EVENT_SUBJECT_PREFIX}.>`; a test enforces the
-/// derivation since consts cannot be concatenated at compile time.
-pub const SCHEDULE_EVENT_FILTER: &str = "scheduler.schedules.events.v1.>";
-/// Durable name the scheduler pull consumer registers under.
-pub const SCHEDULE_EVENT_CONSUMER: &str = "scheduler_execution_v1";
-/// KV bucket holding the rebuildable scheduler checkpoint cache.
-pub const SCHEDULE_STATE_BUCKET: &str = "SCHEDULER_SCHEDULE_STATE";
-/// Execution schedule stream (must be provisioned with `AllowMsgSchedules`).
-pub const SCHEDULE_EXECUTION_STREAM: &str = "SCHEDULER_SCHEDULE_EXECUTION";
+use super::dispatcher::DeliveredMessage;
 
 /// The execution stream cannot honor `Nats-Schedule*` headers; publishes
 /// would succeed but the scheduled messages would never fire.

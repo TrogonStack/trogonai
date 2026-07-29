@@ -560,3 +560,71 @@ fn log_notification_error_covers_both_outcomes() {
     super::log_notification_error("session/cancel", Ok(()));
     super::log_notification_error("session/cancel", Err(Error::internal_error()));
 }
+
+#[tokio::test]
+async fn boundary_with_a_transport_returns_the_main_result() {
+    let result = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(futures::io::sink(), PendingRead),
+        async move |_cx| Ok(42u32),
+    )
+    .await;
+
+    assert!(matches!(result, Ok(BoundaryExit::Main(42))));
+}
+
+/// The generic variant detects closure through `ConnectionTo::incoming_closed`
+/// rather than by wrapping the reader, so assert that path independently of the
+/// byte-stream variant's `EofSignalReader`.
+#[tokio::test]
+async fn boundary_with_a_transport_ends_on_incoming_close() {
+    let result = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(futures::io::sink(), futures::io::empty()),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    )
+    .await;
+
+    assert!(matches!(result, Ok(BoundaryExit::TransportClosed)));
+}
+
+/// `$/cancel_request` is swallowed by its own registered handler so it never
+/// reaches the dispatch match. Proven by showing the connection still answers a
+/// following request rather than erroring on an unhandled notification.
+#[tokio::test]
+async fn boundary_with_a_transport_swallows_cancel_request_notifications() {
+    let (client_io, server_io) = tokio::io::duplex(4096);
+    let (client_read, client_write) = tokio::io::split(client_io);
+    let (server_read, server_write) = tokio::io::split(server_io);
+
+    let boundary = connect_agent_boundary_with(
+        Arc::new(StubAgent),
+        ByteStreams::new(
+            async_compat::Compat::new(server_write),
+            async_compat::Compat::new(server_read),
+        ),
+        async move |_cx| std::future::pending::<Result<()>>().await,
+    );
+
+    let client = async move {
+        let mut writer = client_write;
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"$/cancel_request\",\"params\":{\"requestId\":7}}\n")
+            .await
+            .unwrap();
+        writer
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(client_read).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["id"], 1, "the connection must survive the notification");
+        assert_eq!(value["result"]["protocolVersion"], 1);
+        drop(writer);
+    };
+
+    let (boundary_result, ()) = tokio::join!(boundary, client);
+    assert!(matches!(boundary_result, Ok(BoundaryExit::TransportClosed)));
+}

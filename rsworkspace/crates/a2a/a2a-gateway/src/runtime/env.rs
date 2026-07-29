@@ -13,12 +13,11 @@ use a2a_redaction::Ed25519PublicKey;
 use tracing::warn;
 use trogon_std::env::ReadEnv;
 
-pub const ENV_GATEWAY_TIER2_CEL_ENABLED: &str = "A2A_GATEWAY_TIER2_CEL_ENABLED";
-pub const ENV_GATEWAY_TIER3_SIGNING_PUBKEY: &str = "A2A_GATEWAY_TIER3_SIGNING_PUBKEY";
-pub const ENV_GATEWAY_AUDIT_PUBLISH: &str = "A2A_GATEWAY_AUDIT_PUBLISH";
-pub const ENV_GATEWAY_UNARY_DEADLINE_SECS: &str = "A2A_GATEWAY_UNARY_DEADLINE_SECS";
-
-const MESSAGE_SEND_METHOD_DOTS: &str = "message.send";
+use crate::constants::MESSAGE_SEND_METHOD_DOTS;
+pub use crate::constants::{
+    ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_TIER2_CEL_ENABLED, ENV_GATEWAY_TIER3_SIGNING_PUBKEY,
+    ENV_GATEWAY_UNARY_DEADLINE_SECS,
+};
 
 /// `true` when Tier-2 CEL evaluation is explicitly enabled via env.
 /// Defaults to `false` when the var is unset, missing, or holds a

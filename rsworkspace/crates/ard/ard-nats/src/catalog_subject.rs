@@ -1,9 +1,6 @@
 use ard_catalog::ArdStorageKey;
 use trogon_nats::{NatsToken, SubjectTokenViolationError};
 
-pub const CATALOG_KV_BUCKET: &str = "ARD_CATALOG";
-pub const CATALOG_EVENT_STREAM: &str = "ARD_CATALOG_EVENTS";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogSubjectKind {
     Upserted,

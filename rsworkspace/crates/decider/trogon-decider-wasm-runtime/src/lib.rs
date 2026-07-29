@@ -67,6 +67,7 @@
 
 mod command_spec;
 mod command_type;
+mod constants;
 mod domain_error_detail;
 mod engine;
 mod execution;
@@ -84,12 +85,13 @@ mod test_fixture;
 
 pub use command_spec::WasmCommandSpec;
 pub use command_type::{CommandType, CommandTypeError};
-pub use domain_error_detail::GuestDomainError;
-pub use engine::{
+pub use constants::{
     DEFAULT_EPOCH_TICK_INTERVAL, DEFAULT_EPOCH_TICKS_PER_CALL, DEFAULT_FUEL_PER_CALL, DEFAULT_MAX_CONCURRENT_SESSIONS,
     DEFAULT_MAX_INSTANCES_PER_SESSION, DEFAULT_MAX_MEMORIES_PER_SESSION, DEFAULT_MAX_MEMORY_BYTES,
-    DEFAULT_MAX_TABLE_ELEMENTS, DEFAULT_MAX_TABLES_PER_SESSION, WasmDeciderEngine, WasmEngineConfig, WasmEngineError,
+    DEFAULT_MAX_TABLE_ELEMENTS, DEFAULT_MAX_TABLES_PER_SESSION,
 };
+pub use domain_error_detail::GuestDomainError;
+pub use engine::{WasmDeciderEngine, WasmEngineConfig, WasmEngineError};
 pub use execution::{
     WasmCommandError, WasmCommandExecution, WasmExecutionResult, WasmSnapshotFailureContext, WasmSnapshotFailurePolicy,
     WithSnapshotStore, WithoutSnapshotStore,

@@ -16,6 +16,7 @@
 //! is documented there in detail.
 
 pub mod capabilities;
+pub mod constants;
 pub mod delegation;
 pub mod error;
 pub mod exchange;

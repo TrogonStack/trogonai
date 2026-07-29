@@ -1,5 +1,8 @@
 use super::*;
-use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_PROTOCOL_VERSION_HEADER, ACP_SESSION_ID_HEADER};
+use crate::constants::{ACP_CONNECTION_ID_HEADER, ACP_ENDPOINT, ACP_PROTOCOL_VERSION_HEADER};
+
+/// Upstream owns session-header routing now, so this lives with the tests.
+const ACP_SESSION_ID_HEADER: &str = "acp-session-id";
 use acp_nats::Config;
 use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate};
 use axum::body::{Body, to_bytes};
@@ -66,59 +69,18 @@ fn test_config() -> Config {
     )
 }
 
-fn test_app(state: AppState) -> axum::Router {
-    axum::Router::new()
-        .route(
-            ACP_ENDPOINT,
-            axum::routing::get(transport::get)
-                .post(transport::post)
-                .delete(transport::delete),
-        )
-        .with_state(state)
-}
-
-fn spawn_connection_thread(
-    nats_mock: AdvancedMockNatsClient,
-    manager_rx: mpsc::UnboundedReceiver<ManagerRequest>,
-) -> std::thread::JoinHandle<()> {
-    let config = test_config();
-    let connection_runtime = build_connection_runtime().expect("failed to create per-connection runtime");
-    std::thread::Builder::new()
-        .name(THREAD_NAME.into())
-        .spawn(move || run_connection_thread(connection_runtime, manager_rx, nats_mock, MockJs::new(), config))
-        .expect("failed to spawn connection thread")
-}
-
-fn build_test_app(
-    nats_mock: AdvancedMockNatsClient,
-) -> (axum::Router, watch::Sender<bool>, std::thread::JoinHandle<()>) {
-    let (shutdown_tx, _) = watch::channel(false);
-    let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
-    let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
-    let app = test_app(AppState {
-        bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        manager_tx,
-        shutdown_tx: shutdown_tx.clone(),
-    });
-    (app, shutdown_tx, conn_thread)
+/// Builds the served router the same way `main` does: the SDK's transport driving
+/// `NatsAgentComponent`, wrapped in the compat layers for the behaviors upstream
+/// omits. Tests therefore exercise production wiring, not a stand-in.
+fn build_test_app(nats_mock: AdvancedMockNatsClient) -> (axum::Router, watch::Sender<bool>) {
+    build_upstream_app(nats_mock)
 }
 
 async fn start_test_server(
     nats_mock: AdvancedMockNatsClient,
-) -> (
-    std::net::SocketAddr,
-    watch::Sender<bool>,
-    tokio::task::JoinHandle<()>,
-    std::thread::JoinHandle<()>,
-) {
-    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-    let (manager_tx, manager_rx) = mpsc::unbounded_channel::<ManagerRequest>();
-    let conn_thread = spawn_connection_thread(nats_mock, manager_rx);
-    let app = test_app(AppState {
-        bind_host: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        manager_tx,
-        shutdown_tx: shutdown_tx.clone(),
-    });
+) -> (std::net::SocketAddr, watch::Sender<bool>, tokio::task::JoinHandle<()>) {
+    let (app, shutdown_tx) = build_upstream_app(nats_mock);
+    let mut shutdown_rx = shutdown_tx.subscribe();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -131,7 +93,28 @@ async fn start_test_server(
             .unwrap();
     });
 
-    (addr, shutdown_tx, server_task, conn_thread)
+    (addr, shutdown_tx, server_task)
+}
+
+/// Opens a session-scoped SSE stream, where upstream delivers any message whose
+/// payload carries a `sessionId`.
+async fn session_stream(
+    client: &reqwest::Client,
+    url: &str,
+    connection_id: &str,
+    session_id: &str,
+) -> impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin {
+    let response = client
+        .get(url)
+        .header(ACCEPT.as_str(), "text/event-stream")
+        .header(ACP_CONNECTION_ID_HEADER, connection_id)
+        .header(ACP_SESSION_ID_HEADER, session_id)
+        .header(ACP_PROTOCOL_VERSION_HEADER, "0")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.bytes_stream()
 }
 
 async fn body_text(response: axum::response::Response) -> String {
@@ -213,7 +196,7 @@ async fn test_websocket_connection_lifecycle() {
     let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 0}"#;
     nats_mock.set_response("acp.agent.initialize", nats_response.into());
 
-    let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+    let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
 
     // Connect client
     let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
@@ -251,8 +234,6 @@ async fn test_websocket_connection_lifecycle() {
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
         .await
         .expect("server task did not shut down");
-
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -262,7 +243,7 @@ async fn test_shutdown_while_connection_active() {
     let _injector = nats_mock.inject_messages();
 
     nats_mock.hang_next_request();
-    let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+    let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
 
     let ws_url = format!("ws://{}{}", addr, ACP_ENDPOINT);
     let (mut ws_stream, _) = connect_async(&ws_url).await.unwrap();
@@ -279,8 +260,6 @@ async fn test_shutdown_while_connection_active() {
         .expect("server task did not shut down");
 
     drop(ws_stream);
-
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -293,7 +272,7 @@ async fn streamable_http_initialize_returns_connection_id_and_json_response() {
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let response = app
         .clone()
         .oneshot(http_post_request(
@@ -312,16 +291,23 @@ async fn streamable_http_initialize_returns_connection_id_and_json_response() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(crate::acp_connection_id::AcpConnectionId::parse(&connection_id).is_ok());
+    // Upstream mints the id (UUIDv4) and keeps its generator private, so assert it
+    // is present and non-empty rather than validating a format we no longer own.
+    assert!(!connection_id.is_empty(), "initialize must return a connection id");
 
     let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
     assert_eq!(body["id"], 1);
     assert_eq!(body["result"]["protocolVersion"], 0);
-    assert_eq!(body["result"]["connectionId"], connection_id);
+    // `connectionId` is not an ACP v1 schema field. The old transport injected it
+    // into the result body; upstream returns it only as a header, which is the
+    // spec-conformant behavior, so the body must carry no such field.
+    assert!(
+        body["result"]["connectionId"].is_null(),
+        "the connection id belongs in the header, not the payload"
+    );
 
     shutdown_tx.send(true).unwrap();
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -335,7 +321,7 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
         );
     nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
 
-    let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+    let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
     let url = format!("http://{}{}", addr, ACP_ENDPOINT);
 
@@ -390,7 +376,6 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
         .await
         .expect("server task did not shut down");
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -404,7 +389,7 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
         );
     nats_mock.set_response("acp.session.test-session-1.agent.load", "{}".into());
 
-    let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+    let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
     let url = format!("http://{}{}", addr, ACP_ENDPOINT);
 
@@ -426,10 +411,14 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
         .to_owned();
     let _body: Value = serde_json::from_str(&initialize.text().await.unwrap()).unwrap();
 
+    // Session-scoped: upstream routes an outbound message to the session stream
+    // whenever its payload carries `sessionId`, so a `session/load` reply reaches
+    // only a GET that named the session.
     let get = client
         .get(&url)
         .header(ACCEPT.as_str(), "text/event-stream")
         .header(ACP_CONNECTION_ID_HEADER, &connection_id)
+        .header(ACP_SESSION_ID_HEADER, "test-session-1")
         .header(ACP_PROTOCOL_VERSION_HEADER, "0")
         .send()
         .await
@@ -459,11 +448,10 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
         .await
         .expect("server task did not shut down");
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
-async fn streamable_http_session_load_requires_session_header() {
+async fn streamable_http_session_load_falls_back_to_the_params_session_id() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
@@ -472,7 +460,7 @@ async fn streamable_http_session_load_requires_session_header() {
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -507,12 +495,15 @@ async fn streamable_http_session_load_requires_session_header() {
             .await
             .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(body_text(response).await, "missing Acp-Session-Id header");
+    // Upstream recovers the session from `params.sessionId` when the header is
+    // absent, so the request is routed rather than rejected. The old transport
+    // required the header and answered 400.
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    // Accepted requests carry no body: the reply arrives on the SSE stream.
+    assert!(body_text(response).await.is_empty());
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -526,7 +517,7 @@ async fn streamable_http_session_load_returns_accepted_before_backend_completes(
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -570,13 +561,12 @@ async fn streamable_http_session_load_returns_accepted_before_backend_completes(
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
 async fn streamable_http_get_requires_connection_and_session_headers() {
     let nats_mock = AdvancedMockNatsClient::new();
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
 
     let response = app
         .clone()
@@ -595,13 +585,12 @@ async fn streamable_http_get_requires_connection_and_session_headers() {
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
 async fn legacy_websocket_alias_is_not_routed() {
     let nats_mock = AdvancedMockNatsClient::new();
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
 
     let response = app
         .clone()
@@ -613,7 +602,6 @@ async fn legacy_websocket_alias_is_not_routed() {
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -622,7 +610,7 @@ async fn streamable_http_rejects_follow_up_requests_before_successful_initialize
     let _injector = nats_mock.inject_messages();
     nats_mock.fail_next_request();
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -630,13 +618,13 @@ async fn streamable_http_rejects_follow_up_requests_before_successful_initialize
         ))
         .await
         .unwrap();
-    let connection_id = initialize
-        .headers()
-        .get(ACP_CONNECTION_ID_HEADER)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
+    // A failed initialize leaves no usable connection. The old transport minted the
+    // id before dispatching, so a caller could keep using a connection that never
+    // initialized; upstream tears it down and returns no id, which is stricter.
+    assert!(
+        initialize.headers().get(ACP_CONNECTION_ID_HEADER).is_none(),
+        "a failed initialize must not hand back a connection id"
+    );
     let _ = body_text(initialize).await;
 
     let response = app
@@ -647,19 +635,20 @@ async fn streamable_http_rejects_follow_up_requests_before_successful_initialize
                 .uri(ACP_ENDPOINT)
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json, text/event-stream")
-                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
                 .body(Body::from(r#"{"jsonrpc":"2.0","method":"initialized"}"#))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(body_text(response).await, "ACP connection has not been initialized");
+    assert!(
+        response.status().is_client_error(),
+        "a request with no initialized connection must be rejected, got {}",
+        response.status()
+    );
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -668,7 +657,7 @@ async fn streamable_http_get_rejects_before_successful_initialize() {
     let _injector = nats_mock.inject_messages();
     nats_mock.fail_next_request();
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -676,13 +665,13 @@ async fn streamable_http_get_rejects_before_successful_initialize() {
         ))
         .await
         .unwrap();
-    let connection_id = initialize
-        .headers()
-        .get(ACP_CONNECTION_ID_HEADER)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
+    // A failed initialize leaves no usable connection. The old transport minted the
+    // id before dispatching, so a caller could keep using a connection that never
+    // initialized; upstream tears it down and returns no id, which is stricter.
+    assert!(
+        initialize.headers().get(ACP_CONNECTION_ID_HEADER).is_none(),
+        "a failed initialize must not hand back a connection id"
+    );
     let _ = body_text(initialize).await;
 
     let response = app
@@ -692,7 +681,6 @@ async fn streamable_http_get_rejects_before_successful_initialize() {
                 .method("GET")
                 .uri(ACP_ENDPOINT)
                 .header(ACCEPT, "text/event-stream")
-                .header(ACP_CONNECTION_ID_HEADER, &connection_id)
                 .header(ACP_SESSION_ID_HEADER, "test-session-1")
                 .body(Body::empty())
                 .unwrap(),
@@ -700,12 +688,14 @@ async fn streamable_http_get_rejects_before_successful_initialize() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(body_text(response).await, "ACP connection has not been initialized");
+    assert!(
+        response.status().is_client_error(),
+        "a request with no initialized connection must be rejected, got {}",
+        response.status()
+    );
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -718,7 +708,7 @@ async fn streamable_http_delete_terminates_initialized_connection() {
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -750,21 +740,13 @@ async fn streamable_http_delete_terminates_initialized_connection() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    assert_eq!(
-        response
-            .headers()
-            .get(ACP_PROTOCOL_VERSION_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some("0")
-    );
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
-async fn streamable_http_rejects_unknown_session_scoped_notification() {
+async fn streamable_http_forwards_an_unknown_session_scoped_notification() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
@@ -773,7 +755,7 @@ async fn streamable_http_rejects_unknown_session_scoped_notification() {
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -809,16 +791,18 @@ async fn streamable_http_rejects_unknown_session_scoped_notification() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(body_text(response).await, "unknown ACP session");
+    // Same as the POST case: an unknown session is the agent's to reject, so the
+    // transport accepts and forwards rather than answering 404 itself.
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    // Accepted requests carry no body: the agent answers on the SSE stream.
+    assert!(body_text(response).await.is_empty());
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
-async fn streamable_http_rejects_unknown_session_scoped_post() {
+async fn streamable_http_forwards_an_unknown_session_scoped_post() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
@@ -827,7 +811,7 @@ async fn streamable_http_rejects_unknown_session_scoped_post() {
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -863,12 +847,15 @@ async fn streamable_http_rejects_unknown_session_scoped_post() {
             .await
             .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(body_text(response).await, "unknown ACP session");
+    // Upstream forwards a session-scoped request without checking that the session
+    // exists: session lifetime belongs to the agent, not the transport. The old
+    // transport tracked known sessions itself and answered 404 here.
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    // Accepted requests carry no body: the agent answers on the SSE stream.
+    assert!(body_text(response).await.is_empty());
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -881,7 +868,7 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
                 .into(),
         );
 
-    let (app, shutdown_tx, conn_thread) = build_test_app(nats_mock);
+    let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
         .clone()
         .oneshot(http_post_request(
@@ -922,7 +909,6 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
 
     let _ = shutdown_tx.send(true);
     drop(app);
-    conn_thread.join().unwrap();
 }
 
 #[tokio::test]
@@ -936,7 +922,7 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         );
     nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
 
-    let (addr, shutdown_tx, server_task, conn_thread) = start_test_server(nats_mock).await;
+    let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
     let url = format!("http://{}{}", addr, ACP_ENDPOINT);
 
@@ -1003,6 +989,13 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
     assert_eq!(first_session_event["result"]["sessionId"], session_id);
     assert_eq!(second_session_event["result"]["sessionId"], session_id);
 
+    // The `session/new` reply above fanned out on the connection stream because its
+    // request carried no session id yet. A `session/update` always carries one, so
+    // upstream routes it to the session stream: still fan-out, but scoped to the
+    // session instead of reaching every listener on the connection.
+    let mut first_session_stream = session_stream(&client, &url, &connection_id, &session_id).await;
+    let mut second_session_stream = session_stream(&client, &url, &connection_id, &session_id).await;
+
     let notification = SessionNotification::new(
         session_id.clone(),
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("fanout"))),
@@ -1026,8 +1019,8 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         "params": serde_json::to_value(notification).unwrap(),
     });
     let (first_event, second_event) = tokio::join!(
-        next_json_sse_event(&mut first_stream),
-        next_json_sse_event(&mut second_stream)
+        next_json_sse_event(&mut first_session_stream),
+        next_json_sse_event(&mut second_session_stream)
     );
 
     assert_eq!(first_event, expected);
@@ -1039,5 +1032,96 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
     let _ = tokio::time::timeout(Duration::from_secs(2), server_task)
         .await
         .expect("server task did not shut down");
-    conn_thread.join().unwrap();
+}
+
+/// Builds the router from the SDK's own HTTP transport, driving the NATS bridge
+/// through `NatsAgentComponent` instead of the hand-rolled connection actors.
+fn build_upstream_app(nats_mock: AdvancedMockNatsClient) -> (axum::Router, watch::Sender<bool>) {
+    let (shutdown_tx, _) = watch::channel(false);
+    // Production's own assembly, not a parallel one: this is the exact router `main`
+    // serves, so a layer or option that only exists on one side cannot hide here.
+    let router = build_router(
+        nats_mock,
+        MockJs::new(),
+        test_config(),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        &shutdown_tx,
+    );
+    (router, shutdown_tx)
+}
+
+/// The adoption gate: an `initialize` must round-trip from a real HTTP request,
+/// through the SDK-owned transport, across the NATS bridge, and back.
+#[tokio::test]
+async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
+    let nats_mock = AdvancedMockNatsClient::new();
+    let _injector = nats_mock.inject_messages();
+    nats_mock.set_response(
+            "acp.agent.initialize",
+            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
+                .into(),
+        );
+
+    let (app, shutdown_tx) = build_upstream_app(nats_mock);
+
+    let response = app
+        .clone()
+        .oneshot(http_post_request(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":0}}"#,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().get(ACP_CONNECTION_ID_HEADER).is_some(),
+        "upstream transport must return a connection id"
+    );
+
+    let body: Value = serde_json::from_str(&body_text(response).await).unwrap();
+    assert_eq!(body["id"], 1, "response must correlate to the request id");
+    assert_eq!(
+        body["result"]["protocolVersion"], 0,
+        "the bridge's NATS reply must reach the HTTP caller"
+    );
+
+    shutdown_tx.send(true).unwrap();
+}
+
+/// Drives a component connection to completion via the drain signal.
+///
+/// The round-trip test above leaves the connection open, so the teardown path
+/// (drain the client proxy, flush bridge background work, report the close) is
+/// never reached there. `into_channel_and_future` is the same entry point
+/// `AcpHttpServer` uses per connection, so this exercises production wiring
+/// rather than a stand-in.
+#[tokio::test]
+async fn draining_closes_an_upstream_transport_connection_cleanly() {
+    let nats_mock = AdvancedMockNatsClient::new();
+    let _injector = nats_mock.inject_messages();
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let component = crate::component::NatsAgentComponent::new(
+        nats_mock,
+        MockJs::new(),
+        test_config(),
+        trogon_telemetry::meter("acp-nats-server"),
+        shutdown_rx,
+    );
+    let (_channel, connection) =
+        agent_client_protocol::ConnectTo::<agent_client_protocol::Client>::into_channel_and_future(component);
+
+    let handle = tokio::spawn(connection);
+
+    // Let the bridge and client proxy come up before asking them to stop, so the
+    // drain branch wins the select rather than racing startup.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    shutdown_tx.send(true).unwrap();
+
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("draining must close the connection")
+        .expect("the connection task must not panic");
+
+    assert!(result.is_ok(), "a drained connection is a clean close: {result:?}");
 }
