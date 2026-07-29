@@ -2,8 +2,8 @@
 
 use crate::{
     config::ScheduleWriteState,
+    constants::{EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
     error::SchedulerError,
-    kv::{EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
 };
 use async_nats::jetstream::{self, stream::RetentionPolicy};
 use std::time::Duration;

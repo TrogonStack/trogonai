@@ -7,17 +7,14 @@ use bytes::Bytes;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error};
 
+use crate::constants::{
+    CLAIM_CHECK_VERSION, CLAIM_HEADER_PREFIX, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY,
+    PROTOCOL_OVERHEAD,
+};
+
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::publish::PublishOutcome;
 use super::traits::JetStreamPublisher;
-
-pub const HEADER_CLAIM_CHECK: &str = "Trogon-Claim-Check";
-pub const HEADER_CLAIM_BUCKET: &str = "Trogon-Claim-Bucket";
-pub const HEADER_CLAIM_KEY: &str = "Trogon-Claim-Key";
-
-const CLAIM_CHECK_VERSION: &str = "v1";
-const PROTOCOL_OVERHEAD: usize = 8 * 1024;
-const CLAIM_HEADER_PREFIX: &str = "Trogon-Claim-";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MaxPayload(usize);

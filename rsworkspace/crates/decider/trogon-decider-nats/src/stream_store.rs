@@ -24,17 +24,13 @@ use trogon_decider_runtime::{
 use trogon_nats::jetstream::{JetStreamLastRawMessageBySubject, JetStreamPublishMessage};
 use trogon_std::{NowV7, UuidV7Generator};
 
+use crate::constants::{
+    NATS_BATCH_COMMIT, NATS_BATCH_ID, NATS_BATCH_SEQUENCE, TROGON_EVENT_HEADER_PREFIX, TROGON_EVENT_TYPE,
+};
+
 mod replay;
 
 type StreamMessage = async_nats::jetstream::message::StreamMessage;
-
-const NATS_BATCH_COMMIT: &str = "Nats-Batch-Commit";
-const NATS_BATCH_ID: &str = "Nats-Batch-Id";
-const NATS_BATCH_SEQUENCE: &str = "Nats-Batch-Sequence";
-/// Prefix used to encode user event headers into NATS message headers.
-pub const TROGON_EVENT_HEADER_PREFIX: &str = "Trogon-Header-";
-/// Header that stores the domain event type.
-pub const TROGON_EVENT_TYPE: &str = "Trogon-Event-Type";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Validated JetStream subject used by the decider storage adapter.

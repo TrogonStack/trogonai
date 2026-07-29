@@ -23,10 +23,7 @@ use p256::ecdsa::SigningKey;
 use p256::pkcs8::DecodePrivateKey;
 use trogon_identity_types::aauth::{DWK_ACCESS, DWK_AGENT, DWK_PERSON, DWK_RESOURCE};
 
-/// RFC 7517 registered media type for a JWK Set. Preferred over the generic
-/// `application/json` because it lets clients identify the payload shape
-/// from `Content-Type` alone without sniffing the body.
-const JWK_SET_CONTENT_TYPE: &str = "application/jwk-set+json";
+use crate::constants::JWK_SET_CONTENT_TYPE;
 
 /// `Cache-Control: max-age=<n>` value, in seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

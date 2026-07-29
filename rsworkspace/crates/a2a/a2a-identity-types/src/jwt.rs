@@ -8,10 +8,6 @@ use serde_json::Value;
 
 use crate::error::JwtError;
 
-/// Header name carrying a serialized [`CallerJwtHeaderValue`] on every A2A
-/// request, including gateway-mediated traffic.
-pub const CALLER_JWT_HEADER_NAME: &str = "A2a-Caller-Jwt";
-
 /// Compact JWT string suitable for header transport. Validates shape on
 /// construction (3 dotted segments) without verifying signature.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const MAX_ACT_CHAIN_DEPTH: usize = 8;
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ActChainEntry {
     pub sub: String,

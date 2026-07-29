@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-const MAX_LENGTH: usize = 256;
+use crate::constants::MAX_LENGTH;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleId(String);

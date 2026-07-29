@@ -18,8 +18,7 @@ use tokio::sync::{mpsc, watch};
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
 
-/// Matches the capacity the hand-rolled transport used for the same channel.
-const NOTIFICATION_CHANNEL_CAPACITY: usize = 64;
+use crate::constants::NOTIFICATION_CHANNEL_CAPACITY;
 
 /// Maps the client proxy's join result onto the connection's outcome.
 ///

@@ -8,19 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// `typ` header value identifying an agent identity token.
-pub const TYP_AGENT: &str = "aa-agent+jwt";
-/// `typ` header value identifying a resource challenge token.
-pub const TYP_RESOURCE: &str = "aa-resource+jwt";
-/// `typ` header value identifying an authorization token from a Person Server.
-pub const TYP_AUTH: &str = "aa-auth+jwt";
-
-/// `dwk` (discoverable-well-known) values used by AAuth issuers.
-pub const DWK_AGENT: &str = "aauth-agent.json";
-pub const DWK_RESOURCE: &str = "aauth-resource.json";
-pub const DWK_PERSON: &str = "aauth-person.json";
-/// `dwk` value for an Access Server, per "Auth Token Structure" / "Access Server Metadata".
-pub const DWK_ACCESS: &str = "aauth-access.json";
+pub use crate::constants::{DWK_ACCESS, DWK_AGENT, DWK_PERSON, DWK_RESOURCE, TYP_AGENT, TYP_AUTH, TYP_RESOURCE};
 
 /// Returns the well-known path (per RFC 8615) for a `dwk` value, e.g. `aauth-agent.json`
 /// becomes `/.well-known/aauth-agent.json`. See "Metadata Documents".

@@ -5,16 +5,12 @@ use futures::StreamExt as _;
 use tracing::{error, info, warn};
 use trogon_std::env::ReadEnv;
 
+use crate::constants::{AUTH_CALLOUT_SUBJECT, DEFAULT_DENIAL_TTL};
 use crate::denial_claims::CalloutIssuer;
 use crate::dispatcher::AuthDispatcher;
 use crate::error::AuthCalloutError;
 use crate::jwt::SigningKey;
 use crate::wire::AuthCalloutWireCodec;
-
-/// NATS subject the server uses for auth callout requests.
-const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
-
-const DEFAULT_DENIAL_TTL: Duration = Duration::from_secs(60);
 
 /// Signing and issuer material for NATS authorization-response denial JWTs.
 pub struct DenialPublisherConfig {

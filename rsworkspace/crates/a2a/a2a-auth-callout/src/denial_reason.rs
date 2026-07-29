@@ -1,6 +1,5 @@
+use crate::constants::MAX_LEN;
 use crate::denial_category::DenialCategory;
-
-const MAX_LEN: usize = 256;
 
 /// Wire-safe denial reason carried in `nats.error` (opaque category string only).
 #[derive(Debug, Clone, PartialEq, Eq)]

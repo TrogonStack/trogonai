@@ -9,15 +9,15 @@
 
 pub mod agent_card_read;
 pub mod agent_card_schema;
+pub mod constants;
 pub mod resource_tuples;
 
 pub use agent_card_read::{
     AgentCardSchemaError, AgentCardSource, accept_agent_card_on_read, filter_agent_cards_on_read,
     validate_agent_card_on_read,
 };
-pub use agent_card_schema::{
-    AGENT_CARD_JSON_SCHEMA, AgentCardJsonSchema, AgentCardValidateError, validate_agent_card_value,
-};
+pub use agent_card_schema::{AgentCardJsonSchema, AgentCardValidateError, validate_agent_card_value};
+pub use constants::AGENT_CARD_JSON_SCHEMA;
 pub use resource_tuples::{
     Tier1A2aMethodSlug, Tier1DeriveError, Tier1DeriveInputs, Tier1Permission, Tier1ResourceId, Tier1ResourceTuple,
     Tier1ResourceTupleRow, Tier1ResourceTupleTable, Tier1ResourceType, Tier1TupleResourceShape, Tier1ValueObjectError,

@@ -24,9 +24,7 @@ use crate::policy::wasmtime_substrate::{Tier2State, WasmtimeSubstrate};
 use crate::policy::{NoopTier3RedactionGate, RealTier3RedactionGate, Tier3RedactionGate, Tier3SkillManifest};
 use crate::runtime::env::{gateway_tier2_cel_enabled, gateway_tier3_signing_pubkey};
 
-const ENV_POLICY_BUNDLE_DIR: &str = "A2A_GATEWAY_POLICY_BUNDLE_DIR";
-const ENV_POLICY_SKILLS: &str = "A2A_GATEWAY_POLICY_SKILLS";
-const ENV_TIER3_REDACTION_ENABLED: &str = "A2A_GATEWAY_TIER3_REDACTION_ENABLED";
+use crate::constants::{ENV_POLICY_BUNDLE_DIR, ENV_POLICY_SKILLS, ENV_TIER3_REDACTION_ENABLED};
 
 /// The dispatch path's view of the policy stack. Each field is
 /// independently-replaceable in tests:

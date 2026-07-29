@@ -3,8 +3,8 @@ use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::DateTime;
 
 use super::*;
+use crate::constants::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX};
 use crate::error::SchedulerError;
-use crate::kv::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX};
 use crate::v1;
 
 use projections_v1::__buffa::oneof::delivery::Kind as ViewDeliveryKind;

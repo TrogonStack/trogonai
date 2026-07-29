@@ -29,10 +29,9 @@ use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
+use crate::constants::AGENT_ID_HEADER;
 use crate::error::BridgeError;
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
-
-const AGENT_ID_HEADER: &str = "x-a2a-agent-id";
 
 pub fn gateway_method_to_subject_dots(method: &str) -> String {
     method.replace('/', ".")

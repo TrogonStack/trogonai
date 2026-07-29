@@ -11,26 +11,9 @@ use jsonrpc_nats::Encoded;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
+pub use crate::constants::GATEWAY_INGRESS_METHOD_SUFFIXES;
 use crate::jsonrpc::{JsonRpcId, extract_request_id, extract_request_id_from_body};
 use crate::wire::{WireError, encode_error, response_id_from_request_headers};
-
-/// Recognized dotted method suffix tokens after `{prefix}.agents.{agent_id}.` /
-/// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
-///
-/// Listed longest-first to ensure deterministic matching.
-pub const GATEWAY_INGRESS_METHOD_SUFFIXES: &[&[&str]] = &[
-    &["message", "stream"],
-    &["message", "send"],
-    &["tasks", "resubscribe"],
-    &["tasks", "cancel"],
-    &["tasks", "list"],
-    &["tasks", "get"],
-    &["push", "set"],
-    &["push", "get"],
-    &["push", "list"],
-    &["push", "delete"],
-    &["card"],
-];
 
 /// Failure resolving a `{prefix}.gateway.` subject to an agent RPC subject.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

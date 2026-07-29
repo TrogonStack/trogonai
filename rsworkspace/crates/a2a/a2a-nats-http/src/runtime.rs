@@ -25,16 +25,10 @@ use trogon_std::env::SystemEnv;
 use trogon_std::signal::shutdown_signal;
 
 #[cfg(not(coverage))]
+use crate::constants::{DEFAULT_BIND, ENV_HTTP_BIND};
+use crate::constants::{ENV_AGENT_ID, ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY};
+#[cfg(not(coverage))]
 use crate::router;
-
-#[cfg_attr(coverage, allow(dead_code))]
-const DEFAULT_BIND: &str = "0.0.0.0:8080";
-#[cfg_attr(coverage, allow(dead_code))]
-const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
-#[cfg_attr(coverage, allow(dead_code))]
-const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
-const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
-const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {

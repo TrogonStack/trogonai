@@ -51,6 +51,7 @@
 use jsonwebtoken::{Algorithm, DecodingKey, crypto::verify, jwk::Jwk};
 use trogon_identity_types::aauth::headers;
 
+use crate::constants::HTTP_SECURITY_HEADERS;
 use crate::jwks::JwksResolver;
 use crate::replay::{ReplayError, ReplayStore};
 use crate::time_source::TimeSource;
@@ -225,18 +226,6 @@ pub enum InvalidConfirmationKeyError {
     StructurallyIncomplete(#[source] crate::jkt::JktError),
 }
 
-/// Security-sensitive headers that drive PoP verification. If any appears
-/// more than once, the verifier refuses rather than silently picking one
-/// value and letting the rest go unauthenticated -- mirrors the same
-/// defense-in-depth rule [`crate::nats_pop`] applies.
-const SECURITY_HEADERS: &[&str] = &[
-    headers::SIGNATURE_KEY,
-    headers::SIGNATURE_INPUT,
-    headers::SIGNATURE,
-    headers::CONTENT_DIGEST,
-    headers::MISSION,
-];
-
 /// Verifier for HTTP requests bearing an AAuth `Signature-Key` / RFC 9421
 /// HTTP Message Signature.
 pub struct HttpPopVerifier<R: JwksResolver, C: TimeSource, S: ReplayStore> {
@@ -358,7 +347,7 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
 }
 
 fn ensure_no_duplicate_security_headers(req: &HttpRequest) -> Result<(), HttpPopError> {
-    for &name in SECURITY_HEADERS {
+    for &name in HTTP_SECURITY_HEADERS {
         if req.header_count(name) > 1 {
             return Err(HttpPopError::DuplicateHeader(name));
         }

@@ -13,6 +13,8 @@ use super::bundle::{
 use super::loader::Tier1DeclarativeLoadError;
 use super::time_predicate::time_of_day_pattern_matches;
 
+use crate::constants::{ENV_TIER1_BUNDLE_DIR, ENV_TIER1_DECLARATIVE_ENABLED};
+
 pub trait Tier1Clock: Send + Sync {
     fn now(&self) -> SystemTime;
 }
@@ -40,9 +42,6 @@ impl Tier1Clock for FixedTier1Clock {
         self.0
     }
 }
-
-pub const ENV_TIER1_DECLARATIVE_ENABLED: &str = "A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED";
-pub const ENV_TIER1_BUNDLE_DIR: &str = "A2A_GATEWAY_TIER1_BUNDLE_DIR";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tier1DeclarativeContext {

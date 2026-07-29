@@ -8,11 +8,10 @@ use tracing::{info, warn};
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamPublisher, ObjectStorePut};
 
 use super::config::{SlackConfig, SlackSocketModeConfig};
+use super::constants::RECONNECT_MAX_DELAY;
+#[cfg(not(coverage))]
+use super::constants::{APPS_CONNECTIONS_OPEN_URL, RECONNECT_INITIAL_DELAY};
 use super::server::SlackBridge;
-
-const APPS_CONNECTIONS_OPEN_URL: &str = "https://slack.com/api/apps.connections.open";
-const RECONNECT_INITIAL_DELAY: Duration = Duration::from_secs(1);
-const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SocketModeError {

@@ -13,13 +13,9 @@ use tracing::{debug, error, warn};
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
+use crate::constants::{CHANNEL_CAP, MAX_INFLIGHT_DISPATCH};
 use crate::dispatch::dispatch_request;
 use crate::wire::{InboundRequest, OutboundError, OutboundFrame, RpcId};
-
-const CHANNEL_CAP: usize = 128;
-/// Cap concurrent in-flight dispatch tasks. A fast producer on stdin can
-/// otherwise create unbounded RPC/network work and memory pressure.
-const MAX_INFLIGHT_DISPATCH: usize = 64;
 
 /// Returns `Err` when the stdout writer task failed (broken pipe, write/flush
 /// error). Callers should propagate so the process exits non-zero — a stdio

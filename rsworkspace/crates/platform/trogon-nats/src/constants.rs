@@ -15,3 +15,11 @@ pub const MIN_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(1);
 pub const REQ_ID_HEADER: &str = "X-Req-Id";
 
 pub const MAX_NATS_TOKEN_LENGTH: usize = 128;
+
+pub const HEADER_CLAIM_CHECK: &str = "Trogon-Claim-Check";
+pub const HEADER_CLAIM_BUCKET: &str = "Trogon-Claim-Bucket";
+pub const HEADER_CLAIM_KEY: &str = "Trogon-Claim-Key";
+
+pub(crate) const CLAIM_CHECK_VERSION: &str = "v1";
+pub(crate) const PROTOCOL_OVERHEAD: usize = 8 * 1024;
+pub(crate) const CLAIM_HEADER_PREFIX: &str = "Trogon-Claim-";

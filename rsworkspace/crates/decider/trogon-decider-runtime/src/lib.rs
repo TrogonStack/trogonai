@@ -67,6 +67,7 @@
     allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
+mod constants;
 /// Event envelopes and codec traits used by stream storage adapters.
 pub mod event;
 /// Command execution policies and runtime orchestration.

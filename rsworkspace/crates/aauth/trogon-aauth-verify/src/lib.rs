@@ -10,6 +10,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod challenge;
+pub mod constants;
 pub mod delegation;
 pub mod http_pop;
 pub mod jkt;
@@ -26,13 +27,14 @@ pub mod upstream;
 pub use challenge::{
     ChallengeMinter, ResourceChallengeContext, ResourceChallengeError, mint_resource_jwt, verify_resource_challenge,
 };
+pub use constants::{DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS, MAX_CHAIN_DEPTH};
 pub use delegation::{
-    DelegationError, FlattenedActEntry, MAX_CHAIN_DEPTH, flatten_act_chain, is_valid_agent_identifier, verify_act_chain,
+    DelegationError, FlattenedActEntry, flatten_act_chain, is_valid_agent_identifier, verify_act_chain,
 };
 pub use http_pop::{HttpPopError, HttpPopVerifier, HttpRequest, VerifiedAuthPresenter, VerifiedPresenter};
 pub use jkt::jwk_thumbprint;
 pub use jwks::{JwksError, JwksResolver, StaticJwks};
-pub use jwks_cache::{CachedJwksResolver, DEFAULT_NEGATIVE_TTL_SECS, DEFAULT_TTL_SECS};
+pub use jwks_cache::CachedJwksResolver;
 pub use jwks_http::{HttpJwksResolver, MaxResponseBytes, RequestTimeout, WellKnownDwk};
 pub use mission::{MissionError, extract_mission_claim, verify_mission_blob_hash, verify_mission_header_matches_claim};
 pub use nats_pop::{NatsHeaders, NatsPopError, NatsPopVerifier, NatsRequest};

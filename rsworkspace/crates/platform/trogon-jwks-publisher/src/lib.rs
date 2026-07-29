@@ -8,5 +8,6 @@
 //! [`provider::AgentProvider::mint`] wherever it issues tokens.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+mod constants;
 pub mod provider;
 pub mod publisher;

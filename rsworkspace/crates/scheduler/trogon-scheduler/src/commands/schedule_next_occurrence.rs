@@ -8,10 +8,7 @@ use super::domain::{
     RRuleCursor, Recurrence, RecurrenceError, RecurrenceStep, ScheduleId, ScheduleOccurrenceSequence,
     ScheduleOccurrenceSequenceError,
 };
-
-/// Occurrences whose due instant is at most this far in the past are still armed,
-/// absorbing scheduling/processing latency around recently due occurrences.
-const PAST_OCCURRENCE_GRACE: chrono::Duration = chrono::Duration::minutes(5);
+use crate::constants::PAST_OCCURRENCE_GRACE;
 
 /// Arms the next recurrence occurrence for an enabled RRULE schedule.
 ///

@@ -26,30 +26,13 @@ use futures::StreamExt;
 #[cfg(not(coverage))]
 use tracing::{debug, warn};
 
-pub const ENV_GATEWAY_EVENTS_PULL: &str = "A2A_GATEWAY_EVENTS_PULL";
-pub const ENV_GATEWAY_EVENTS_MAX_ACK_PENDING: &str = "A2A_GATEWAY_EVENTS_MAX_ACK_PENDING";
-pub const ENV_GATEWAY_EVENTS_FETCH_BATCH: &str = "A2A_GATEWAY_EVENTS_FETCH_BATCH";
-pub const ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS: &str = "A2A_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS";
-pub const ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER: &str = "A2A_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER";
-
-pub const DEFAULT_MAX_ACK_PENDING: usize = 1024;
-pub const DEFAULT_FETCH_BATCH: usize = 1;
-pub const DEFAULT_FETCH_HEARTBEAT_SECS: u64 = 5;
-pub const DEFAULT_INACTIVE_THRESHOLD_SECS: u64 = 300;
-pub const DEFAULT_MAX_INFLIGHT_PER_CALLER: usize = 32;
-
+pub use crate::constants::{
+    DEFAULT_FETCH_BATCH, DEFAULT_FETCH_HEARTBEAT_SECS, DEFAULT_INACTIVE_THRESHOLD_SECS, DEFAULT_MAX_ACK_PENDING,
+    DEFAULT_MAX_INFLIGHT_PER_CALLER, ENV_GATEWAY_EVENTS_FETCH_BATCH, ENV_GATEWAY_EVENTS_FETCH_HEARTBEAT_SECS,
+    ENV_GATEWAY_EVENTS_MAX_ACK_PENDING, ENV_GATEWAY_EVENTS_MAX_INFLIGHT_PER_CALLER, ENV_GATEWAY_EVENTS_PULL,
+};
 #[cfg(not(coverage))]
-const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
-#[cfg(not(coverage))]
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
-#[cfg(not(coverage))]
-const FETCH_EXPIRES: Duration = Duration::from_secs(30);
-/// Delay applied when the per-caller inflight gate is full. Keeps the
-/// JetStream redelivery rate bounded while the offending caller's other
-/// in-flight forwards drain — without a delay JetStream would re-deliver
-/// immediately and the pump would burn CPU on rejected messages.
-#[cfg(not(coverage))]
-const GATE_NAK_DELAY: Duration = Duration::from_millis(500);
+use crate::constants::{FETCH_EXPIRES, GATE_NAK_DELAY, INITIAL_BACKOFF, MAX_BACKOFF};
 
 /// JetStream durable name for the gateway task-event egress consumer.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -267,7 +267,7 @@ async fn needs_clarification_then_grant_walks_full_round_trip() {
 async fn clarification_round_limit_is_enforced() {
     let (_a, _r, agent_jwt, resource_jwt, jwks) = agent_and_resource(None);
     let mut decisions = Vec::new();
-    for _ in 0..(crate::pending::MAX_CLARIFICATION_ROUNDS + 1) {
+    for _ in 0..(crate::constants::MAX_CLARIFICATION_ROUNDS + 1) {
         decisions.push(PolicyDecision::NeedsClarification {
             clarification: "still unclear".to_string(),
             options: None,
@@ -282,7 +282,7 @@ async fn clarification_round_limit_is_enforced() {
         other => panic!("expected Pending, got {other:?}"),
     };
 
-    for _ in 0..(crate::pending::MAX_CLARIFICATION_ROUNDS - 1) {
+    for _ in 0..(crate::constants::MAX_CLARIFICATION_ROUNDS - 1) {
         let outcome = server
             .respond_to_clarification(
                 &pending_id,

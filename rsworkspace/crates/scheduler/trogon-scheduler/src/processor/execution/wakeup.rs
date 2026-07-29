@@ -9,13 +9,11 @@ use trogon_std::time::{EpochClock, SystemClock};
 
 use crate::commands::domain::ScheduleId;
 use crate::commands::{EvolveError, RecordScheduleOccurrence, RecordScheduleOccurrenceError};
+use crate::constants::{RRULE_WAKEUP_CONSUMER, RRULE_WAKEUP_FILTER};
 use crate::processor::execution::reconciliation::{
     RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, ScheduleKey, ScheduleSubject,
 };
 use trogonai_proto::scheduler::schedules::ScheduleEventPayloadError;
-
-pub const RRULE_WAKEUP_FILTER: &str = "scheduler.schedules.execution.v1.rrule.>";
-pub const RRULE_WAKEUP_CONSUMER: &str = "scheduler_rrule_wakeup_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RRuleWakeupObsoleteReason {

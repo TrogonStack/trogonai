@@ -5,6 +5,7 @@
 pub mod catalog_event;
 pub mod catalog_index;
 pub mod catalog_subject;
+pub mod constants;
 pub mod memory_catalog_store;
 pub mod store;
 

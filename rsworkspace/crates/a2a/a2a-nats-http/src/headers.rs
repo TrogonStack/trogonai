@@ -15,17 +15,12 @@ use std::sync::Arc;
 
 use a2a_nats::error::{EXTENSION_SUPPORT_REQUIRED, VERSION_NOT_SUPPORTED};
 use axum::extract::{Request, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
-pub const A2A_VERSION_HEADER: HeaderName = HeaderName::from_static("a2a-version");
-pub const A2A_EXTENSIONS_HEADER: HeaderName = HeaderName::from_static("a2a-extensions");
-pub const A2A_MEDIA_TYPE: &str = "application/a2a+json";
-
-/// Default A2A protocol version this server speaks when the client omits the header.
-pub const DEFAULT_A2A_VERSION: &str = "0.3.0";
+pub use crate::constants::{A2A_EXTENSIONS_HEADER, A2A_MEDIA_TYPE, A2A_VERSION_HEADER, DEFAULT_A2A_VERSION};
 
 #[derive(Clone, Debug)]
 pub struct SpecNegotiationConfig {

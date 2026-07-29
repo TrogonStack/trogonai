@@ -8,7 +8,6 @@
 //! producing duplicate mirror publishes.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use a2a_nats::A2aPrefix;
 use a2a_nats::constants::NATS_MSG_ID_HEADER;
@@ -30,16 +29,10 @@ use a2a_nats::nats::subjects::A2aStream;
 #[cfg(not(coverage))]
 use futures::StreamExt;
 
-pub const ENV_PUSH_DLQ_MIRROR: &str = "A2A_GATEWAY_PUSH_DLQ_MIRROR";
-pub const ENV_PUSH_DLQ_MIRROR_DURABLE: &str = "A2A_GATEWAY_PUSH_DLQ_DURABLE";
-pub const PUSH_DLQ_MIRROR_HEADER: &str = "X-A2a-Dlq-Mirrored";
-/// Prefix applied to the `Nats-Msg-Id` header on mirror publishes so the
-/// authoritative DLQ envelope and its mirror don't collide in JetStream's
-/// `duplicate_window` dedup — they share a stream.
-pub const MIRROR_MSG_ID_PREFIX: &str = "mirror:";
-
-const MAX_PUBLISH_RETRIES: u32 = 3;
-const RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
+pub use crate::constants::{
+    ENV_PUSH_DLQ_MIRROR, ENV_PUSH_DLQ_MIRROR_DURABLE, MIRROR_MSG_ID_PREFIX, PUSH_DLQ_MIRROR_HEADER,
+};
+use crate::constants::{MAX_PUBLISH_RETRIES, RETRY_BASE_DELAY};
 
 /// Validated NATS durable name for the mirror's pull consumer.
 ///

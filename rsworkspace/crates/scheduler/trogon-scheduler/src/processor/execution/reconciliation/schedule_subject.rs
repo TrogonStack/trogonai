@@ -1,13 +1,7 @@
 use super::ScheduleKey;
-
-const EXECUTION_SUBJECT_PREFIX: &str = "scheduler.schedules.execution.v1";
-pub(crate) const EVENT_SUBJECT_PREFIX: &str = "scheduler.schedules.events.v1";
-pub(crate) const RRULE_WAKEUP_SUBJECT_PREFIX: &str = "scheduler.schedules.execution.v1.rrule";
-/// Namespace reserved for scheduler-internal sentinel routes (e.g. the
-/// corrupt-checkpoint placeholder). Reserving it at request validation keeps
-/// sentinel routes unclaimable by user schedules, so sentinel detection can
-/// never misclassify a real schedule.
-pub(crate) const SCHEDULER_INTERNAL_PREFIX: &str = "trogon.scheduler";
+use crate::constants::{
+    EVENT_SUBJECT_PREFIX, EXECUTION_SUBJECT_PREFIX, RRULE_WAKEUP_SUBJECT_PREFIX, SCHEDULER_INTERNAL_PREFIX,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleSubject {

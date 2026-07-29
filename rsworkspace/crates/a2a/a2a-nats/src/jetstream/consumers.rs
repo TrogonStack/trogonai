@@ -8,16 +8,13 @@
 //!   `ByStartSequence` from a client-supplied `last_seq + 1`. Used by `tasks/resubscribe`
 //!   for reconnect-after-disconnect — skips already-seen events without re-replaying them.
 
-use std::time::Duration;
-
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
 use crate::a2a_prefix::A2aPrefix;
+use crate::constants::INACTIVE_THRESHOLD;
 use crate::req_id::ReqId;
 use crate::task_id::A2aTaskId;
-
-const INACTIVE_THRESHOLD: Duration = Duration::from_secs(300);
 
 /// Durable gateway egress consumer on the full task-events filter.
 pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_pending: i64) -> Config {

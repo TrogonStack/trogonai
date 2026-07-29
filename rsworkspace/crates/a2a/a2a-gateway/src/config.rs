@@ -11,7 +11,7 @@ use a2a_nats::{A2aPrefix, A2aPrefixError, NatsConfig};
 use clap::Parser;
 use trogon_std::env::ReadEnv;
 
-const ENV_GATEWAY_QUEUE_GROUP: &str = "A2A_GATEWAY_QUEUE_GROUP";
+use crate::constants::ENV_GATEWAY_QUEUE_GROUP;
 
 /// Validated NATS server URL. Carrying the validation in the type stops
 /// later layers (connect, audit) from inheriting empty/whitespace
