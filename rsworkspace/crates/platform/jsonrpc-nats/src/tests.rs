@@ -114,6 +114,41 @@ fn round_trip_via_json_value() {
 }
 
 #[test]
+fn canonical_request_without_params_round_trips() {
+    let message = Message::Request {
+        id: RequestId::Number(1),
+        method: "ping".to_string(),
+        params: serde_json::Value::Null,
+    };
+    let encoded = encode_canonical(&message).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
+    assert!(body.get("params").is_none());
+
+    let decoded = decode_canonical(Direction::Request, Some("ping"), &encoded.headers, &encoded.body).unwrap();
+    assert_eq!(decoded, message);
+}
+
+#[test]
+fn canonical_notification_without_params_round_trips() {
+    let message = Message::Notification {
+        method: "notifications/initialized".to_string(),
+        params: serde_json::Value::Null,
+    };
+    let encoded = encode_canonical(&message).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
+    assert!(body.get("params").is_none());
+
+    let decoded = decode_canonical(
+        Direction::Request,
+        Some("notifications/initialized"),
+        &encoded.headers,
+        &encoded.body,
+    )
+    .unwrap();
+    assert_eq!(decoded, message);
+}
+
+#[test]
 fn decode_request_with_id_and_empty_body_has_null_params() {
     let mut headers = HeaderMap::new();
     headers.insert(HEADER_ID, encode_id_literal(&RequestId::Number(1)));

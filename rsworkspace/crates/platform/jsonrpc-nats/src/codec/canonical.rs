@@ -16,7 +16,17 @@ use super::{Encoded, from_json_value, to_json_value};
 /// authoritative `Jsonrpc-*` headers. Routing projections are derived by the
 /// protocol adapter from the same message and validated during decoding.
 pub fn encode_canonical(message: &Message) -> Result<Encoded, CodecError> {
-    encode_canonical_value(&to_json_value(message))
+    let mut value = to_json_value(message);
+    // `Message` cannot distinguish an absent `params` from an explicit null, so
+    // `to_json_value` renders an omitted `params` as `"params": null`. Canonical
+    // JSON-RPC omits absent params and `validate_params` rejects a null, so drop
+    // it here to keep paramless requests and notifications round-trippable.
+    if let Value::Object(object) = &mut value
+        && object.get("params").is_some_and(Value::is_null)
+    {
+        object.remove("params");
+    }
+    encode_canonical_value(&value)
 }
 
 /// Encode a complete canonical JSON-RPC 2.0 value without normalizing its shape.
