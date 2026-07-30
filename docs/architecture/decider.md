@@ -162,9 +162,11 @@ callers set headers explicitly via `CommandExecution::with_headers`. See
 [Event Metadata](./event-metadata.md) for the full policy, and
 [ADR#0013](../adr/0013-origin-stream-sequence-header.md) for the one reserved header name
 this repository defines today, `Trogon-Origin-Stream-Sequence`, used only for provenance
-when an event is republished into a different stream from the one it originally lived in.
-It is never used for checkpoints, positions, or concurrency; those always use the stream's
-current sequence.
+when an application appends a historical event into a different stream from the one where
+it originally lived. Native JetStream source, mirror, `RePublish`, and snapshot-restore
+operations use NATS-owned provenance or preserve the stored stream instead. The application
+header is never used for checkpoints, positions, or concurrency; those always use the
+stream's current sequence.
 
 ## JetStream storage layer (`trogon-decider-nats`)
 
