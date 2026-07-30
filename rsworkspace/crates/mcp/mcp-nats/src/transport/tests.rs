@@ -3,12 +3,13 @@ use crate::constants::MIN_TIMEOUT_SECS;
 use crate::wire;
 use async_nats::header::HeaderMap;
 use rmcp::model::{
-    ClientJsonRpcMessage, ClientNotification, ClientRequest, CustomNotification, CustomRequest, ErrorData,
+    ClientJsonRpcMessage, ClientNotification, ClientRequest, ConstString, CustomNotification, CustomRequest, ErrorData,
     ListToolsRequest, PaginatedRequestParams, PingRequest, RequestMetaObject, ServerJsonRpcMessage, ServerNotification,
     ServerResult,
 };
 use rmcp::service::{RoleClient, RoleServer, TxJsonRpcMessage};
 use rmcp::transport::common::http_header::{HEADER_MCP_METHOD, HEADER_MCP_PROTOCOL_VERSION};
+use std::collections::HashSet;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::mocks::MockError;
 
@@ -740,8 +741,6 @@ fn method_suffix_maps_rmcp_methods_to_acp_style_subject_suffixes() {
 
 #[test]
 fn method_table_round_trips_with_no_duplicates() {
-    use std::collections::HashSet;
-
     let methods: HashSet<&str> = METHOD_TABLE.iter().map(|(method, _)| *method).collect();
     let suffixes: HashSet<&str> = METHOD_TABLE.iter().map(|(_, suffix)| *suffix).collect();
     assert_eq!(methods.len(), METHOD_TABLE.len(), "duplicate method in METHOD_TABLE");
@@ -755,8 +754,6 @@ fn method_table_round_trips_with_no_duplicates() {
 
 #[test]
 fn method_table_covers_every_rmcp_routable_method() {
-    use rmcp::model::ConstString;
-
     fn table_contains(method: &str) -> bool {
         METHOD_TABLE.iter().any(|(m, _)| *m == method)
     }

@@ -2,9 +2,10 @@
 #[path = "pipeline_tests.rs"]
 mod pipeline_tests;
 
+use crate::constants::TEXT_CHUNK_LIMIT;
 use crate::outbound::Outbound;
 use crate::parse;
-use crate::render::{TEXT_CHUNK_LIMIT, TelegramRenderClient, chunk_text};
+use crate::render::{TelegramRenderClient, chunk_text};
 use anyhow::Context as _;
 use tracing::{info, warn};
 use trogon_chat::{AgentId, AgentPort, ChatStore, ConversationRecord};

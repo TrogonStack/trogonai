@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 fn peer(s: &str) -> McpPeerId {
     McpPeerId::new(s).unwrap()
@@ -108,8 +109,6 @@ fn parses_client_notification_subject() {
 
 #[test]
 fn suffix_tables_stay_in_sync_with_transport_method_table() {
-    use std::collections::HashSet;
-
     let parsing_suffixes: HashSet<&str> = ServerRequestMethod::SUFFIXES
         .iter()
         .chain(ClientNotificationMethod::SUFFIXES)
