@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Run the repo Rust policy lints via cargo dylint with RUSTUP_TOOLCHAIN unset"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+unset RUSTUP_TOOLCHAIN
+cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets

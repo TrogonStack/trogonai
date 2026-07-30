@@ -11,7 +11,6 @@ on:
       - 'LICENSE'
       - '.mise.toml'
       - '.config/mise/tasks/**'
-      - '.github/actions/enforce-cargo-license/**'
       - '.github/actions/setup-rust/**'
       - '.github/workflows/ci-rust.yml'
 
@@ -45,11 +44,10 @@ jobs:
           dylint-toolchain-dir: rsworkspace/dylints/trogon_lints
 
       - name: Enforce crate licenses
-        uses: ./.github/actions/enforce-cargo-license
+        run: mise run --skip-tools github-actions:enforce-cargo-license
 
       - name: Enforce TLS policy (ADR#0015)
-        run: cargo deny check bans
-        working-directory: rsworkspace
+        run: mise run --skip-tools rust:tls-policy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -67,8 +65,7 @@ jobs:
         run: mise run github-actions:dylint-tests
 
       - name: Run repo Rust policy lints
-        run: env -u RUSTUP_TOOLCHAIN cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
-        working-directory: rsworkspace
+        run: mise run --skip-tools github-actions:rust-dylint
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features
@@ -112,8 +109,7 @@ jobs:
         working-directory: rsworkspace
 
       - name: Run tests with coverage
-        run: cargo cov nextest --cobertura --output-path coverage.xml
-        working-directory: rsworkspace
+        run: mise run --skip-tools github-actions:rust-coverage
 
       - name: Coverage report and gate
         # TODO: Add a fork-safe read-only coverage comparison path; this action writes to
