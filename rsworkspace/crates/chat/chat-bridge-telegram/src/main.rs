@@ -81,9 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let bot = Bot::new(config.bot_token.clone());
 
     let local = tokio::task::LocalSet::new();
-    let result = local
-        .run_until(run(nats_client, store, messages, bot, config))
-        .await;
+    let result = local.run_until(run(nats_client, store, messages, bot, config)).await;
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");

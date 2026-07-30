@@ -37,10 +37,7 @@ pub struct ChatStore {
     conversations: jetstream::kv::Store,
 }
 
-async fn ensure_bucket(
-    js: &jetstream::Context,
-    bucket: String,
-) -> Result<jetstream::kv::Store, ChatStoreError> {
+async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChatStoreError> {
     if let Ok(store) = js.get_key_value(&bucket).await {
         return Ok(store);
     }
