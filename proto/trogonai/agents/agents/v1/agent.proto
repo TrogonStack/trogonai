@@ -13,8 +13,13 @@ message AgentConfiguration {
   // Execution engine. Immutable for the agent's v1 lifetime; switching
   // engines mints a new sibling agent rather than a revision (design Q24).
   string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
-  // Runtime-owned settings: model, parameters, and dependency declarations.
-  // The runtime named above defines the message type carried here and
-  // validates its contents. Absent means the runtime runs with its defaults.
+  // Runtime-owned settings: model selection, model parameters, and dependency
+  // declarations. Model selection is deliberately runtime-owned rather than a
+  // sibling field on this message. Which models exist, how they are named, and
+  // which sampling or reasoning knobs apply are facts the runtime owns, and a
+  // runtime that exposes no model selection at all simply carries none, with no
+  // platform-level field left empty to interpret. The runtime named above
+  // defines the message type carried here and validates its contents. Absent
+  // means the runtime runs with its defaults.
   google.protobuf.Any settings = 2;
 }
