@@ -1,8 +1,5 @@
-#[cfg(not(coverage))]
 use teloxide::Bot;
-#[cfg(not(coverage))]
 use teloxide::requests::Requester;
-#[cfg(not(coverage))]
 use teloxide::types::{ChatAction, ChatId};
 
 /// The render half's platform seam: what the pipeline needs from Telegram,
@@ -14,19 +11,16 @@ pub trait Outbound {
     async fn send_text(&self, chat_id: i64, text: String) -> anyhow::Result<()>;
 }
 
-#[cfg(not(coverage))]
 pub struct TelegramOutbound {
     bot: Bot,
 }
 
-#[cfg(not(coverage))]
 impl TelegramOutbound {
     pub fn new(bot: Bot) -> Self {
         Self { bot }
     }
 }
 
-#[cfg(not(coverage))]
 impl Outbound for TelegramOutbound {
     async fn typing(&self, chat_id: i64) -> anyhow::Result<()> {
         self.bot.send_chat_action(ChatId(chat_id), ChatAction::Typing).await?;

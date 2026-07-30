@@ -1,14 +1,8 @@
-use std::time::Duration;
-
 use trogon_std::{ByteSize, HttpBodySizeMax};
 
 pub const HTTP_BODY_SIZE_MAX: HttpBodySizeMax = HttpBodySizeMax::new(ByteSize::mib(10)).unwrap();
 
 pub const HEADER_SECRET_TOKEN: &str = "x-telegram-bot-api-secret-token";
-
-pub const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
-pub const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-pub const TELEGRAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const NATS_HEADER_UPDATE_TYPE: &str = "X-Telegram-Update-Type";
 pub const NATS_HEADER_UPDATE_ID: &str = "X-Telegram-Update-Id";

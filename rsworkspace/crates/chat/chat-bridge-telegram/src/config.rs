@@ -24,13 +24,17 @@ pub struct BridgeConfig {
 
 impl BridgeConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> anyhow::Result<Self> {
-        let bot_token = env.var("TELEGRAM_BOT_TOKEN").context("TELEGRAM_BOT_TOKEN not set")?;
+        let bot_token = env
+            .var("TELEGRAM_BOT_TOKEN")
+            .context("TELEGRAM_BOT_TOKEN not set")?;
 
         let chat_prefix = env.var("CHAT_PREFIX").unwrap_or_else(|_| "prod".to_string());
         let inbound_stream = env
             .var("TELEGRAM_INBOUND_STREAM")
             .unwrap_or_else(|_| "TELEGRAM".to_string());
-        let bot_account = env.var("TELEGRAM_BOT_ACCOUNT").unwrap_or_else(|_| "bot".to_string());
+        let bot_account = env
+            .var("TELEGRAM_BOT_ACCOUNT")
+            .unwrap_or_else(|_| "bot".to_string());
         let agent_id = env.var("CHAT_AGENT_ID").unwrap_or_else(|_| "default".to_string());
         let agent_cwd = env
             .var("CHAT_AGENT_CWD")

@@ -35,7 +35,10 @@ impl AcpPort {
 /// text reaches the model.
 fn prompt_text(event: &InboundChatEvent) -> String {
     let body = event.text.as_deref().unwrap_or_default();
-    format!("[telegram message from {}]\n{}", event.sender.display_name, body)
+    format!(
+        "[telegram message from {}]\n{}",
+        event.sender.display_name, body
+    )
 }
 
 /// Structured twin of the context prefix, for agents that opt into reading

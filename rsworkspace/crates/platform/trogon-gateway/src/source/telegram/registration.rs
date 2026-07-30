@@ -1,12 +1,17 @@
 #![cfg_attr(coverage, allow(dead_code))]
 
+use std::time::Duration;
+
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use super::config::TelegramSourceConfig;
-use super::constants::{TELEGRAM_API_BASE, TELEGRAM_CONNECT_TIMEOUT, TELEGRAM_REQUEST_TIMEOUT};
+
+const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
+const TELEGRAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const TELEGRAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistrationError {

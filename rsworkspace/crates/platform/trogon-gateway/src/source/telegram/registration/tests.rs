@@ -6,13 +6,10 @@ use reqwest::header::CONTENT_TYPE;
 use serde_json::{Value, json};
 use std::error::Error;
 #[cfg(coverage)]
-use std::time::Duration;
-#[cfg(coverage)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(coverage)]
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_std::NonZeroDuration;

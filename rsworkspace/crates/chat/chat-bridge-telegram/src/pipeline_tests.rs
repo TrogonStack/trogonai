@@ -1,7 +1,9 @@
 use super::*;
 use crate::outbound::Outbound;
 use acp_nats::ClientHandler;
-use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
+use agent_client_protocol::schema::v1::{
+    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent,
+};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -56,7 +58,11 @@ impl trogon_chat::AgentPort for FakePort {
         Ok(AgentSessionId::new(format!("sess-{}", self.sessions_created.borrow())))
     }
 
-    async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error> {
+    async fn prompt(
+        &self,
+        session: &AgentSessionId,
+        event: &InboundChatEvent,
+    ) -> Result<PromptOutcome, Self::Error> {
         self.prompted
             .borrow_mut()
             .push((session.as_str().to_string(), event.text.clone().unwrap_or_default()));
@@ -178,7 +184,11 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     };
 
     for _ in 0..3 {
-        let msg = messages.next().await.expect("stream yields").expect("message received");
+        let msg = messages
+            .next()
+            .await
+            .expect("stream yields")
+            .expect("message received");
         pipeline.handle_message(&msg).await.expect("handled");
     }
 
@@ -220,7 +230,10 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     );
 
     // Everything acked: nothing left pending for redelivery.
-    let info = stream.consumer_info("bridge-test").await.expect("consumer info");
+    let info = stream
+        .consumer_info("bridge-test")
+        .await
+        .expect("consumer info");
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 0);
 }

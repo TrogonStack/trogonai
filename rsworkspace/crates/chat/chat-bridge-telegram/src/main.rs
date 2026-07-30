@@ -8,40 +8,34 @@
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod constants;
+mod acp_port;
+mod config;
 mod outbound;
 mod parse;
 mod pipeline;
 mod render;
 
-// Connect-and-serve is gated to `cfg(not(coverage))` because
-// `trogon-nats::NatsJetStreamClient` is excluded during coverage runs; the
-// channel-neutral pipeline/render halves stay compiled so their tests run.
-#[cfg(not(coverage))]
-mod acp_port;
-#[cfg(not(coverage))]
-mod config;
+use acp_nats::{AgentHandler, ClientHandler};
+use acp_port::{AcpBridge, AcpPort};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::InitializeRequest;
+use anyhow::Context as _;
+use config::BridgeConfig;
+use futures::StreamExt;
+use outbound::TelegramOutbound;
+use pipeline::Pipeline;
+use render::TelegramRenderClient;
+use std::rc::Rc;
+use std::sync::Arc;
+use teloxide::Bot;
+use tracing::{error, info, warn};
+use trogon_chat::store::PrincipalRecord;
+use trogon_chat::{ChatStore, Endpoint, PrincipalId};
+use trogon_std::env::SystemEnv;
+use trogon_std::fs::SystemFs;
+use trogon_std::signal::shutdown_signal;
+use trogon_telemetry::ServiceName;
 
-#[cfg(not(coverage))]
-use {
-    acp_nats::{AgentHandler, ClientHandler},
-    acp_port::{AcpBridge, AcpPort},
-    agent_client_protocol::schema::{ProtocolVersion, v1::InitializeRequest},
-    anyhow::Context as _,
-    config::BridgeConfig,
-    futures::StreamExt,
-    outbound::TelegramOutbound,
-    pipeline::Pipeline,
-    render::TelegramRenderClient,
-    std::sync::Arc,
-    teloxide::Bot,
-    tracing::{error, info, warn},
-    trogon_chat::{ChatStore, Endpoint, PrincipalId, store::PrincipalRecord},
-    trogon_std::{env::SystemEnv, fs::SystemFs, signal::shutdown_signal},
-    trogon_telemetry::ServiceName,
-};
-
-#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = BridgeConfig::from_env(&SystemEnv)?;
@@ -82,7 +76,9 @@ async fn main() -> anyhow::Result<()> {
     let bot = Bot::new(config.bot_token.clone());
 
     let local = tokio::task::LocalSet::new();
-    let result = local.run_until(run(nats_client, store, messages, bot, config)).await;
+    let result = local
+        .run_until(run(nats_client, store, messages, bot, config))
+        .await;
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
@@ -90,7 +86,6 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-#[cfg(not(coverage))]
 async fn seed_principals(store: &ChatStore, config: &BridgeConfig) -> anyhow::Result<()> {
     for user in &config.seed_users {
         let principal = PrincipalId::new(format!("telegram-{user}"))?;
@@ -103,7 +98,6 @@ async fn seed_principals(store: &ChatStore, config: &BridgeConfig) -> anyhow::Re
     Ok(())
 }
 
-#[cfg(not(coverage))]
 async fn run(
     nats_client: async_nats::Client,
     store: ChatStore,
@@ -122,7 +116,7 @@ async fn run(
         config.acp.clone(),
         notification_tx,
     ));
-    let renderer = Arc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(TelegramRenderClient::new());
 
     let client_task = tokio::task::spawn_local(acp_nats::client::run(
         nats_client.clone(),
@@ -186,6 +180,3 @@ async fn run(
     notification_task.abort();
     Ok(())
 }
-
-#[cfg(coverage)]
-fn main() {}

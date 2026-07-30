@@ -105,7 +105,7 @@ tower-http = { version = "=0.7.0", features = ["trace"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
 
 # Telegram
-teloxide = { version = "=0.14.1", default-features = false, features = ["macros", "webhooks-axum", "rustls"] }
+teloxide = { version = "=0.14.1", features = ["macros", "webhooks-axum"] }
 
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }
