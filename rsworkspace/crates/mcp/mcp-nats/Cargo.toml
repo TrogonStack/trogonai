@@ -8,10 +8,12 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 thiserror = { workspace = true }
 async-nats = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+http = { workspace = true }
 rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -1,10 +1,10 @@
 #[derive(Debug, Clone)]
-pub struct GetTaskResultSubject {
+pub struct DiscoverSubject {
     prefix: crate::McpPrefix,
     server_id: crate::McpPeerId,
 }
 
-impl GetTaskResultSubject {
+impl DiscoverSubject {
     pub fn new(prefix: &crate::McpPrefix, server_id: &crate::McpPeerId) -> Self {
         Self {
             prefix: prefix.clone(),
@@ -13,15 +13,15 @@ impl GetTaskResultSubject {
     }
 }
 
-impl std::fmt::Display for GetTaskResultSubject {
+impl std::fmt::Display for DiscoverSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.tasks.result",
+            "{}.server.{}.server.discover",
             self.prefix.as_str(),
             self.server_id.as_str()
         )
     }
 }
 
-impl super::super::markers::Requestable for GetTaskResultSubject {}
+impl super::super::markers::Requestable for DiscoverSubject {}

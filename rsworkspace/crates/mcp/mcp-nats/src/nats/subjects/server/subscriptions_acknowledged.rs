@@ -1,10 +1,10 @@
 #[derive(Debug, Clone)]
-pub struct ElicitationCompletedSubject {
+pub struct SubscriptionsAcknowledgedSubject {
     prefix: crate::McpPrefix,
     client_id: crate::McpPeerId,
 }
 
-impl ElicitationCompletedSubject {
+impl SubscriptionsAcknowledgedSubject {
     pub fn new(prefix: &crate::McpPrefix, client_id: &crate::McpPeerId) -> Self {
         Self {
             prefix: prefix.clone(),
@@ -13,15 +13,15 @@ impl ElicitationCompletedSubject {
     }
 }
 
-impl std::fmt::Display for ElicitationCompletedSubject {
+impl std::fmt::Display for SubscriptionsAcknowledgedSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.elicitation.complete",
+            "{}.client.{}.notifications.subscriptions.acknowledged",
             self.prefix.as_str(),
             self.client_id.as_str()
         )
     }
 }
 
-impl super::super::markers::Publishable for ElicitationCompletedSubject {}
+impl super::super::markers::Publishable for SubscriptionsAcknowledgedSubject {}

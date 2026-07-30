@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+#MISE description="Local mirror of the rsworkspace CI lint job (license + deny bans + fmt + repo policy lints + clippy), workspace-wide. Run before pushing."
+#
+# Usage: mise run rust-lint
+#
+# Mirrors the `lint` job in .github/workflows/ci-rust.yml exactly, in order, so a
+# green run locally means a green lint job in CI. Each step prints PASS/FAIL on
+# its own line and the script stops at the first failure, so the offending gate
+# is unambiguous before you push. This exists because fixing one lint error and
+# pushing only surfaces the next gate; run this to catch them all at once.
+set -u
+set -o pipefail
+
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+RSWS="$ROOT/rsworkspace"
+if ! cd "$RSWS"; then
+    echo "Unable to enter workspace: $RSWS" >&2
+    exit 1
+fi
+
+step() {
+    local name="$1"; shift
+    echo
+    echo "================================================================"
+    echo "STEP: $name"
+    echo "  cmd: $*"
+    echo "================================================================"
+    if "$@"; then
+        echo "  RESULT: PASS: $name"
+    else
+        local rc=$?
+        echo "  RESULT: FAIL: $name (exit $rc)"
+        echo
+        echo "OVERALL: FAIL ($name)"
+        exit "$rc"
+    fi
+}
+
+# 1. Crate licenses: mirrors CI 'Enforce crate licenses'.
+step "license" python3 - <<'PY'
+import json, subprocess, sys, tomllib
+
+meta = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"]))
+violations = []
+for pkg in meta["packages"]:
+    with open(pkg["manifest_path"], "rb") as manifest_file:
+        manifest = tomllib.load(manifest_file)
+    declared_license = manifest.get("package", {}).get("license")
+    if pkg.get("license") != "Apache-2.0" or declared_license != "Apache-2.0":
+        violations.append(f'{pkg["manifest_path"]}: license is {pkg.get("license") or "missing"}')
+
+if violations:
+    print('Every Rust crate must declare license = "Apache-2.0" in Cargo.toml.', file=sys.stderr)
+    print("\n".join(violations), file=sys.stderr)
+    sys.exit(1)
+PY
+
+# 2. TLS policy: mirrors CI 'Enforce TLS policy (ADR#0015)'.
+step "deny-bans" cargo deny check bans
+
+# 3. Formatting: mirrors CI 'Check formatting'.
+step "fmt-check" cargo fmt --all -- --check
+
+# 4. Repo-owned policy lints (dylint). Needs the pinned dylint toolchain, so
+#    install it the same way rust-pr-check does before running the lints.
+load_dylint_toolchain_config() {
+    local parsed
+    if ! parsed="$(TOOLCHAIN_FILE="dylints/trogon_lints/rust-toolchain.toml" python3 - <<'PY'
+import os
+import sys
+import tomllib
+
+try:
+    with open(os.environ["TOOLCHAIN_FILE"], "rb") as toolchain_file:
+        toolchain = tomllib.load(toolchain_file)["toolchain"]
+    channel = toolchain["channel"]
+    components = toolchain.get("components", [])
+    if not isinstance(channel, str) or not channel.strip():
+        raise ValueError("toolchain.channel must be a non-empty string")
+    if not isinstance(components, list) or any(
+        not isinstance(component, str) or not component.strip() for component in components
+    ):
+        raise ValueError("toolchain.components must be a list of non-empty strings")
+except (KeyError, OSError, TypeError, ValueError) as error:
+    print(f"Invalid Dylint toolchain config: {error}", file=sys.stderr)
+    sys.exit(1)
+
+sys.stdout.write("\n".join([channel, *components]) + "\n")
+PY
+)"; then
+        return 1
+    fi
+
+    mapfile -t DYLINT_TOOLCHAIN_CONFIG <<< "$parsed"
+    DYLINT_TOOLCHAIN="${DYLINT_TOOLCHAIN_CONFIG[0]}"
+    DYLINT_COMPONENTS=("${DYLINT_TOOLCHAIN_CONFIG[@]:1}")
+}
+
+step "policy-lint-config" load_dylint_toolchain_config
+
+step "policy-lint-toolchain" rustup toolchain install "$DYLINT_TOOLCHAIN" --profile minimal
+if [[ ${#DYLINT_COMPONENTS[@]} -gt 0 ]]; then
+    step "policy-lint-components" rustup component add "${DYLINT_COMPONENTS[@]}" --toolchain "$DYLINT_TOOLCHAIN"
+fi
+
+# Mirrors CI 'Test repo Rust policy lints'.
+step "policy-lint-tests" bash -c 'cd dylints/trogon_lints && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
+
+# Mirrors CI 'Run repo Rust policy lints': note `--all-targets` so test-target
+# violations (inline test modules, function-local `use`, ...) are caught too.
+step "policy-lints" env -u RUSTUP_TOOLCHAIN rustup run "$DYLINT_TOOLCHAIN" \
+    cargo dylint --path dylints/trogon_lints --workspace --no-deps -- --all-features --all-targets
+
+# 5. clippy: mirrors CI 'Run clippy'.
+step "clippy" cargo clippy --all-targets --all-features
+
+echo
+echo "================================================================"
+echo "OVERALL: PASS: all CI lint gates green"
+echo "================================================================"

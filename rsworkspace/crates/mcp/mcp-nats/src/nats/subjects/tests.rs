@@ -36,6 +36,7 @@ fn all_server_request_subjects_are_method_shaped() {
     let subjects = [
         server::InitializeSubject::new(&prefix, &server).to_string(),
         server::PingSubject::new(&prefix, &server).to_string(),
+        server::DiscoverSubject::new(&prefix, &server).to_string(),
         server::CompleteSubject::new(&prefix, &server).to_string(),
         server::SetLoggingLevelSubject::new(&prefix, &server).to_string(),
         server::ListPromptsSubject::new(&prefix, &server).to_string(),
@@ -43,13 +44,13 @@ fn all_server_request_subjects_are_method_shaped() {
         server::ListResourcesSubject::new(&prefix, &server).to_string(),
         server::ListResourceTemplatesSubject::new(&prefix, &server).to_string(),
         server::ReadResourceSubject::new(&prefix, &server).to_string(),
+        server::SubscriptionsListenSubject::new(&prefix, &server).to_string(),
         server::SubscribeResourceSubject::new(&prefix, &server).to_string(),
         server::UnsubscribeResourceSubject::new(&prefix, &server).to_string(),
         server::ListToolsSubject::new(&prefix, &server).to_string(),
         server::CallToolSubject::new(&prefix, &server).to_string(),
         server::GetTaskSubject::new(&prefix, &server).to_string(),
-        server::ListTasksSubject::new(&prefix, &server).to_string(),
-        server::GetTaskResultSubject::new(&prefix, &server).to_string(),
+        server::UpdateTaskSubject::new(&prefix, &server).to_string(),
         server::CancelTaskSubject::new(&prefix, &server).to_string(),
     ];
 
@@ -58,6 +59,7 @@ fn all_server_request_subjects_are_method_shaped() {
         [
             "mcp.server.filesystem.initialize",
             "mcp.server.filesystem.ping",
+            "mcp.server.filesystem.server.discover",
             "mcp.server.filesystem.completion.complete",
             "mcp.server.filesystem.logging.set_level",
             "mcp.server.filesystem.prompts.list",
@@ -65,13 +67,13 @@ fn all_server_request_subjects_are_method_shaped() {
             "mcp.server.filesystem.resources.list",
             "mcp.server.filesystem.resources.templates.list",
             "mcp.server.filesystem.resources.read",
+            "mcp.server.filesystem.subscriptions.listen",
             "mcp.server.filesystem.resources.subscribe",
             "mcp.server.filesystem.resources.unsubscribe",
             "mcp.server.filesystem.tools.list",
             "mcp.server.filesystem.tools.call",
             "mcp.server.filesystem.tasks.get",
-            "mcp.server.filesystem.tasks.list",
-            "mcp.server.filesystem.tasks.result",
+            "mcp.server.filesystem.tasks.update",
             "mcp.server.filesystem.tasks.cancel",
         ]
     );
@@ -97,7 +99,8 @@ fn all_server_notification_subjects_are_peer_targeted() {
         server::ResourceListChangedSubject::new(&prefix, &client).to_string(),
         server::ToolListChangedSubject::new(&prefix, &client).to_string(),
         server::PromptListChangedSubject::new(&prefix, &client).to_string(),
-        server::ElicitationCompletedSubject::new(&prefix, &client).to_string(),
+        server::SubscriptionsAcknowledgedSubject::new(&prefix, &client).to_string(),
+        server::TaskStatusSubject::new(&prefix, &client).to_string(),
     ];
 
     assert_eq!(
@@ -110,7 +113,8 @@ fn all_server_notification_subjects_are_peer_targeted() {
             "mcp.client.desktop.notifications.resources.list_changed",
             "mcp.client.desktop.notifications.tools.list_changed",
             "mcp.client.desktop.notifications.prompts.list_changed",
-            "mcp.client.desktop.notifications.elicitation.complete",
+            "mcp.client.desktop.notifications.subscriptions.acknowledged",
+            "mcp.client.desktop.notifications.tasks",
         ]
     );
 }

@@ -22,6 +22,7 @@ trogon-telemetry = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+async-nats = { workspace = true }
 serde_json = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }

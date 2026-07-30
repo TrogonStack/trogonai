@@ -2,8 +2,8 @@
 
 use mcp_nats::{Config, McpPeerId, McpPrefix, client, wire};
 use rmcp::model::{
-    ClientJsonRpcMessage, ClientRequest, ListToolsRequest, PaginatedRequestParams, RequestId, ServerJsonRpcMessage,
-    ServerResult,
+    ClientJsonRpcMessage, ClientRequest, DiscoverRequest, DiscoverRequestParams, ListToolsRequest,
+    PaginatedRequestParams, RequestId, ServerJsonRpcMessage, ServerResult,
 };
 use rmcp::service::RoleServer;
 use rmcp::transport::Transport;
@@ -41,6 +41,35 @@ async fn public_client_transport_routes_rmcp_request_over_nats() {
         params: Some(PaginatedRequestParams::default()),
         extensions: Default::default(),
     });
+    transport
+        .send(ClientJsonRpcMessage::request(request, RequestId::Number(1)))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        transport.receive().await.unwrap(),
+        ServerJsonRpcMessage::Response(_)
+    ));
+}
+
+#[tokio::test]
+async fn public_client_transport_routes_discover_over_nats() {
+    let nats = AdvancedMockNatsClient::new();
+    let _inbound = nats.inject_messages();
+    let response = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(1));
+    let encoded = wire::encode_tx::<RoleServer>(&response).unwrap();
+    nats.set_response_wire("mcp.server.filesystem.server.discover", encoded.headers, encoded.body);
+
+    let mut transport = client::connect(
+        nats,
+        &config(),
+        McpPeerId::new("desktop").unwrap(),
+        McpPeerId::new("filesystem").unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let request = ClientRequest::DiscoverRequest(DiscoverRequest::new(DiscoverRequestParams::default()));
     transport
         .send(ClientJsonRpcMessage::request(request, RequestId::Number(1)))
         .await
