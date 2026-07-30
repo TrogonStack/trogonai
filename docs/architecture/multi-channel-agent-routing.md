@@ -17,7 +17,7 @@ designed channel-neutral from day one even while only Telegram exists.
 
 ## V1: the direct path
 
-```
+```text
                  SUBJECTS / PROTOCOL                     WORKER
 
 Telegram ─HTTP─▶ telegram.{update_type}                  trogon-gateway (exists)
@@ -59,7 +59,7 @@ binary. A second channel imports the same brain; it never copies it.
 When a second channel or a second consumer of conversations (audit, analytics)
 arrives, the bridge splits along the seams the shared crate already defines:
 
-```
+```text
 telegram.{update_type}  (stream TELEGRAM)                trogon-gateway
       │
       ▼
@@ -87,7 +87,7 @@ platform API calls
 
 ## Domain model
 
-```
+```text
 endpoint (channel, account, peer)     where messages arrive and leave
    │  many-to-one
    ▼
@@ -144,7 +144,7 @@ concept with one channel-neutral mechanism.
 **Inbound chat event** (a Rust type in v1; the `chat.*.in.*` payload after
 extraction):
 
-```
+```text
 {
   endpoint:    { channel, account, peer },
   sender:      { platform_user_id, display_name },
@@ -182,7 +182,7 @@ Size is capped at the bridge.
 
 The bridge reaches agents through one in-process trait:
 
-```
+```text
 AgentPort:
   create_session / resume_session
   prompt(session, content) -> stream of agent events

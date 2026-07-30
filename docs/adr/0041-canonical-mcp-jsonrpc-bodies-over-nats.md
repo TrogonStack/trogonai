@@ -79,7 +79,7 @@ body.
 
 ### 5. Other protocols keep the existing codec during migration
 
-Upon acceptance, this decision supersedes ADR#0011 for MCP only. ACP and A2A
+Upon acceptance, this decision supersedes [ADR#0011](./0011-jsonrpc-over-nats-binding.md) for MCP only. ACP and A2A
 continue using its content-mode codec until their consumers, signing rules, and
 rollout plans are evaluated separately. The shared `jsonrpc-nats` package exposes
 the two wire modes explicitly so selecting one is deliberate.
