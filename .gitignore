@@ -25,19 +25,22 @@ docs/.vitepress/cache
 !.env.example
 mise.local.toml
 
+# Docker
+docker-compose.override.yml
+
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# trogonai internal
+.trogonai/
+*.internal.trogonai.md
 
 # Coverage
 lcov.info
@@ -46,12 +49,6 @@ coverage.xml
 coverage-*.xml
 *.profraw
 *.profdata
-
-# Docker
-.dockerignore
-
-# NATS
-*.creds
 
 # Misc
 tmp

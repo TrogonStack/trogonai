@@ -14,7 +14,6 @@ pub enum ServiceName {
     TrogonSourceLinear,
     TrogonSourceSlack,
     TrogonSourceTelegram,
-    ChatBridgeTelegram,
 }
 
 impl ServiceName {
@@ -31,7 +30,6 @@ impl ServiceName {
             Self::TrogonSourceLinear => "trogon-source-linear",
             Self::TrogonSourceSlack => "trogon-source-slack",
             Self::TrogonSourceTelegram => "trogon-source-telegram",
-            Self::ChatBridgeTelegram => "chat-bridge-telegram",
         }
     }
 }
