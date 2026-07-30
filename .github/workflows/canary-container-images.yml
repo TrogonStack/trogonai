@@ -33,6 +33,7 @@ jobs:
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install: false
+          cache: false
 
       - name: Resolve service config
         id: service_config
