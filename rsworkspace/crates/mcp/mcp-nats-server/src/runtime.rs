@@ -187,8 +187,11 @@ where
 }
 
 fn unexpected_result(method: &str, result: &ServerResult) -> ErrorData {
+    // Keep the payload-bearing debug local; the client-facing message names only
+    // the method so tool/prompt content cannot leak through the error.
+    warn!(method, ?result, "MCP NATS proxy received an unexpected result");
     ErrorData::internal_error(
-        format!("MCP NATS proxy received an unexpected result for {method}: {result:?}"),
+        format!("MCP NATS proxy received an unexpected result for {method}"),
         None,
     )
 }
