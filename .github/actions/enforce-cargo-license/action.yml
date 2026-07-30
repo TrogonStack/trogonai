@@ -22,39 +22,32 @@ runs:
         metadata_path="${RUNNER_TEMP:-/tmp}/cargo-metadata.json"
         cargo metadata --no-deps --format-version 1 > "$metadata_path"
 
-        METADATA_PATH="$metadata_path" node <<'NODE'
-        const fs = require("node:fs");
-        const expectedLicense = process.env.EXPECTED_LICENSE;
-        const metadata = JSON.parse(fs.readFileSync(process.env.METADATA_PATH, "utf8"));
-        const violations = [];
+        METADATA_PATH="$metadata_path" python3 <<'PY'
+        import json
+        import os
+        import sys
+        import tomllib
 
-        for (const pkg of metadata.packages) {
-          const manifest = fs.readFileSync(pkg.manifest_path, "utf8");
-          const packageLines = [];
-          let inPackage = false;
+        with open(os.environ["METADATA_PATH"], encoding="utf-8") as metadata_file:
+          metadata = json.load(metadata_file)
 
-          for (const line of manifest.split(/\r?\n/)) {
-            if (line.startsWith("[")) {
-              if (inPackage) break;
-              inPackage = line.trim() === "[package]";
-              continue;
-            }
+        expected_license = os.environ["EXPECTED_LICENSE"]
+        violations = []
 
-            if (inPackage) {
-              packageLines.push(line);
-            }
-          }
+        for package in metadata["packages"]:
+          with open(package["manifest_path"], "rb") as manifest_file:
+            manifest = tomllib.load(manifest_file)
+          declared_license = manifest.get("package", {}).get("license")
+          if package.get("license") != expected_license or declared_license != expected_license:
+            violations.append(
+              f'{package["manifest_path"]}: license is {package.get("license") or "missing"}'
+            )
 
-          if (pkg.license !== expectedLicense || !packageLines.includes(`license = "${expectedLicense}"`)) {
-            violations.push(`${pkg.manifest_path}: license is ${pkg.license ?? "missing"}`);
-          }
-        }
-
-        if (violations.length > 0) {
-          console.error(`Every Rust crate must declare license = "${expectedLicense}" in Cargo.toml.`);
-          for (const violation of violations) {
-            console.error(violation);
-          }
-          process.exit(1);
-        }
-        NODE
+        if violations:
+          print(
+            f'Every Rust crate must declare license = "{expected_license}" in Cargo.toml.',
+            file=sys.stderr,
+          )
+          print("\n".join(violations), file=sys.stderr)
+          sys.exit(1)
+        PY
