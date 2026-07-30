@@ -1,14 +1,28 @@
 use std::collections::HashMap;
 use std::future;
 use std::io;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use axum::http::request::Parts;
 use mcp_nats::{
-    ClientJsonRpcMessage, Config, ErrorData, FlushClient, McpPeerId, NatsTransport, PublishClient, RequestClient,
-    RequestId, ServerJsonRpcMessage, SubscribeClient,
+    ClientJsonRpcMessage, Config, ErrorData, FlushClient, McpPeerId, McpTransportHeaders, NatsTransport, PublishClient,
+    RequestClient, RequestId, ServerJsonRpcMessage, SubscribeClient,
 };
-use rmcp::model::{ClientNotification, ClientRequest, ServerInfo, ServerRequest, ServerResult};
-use rmcp::service::{NotificationContext, Peer, RequestContext, RoleClient, RoleServer, Service, ServiceError};
+use rmcp::ServerHandler;
+#[allow(deprecated)]
+use rmcp::model::SetLevelRequestParams;
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CancelTaskParams, CancelledNotificationParam, ClientNotification,
+    ClientRequest, CompleteRequestParams, CompleteResult, CustomNotification, CustomRequest, CustomResult,
+    DiscoverRequestParams, DiscoverResult, Extensions, GetPromptRequestParams, GetPromptResponse, GetTaskParams,
+    GetTaskResult, InitializeRequestParams, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, Notification, NotificationMetaObject, NotificationNoParam,
+    PaginatedRequestParams, ProgressNotificationParam, ReadResourceRequestParams, ReadResourceResponse, Request,
+    RequestMetaObject, RequestNoParam, RequestOptionalParam, ServerInfo, ServerRequest, ServerResult,
+    SubscribeRequestParams, UnsubscribeRequestParams, UpdateTaskParams,
+};
+use rmcp::service::{NotificationContext, Peer, RequestContext, RoleClient, RoleServer, ServiceError};
 use rmcp::transport::Transport;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
@@ -93,7 +107,7 @@ where
 {
     command_tx: mpsc::Sender<ProxyCommand>,
     operation_timeout: Duration,
-    server_info: ServerInfo,
+    server_info: Arc<RwLock<ServerInfo>>,
     _nats: std::marker::PhantomData<N>,
 }
 
@@ -112,17 +126,25 @@ where
         Self {
             command_tx,
             operation_timeout,
-            server_info: ServerInfo::default(),
+            server_info: Arc::new(RwLock::new(ServerInfo::default())),
             _nats: std::marker::PhantomData,
         }
     }
 }
 
-impl<N> Service<RoleServer> for McpNatsProxyService<N>
+impl<N> McpNatsProxyService<N>
 where
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
 {
-    async fn handle_request(
+    fn remember_server_info(&self, result: &ServerInfo) {
+        let mut server_info = self
+            .server_info
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *server_info = result.clone();
+    }
+
+    async fn forward(
         &self,
         request: ClientRequest,
         context: RequestContext<RoleServer>,
@@ -143,7 +165,7 @@ where
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the request", None))?
     }
 
-    async fn handle_notification(
+    async fn forward_notification(
         &self,
         notification: ClientNotification,
         context: NotificationContext<RoleServer>,
@@ -162,9 +184,367 @@ where
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy timed out waiting for the notification", None))?
             .map_err(|_| ErrorData::internal_error("MCP NATS proxy dropped the notification", None))?
     }
+}
+
+fn unexpected_result(method: &str, result: &ServerResult) -> ErrorData {
+    // `ServerResult` debug can carry tool/prompt content, so keep it out of both
+    // the client-facing error and the logs; the method and an opaque variant
+    // discriminant are enough to triage without exposing any payload.
+    warn!(
+        method,
+        result_variant = ?std::mem::discriminant(result),
+        "MCP NATS proxy received an unexpected result"
+    );
+    ErrorData::internal_error(
+        format!("MCP NATS proxy received an unexpected result for {method}"),
+        None,
+    )
+}
+
+fn preserve_http_transport_headers(extensions: &mut Extensions) {
+    let headers = extensions
+        .get::<Parts>()
+        .map(|parts| McpTransportHeaders::from_http(&parts.headers));
+    if let Some(headers) = headers.filter(|headers| !headers.is_empty()) {
+        extensions.insert(headers);
+    }
+}
+
+fn restore_request_meta(extensions: &mut Extensions, context_meta: RequestMetaObject) {
+    let mut meta = extensions.remove::<RequestMetaObject>().unwrap_or_default();
+    meta.extend(context_meta);
+    if !meta.is_empty() {
+        extensions.insert(meta);
+    }
+}
+
+fn restore_notification_meta(extensions: &mut Extensions, context_meta: NotificationMetaObject) {
+    let mut meta = extensions.remove::<NotificationMetaObject>().unwrap_or_default();
+    meta.extend(context_meta);
+    if !meta.is_empty() {
+        extensions.insert(meta);
+    }
+}
+
+fn request_extensions(context: &RequestContext<RoleServer>) -> Extensions {
+    let mut extensions = context.extensions.clone();
+    restore_request_meta(&mut extensions, context.meta.clone());
+    preserve_http_transport_headers(&mut extensions);
+    extensions
+}
+
+fn notification_extensions(context: &NotificationContext<RoleServer>) -> Extensions {
+    let mut extensions = context.extensions.clone();
+    restore_notification_meta(&mut extensions, context.meta.clone());
+    preserve_http_transport_headers(&mut extensions);
+    extensions
+}
+
+fn wrap_request<M: Default, P>(params: P, context: &RequestContext<RoleServer>) -> Request<M, P> {
+    let mut request = Request::new(params);
+    request.extensions = request_extensions(context);
+    request
+}
+
+fn wrap_optional_request<M: Default, P>(
+    params: Option<P>,
+    context: &RequestContext<RoleServer>,
+) -> RequestOptionalParam<M, P> {
+    RequestOptionalParam {
+        method: Default::default(),
+        params,
+        extensions: request_extensions(context),
+    }
+}
+
+fn wrap_no_param_request<M: Default>(context: &RequestContext<RoleServer>) -> RequestNoParam<M> {
+    RequestNoParam {
+        method: Default::default(),
+        extensions: request_extensions(context),
+    }
+}
+
+fn wrap_notification<M: Default, P>(params: P, context: &NotificationContext<RoleServer>) -> Notification<M, P> {
+    let mut notification = Notification::new(params);
+    notification.extensions = notification_extensions(context);
+    notification
+}
+
+fn wrap_no_param_notification<M: Default>(context: &NotificationContext<RoleServer>) -> NotificationNoParam<M> {
+    NotificationNoParam {
+        method: Default::default(),
+        extensions: notification_extensions(context),
+    }
+}
+
+impl<N> ServerHandler for McpNatsProxyService<N>
+where
+    N: SubscribeClient + RequestClient + PublishClient + FlushClient,
+{
+    async fn ping(&self, context: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        let request = ClientRequest::PingRequest(wrap_no_param_request(&context));
+        match self.forward(request, context).await? {
+            ServerResult::EmptyResult(_) => Ok(()),
+            other => Err(unexpected_result("ping", &other)),
+        }
+    }
+
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        let wire_request = ClientRequest::InitializeRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::InitializeResult(result) => {
+                self.remember_server_info(&result);
+                Ok(result)
+            }
+            other => Err(unexpected_result("initialize", &other)),
+        }
+    }
+
+    async fn discover(&self, context: RequestContext<RoleServer>) -> Result<DiscoverResult, ErrorData> {
+        let request = ClientRequest::DiscoverRequest(wrap_request(DiscoverRequestParams {}, &context));
+        match self.forward(request, context).await? {
+            ServerResult::DiscoverResult(result) => Ok(result),
+            other => Err(unexpected_result("discover", &other)),
+        }
+    }
+
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        let wire_request = ClientRequest::CompleteRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::CompleteResult(result) => Ok(result),
+            other => Err(unexpected_result("completion/complete", &other)),
+        }
+    }
+
+    #[allow(deprecated)]
+    async fn set_level(
+        &self,
+        request: SetLevelRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let wire_request = ClientRequest::SetLevelRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::EmptyResult(_) => Ok(()),
+            other => Err(unexpected_result("logging/setLevel", &other)),
+        }
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let wire_request = ClientRequest::GetPromptRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::GetPromptResult(result) => Ok(GetPromptResponse::Complete(result)),
+            ServerResult::InputRequiredResult(result) => Ok(GetPromptResponse::InputRequired(result)),
+            other => Err(unexpected_result("prompts/get", &other)),
+        }
+    }
+
+    async fn list_prompts(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        let wire_request = ClientRequest::ListPromptsRequest(wrap_optional_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::ListPromptsResult(result) => Ok(result),
+            other => Err(unexpected_result("prompts/list", &other)),
+        }
+    }
+
+    async fn list_resources(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let wire_request = ClientRequest::ListResourcesRequest(wrap_optional_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::ListResourcesResult(result) => Ok(result),
+            other => Err(unexpected_result("resources/list", &other)),
+        }
+    }
+
+    async fn list_resource_templates(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        let wire_request = ClientRequest::ListResourceTemplatesRequest(wrap_optional_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::ListResourceTemplatesResult(result) => Ok(result),
+            other => Err(unexpected_result("resources/templates/list", &other)),
+        }
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let wire_request = ClientRequest::ReadResourceRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::ReadResourceResult(result) => Ok(ReadResourceResponse::Complete(result)),
+            ServerResult::InputRequiredResult(result) => Ok(ReadResourceResponse::InputRequired(result)),
+            other => Err(unexpected_result("resources/read", &other)),
+        }
+    }
+
+    #[allow(deprecated)]
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let wire_request = ClientRequest::SubscribeRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::EmptyResult(_) => Ok(()),
+            other => Err(unexpected_result("resources/subscribe", &other)),
+        }
+    }
+
+    #[allow(deprecated)]
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let wire_request = ClientRequest::UnsubscribeRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::EmptyResult(_) => Ok(()),
+            other => Err(unexpected_result("resources/unsubscribe", &other)),
+        }
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let wire_request = ClientRequest::CallToolRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::CallToolResult(result) => Ok(CallToolResponse::Complete(result)),
+            ServerResult::InputRequiredResult(result) => Ok(CallToolResponse::InputRequired(result)),
+            ServerResult::CreateTaskResult(result) => Ok(CallToolResponse::Task(result)),
+            other => Err(unexpected_result("tools/call", &other)),
+        }
+    }
+
+    async fn list_tools(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let wire_request = ClientRequest::ListToolsRequest(wrap_optional_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::ListToolsResult(result) => Ok(result),
+            other => Err(unexpected_result("tools/list", &other)),
+        }
+    }
+
+    async fn on_custom_request(
+        &self,
+        mut request: CustomRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, ErrorData> {
+        request.extensions = request_extensions(&context);
+        match self.forward(ClientRequest::CustomRequest(request), context).await? {
+            ServerResult::CustomResult(result) => Ok(result),
+            other => Err(unexpected_result("custom request", &other)),
+        }
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        let wire_request = ClientRequest::GetTaskRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::GetTaskResult(result) => Ok(result),
+            other => Err(unexpected_result("tasks/get", &other)),
+        }
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let wire_request = ClientRequest::UpdateTaskRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::TaskAckResult(_) => Ok(()),
+            other => Err(unexpected_result("tasks/update", &other)),
+        }
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let wire_request = ClientRequest::CancelTaskRequest(wrap_request(request, &context));
+        match self.forward(wire_request, context).await? {
+            ServerResult::TaskAckResult(_) => Ok(()),
+            other => Err(unexpected_result("tasks/cancel", &other)),
+        }
+    }
+
+    async fn on_cancelled(&self, notification: CancelledNotificationParam, context: NotificationContext<RoleServer>) {
+        let wire_notification = ClientNotification::CancelledNotification(wrap_notification(notification, &context));
+        if let Err(error) = self.forward_notification(wire_notification, context).await {
+            warn!(error = %error, "Failed to forward cancelled notification to MCP NATS proxy");
+        }
+    }
+
+    async fn on_progress(&self, notification: ProgressNotificationParam, context: NotificationContext<RoleServer>) {
+        let wire_notification = ClientNotification::ProgressNotification(wrap_notification(notification, &context));
+        if let Err(error) = self.forward_notification(wire_notification, context).await {
+            warn!(error = %error, "Failed to forward progress notification to MCP NATS proxy");
+        }
+    }
+
+    async fn on_initialized(&self, context: NotificationContext<RoleServer>) {
+        let wire_notification = ClientNotification::InitializedNotification(wrap_no_param_notification(&context));
+        if let Err(error) = self.forward_notification(wire_notification, context).await {
+            warn!(error = %error, "Failed to forward initialized notification to MCP NATS proxy");
+        }
+    }
+
+    async fn on_roots_list_changed(&self, context: NotificationContext<RoleServer>) {
+        let wire_notification = ClientNotification::RootsListChangedNotification(wrap_no_param_notification(&context));
+        if let Err(error) = self.forward_notification(wire_notification, context).await {
+            warn!(error = %error, "Failed to forward roots list changed notification to MCP NATS proxy");
+        }
+    }
+
+    async fn on_custom_notification(
+        &self,
+        mut notification: CustomNotification,
+        context: NotificationContext<RoleServer>,
+    ) {
+        notification.extensions = notification_extensions(&context);
+        let wire_notification = ClientNotification::CustomNotification(notification);
+        if let Err(error) = self.forward_notification(wire_notification, context).await {
+            warn!(error = %error, "Failed to forward custom notification to MCP NATS proxy");
+        }
+    }
 
     fn get_info(&self) -> ServerInfo {
-        self.server_info.clone()
+        self.server_info
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 

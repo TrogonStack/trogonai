@@ -1,11 +1,11 @@
 ---
-number: "0041"
+number: "0042"
 slug: nats-trace-context-and-message-path-tracing
 status: draft
 date: 2026-07-30
 ---
 
-# ADR#0041: NATS Trace Context and Message Path Tracing
+# ADR#0042: NATS Trace Context and Message Path Tracing
 
 ## Context
 

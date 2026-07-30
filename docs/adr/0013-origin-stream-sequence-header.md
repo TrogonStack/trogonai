@@ -112,7 +112,7 @@ diagnostics, or repair.
 
 - [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
 - [ADR#0010: Unit Tests First, Testcontainers Only When Necessary](./0010-testcontainers-for-infrastructure-tests.md)
-- [ADR#0041: NATS Trace Context and Message Path Tracing (Draft)](./0041-nats-trace-context-and-message-path-tracing.md)
+- [ADR#0042: NATS Trace Context and Message Path Tracing (Draft)](./0042-nats-trace-context-and-message-path-tracing.md)
 - [NATS JetStream Headers](https://docs.nats.io/nats-concepts/jetstream/headers)
 - [NATS JetStream Source and Mirror Streams](https://docs.nats.io/nats-concepts/jetstream/source_and_mirror)
 - [NATS JetStream Disaster Recovery](https://docs.nats.io/running-a-nats-service/nats_admin/jetstream_admin/disaster_recovery)

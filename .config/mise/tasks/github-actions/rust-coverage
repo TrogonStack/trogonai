@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Run rsworkspace tests with coverage and write rsworkspace/coverage.xml"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+cargo cov nextest --cobertura --output-path coverage.xml

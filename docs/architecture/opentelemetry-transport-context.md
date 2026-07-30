@@ -37,7 +37,7 @@ This page does not introduce new wire names or settle an unresolved lifecycle
 policy. A new or incompatible cross-cutting policy requires an ADR. Implementing
 an already selected official contract does not require one ADR per missing hop.
 
-[ADR#0041: NATS Trace Context and Message Path Tracing (Draft)](../adr/0041-nats-trace-context-and-message-path-tracing.md)
+[ADR#0042: NATS Trace Context and Message Path Tracing (Draft)](../adr/0042-nats-trace-context-and-message-path-tracing.md)
 proposes the remaining local NATS policy: version compatibility, broker path
 tracing, account boundaries, server-side preservation, and the separation
 between direct message context and durable event metadata. It is not binding
@@ -174,7 +174,7 @@ with the lifecycle distinctions documented below.
 | --- | --- | --- |
 | Shared `trogon-nats` request and publish helpers | `headers_with_trace_context` and `inject_trace_context` inject the current span context into outgoing NATS headers. There is no shared NATS header extractor. | Outbound only |
 | NATS server path tracing | The development compose file uses NATS 2.14.2, which preserves `traceparent`, but no repository server configuration enables account `msg_trace` or cross-account `allow_trace`. The shared NATS integration fixture uses 2.10.14 and therefore cannot exercise NATS ADR-41, which was introduced in 2.11. | Development version compatible; shared ADR-41 coverage missing |
-| MCP over NATS | `mcp-nats` injects the current context on requests, notifications, responses, and errors. Incoming NATS headers are decoded for JSON-RPC metadata but are not extracted into OpenTelemetry. MCP `params._meta` survives typed wire encoding, and the resolved `rmcp` dependency exposes SEP-414 accessors, but repository code neither populates those fields from the active context nor extracts them as a remote parent. | Outbound only plus pass-through only |
+| MCP over NATS | `mcp-nats` injects the current context on requests, notifications, responses, and errors. Incoming NATS headers supply MCP transport routing metadata but are not extracted into OpenTelemetry. `params._meta` travels verbatim in the canonical JSON-RPC body defined by [ADR#0041 (Draft)](../adr/0041-canonical-mcp-jsonrpc-bodies-over-nats.md), and the resolved `rmcp` dependency exposes SEP-414 accessors, but repository code neither populates those fields from the active context nor extracts them as a remote parent. | Outbound only plus pass-through only |
 | MCP Streamable HTTP | `mcp-nats-server` initializes OpenTelemetry, but its Axum service does not use the repository HTTP instrumentation or another repository-owned W3C extractor. The MCP model preserves `_meta`; no code connects it to OpenTelemetry before forwarding work to NATS. | Pass-through only |
 | MCP stdio | `mcp-nats-stdio` initializes OpenTelemetry and forwards typed MCP messages. Stdio has no transport headers, so SEP-414 `_meta` is the applicable carrier. The bridge preserves it but does not extract or inject it. Its NATS side still performs outbound-only header injection. | Pass-through only plus outbound only |
 | ACP remote HTTP and WebSocket | `acp-nats-server` initializes OpenTelemetry and wraps the official ACP HTTP server with `instrument_router`. The wrapper creates an HTTP server span but does not extract W3C HTTP headers. ACP models preserve `_meta`, but the bridge does not connect those keys to OpenTelemetry. WebSocket messages have the same ACP `_meta` requirement; the HTTP upgrade span is not a per-message trace parent. | Instrumented only plus pass-through only |
@@ -303,7 +303,7 @@ direct carrier. A transparent protocol bridge still preserves the protocol
 context in `_meta`; the new direct NATS context describes only its transport
 hop.
 
-[ADR#0041 (Draft)](../adr/0041-nats-trace-context-and-message-path-tracing.md)
+[ADR#0042 (Draft)](../adr/0042-nats-trace-context-and-message-path-tracing.md)
 proposes this link model, the compatible NATS version floor, and the operational
 controls required before account `msg_trace` is enabled. Broker path events must
 remain separate from application spans unless a later adapter defines their
@@ -415,7 +415,7 @@ or the repository accepts a specific extension.
 ### ADR scope
 
 MCP `_meta` handling follows upstream guidance and can be implemented directly.
-[ADR#0041 (Draft)](../adr/0041-nats-trace-context-and-message-path-tracing.md)
+[ADR#0042 (Draft)](../adr/0042-nats-trace-context-and-message-path-tracing.md)
 contains the focused local NATS decision: its official carrier, server
 preservation boundary, asynchronous link model, durable replay relationship,
 version floor, account controls, and relationship to broker path events. The ACP

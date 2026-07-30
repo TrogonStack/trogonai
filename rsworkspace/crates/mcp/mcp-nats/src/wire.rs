@@ -1,17 +1,32 @@
-//! MCP JSON-RPC ↔ jsonrpc-nats codec bridge.
+//! MCP canonical JSON-RPC over NATS codec bridge.
 
 use async_nats::header::HeaderMap;
-use jsonrpc_nats::{CodecError, Direction, Encoded, decode, encode, from_json_value, to_json_value};
+use jsonrpc_nats::{CodecError, Direction, Encoded, decode_canonical_value, encode_canonical_value};
+use rmcp::model::{GetExtensions, JsonRpcMessage};
 use rmcp::service::{RxJsonRpcMessage, ServiceRole, TxJsonRpcMessage};
 
-use crate::transport::NatsTransportError;
+use crate::{McpTransportHeaders, transport::NatsTransportError};
 
-pub use jsonrpc_nats::merge_jsonrpc_headers as merge_headers;
+pub use jsonrpc_nats::merge_headers;
 
-pub fn encode_tx<R: ServiceRole>(item: &TxJsonRpcMessage<R>) -> Result<Encoded, NatsTransportError> {
+pub fn encode_tx<R>(item: &TxJsonRpcMessage<R>) -> Result<Encoded, NatsTransportError>
+where
+    R: ServiceRole,
+    R::Not: GetExtensions,
+{
     let value = serde_json::to_value(item).map_err(NatsTransportError::Serialize)?;
-    let message = from_json_value(&value).map_err(map_codec_error)?;
-    encode(&message).map_err(map_codec_error)
+    let mut encoded = encode_canonical_value(&value).map_err(map_codec_error)?;
+    let transport_headers = match item {
+        JsonRpcMessage::Request(request) => request.request.extensions().get::<McpTransportHeaders>(),
+        JsonRpcMessage::Notification(notification) => {
+            notification.notification.extensions().get::<McpTransportHeaders>()
+        }
+        JsonRpcMessage::Response(_) | JsonRpcMessage::Error(_) => None,
+    };
+    if let Some(headers) = transport_headers {
+        headers.extend_nats(&mut encoded.headers);
+    }
+    Ok(encoded)
 }
 
 pub fn decode_rx<R: ServiceRole>(
@@ -20,11 +35,26 @@ pub fn decode_rx<R: ServiceRole>(
     headers: &HeaderMap,
     body: &[u8],
 ) -> Result<RxJsonRpcMessage<R>, NatsTransportError> {
-    let message = decode(direction, method, headers, body).map_err(map_codec_error)?;
-    let value = to_json_value(&message);
-    serde_json::from_value(value).map_err(NatsTransportError::Deserialize)
+    let value = decode_canonical_value(direction, method, headers, body).map_err(map_codec_error)?;
+    let mut item: RxJsonRpcMessage<R> = serde_json::from_value(value).map_err(NatsTransportError::Deserialize)?;
+    let transport_headers = McpTransportHeaders::from_nats(headers);
+    if !transport_headers.is_empty() {
+        match &mut item {
+            JsonRpcMessage::Request(request) => {
+                request.request.extensions_mut().insert(transport_headers);
+            }
+            JsonRpcMessage::Notification(notification) => {
+                notification.notification.extensions_mut().insert(transport_headers);
+            }
+            JsonRpcMessage::Response(_) | JsonRpcMessage::Error(_) => {}
+        }
+    }
+    Ok(item)
 }
 
 fn map_codec_error(error: CodecError) -> NatsTransportError {
     NatsTransportError::Codec(error)
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 fn peer(s: &str) -> McpPeerId {
     McpPeerId::new(s).unwrap()
@@ -103,6 +104,31 @@ fn parses_client_notification_subject() {
             client_id: peer("desktop"),
             method: ServerNotificationMethod::ResourceUpdated,
         }
+    );
+}
+
+#[test]
+fn suffix_tables_stay_in_sync_with_transport_method_table() {
+    let parsing_suffixes: HashSet<&str> = ServerRequestMethod::SUFFIXES
+        .iter()
+        .chain(ClientNotificationMethod::SUFFIXES)
+        .chain(ClientRequestMethod::SUFFIXES)
+        .chain(ServerNotificationMethod::SUFFIXES)
+        .copied()
+        .collect();
+    let transport_suffixes: HashSet<&str> = crate::transport::METHOD_TABLE
+        .iter()
+        .map(|(_, suffix)| *suffix)
+        .collect();
+
+    let only_in_transport: Vec<&str> = transport_suffixes.difference(&parsing_suffixes).copied().collect();
+    let only_in_parsing: Vec<&str> = parsing_suffixes.difference(&transport_suffixes).copied().collect();
+
+    assert!(
+        only_in_transport.is_empty() && only_in_parsing.is_empty(),
+        "parsing.rs and transport.rs suffix tables drifted apart: \
+         transport.rs routes but parsing.rs cannot parse {only_in_transport:?}; \
+         parsing.rs can parse but transport.rs never routes {only_in_parsing:?}"
     );
 }
 

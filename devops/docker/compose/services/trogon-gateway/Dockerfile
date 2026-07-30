@@ -10,6 +10,8 @@ FROM chef AS planner
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+COPY cli/ cli/
+COPY wasm-components/ wasm-components/
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -21,6 +23,8 @@ RUN cargo chef cook --release --recipe-path recipe.json -p trogon-gateway
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+COPY cli/ cli/
+COPY wasm-components/ wasm-components/
 
 RUN cargo build --release -p trogon-gateway && \
     strip target/release/trogon-gateway

@@ -51,7 +51,7 @@ direct `traceparent`, while the embedded historical event metadata remains
 unchanged. [ADR#0013](../adr/0013-origin-stream-sequence-header.md) defines the
 application-level origin-sequence metadata when an event is appended into a
 different stream.
-[ADR#0041 (Draft)](../adr/0041-nats-trace-context-and-message-path-tracing.md)
+[ADR#0042 (Draft)](../adr/0042-nats-trace-context-and-message-path-tracing.md)
 proposes the NATS trace carrier and server-operation boundary.
 
 An import that transforms source data into a new domain event gives the new

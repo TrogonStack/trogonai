@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Assert regenerated protobuf bindings match what's committed"
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT"
+
+git add -A -- rsworkspace/crates/platform/trogonai-proto/src/gen
+git diff --cached --exit-code -- rsworkspace/crates/platform/trogonai-proto/src/gen
