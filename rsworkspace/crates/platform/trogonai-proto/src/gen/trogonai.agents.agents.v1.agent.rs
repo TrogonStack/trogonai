@@ -16,9 +16,14 @@ pub struct AgentConfiguration {
     /// Field 1: `runtime`
     #[serde(rename = "runtime", with = "::buffa::json_helpers::proto_string")]
     pub runtime: ::buffa::alloc::string::String,
-    /// Runtime-owned settings: model, parameters, and dependency declarations.
-    /// The runtime named above defines the message type carried here and
-    /// validates its contents. Absent means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, and dependency
+    /// declarations. Model selection is deliberately runtime-owned rather than a
+    /// sibling field on this message. Which models exist, how they are named, and
+    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
+    /// runtime that exposes no model selection at all simply carries none, with no
+    /// platform-level field left empty to interpret. The runtime named above
+    /// defines the message type carried here and validates its contents. Absent
+    /// means the runtime runs with its defaults.
     ///
     /// Field 2: `settings`
     #[serde(

@@ -119,6 +119,15 @@ Use these normative logical records:
       configuration_digest
       source
 
+The two model-selection fields above are contested. The shipped agent contract
+carries model selection inside the runtime-owned settings on AgentConfiguration
+rather than as platform-owned sibling fields, so every step below that reads a
+ModelSelection from AgentConfiguration describes intended design whose
+precondition is unmet. The consequence recorded in
+[ADR#0025](./0025-agent-definition-data-ownership.md) tracks that conflict; the
+rest of this ADR, including implementation pinning, plan immutability, and
+attestation, is unaffected by it.
+
 AgentImplementationVersion describes a reusable immutable release. Its
 definition digest commits to the product and adapter artifacts, native product
 version, supported contracts, and implementation capabilities. A mutable tag
@@ -138,7 +147,9 @@ activation.
 ModelSelection identifies an exact versioned model catalog record, not a
 display name, mutable provider alias, auto value, or provider credential. Its
 parameters are part of AgentConfiguration. The implementation cannot replace
-that model with a native default or fallback.
+that model with a native default or fallback. Enforcing that last sentence
+requires the platform to read the pinned model, which runtime-owned model
+selection does not currently grant.
 
 An implementation-required auxiliary model is also explicit in
 AgentConfiguration under a typed role. An implementation release cannot add a
@@ -554,6 +565,11 @@ Large immutable implementation definitions and checkpoints may be external
 only when the event retains their exact reference, type, and digest.
 
 ### 7. Apply the model to concrete products
+
+The Model ownership column below assumes platform-owned model selection, which
+the shipped contract does not provide; read it as intended design pending the
+reconciliation recorded in
+[ADR#0025](./0025-agent-definition-data-ownership.md).
 
 | Arrangement | AgentConfiguration implementation | Model ownership | Classification |
 | --- | --- | --- | --- |

@@ -698,6 +698,12 @@ content (instructions, skill pins, variables) + dependency declarations
 (tools, delegates). Nothing economic, temporal, evaluative, or
 reputational.
 
+**Later reversal:** naming `model` beside `runtime` here treats model selection
+as a platform-owned field. The shipped agent contract instead gives it to the
+runtime, and the consequence recorded in
+[ADR#0025](../../adr/0025-agent-definition-data-ownership.md) tracks that
+conflict. Q5 and Q24 below carry the same assumption.
+
 Event-model impact: `AgentProvisioned.charter`
 loses `limits` and delegation caps; a Policy plane joins Grants
 (BudgetPolicySet, DelegationPolicySet, human principals only); trigger/
