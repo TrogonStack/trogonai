@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#MISE description="Install the pinned dylint toolchain from DYLINT_TOOLCHAIN_DIR's rust-toolchain.toml, if set"
+set -euo pipefail
+
+dylint_toolchain_input="${DYLINT_TOOLCHAIN_DIR:-}"
+if [[ -n "$dylint_toolchain_input" ]]; then
+    if [[ "$dylint_toolchain_input" = /* ]]; then
+        dylint_toolchain_dir="$dylint_toolchain_input"
+    else
+        dylint_toolchain_dir="${GITHUB_WORKSPACE:-$PWD}/$dylint_toolchain_input"
+    fi
+
+    if [[ ! -f "$dylint_toolchain_dir/rust-toolchain.toml" ]]; then
+        echo "::error::Dylint rust-toolchain.toml not found in $dylint_toolchain_dir"
+        exit 1
+    fi
+
+    mapfile -t dylint_toolchain_config < <(
+        TOOLCHAIN_FILE="$dylint_toolchain_dir/rust-toolchain.toml" python -c 'import os, sys, tomllib; toolchain = tomllib.load(open(os.environ["TOOLCHAIN_FILE"], "rb"))["toolchain"]; sys.stdout.write("\n".join([toolchain["channel"], *toolchain.get("components", [])]) + "\n")'
+    )
+
+    dylint_toolchain="${dylint_toolchain_config[0]}"
+    dylint_components=("${dylint_toolchain_config[@]:1}")
+
+    rustup toolchain install "$dylint_toolchain" --profile minimal
+    if [[ ${#dylint_components[@]} -gt 0 ]]; then
+        rustup component add "${dylint_components[@]}" --toolchain "$dylint_toolchain"
+    fi
+fi

@@ -12,6 +12,7 @@ on:
       - 'buf.gen.yaml'
       - 'buf.lock'
       - '.mise.toml'
+      - '.config/mise/tasks/**'
       - 'rsworkspace/crates/platform/trogonai-proto/src/gen/**'
       - '.github/workflows/ci-proto.yml'
 
@@ -111,6 +112,4 @@ jobs:
         run: mise run --skip-tools proto:generate
 
       - name: Assert generated output matches proto sources
-        run: |
-          git add -A -- rsworkspace/crates/platform/trogonai-proto/src/gen
-          git diff --cached --exit-code -- rsworkspace/crates/platform/trogonai-proto/src/gen
+        run: mise run --skip-tools github-actions:assert-proto-generated
