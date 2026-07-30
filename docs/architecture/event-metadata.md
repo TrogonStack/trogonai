@@ -45,6 +45,15 @@ preserve the existing direct NATS `traceparent` while NATS adds its own
 provenance headers. None of those server operations creates an OpenTelemetry
 producer span or a new message context.
 
+That preservation of the direct carrier holds on NATS 2.14 or newer. Earlier
+NATS ADR-41 servers can rewrite `traceparent` at storage, sampling, or account
+boundaries, so a mixed or older topology cannot treat it as a guarantee, and
+those servers do not belong on a path that relies on direct W3C propagation. The
+stored event metadata is unaffected either way, because it is durable event data
+rather than the live NATS carrier.
+[ADR#0042 (Draft)](../adr/0042-nats-trace-context-and-message-path-tracing.md)
+proposes that version floor.
+
 An application that consumes a historical event and publishes a new NATS
 message does create a new message boundary. The new message receives the active
 direct `traceparent`, while the embedded historical event metadata remains
