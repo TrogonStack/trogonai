@@ -53,7 +53,9 @@ How an agent is defined, versioned, and run. The full narrative is split across
 and session plan), and
 [ADR#0032](../adr/0032-model-route-and-credential-binding.md) (model routing and
 credentials). These are draft decisions; treat the entries as the intended model,
-not current behavior.
+not current behavior. Model-selection ownership is not merely unbuilt but
+unresolved: those ADRs place it on the platform, while the shipped contract gives
+it to the runtime, and reconciling them is its own decision.
 
 - [Agent](./agent)
 - [AgentConfiguration](./agentconfiguration)

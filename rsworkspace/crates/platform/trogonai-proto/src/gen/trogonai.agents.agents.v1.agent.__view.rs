@@ -13,9 +13,14 @@ pub struct AgentConfigurationView<'a> {
     ///
     /// Field 1: `runtime`
     pub runtime: &'a str,
-    /// Runtime-owned settings: model, parameters, and dependency declarations.
-    /// The runtime named above defines the message type carried here and
-    /// validates its contents. Absent means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, and dependency
+    /// declarations. Model selection is deliberately runtime-owned rather than a
+    /// sibling field on this message. Which models exist, how they are named, and
+    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
+    /// runtime that exposes no model selection at all simply carries none, with no
+    /// platform-level field left empty to interpret. The runtime named above
+    /// defines the message type carried here and validates its contents. Absent
+    /// means the runtime runs with its defaults.
     ///
     /// Field 2: `settings`
     pub settings: ::buffa::MessageFieldView<
@@ -282,9 +287,14 @@ impl AgentConfigurationOwnedView {
     pub fn runtime(&self) -> &'_ str {
         self.0.reborrow().runtime
     }
-    /// Runtime-owned settings: model, parameters, and dependency declarations.
-    /// The runtime named above defines the message type carried here and
-    /// validates its contents. Absent means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, and dependency
+    /// declarations. Model selection is deliberately runtime-owned rather than a
+    /// sibling field on this message. Which models exist, how they are named, and
+    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
+    /// runtime that exposes no model selection at all simply carries none, with no
+    /// platform-level field left empty to interpret. The runtime named above
+    /// defines the message type carried here and validates its contents. Absent
+    /// means the runtime runs with its defaults.
     ///
     /// Field 2: `settings`
     #[must_use]
