@@ -25,11 +25,18 @@ logical and physical carrier mappings and their current implementation status.
 Trace metadata is immutable with the event. The NATS event-store adapter may
 encode logical `traceparent` as physical `Trogon-Header-traceparent`, but reading
 it decodes the same name and value. Replay, projection rebuild, consumer
-recovery, and restoration from offloaded storage do not create a new event and
-must not rewrite that context.
+recovery, and every form of restoration keep the stored context of an existing
+event and must not rewrite it.
 
 Here, replay means reading already persisted events back into an aggregate or
 projection. It performs no append, so there is no header creation or rewrite.
+Restoration splits by layer. Native JetStream snapshot restore reconstructs
+stored messages, so it also performs no application append. An application that
+restores offloaded or archived events appends them into a replacement stream and
+therefore does create a new NATS message for each one, as
+[ADR#0013](../adr/0013-origin-stream-sequence-header.md) describes. That append
+carries the restore job's own message context and still leaves the restored
+event's stored context unchanged.
 
 Import and republish differ only when an application crosses a new creation
 boundary. Native JetStream snapshot restore reconstructs the stored message and
