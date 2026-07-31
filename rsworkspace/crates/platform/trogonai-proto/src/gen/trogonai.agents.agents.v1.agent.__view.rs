@@ -13,14 +13,20 @@ pub struct AgentConfigurationView<'a> {
     ///
     /// Field 1: `runtime`
     pub runtime: &'a str,
-    /// Runtime-owned settings: model selection, model parameters, and dependency
-    /// declarations. Model selection is deliberately runtime-owned rather than a
-    /// sibling field on this message. Which models exist, how they are named, and
-    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
-    /// runtime that exposes no model selection at all simply carries none, with no
-    /// platform-level field left empty to interpret. The runtime named above
-    /// defines the message type carried here and validates its contents. Absent
-    /// means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, instruction
+    /// and prompt content, and dependency declarations. Model selection and
+    /// instructions are deliberately runtime-owned rather than sibling fields on
+    /// this message (ADR#0043). Which models exist, how they are named, which
+    /// sampling or reasoning knobs apply, and what shape a prompt takes (one
+    /// string, a document list, a named preset with an append seam) are facts
+    /// the runtime owns, and a runtime that exposes none of these simply carries
+    /// none, with no platform-level field left empty to interpret. The runtime
+    /// named above defines the message type carried here and validates its
+    /// contents. A populated settings payload carrying any type other than the
+    /// one the named runtime defines is invalid: provisioning and the write-side
+    /// decider reject it rather than persist bytes no runtime can interpret.
+    /// Absent means the runtime runs with its defaults, including its default
+    /// prompt.
     ///
     /// Field 2: `settings`
     pub settings: ::buffa::MessageFieldView<
@@ -287,14 +293,20 @@ impl AgentConfigurationOwnedView {
     pub fn runtime(&self) -> &'_ str {
         self.0.reborrow().runtime
     }
-    /// Runtime-owned settings: model selection, model parameters, and dependency
-    /// declarations. Model selection is deliberately runtime-owned rather than a
-    /// sibling field on this message. Which models exist, how they are named, and
-    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
-    /// runtime that exposes no model selection at all simply carries none, with no
-    /// platform-level field left empty to interpret. The runtime named above
-    /// defines the message type carried here and validates its contents. Absent
-    /// means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, instruction
+    /// and prompt content, and dependency declarations. Model selection and
+    /// instructions are deliberately runtime-owned rather than sibling fields on
+    /// this message (ADR#0043). Which models exist, how they are named, which
+    /// sampling or reasoning knobs apply, and what shape a prompt takes (one
+    /// string, a document list, a named preset with an append seam) are facts
+    /// the runtime owns, and a runtime that exposes none of these simply carries
+    /// none, with no platform-level field left empty to interpret. The runtime
+    /// named above defines the message type carried here and validates its
+    /// contents. A populated settings payload carrying any type other than the
+    /// one the named runtime defines is invalid: provisioning and the write-side
+    /// decider reject it rather than persist bytes no runtime can interpret.
+    /// Absent means the runtime runs with its defaults, including its default
+    /// prompt.
     ///
     /// Field 2: `settings`
     #[must_use]
