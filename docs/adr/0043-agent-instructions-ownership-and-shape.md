@@ -27,166 +27,131 @@ lives on the wire or what shape it takes. Three questions are open:
 The [agent instructions research corpus](../research/agent-instructions/index.md)
 was gathered for this decision. Its findings, in brief: every surveyed
 harness accepts standing instructions whose payload is unstructured
-markdown; the ecosystem's structured forms (rule lists) structure only
-activation (globs, triggers, always-on flags), never the content; the
-unions that exist at SDK boundaries are string-or-preset and
-string-or-callable, never string-or-messages; chat-shaped prompt content
-appears only in prompt-management products, not in agent definitions; and
-instruction content converged into a portable, Linux Foundation governed
-standard (AGENTS.md) precisely because content travels across tools while
-injection mechanics do not.
+markdown text; the ecosystem's structured forms (rule lists) structure
+activation, never content; chat-shaped prompt content appears only in
+prompt-management products, not in agent definitions; and instruction
+content converged into a portable standard (AGENTS.md) while injection
+mechanics stayed per-tool.
+
+The deciding evidence is the shape of the runtime contract this platform
+integrates first. The Claude Agent SDK exports:
+
+```typescript
+systemPrompt?: string | string[] | {
+  type: 'preset';
+  preset: 'claude_code';
+  append?: string;
+  excludeDynamicSections?: boolean;
+};
+```
+
+Even the content half of that contract is runtime vocabulary: a plain
+string, a list of strings, or a named preset with an append seam and a
+cache-shaping toggle. Codex's equivalent surface is a config file plus
+concatenated, budgeted context documents; Gemini's is a replacement file
+with template variables. There is no single content shape for a platform
+field to mirror without loss.
 
 Compatibility posture: these contracts are pre-adoption and breaking
-changes are acceptable today. This decision therefore optimizes for honest
-ownership modeling rather than wire-compatibility insurance. The protobuf
-evolution facts are still recorded under Consequences because they
-determine which future changes are additive and which are one-way doors.
+changes are acceptable today, so this decision optimizes for honest
+ownership modeling, and for not freezing an abstraction ahead of the
+features that would consume it.
 
 ## Decision
 
-### 1. Instruction content is charter content inside AgentConfiguration
+### 1. Instruction content is runtime-owned inside settings; no platform instruction field ships
 
-This confirms [ADR#0025](./0025-agent-definition-data-ownership.md):
-instructions is the agent's own fact. The ownership test that governs the
-registry (is this the agent's own fact, or someone else's stance toward
-the agent?) places the agent's authored voice inside its configuration,
-where proposals diff it, activation digests commit to it, and the bench
-measures it.
+The platform declines to define a generic instruction abstraction now.
+Instruction and prompt content live inside the runtime-owned `settings`
+payload, in the runtime's native shape, exactly as model selection
+already does. A Claude-runtime settings message mirrors the
+`systemPrompt` union verbatim; a runtime with a different prompt contract
+mirrors its own. The settings rule extends unchanged: the runtime named
+on the configuration defines the message type carried in `settings` and
+validates its contents, and absent means the runtime runs with its
+defaults, including its default prompt.
 
-Two relocations were considered and rejected.
+The reasoning that moved model selection into settings turns out to
+apply after all, once the corpus evidence is read at the contract level
+rather than the payload level. What a prompt IS to a runtime (one
+string, a document list, a preset plus append) is a fact the runtime
+owns. A platform-level markdown field would be a lossy projection that
+no runtime accepts directly: every adapter would immediately re-encode
+it into the native shape, inventing semantics (position, join rules,
+preset interaction) that the platform never actually decided.
 
-**Not runtime-owned settings.** The test that moved model selection into
-the runtime's settings does not transfer. Model vocabulary is
-runtime-owned and optional: a runtime that exposes no model selection
-carries none, and no platform field is left empty to interpret. Instruction
-content fails both prongs: every surveyed runtime consumes markdown
-instruction content, and the content is authored by humans and by the
-agent itself, not defined by the runtime. Burying it in the `Any` would
-also make an instruction edit indistinguishable from any other settings
-change, which destroys the typed difference and derived change class that
-[ADR#0025](./0025-agent-definition-data-ownership.md) builds proposals on,
-prevents learned-layer classification without per-runtime differs, and
-forces an agent proposing an edit to its own instructions to understand
-its runtime's settings schema.
+### 2. The generic abstraction is deferred, not designed
 
-**Not outside AgentConfiguration.** Two exteriorizations were examined:
+No `Instructions` wrapper, no `oneof`, no repeated block list, and no
+platform field left empty to interpret. What would force a revisit is a
+platform feature that must read instructions across runtimes: typed
+proposal differences and change classes over instruction edits, bench
+attribution keyed to instruction content, or cross-runtime instruction
+governance. When one of those becomes real work, a successor ADR decides
+the abstraction from the corpus evidence instead of ahead of it.
 
-- A selector-bound plane beside the agent, like policy or evaluation.
-  Rejected because instruction changes must mint revisions: a
-  [session](../glossary/session) pins a revision, and if instructions
-  floated on a plane, pinned behavior would drift, the revision digest
-  would no longer commit to behavior, and "which behavior ran" would
-  become a pair of version axes that every evaluation and comparison must
-  carry. Planes hold other parties' stances toward the agent; the agent's
-  own voice on a plane inverts that rule.
-- A separate registry entity (a shared instructions document) referenced
-  from the configuration. Rejected for v1 because a shared mutable
-  document couples agents: an edit either becomes an implicit proposal
-  against every referencing agent or it silently rewrites their behavior,
-  the exact failure mode the variables contract in
-  [ADR#0025](./0025-agent-definition-data-ownership.md) forbids. Reuse at
-  authoring time is the template system's job, which the
-  [decision record](../research/agent-platform/decision-record.md) (Q16)
-  already names as the largest undesigned area. The genuine benefits of
-  externalized content, size and deduplication, are reachable later as an
-  additive content-address variant inside the wrapper without moving
-  ownership; see Consequences.
+### 3. The conflict with [ADR#0025](./0025-agent-definition-data-ownership.md) is recorded, not resolved
 
-### 2. The shape is a singular wrapper message carrying markdown text
+[ADR#0025](./0025-agent-definition-data-ownership.md)'s conceptual model
+places instructions in AgentConfiguration and classifies instruction
+edits as learned-layer changes. The shipped contract now diverges for
+instructions exactly as it does for model selection, and the same
+consequence applies: any step that reads instructions as typed platform
+content has an unmet precondition until a later decision supplies one.
 
-```proto
-message AgentConfiguration {
-  string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
-  google.protobuf.Any settings = 2;
-  Instructions instructions = 3;
-}
+Considered and rejected for now, the platform-owned wrapper
+(`Instructions { string text = 1 }`, a previous draft of this ADR that
+briefly existed on this branch and never merged):
 
-// Instructions is the charter instruction content: one authored markdown
-// document (design Q17: the layers that are not this document live on
-// their own surfaces). A message rather than a bare string so growth is
-// additive; string-to-message on one field number is the one silently
-// misparsing proto migration, so the container is chosen once, here.
-message Instructions {
-  string text = 1;
-}
-```
+- It privileges one projection, a single markdown document, of contracts
+  that natively accept lists, presets, and files.
+- Its platform benefits (typed instruction diffs, learned-layer
+  classification without decoding runtime types, runtime-blind
+  self-proposals) purchase machinery no shipped feature consumes yet.
+- With breaking changes still acceptable, deferring is cheap, while
+  un-shipping a platform abstraction after adoption is not.
 
-- `text` is markdown, the payload shape of every surveyed harness. Absent
-  `instructions` means the runtime runs its default prompt, mirroring the
-  absent-settings rule.
-- **No `oneof`.** The corpus contains no alternative representation of
-  agent instruction content to model. The unions that exist are injection
-  mechanics (string or preset-plus-append) or host-language escape hatches
-  (string or callable), and role-tagged message lists appear only in
-  prompt management. If an alternative representation ever becomes real,
-  moving the single `text` field into a new `oneof` is a wire-safe,
-  digest-stable change.
-- **No `repeated`.** The ecosystem's rule lists structure activation, not
-  content, and this architecture already owns those activation homes:
-  description-triggered content is skills, cadence-bound injection is turn
-  wrappers, generated snippets are the memory plane. A top-level repeated
-  field also can never gain list-level metadata without a second field,
-  while a singular message can grow a list inside it if one is ever
-  justified.
-- **Wrapper over bare string.** With breaking changes acceptable the
-  difference is modest, but every anticipated growth (content metadata, a
-  block list, a content-address variant) lands as an additive field inside
-  the wrapper, and the one migration protobuf cannot survive on a fixed
-  field number is bare string to message. The container decision is a
-  one-way door, so it is taken now; everything else is deferred.
-
-### 3. Injection mechanics are runtime-owned settings
-
-How content reaches the model is runtime vocabulary and lives in the
-runtime's typed settings message: preset or base-prompt choice, append
-versus full replacement, dynamic-section exclusion, built-in block
-toggles. The runtime adapter composes the two surfaces: platform
-`instructions.text` is what the agent says; runtime settings decide how
-the harness ingests it (a system-prompt append, a context file, a config
-key). Where the assembled context places the content is the assembly
-specification's concern (decision record Q17), not a charter field.
+Also rejected, unchanged from the earlier analysis: exteriorizing
+instructions to a selector-bound plane (instruction changes must mint
+revisions; a [session](../glossary/session) pins a revision and behavior
+must not float behind it) or to a shared instructions entity (an edit to
+a shared document either becomes an implicit proposal against every
+referencing agent or silently rewrites their behavior, the failure mode
+the variables contract in
+[ADR#0025](./0025-agent-definition-data-ownership.md) forbids).
 
 ## Invariants
 
-- The revision digest commits to instruction content: today by value,
-  and through a content digest if an address variant is ever added.
-- Instruction changes are learned-layer changes: they arrive by proposal,
-  mint revisions, and never mutate an activated configuration.
-- The platform diffs instructions without decoding any runtime settings
-  type.
-- Runtime settings never carry instruction content; `Instructions` never
-  carries injection mechanics.
-- Role-tagged conversation content is out of charter scope; conversation
-  positions belong to turn wrappers and the memory plane.
+- `settings` is the single home for instruction content and injection
+  mechanics alike; `AgentConfiguration` carries no instruction field.
+- Revision digests commit to instruction content transitively through
+  the settings bytes; pinning and reproducibility are unaffected.
+- Instruction changes mint revisions like any configuration change; what
+  the platform cannot yet do is classify or diff them without decoding
+  the runtime's settings type, and that limitation is accepted, not
+  accidental.
+- Conversation-shaped content stays out of the agent record; turn
+  wrappers and the memory plane own those positions when they land.
 
 ## Consequences
 
-- `AgentConfiguration` gains `Instructions instructions = 3` when charter
-  content is implemented; `AgentProvisioned` carries it transitively
-  inside the configuration it already embeds.
-- Proposals read a typed instructions difference directly; change-class
-  derivation needs no runtime knowledge.
-- Each runtime's settings message defines its injection knobs in its
-  native vocabulary, and an empty settings payload keeps meaning "runtime
-  defaults" for mechanics exactly as it does today.
-- Recorded evolution facts for when compatibility starts to matter:
-  adding fields to `Instructions` is unconditionally safe; moving the
-  single `text` field into a new `oneof` is wire-safe and byte-stable for
-  existing values; singular-to-repeated is wire-compatible for string,
-  bytes, and message fields; bare string to message on one field number
-  is not wire-safe, which is why the wrapper exists from the start.
-- Anticipated growth, all additive inside `Instructions`, none scheduled:
-  a `repeated` block list with activation metadata only if skills, turn
-  wrappers, and the memory plane prove insufficient; a content-address
-  variant (`ref` plus a content `Digest`) if content outgrows event
-  transport budgets. Observed ecosystem budgets top out at 32 KiB
-  for concatenated project docs and 256,000 characters for a single
-  instruction string, well inside the platform's event payload ceiling
-  today.
-- The research behind this decision is frozen in the
-  [agent instructions corpus](../research/agent-instructions/index.md);
-  where later findings differ, this record is amended rather than the
-  corpus rewritten.
+- `AgentConfiguration` stays two fields. The `settings` comment in
+  `agent.proto` now names instruction and prompt content as runtime-owned
+  explicitly, so the next reader does not re-open the question by
+  omission.
+- Each runtime settings message models its native prompt contract
+  verbatim (mirror the union, do not flatten it into one string).
+- Proposal machinery treats an instruction edit as an opaque settings
+  change for now; typed instruction differences, learned-layer
+  classification, and bench attribution over instruction content are
+  future work gated on a successor decision, tracked the same way
+  [ADR#0025](./0025-agent-definition-data-ownership.md) tracks the
+  model-selection conflict.
+- The research corpus stays frozen as the evidence base for that
+  revisit, and the protobuf evolution facts recorded with it (adding
+  fields to a message is unconditionally safe; moving one existing field
+  into a new `oneof` is wire-safe; bare string to message on one field
+  number is not) apply on the day a platform field is ever introduced.
 
 ## References
 
@@ -197,4 +162,4 @@ specification's concern (decision record Q17), not a charter field.
 - [Harness survey](../research/agent-instructions/harness-survey.md)
 - [Prompt management shapes](../research/agent-instructions/prompt-management.md)
 - [Agent platform decision record](../research/agent-platform/decision-record.md) (Q15, Q16, Q17, Q24)
-- [AGENTS.md standard](https://agents.md)
+- [Claude Agent SDK TypeScript reference](https://code.claude.com/docs/en/agent-sdk/typescript)

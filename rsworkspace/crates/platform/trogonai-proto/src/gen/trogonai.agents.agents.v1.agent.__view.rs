@@ -13,29 +13,21 @@ pub struct AgentConfigurationView<'a> {
     ///
     /// Field 1: `runtime`
     pub runtime: &'a str,
-    /// Runtime-owned settings: model selection, model parameters, and dependency
-    /// declarations. Model selection is deliberately runtime-owned rather than a
-    /// sibling field on this message. Which models exist, how they are named, and
-    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
-    /// runtime that exposes no model selection at all simply carries none, with no
-    /// platform-level field left empty to interpret. The runtime named above
-    /// defines the message type carried here and validates its contents. Absent
-    /// means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, instruction
+    /// and prompt content, and dependency declarations. Model selection and
+    /// instructions are deliberately runtime-owned rather than sibling fields on
+    /// this message (ADR#0043). Which models exist, how they are named, which
+    /// sampling or reasoning knobs apply, and what shape a prompt takes (one
+    /// string, a document list, a named preset with an append seam) are facts
+    /// the runtime owns, and a runtime that exposes none of these simply carries
+    /// none, with no platform-level field left empty to interpret. The runtime
+    /// named above defines the message type carried here and validates its
+    /// contents. Absent means the runtime runs with its defaults, including its
+    /// default prompt.
     ///
     /// Field 2: `settings`
     pub settings: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::AnyView<'a>,
-    >,
-    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
-    /// sibling of the runtime-owned settings rather than a field inside them:
-    /// every runtime consumes markdown instruction content, and the proposal
-    /// plane diffs it and classifies the change without decoding any runtime
-    /// type. How the content is injected is the runtime's settings concern.
-    /// Absent means the runtime runs its default prompt.
-    ///
-    /// Field 3: `instructions`
-    pub instructions: ::buffa::MessageFieldView<
-        super::super::__buffa::view::InstructionsView<'a>,
     >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
@@ -106,27 +98,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentConfigurationView<'a> {
                     }
                 }
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                let __sub_ctx = ctx.descend()?;
-                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
-                match view.instructions.as_mut() {
-                    Some(existing) => {
-                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
-                    }
-                    None => {
-                        view.instructions = ::buffa::MessageFieldView::set(
-                            <super::super::__buffa::view::InstructionsView as ::buffa::MessageView>::decode_view_ctx(
-                                sub,
-                                __sub_ctx,
-                            )?,
-                        );
-                    }
-                }
-            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -156,14 +127,6 @@ impl<'a> ::buffa::MessageView<'a> for AgentConfigurationView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            instructions: match self.instructions.as_option() {
-                Some(v) => {
-                    ::buffa::MessageField::<
-                        super::super::Instructions,
-                    >::some(v.to_owned_from_source(__buffa_src)?)
-                }
-                None => ::buffa::MessageField::none(),
-            },
             ..::core::default::Default::default()
         })
     }
@@ -183,14 +146,6 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentConfigurationView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if self.instructions.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.instructions.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
         size
     }
     #[allow(clippy::needless_borrow)]
@@ -205,10 +160,6 @@ impl<'a> ::buffa::ViewEncode<'a> for AgentConfigurationView<'a> {
         if self.settings.is_set() {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
             self.settings.write_to(__cache, buf);
-        }
-        if self.instructions.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
-            self.instructions.write_to(__cache, buf);
         }
     }
 }
@@ -236,11 +187,6 @@ impl<'__a> ::serde::Serialize for AgentConfigurationView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.settings.as_option() {
                 __map.serialize_entry("settings", __v)?;
-            }
-        }
-        {
-            if let ::core::option::Option::Some(__v) = self.instructions.as_option() {
-                __map.serialize_entry("instructions", __v)?;
             }
         }
         __map.end()
@@ -344,14 +290,17 @@ impl AgentConfigurationOwnedView {
     pub fn runtime(&self) -> &'_ str {
         self.0.reborrow().runtime
     }
-    /// Runtime-owned settings: model selection, model parameters, and dependency
-    /// declarations. Model selection is deliberately runtime-owned rather than a
-    /// sibling field on this message. Which models exist, how they are named, and
-    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
-    /// runtime that exposes no model selection at all simply carries none, with no
-    /// platform-level field left empty to interpret. The runtime named above
-    /// defines the message type carried here and validates its contents. Absent
-    /// means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, instruction
+    /// and prompt content, and dependency declarations. Model selection and
+    /// instructions are deliberately runtime-owned rather than sibling fields on
+    /// this message (ADR#0043). Which models exist, how they are named, which
+    /// sampling or reasoning knobs apply, and what shape a prompt takes (one
+    /// string, a document list, a named preset with an append seam) are facts
+    /// the runtime owns, and a runtime that exposes none of these simply carries
+    /// none, with no platform-level field left empty to interpret. The runtime
+    /// named above defines the message type carried here and validates its
+    /// contents. Absent means the runtime runs with its defaults, including its
+    /// default prompt.
     ///
     /// Field 2: `settings`
     #[must_use]
@@ -361,20 +310,6 @@ impl AgentConfigurationOwnedView {
         ::buffa_types::google::protobuf::__buffa::view::AnyView<'_>,
     > {
         &self.0.reborrow().settings
-    }
-    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
-    /// sibling of the runtime-owned settings rather than a field inside them:
-    /// every runtime consumes markdown instruction content, and the proposal
-    /// plane diffs it and classifies the change without decoding any runtime
-    /// type. How the content is injected is the runtime's settings concern.
-    /// Absent means the runtime runs its default prompt.
-    ///
-    /// Field 3: `instructions`
-    #[must_use]
-    pub fn instructions(
-        &self,
-    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::InstructionsView<'_>> {
-        &self.0.reborrow().instructions
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AgentConfigurationView<'static>>>

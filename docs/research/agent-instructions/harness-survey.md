@@ -10,7 +10,7 @@ pass in as standing agent instructions, and what is its exact shape?
 
 | Harness | Primary inputs | Content payload |
 |---|---|---|
-| Claude Agent SDK | `systemPrompt` union | string |
+| Claude Agent SDK | `systemPrompt` union | string or string list |
 | Claude Code CLI | CLAUDE.md family, `.claude/rules/*.md`, flags | markdown |
 | Anthropic Messages API | `system` | string or text blocks |
 | Codex CLI / cloud | AGENTS.md, `config.toml` keys | markdown / string |
@@ -31,10 +31,12 @@ instructions.
 
 ## Claude (Anthropic)
 
-- Agent SDK `systemPrompt` is a tagged union. TypeScript:
-  `string | { type: 'preset', preset: 'claude_code', append?: string,
-  excludeDynamicSections?: boolean }`. Python adds a third variant,
-  `{ type: 'file', path: str }`, used to avoid OS argument-length limits.
+- Agent SDK `systemPrompt` is a tagged union. TypeScript, per the
+  exported `Options` typing:
+  `string | string[] | { type: 'preset', preset: 'claude_code',
+  append?: string, excludeDynamicSections?: boolean }`. Python adds a
+  further variant, `{ type: 'file', path: str }`, used to avoid OS
+  argument-length limits.
   Omitted means a minimal default, unlike the CLI which uses the full
   preset. Anchors:
   [TypeScript SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript),
@@ -258,9 +260,9 @@ Every surveyed input surface reduces to one of five forms:
    model-decided relevance (Cursor `.mdc`, Devin rules, Copilot
    `.instructions.md`, Claude `.claude/rules`, Cline). The payload
    inside each object is still a markdown string.
-3. Small tagged unions at SDK and API boundaries: string or preset plus
-   append or file (Claude), string or callable (OpenAI), string or text
-   blocks (Anthropic API).
+3. Small tagged unions at SDK and API boundaries: string, string list,
+   preset plus append, or file (Claude), string or callable (OpenAI),
+   string or text blocks (Anthropic API).
 4. Platform-managed snippet stores with semantic triggers, generated
    rather than authored, held outside the agent definition (Devin
    Knowledge, Cursor and Windsurf and Codex Memories).

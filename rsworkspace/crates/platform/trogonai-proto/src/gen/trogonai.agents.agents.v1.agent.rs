@@ -16,14 +16,17 @@ pub struct AgentConfiguration {
     /// Field 1: `runtime`
     #[serde(rename = "runtime", with = "::buffa::json_helpers::proto_string")]
     pub runtime: ::buffa::alloc::string::String,
-    /// Runtime-owned settings: model selection, model parameters, and dependency
-    /// declarations. Model selection is deliberately runtime-owned rather than a
-    /// sibling field on this message. Which models exist, how they are named, and
-    /// which sampling or reasoning knobs apply are facts the runtime owns, and a
-    /// runtime that exposes no model selection at all simply carries none, with no
-    /// platform-level field left empty to interpret. The runtime named above
-    /// defines the message type carried here and validates its contents. Absent
-    /// means the runtime runs with its defaults.
+    /// Runtime-owned settings: model selection, model parameters, instruction
+    /// and prompt content, and dependency declarations. Model selection and
+    /// instructions are deliberately runtime-owned rather than sibling fields on
+    /// this message (ADR#0043). Which models exist, how they are named, which
+    /// sampling or reasoning knobs apply, and what shape a prompt takes (one
+    /// string, a document list, a named preset with an append seam) are facts
+    /// the runtime owns, and a runtime that exposes none of these simply carries
+    /// none, with no platform-level field left empty to interpret. The runtime
+    /// named above defines the message type carried here and validates its
+    /// contents. Absent means the runtime runs with its defaults, including its
+    /// default prompt.
     ///
     /// Field 2: `settings`
     #[serde(
@@ -31,26 +34,12 @@ pub struct AgentConfiguration {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub settings: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
-    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
-    /// sibling of the runtime-owned settings rather than a field inside them:
-    /// every runtime consumes markdown instruction content, and the proposal
-    /// plane diffs it and classifies the change without decoding any runtime
-    /// type. How the content is injected is the runtime's settings concern.
-    /// Absent means the runtime runs its default prompt.
-    ///
-    /// Field 3: `instructions`
-    #[serde(
-        rename = "instructions",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
-    )]
-    pub instructions: ::buffa::MessageField<Instructions>,
 }
 impl ::core::fmt::Debug for AgentConfiguration {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("AgentConfiguration")
             .field("runtime", &self.runtime)
             .field("settings", &self.settings)
-            .field("instructions", &self.instructions)
             .finish()
     }
 }
@@ -88,14 +77,6 @@ impl ::buffa::Message for AgentConfiguration {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if self.instructions.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.instructions.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
         size
     }
     fn write_to(
@@ -109,10 +90,6 @@ impl ::buffa::Message for AgentConfiguration {
         if self.settings.is_set() {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
             self.settings.write_to(__cache, buf);
-        }
-        if self.instructions.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
-            self.instructions.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -144,17 +121,6 @@ impl ::buffa::Message for AgentConfiguration {
                     ctx,
                 )?;
             }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.instructions.get_or_insert_default(),
-                    buf,
-                    ctx,
-                )?;
-            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -164,7 +130,6 @@ impl ::buffa::Message for AgentConfiguration {
     fn clear(&mut self) {
         self.runtime.clear();
         self.settings = ::buffa::MessageField::none();
-        self.instructions = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AgentConfiguration {

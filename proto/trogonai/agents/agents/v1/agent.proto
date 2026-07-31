@@ -3,7 +3,6 @@ edition = "2024";
 package trogonai.agents.agents.v1;
 
 import "google/protobuf/any.proto";
-import "trogonai/agents/agents/v1/instructions.proto";
 
 // AgentConfiguration is the minimal, versioned declaration of an agent
 // (design Q16): identity, engine, and the engine-owned settings. Nothing
@@ -14,20 +13,16 @@ message AgentConfiguration {
   // Execution engine. Immutable for the agent's v1 lifetime; switching
   // engines mints a new sibling agent rather than a revision (design Q24).
   string runtime = 1 [features.field_presence = LEGACY_REQUIRED];
-  // Runtime-owned settings: model selection, model parameters, and dependency
-  // declarations. Model selection is deliberately runtime-owned rather than a
-  // sibling field on this message. Which models exist, how they are named, and
-  // which sampling or reasoning knobs apply are facts the runtime owns, and a
-  // runtime that exposes no model selection at all simply carries none, with no
-  // platform-level field left empty to interpret. The runtime named above
-  // defines the message type carried here and validates its contents. Absent
-  // means the runtime runs with its defaults.
+  // Runtime-owned settings: model selection, model parameters, instruction
+  // and prompt content, and dependency declarations. Model selection and
+  // instructions are deliberately runtime-owned rather than sibling fields on
+  // this message (ADR#0043). Which models exist, how they are named, which
+  // sampling or reasoning knobs apply, and what shape a prompt takes (one
+  // string, a document list, a named preset with an append seam) are facts
+  // the runtime owns, and a runtime that exposes none of these simply carries
+  // none, with no platform-level field left empty to interpret. The runtime
+  // named above defines the message type carried here and validates its
+  // contents. Absent means the runtime runs with its defaults, including its
+  // default prompt.
   google.protobuf.Any settings = 2;
-  // Charter instruction content, platform-owned (ADR#0043). Deliberately a
-  // sibling of the runtime-owned settings rather than a field inside them:
-  // every runtime consumes markdown instruction content, and the proposal
-  // plane diffs it and classifies the change without decoding any runtime
-  // type. How the content is injected is the runtime's settings concern.
-  // Absent means the runtime runs its default prompt.
-  Instructions instructions = 3;
 }

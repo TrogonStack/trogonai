@@ -59,7 +59,8 @@ exchanges, history templating. That is prompt management.
 Agent definitions across the corpus do not use it. Their instruction
 fields are strings (OpenAI Assistants and Agents SDK, every harness in
 the [harness survey](./harness-survey.md)), and where a union appears it
-is string-or-preset or string-or-callable, never string-or-messages.
+is string-or-preset, string-or-callable, or string-or-string-list, never
+string-or-messages.
 
 Two facts from Langfuse generalize beyond it:
 
