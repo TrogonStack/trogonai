@@ -606,5 +606,3 @@ same transaction as the append.** What it adds beyond T3:
 - **`shell`/`skill`/`compact`/`wait` unavailable**: these return
   `OperationUnavailableError` in v2 at this commit (`session.ts:387-424`); whether
   that is a temporary migration state or a deliberate removal is unclear.
-</content>
-</invoke>
