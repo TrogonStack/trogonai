@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.agents.agents.v1;
 
 import "google/protobuf/any.proto";
+import "trogonai/agents/agents/v1/instructions.proto";
 
 // AgentConfiguration is the minimal, versioned declaration of an agent
 // (design Q16): identity, engine, and the engine-owned settings. Nothing
@@ -22,4 +23,11 @@ message AgentConfiguration {
   // defines the message type carried here and validates its contents. Absent
   // means the runtime runs with its defaults.
   google.protobuf.Any settings = 2;
+  // Charter instruction content, platform-owned (ADR#0042). Deliberately a
+  // sibling of the runtime-owned settings rather than a field inside them:
+  // every runtime consumes markdown instruction content, and the proposal
+  // plane diffs it and classifies the change without decoding any runtime
+  // type. How the content is injected is the runtime's settings concern.
+  // Absent means the runtime runs its default prompt.
+  Instructions instructions = 3;
 }

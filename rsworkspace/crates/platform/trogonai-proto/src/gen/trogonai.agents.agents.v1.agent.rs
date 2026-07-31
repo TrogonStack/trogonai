@@ -31,12 +31,26 @@ pub struct AgentConfiguration {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub settings: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
+    /// Charter instruction content, platform-owned (ADR#0042). Deliberately a
+    /// sibling of the runtime-owned settings rather than a field inside them:
+    /// every runtime consumes markdown instruction content, and the proposal
+    /// plane diffs it and classifies the change without decoding any runtime
+    /// type. How the content is injected is the runtime's settings concern.
+    /// Absent means the runtime runs its default prompt.
+    ///
+    /// Field 3: `instructions`
+    #[serde(
+        rename = "instructions",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub instructions: ::buffa::MessageField<Instructions>,
 }
 impl ::core::fmt::Debug for AgentConfiguration {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("AgentConfiguration")
             .field("runtime", &self.runtime)
             .field("settings", &self.settings)
+            .field("instructions", &self.instructions)
             .finish()
     }
 }
@@ -74,6 +88,14 @@ impl ::buffa::Message for AgentConfiguration {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        if self.instructions.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.instructions.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         size
     }
     fn write_to(
@@ -87,6 +109,10 @@ impl ::buffa::Message for AgentConfiguration {
         if self.settings.is_set() {
             ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
             self.settings.write_to(__cache, buf);
+        }
+        if self.instructions.is_set() {
+            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            self.instructions.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -118,6 +144,17 @@ impl ::buffa::Message for AgentConfiguration {
                     ctx,
                 )?;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.instructions.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -127,6 +164,7 @@ impl ::buffa::Message for AgentConfiguration {
     fn clear(&mut self) {
         self.runtime.clear();
         self.settings = ::buffa::MessageField::none();
+        self.instructions = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AgentConfiguration {
