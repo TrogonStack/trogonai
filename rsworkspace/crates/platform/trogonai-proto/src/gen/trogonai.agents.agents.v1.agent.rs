@@ -25,8 +25,11 @@ pub struct AgentConfiguration {
     /// the runtime owns, and a runtime that exposes none of these simply carries
     /// none, with no platform-level field left empty to interpret. The runtime
     /// named above defines the message type carried here and validates its
-    /// contents. Absent means the runtime runs with its defaults, including its
-    /// default prompt.
+    /// contents. A populated settings payload carrying any type other than the
+    /// one the named runtime defines is invalid: provisioning and the write-side
+    /// decider reject it rather than persist bytes no runtime can interpret.
+    /// Absent means the runtime runs with its defaults, including its default
+    /// prompt.
     ///
     /// Field 2: `settings`
     #[serde(
