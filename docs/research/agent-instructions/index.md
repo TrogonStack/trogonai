@@ -8,7 +8,7 @@ Where a conclusion here differs from an accepted record in the
 [ADR index](../../adr/index.md), the ADR is authoritative.
 
 The decision this corpus feeds is
-[ADR#0042: Agent Instructions Ownership and Shape](../../adr/0042-agent-instructions-ownership-and-shape.md).
+[ADR#0043: Agent Instructions Ownership and Shape](../../adr/0043-agent-instructions-ownership-and-shape.md).
 
 ## Method
 

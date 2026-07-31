@@ -26,7 +26,7 @@ pub struct AgentConfigurationView<'a> {
     pub settings: ::buffa::MessageFieldView<
         ::buffa_types::google::protobuf::__buffa::view::AnyView<'a>,
     >,
-    /// Charter instruction content, platform-owned (ADR#0042). Deliberately a
+    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
     /// sibling of the runtime-owned settings rather than a field inside them:
     /// every runtime consumes markdown instruction content, and the proposal
     /// plane diffs it and classifies the change without decoding any runtime
@@ -362,7 +362,7 @@ impl AgentConfigurationOwnedView {
     > {
         &self.0.reborrow().settings
     }
-    /// Charter instruction content, platform-owned (ADR#0042). Deliberately a
+    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
     /// sibling of the runtime-owned settings rather than a field inside them:
     /// every runtime consumes markdown instruction content, and the proposal
     /// plane diffs it and classifies the change without decoding any runtime

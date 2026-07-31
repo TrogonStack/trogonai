@@ -103,9 +103,9 @@ one `projectKey`; there is no cross-project enumeration in the SDK contract.
 - Listing/resume is scoped to the current project directory. "session ID lookup
   is scoped to the current project directory and its git worktrees, so a
   session created elsewhere reports
-  `No conversation found with session ID: <session-id>`." The picker can
-  widen: `Ctrl+W` to "all worktrees of the repository," `Ctrl+A` to "every
-  project on this machine."
+  `No conversation found with session ID: <session-id>`." The picker can widen:
+  `Ctrl+W` to "all worktrees of the repository," `Ctrl+A` to "every project on
+  this machine."
 - **Relocation is handled by moving storage, not by rewriting identity.** "From
   v2.1.169, moving a session with `/cd` relocates it to the new directory's
   project storage, so it appears in that directory's picker afterward." A moved

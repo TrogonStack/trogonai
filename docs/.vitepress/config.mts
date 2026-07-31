@@ -43,6 +43,10 @@ export default async () => {
             { text: "Key Custody", link: "/architecture/key-custody" },
             { text: "Key Management", link: "/architecture/key-management" },
             { text: "Key States", link: "/architecture/key-states" },
+            {
+              text: "OpenTelemetry Transport Context",
+              link: "/architecture/opentelemetry-transport-context",
+            },
             { text: "Secret Management", link: "/architecture/secret-management" },
           ],
         },

@@ -31,7 +31,7 @@ pub struct AgentConfiguration {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub settings: ::buffa::MessageField<::buffa_types::google::protobuf::Any>,
-    /// Charter instruction content, platform-owned (ADR#0042). Deliberately a
+    /// Charter instruction content, platform-owned (ADR#0043). Deliberately a
     /// sibling of the runtime-owned settings rather than a field inside them:
     /// every runtime consumes markdown instruction content, and the proposal
     /// plane diffs it and classifies the change without decoding any runtime

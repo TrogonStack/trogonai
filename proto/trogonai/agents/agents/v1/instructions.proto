@@ -2,7 +2,7 @@ edition = "2024";
 
 package trogonai.agents.agents.v1;
 
-// Instructions is the charter instruction content (ADR#0042): the one
+// Instructions is the charter instruction content (ADR#0043): the one
 // authored markdown document that is the agent's own voice. Proposals diff
 // it as typed platform content and activation digests commit to it. It is a
 // message rather than a bare string so growth stays additive on this field

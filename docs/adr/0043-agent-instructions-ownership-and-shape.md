@@ -1,11 +1,11 @@
 ---
-number: "0042"
+number: "0043"
 slug: agent-instructions-ownership-and-shape
 status: draft
 date: 2026-07-30
 ---
 
-# ADR#0042: Agent Instructions Ownership and Shape
+# ADR#0043: Agent Instructions Ownership and Shape
 
 ## Context
 
