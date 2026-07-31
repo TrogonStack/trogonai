@@ -32,11 +32,15 @@ instructions.
 ## Claude (Anthropic)
 
 - Agent SDK `systemPrompt` is a tagged union. TypeScript, per the
-  exported `Options` typing:
+  exported `Options` typing in `@anthropic-ai/claude-agent-sdk` 0.3.220
+  (the published reference page documents only the string and preset
+  forms, lagging the typings):
   `string | string[] | { type: 'preset', preset: 'claude_code',
-  append?: string, excludeDynamicSections?: boolean }`. Python adds a
-  further variant, `{ type: 'file', path: str }`, used to avoid OS
-  argument-length limits.
+  append?: string, excludeDynamicSections?: boolean }`. The typing's own
+  example uses the list form to thread a dynamic cache boundary between
+  prompt segments. Python adds a further variant,
+  `{ type: 'file', path: str }`, used to avoid OS argument-length
+  limits.
   Omitted means a minimal default, unlike the CLI which uses the full
   preset. Anchors:
   [TypeScript SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript),

@@ -34,7 +34,9 @@ content converged into a portable standard (AGENTS.md) while injection
 mechanics stayed per-tool.
 
 The deciding evidence is the shape of the runtime contract this platform
-integrates first. The Claude Agent SDK exports:
+integrates first. The Claude Agent SDK exports, per the `Options` typing
+shipped in `@anthropic-ai/claude-agent-sdk` 0.3.220 (the published
+reference page still documents only the string and preset forms):
 
 ```typescript
 systemPrompt?: string | string[] | {
@@ -46,8 +48,9 @@ systemPrompt?: string | string[] | {
 ```
 
 Even the content half of that contract is runtime vocabulary: a plain
-string, a list of strings, or a named preset with an append seam and a
-cache-shaping toggle. Codex's equivalent surface is a config file plus
+string, a list of prompt segments (the typing's own example threads a
+dynamic cache boundary between them), or a named preset with an append
+seam and a cache-shaping toggle. Codex's equivalent surface is a config file plus
 concatenated, budgeted context documents; Gemini's is a replacement file
 with template variables. There is no single content shape for a platform
 field to mirror without loss.
@@ -75,10 +78,13 @@ The reasoning that moved model selection into settings turns out to
 apply after all, once the corpus evidence is read at the contract level
 rather than the payload level. What a prompt IS to a runtime (one
 string, a document list, a preset plus append) is a fact the runtime
-owns. A platform-level markdown field would be a lossy projection that
-no runtime accepts directly: every adapter would immediately re-encode
-it into the native shape, inventing semantics (position, join rules,
-preset interaction) that the platform never actually decided.
+owns. A platform-level markdown field could feed the plain-string form
+of such contracts, but it can express only that one form: the segment
+lists, preset selection, and append seams above have no platform-side
+representation, so every adapter would either flatten to the weakest
+shape or invent semantics (position, join rules, preset interaction)
+that the platform never actually decided. Either way the platform field
+is a lossy projection of the contract the runtime defines.
 
 ### 2. The generic abstraction is deferred, not designed
 
@@ -148,10 +154,16 @@ the variables contract in
   [ADR#0025](./0025-agent-definition-data-ownership.md) tracks the
   model-selection conflict.
 - The research corpus stays frozen as the evidence base for that
-  revisit, and the protobuf evolution facts recorded with it (adding
-  fields to a message is unconditionally safe; moving one existing field
-  into a new `oneof` is wire-safe; bare string to message on one field
-  number is not) apply on the day a platform field is ever introduced.
+  revisit, and the protobuf evolution facts recorded with it apply on
+  the day a platform field is ever introduced: adding fields is safe on
+  the binary wire format, though ProtoJSON parsers reject unknown fields
+  unless configured to discard them (relevant here because the
+  generated bindings carry ProtoJSON support and
+  [ADR#0041](./0041-canonical-mcp-jsonrpc-bodies-over-nats.md) puts JSON
+  bodies on the wire); moving one existing explicit-presence field into
+  a newly created `oneof` is wire-safe, while moving fields into an
+  existing `oneof` is not; and bare string to message on one field
+  number is never safe.
 
 ## References
 
