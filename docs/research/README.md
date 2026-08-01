@@ -26,3 +26,6 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [diggerhq/opencomputer](https://github.com/diggerhq/opencomputer)
 - [Mesh-LLM/mesh-llm](https://github.com/Mesh-LLM/mesh-llm)
 - [earendil-works/pi](https://github.com/earendil-works/pi)
+- [zed-industries/zed](https://github.com/zed-industries/zed)
+- [agentclientprotocol/agent-client-protocol](https://github.com/agentclientprotocol/agent-client-protocol)
+- [cline/cline](https://github.com/cline/cline)
