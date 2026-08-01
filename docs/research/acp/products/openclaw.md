@@ -58,4 +58,17 @@ Copy: the clean separation of "who owns the session" (always the Gateway) from "
 
 Correction to claim 2 / the callability verdict's bridge suggestion: the crate that would let trogonai appear as an ACP agent to OpenClaw is named "acp-nats-agent" in the actual trogonai repo (rsworkspace/crates/acp/acp-nats-agent, described as "Server-side framework for building ACP agents over NATS"), not "acp-nats-agent-fronted" as stated in the claim. The architectural direction is correct (a NATS-backed agent-side shim using acp-nats-agent could front trogonai and be exec'd by OpenClaw's acpx config as an external harness), but the specific crate name cited does not exist verbatim.
 
+Correction to the licensing claim: the body calls `openclaw/openclaw` "MIT"
+without qualification, but GitHub's repository metadata reports its license
+as `NOASSERTION` / "Other". Both are defensible and the discrepancy is
+mechanical, not substantive: the repo's `LICENSE` is the standard MIT text
+verbatim, followed by one appended sentence ("Third-party notices for
+incorporated or adapted code are recorded in THIRD_PARTY_NOTICES.md"), and
+that addition is enough to defeat GitHub's exact-match license detector. The
+grant itself is MIT, so the body's "License is MIT, no constraint" conclusion
+holds, but anyone re-deriving the license from GitHub's API or the repo
+sidebar will see "Other" rather than "MIT". By contrast, `openclaw/acpx` is
+detected as MIT outright, so the acpx licensing claims elsewhere in this
+dossier need no such qualification.
+
 Minor note on claim 1: OpenClaw's own official docs instruct "openclaw plugins install @openclaw/acpx" (scoped package name), but that scoped name 404s on npm per openclaw/openclaw GitHub issues #32967 and #32380; the artifact actually published to npm is the unscoped "acpx" package, currently at v0.13.0. This is an inconsistency inside OpenClaw's own documentation/tooling, not an inaccuracy introduced by the claim under test, since the claim's npm package name and version are both independently verified correct against the npm registry.

@@ -157,7 +157,7 @@ Adopt ADR 0023 as-is; do not reopen the store question.
 
 ## Sources
 
-Prior secret-management research (SECRET_MANAGEMNT, AWS_VS_OPENBAO,
+Prior secret-management research (SECRET_MANAGEMENT, AWS_VS_OPENBAO,
 GITLAB_OPENBAO, BASIL_RESEARCH, and the Basil clipping), plus prior
 research on secret-store design, API keys, open connectors, and agent
 service design QA. [Host role and
