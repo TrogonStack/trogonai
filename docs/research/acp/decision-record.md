@@ -109,9 +109,11 @@ Four component-level designs support the `acp-host` build:
   carry no upstream credentials, authorization headers, or grant tokens, is
   recorded in the draft
   [ADR#0032](../../adr/0032-model-route-and-credential-binding.md) rather
-  than in ADR#0023 itself; ADR#0023 fixes the secrets-service architecture
-  those guarantees are built on, but had not reached accepted status as of
-  this writing.
+  than in
+  [ADR#0023](../../adr/0023-secret-management-and-key-custody-direction.md)
+  itself. The secret custody direction fixes the secrets-service
+  architecture those guarantees are built on, but had not reached accepted
+  status as of this writing.
 - [Media Store Decision](./media-store.md): S3/MinIO object storage with
   lifecycle TTLs, a `media://` resource-link scheme resolved to fresh
   presigned URLs, and an inline-base64 guardrail for small payloads.
