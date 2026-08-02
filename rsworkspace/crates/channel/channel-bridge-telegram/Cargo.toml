@@ -10,7 +10,7 @@ workspace = true
 acp-nats = { workspace = true }
 trogon-channel = { workspace = true }
 trogon-nats = { workspace = true }
-trogon-std = { workspace = true, features = ["signal"] }
+trogon-std = { workspace = true, features = ["signal", "uuid"] }
 trogon-telemetry = { workspace = true }
 
 agent-client-protocol = { workspace = true }

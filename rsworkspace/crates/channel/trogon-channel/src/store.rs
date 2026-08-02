@@ -3,6 +3,7 @@ use crate::endpoint::{Endpoint, PrincipalId};
 use async_nats::jetstream;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use trogon_std::NowV7;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChannelStoreError {
@@ -110,8 +111,9 @@ impl ChannelStore {
         &self,
         endpoint: &Endpoint,
         record: &ConversationRecord,
+        ids: &impl NowV7,
     ) -> Result<ConversationId, ChannelStoreError> {
-        let id = ConversationId::generate();
+        let id = ConversationId::generate(ids);
         self.conversations
             .put(id.as_str(), serde_json::to_vec(record)?.into())
             .await?;

@@ -1,6 +1,7 @@
 use crate::agent_port::AgentSessionId;
 use crate::endpoint::PrincipalId;
 use serde::{Deserialize, Serialize};
+use trogon_std::NowV7;
 
 /// Which configured agent a conversation is bound to. Resolution from id to
 /// protocol + address is bridge/router configuration, never stored here.
@@ -27,8 +28,12 @@ impl std::fmt::Display for AgentId {
 pub struct ConversationId(String);
 
 impl ConversationId {
-    pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().simple().to_string())
+    /// Opaque and time-ordered: this doubles as the conversation KV key, so
+    /// v7 makes the bucket list in creation order. The generator is passed in
+    /// for the same reason `ConversationRecord::created_at` is: no ambient
+    /// clock in this crate.
+    pub fn generate(ids: &impl NowV7) -> Self {
+        Self(ids.now_v7().simple().to_string())
     }
 
     pub fn from_string(id: impl Into<String>) -> Self {
@@ -58,4 +63,25 @@ pub struct ConversationRecord {
     /// Unix seconds; supplied by the caller (this crate takes no clock).
     pub created_at: i64,
     pub last_activity_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trogon_std::UuidV7Generator;
+
+    #[test]
+    fn generated_ids_are_v7_in_simple_form() {
+        let id = ConversationId::generate(&UuidV7Generator);
+        assert_eq!(id.as_str().len(), 32);
+        assert!(id.as_str().chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.as_str().chars().nth(12), Some('7'), "version nibble");
+    }
+
+    #[test]
+    fn generated_ids_sort_in_creation_order() {
+        let first = ConversationId::generate(&UuidV7Generator);
+        let second = ConversationId::generate(&UuidV7Generator);
+        assert!(first.as_str() < second.as_str());
+    }
 }

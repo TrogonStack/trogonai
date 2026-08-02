@@ -31,6 +31,7 @@ use teloxide::Bot;
 use tracing::{error, info, warn};
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{ChannelStore, Endpoint, PrincipalId};
+use trogon_std::UuidV7Generator;
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_std::signal::shutdown_signal;
@@ -162,6 +163,7 @@ async fn run(
         bot_account: &config.bot_account,
         agent_id: &config.agent_id,
         triggers: &config.command_triggers,
+        ids: &UuidV7Generator,
     };
 
     let shutdown = shutdown_signal();

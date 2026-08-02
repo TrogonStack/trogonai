@@ -11,6 +11,7 @@ use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
     AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
 };
+use trogon_std::UuidV7Generator;
 
 struct NatsServer {
     _container: ContainerAsync<Nats>,
@@ -203,6 +204,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         bot_account: "mybot",
         agent_id: "default",
         triggers: &triggers,
+        ids: &UuidV7Generator,
     };
 
     for _ in 0..6 {

@@ -11,13 +11,14 @@ use trogon_channel::{
     AgentId, AgentPort, AgentPortError as _, ChannelStore, Command, CommandTriggers, ConversationId,
     ConversationRecord, InboundEvent, ReleaseReason,
 };
+use trogon_std::NowV7;
 
 /// What the bridge says back when a command has nothing else to do. A reset
 /// with no follow-up prompt produces no agent output, so without this the user
 /// gets silence.
 const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
 
-pub struct Pipeline<'a, P, O> {
+pub struct Pipeline<'a, P, O, G> {
     pub store: &'a ChannelStore,
     pub port: &'a P,
     pub renderer: &'a TelegramRenderClient,
@@ -25,6 +26,7 @@ pub struct Pipeline<'a, P, O> {
     pub bot_account: &'a str,
     pub agent_id: &'a str,
     pub triggers: &'a CommandTriggers,
+    pub ids: &'a G,
 }
 
 fn now_unix() -> i64 {
@@ -37,7 +39,7 @@ async fn ack(msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
     msg.ack().await.map_err(|e| anyhow::anyhow!("ack failed: {e}"))
 }
 
-impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
+impl<P: AgentPort, O: Outbound, G: NowV7> Pipeline<'_, P, O, G> {
     /// Whether the individual who sent this message is a known principal. The
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
@@ -117,7 +119,10 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
                     created_at: now,
                     last_activity_at: now,
                 };
-                let id = self.store.create_conversation(&event.endpoint, &record).await?;
+                let id = self
+                    .store
+                    .create_conversation(&event.endpoint, &record, self.ids)
+                    .await?;
                 info!(conversation = %id, endpoint = %event.endpoint, agent = %record.agent_id, "Created conversation");
                 (id, record)
             }
