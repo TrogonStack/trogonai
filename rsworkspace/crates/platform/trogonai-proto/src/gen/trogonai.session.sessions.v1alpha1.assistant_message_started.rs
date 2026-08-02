@@ -26,6 +26,27 @@ pub struct AssistantMessageStarted {
     /// Field 3: `model`
     #[serde(rename = "model", with = "::buffa::json_helpers::proto_string")]
     pub model: ::buffa::alloc::string::String,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id). Several
+    /// assistant messages share one turn whenever the turn ran a tool loop.
+    ///
+    /// Field 4: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
+    /// Sampling configuration this generation ran with; unset when every setting
+    /// was left at the provider default. Recorded beside model for the same reason
+    /// model is recorded here rather than looked up: a replay must reproduce the
+    /// request that was made, not the request today's defaults would produce.
+    ///
+    /// Field 5: `settings`
+    #[serde(
+        rename = "settings",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub settings: ::buffa::MessageField<ModelSettings, ::buffa::Inline<ModelSettings>>,
 }
 impl ::core::fmt::Debug for AssistantMessageStarted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -33,6 +54,8 @@ impl ::core::fmt::Debug for AssistantMessageStarted {
             .field("session_id", &self.session_id)
             .field("message_id", &self.message_id)
             .field("model", &self.model)
+            .field("turn_id", &self.turn_id)
+            .field("settings", &self.settings)
             .finish()
     }
 }
@@ -59,18 +82,27 @@ impl ::buffa::Message for AssistantMessageStarted {
     /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
     /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.message_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.model) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.settings.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.settings.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
@@ -78,6 +110,15 @@ impl ::buffa::Message for AssistantMessageStarted {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.message_id, buf);
         ::buffa::types::put_string_field(3u32, &self.model, buf);
+        ::buffa::types::put_string_field(4u32, &self.turn_id, buf);
+        if self.settings.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.settings.write_to(__cache, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -111,6 +152,24 @@ impl ::buffa::Message for AssistantMessageStarted {
                 )?;
                 ::buffa::types::merge_string(&mut self.model, buf)?;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.settings.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -121,6 +180,8 @@ impl ::buffa::Message for AssistantMessageStarted {
         self.session_id.clear();
         self.message_id.clear();
         self.model.clear();
+        self.turn_id.clear();
+        self.settings = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AssistantMessageStarted {

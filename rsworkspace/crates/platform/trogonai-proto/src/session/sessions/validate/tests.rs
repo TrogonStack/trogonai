@@ -13,6 +13,85 @@ fn session_ordinal(value: u64) -> v1alpha1::SessionOrdinal {
     v1alpha1::SessionOrdinal { value }
 }
 
+fn workspace_ref() -> v1alpha1::WorkspaceRef {
+    v1alpha1::WorkspaceRef {
+        workspace_id: "workspace-1".to_string(),
+        uri: "file:///workspace".to_string(),
+        revision: None,
+    }
+}
+
+fn session_started() -> v1alpha1::SessionStarted {
+    v1alpha1::SessionStarted {
+        session_id: "session-1".to_string(),
+        execution_plan: MessageField::some(v1alpha1::StoredSessionExecutionPlan {
+            plan_bytes: b"plan".to_vec(),
+            plan_digest: MessageField::some(digest()),
+        }),
+        workspace: MessageField::some(workspace_ref()),
+    }
+}
+
+fn assistant_message_started() -> v1alpha1::AssistantMessageStarted {
+    v1alpha1::AssistantMessageStarted {
+        session_id: "session-1".to_string(),
+        message_id: "message-1".to_string(),
+        model: "model".to_string(),
+        settings: MessageField::none(),
+        turn_id: "turn-1".to_string(),
+    }
+}
+
+fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
+    v1alpha1::ToolCallCompleted {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        result: MessageField::some(v1alpha1::ToolCallResult {
+            status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
+            kind: Some(v1alpha1::tool_call_result::Kind::Text(Box::new(
+                v1alpha1::TextToolResult {
+                    content: "done".to_string(),
+                    truncated: None,
+                },
+            ))),
+        }),
+        turn_id: "turn-1".to_string(),
+        termination: MessageField::none(),
+        duration: MessageField::none(),
+        observed: Vec::new(),
+    }
+}
+
+fn file_changed() -> v1alpha1::FileChanged {
+    v1alpha1::FileChanged {
+        session_id: "session-1".to_string(),
+        path: "src/new.rs".to_string(),
+        change_kind: buffa::EnumValue::from(v1alpha1::FileChangeKind::Modified),
+        previous_path: None,
+        before_ref: MessageField::none(),
+        after_ref: MessageField::none(),
+        tool_call_id: "tool-call-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        diff: MessageField::none(),
+    }
+}
+
+fn resource_observation() -> v1alpha1::ResourceObservation {
+    v1alpha1::ResourceObservation {
+        uri: "file:///workspace/src/new.rs".to_string(),
+        content_digest: MessageField::some(digest()),
+        range: MessageField::none(),
+        complete: Some(true),
+    }
+}
+
+fn event_of(event: impl Into<SessionEventCase>) -> v1alpha1::SessionEvent {
+    v1alpha1::SessionEvent {
+        event: Some(event.into()),
+    }
+}
+
 fn assistant_message() -> v1alpha1::CanonicalMessage {
     v1alpha1::CanonicalMessage {
         message_id: "message-1".to_string(),
@@ -34,6 +113,7 @@ fn artifact_ref() -> v1alpha1::ArtifactRef {
         mime: "text/plain".to_string(),
         preview: None,
         truncated: None,
+        untruncated_size_bytes: None,
     }
 }
 
@@ -71,6 +151,7 @@ fn token_usage_with_currency(currency_code: &str) -> v1alpha1::TokenUsage {
             currency_code: currency_code.to_string(),
             rate_ref: None,
         }),
+        completeness: None,
     }
 }
 
@@ -87,6 +168,7 @@ fn user_message_event(content: Vec<v1alpha1::ContentBlock>) -> v1alpha1::Session
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -115,6 +197,7 @@ fn validate_session_event_accepts_valid_session_started() {
                     plan_bytes: b"plan".to_vec(),
                     plan_digest: MessageField::some(digest()),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -190,6 +273,7 @@ fn validate_user_message_recorded_rejects_missing_content_block_kind() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -215,6 +299,10 @@ fn validate_tool_call_completed_rejects_missing_result_kind() {
                     status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
                     kind: None,
                 }),
+                duration: MessageField::none(),
+                observed: Vec::new(),
+                termination: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -282,6 +370,7 @@ fn validate_user_message_recorded_rejects_assistant_role() {
             v1alpha1::UserMessageRecorded {
                 session_id: "session-1".to_string(),
                 message: MessageField::some(assistant_message()),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -314,6 +403,7 @@ fn validate_assistant_message_completed_rejects_user_role() {
                 }),
                 finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::EndTurn),
                 matched_stop_sequence: None,
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -339,6 +429,9 @@ fn validate_file_changed_rejects_renamed_without_previous_path() {
                 previous_path: None,
                 before_ref: MessageField::none(),
                 after_ref: MessageField::none(),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -361,6 +454,9 @@ fn validate_file_changed_rejects_non_renamed_with_previous_path() {
                 previous_path: Some("src/old.rs".to_string()),
                 before_ref: MessageField::none(),
                 after_ref: MessageField::none(),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -383,6 +479,9 @@ fn validate_file_changed_accepts_renamed_with_previous_path() {
                 previous_path: Some("src/old.rs".to_string()),
                 before_ref: MessageField::none(),
                 after_ref: MessageField::none(),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -505,6 +604,7 @@ fn validate_assistant_message_completed_rejects_missing_matched_stop_sequence() 
                 message: MessageField::some(assistant_message()),
                 finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::StopSequence),
                 matched_stop_sequence: None,
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -525,6 +625,7 @@ fn validate_assistant_message_completed_rejects_unexpected_matched_stop_sequence
                 message: MessageField::some(assistant_message()),
                 finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::EndTurn),
                 matched_stop_sequence: Some("STOP".to_string()),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -545,6 +646,7 @@ fn validate_assistant_message_completed_accepts_stop_sequence_with_match() {
                 message: MessageField::some(assistant_message()),
                 finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::StopSequence),
                 matched_stop_sequence: Some("STOP".to_string()),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -780,6 +882,7 @@ fn validate_session_started_rejects_empty_plan_bytes() {
                         value: vec![0u8; 32],
                     }),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -806,6 +909,7 @@ fn validate_session_started_rejects_unsupported_digest_algorithm() {
                         value: Vec::new(),
                     }),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -832,6 +936,7 @@ fn validate_session_started_rejects_empty_digest_algorithm() {
                         value: vec![0u8; 32],
                     }),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -858,6 +963,7 @@ fn validate_session_started_rejects_wrong_length_sha256_digest() {
                         value: vec![0u8; 4],
                     }),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -882,6 +988,7 @@ fn validate_session_started_accepts_valid_digest() {
                     plan_bytes: b"plan".to_vec(),
                     plan_digest: MessageField::some(digest()),
                 }),
+                workspace: MessageField::some(workspace_ref()),
             }
             .into(),
         ),
@@ -1075,6 +1182,7 @@ fn validate_assistant_message_failed_rejects_unspecified_reason() {
                 reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Unspecified),
                 detail: None,
                 usage: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1096,6 +1204,7 @@ fn validate_assistant_message_failed_accepts_known_reason() {
                 reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
                 detail: None,
                 usage: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1114,6 +1223,7 @@ fn validate_tool_call_failed_rejects_unspecified_reason() {
                 tool_execution_id: "tool-exec-1".to_string(),
                 error: "boom".to_string(),
                 reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Unspecified),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1135,6 +1245,7 @@ fn validate_tool_call_failed_rejects_empty_error() {
                 tool_execution_id: "tool-exec-1".to_string(),
                 error: String::new(),
                 reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1156,6 +1267,7 @@ fn validate_tool_call_failed_accepts_known_reason() {
                 tool_execution_id: "tool-exec-1".to_string(),
                 error: "boom".to_string(),
                 reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1606,6 +1718,8 @@ fn validate_assistant_message_started_accepts_valid_event() {
                 session_id: "session-1".to_string(),
                 message_id: "message-1".to_string(),
                 model: "model".to_string(),
+                settings: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1622,6 +1736,8 @@ fn validate_assistant_message_started_rejects_empty_model() {
                 session_id: "session-1".to_string(),
                 message_id: "message-1".to_string(),
                 model: String::new(),
+                settings: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1645,6 +1761,7 @@ fn validate_tool_call_requested_accepts_valid_event() {
                 input_json: "{}".to_string(),
                 parent_tool_use_id: None,
                 operation_id: None,
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1662,6 +1779,7 @@ fn validate_tool_call_approved_accepts_valid_event() {
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
                 approved_by: "user-1".to_string(),
+                turn_id: None,
             }
             .into(),
         ),
@@ -1680,6 +1798,7 @@ fn validate_tool_call_denied_accepts_valid_event() {
                 tool_execution_id: "tool-exec-1".to_string(),
                 denied_by: "user-1".to_string(),
                 reason: None,
+                turn_id: None,
             }
             .into(),
         ),
@@ -1696,6 +1815,7 @@ fn validate_tool_call_started_accepts_valid_event() {
                 session_id: "session-1".to_string(),
                 tool_call_id: "tool-call-1".to_string(),
                 tool_execution_id: "tool-exec-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1846,6 +1966,7 @@ fn validate_user_message_recorded_accepts_valid_event() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -1871,6 +1992,10 @@ fn validate_tool_call_completed_accepts_valid_event() {
                         },
                     ))),
                 }),
+                duration: MessageField::none(),
+                observed: Vec::new(),
+                termination: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2230,6 +2355,7 @@ fn validate_user_message_recorded_accepts_artifact_ref_content_block() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2259,6 +2385,7 @@ fn validate_user_message_recorded_rejects_invalid_artifact_ref_content_block() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2284,6 +2411,10 @@ fn validate_tool_call_completed_accepts_artifact_ref_result() {
                     status: buffa::EnumValue::from(v1alpha1::ToolCallResultStatus::Success),
                     kind: Some(v1alpha1::tool_call_result::Kind::ArtifactRef(Box::new(artifact_ref()))),
                 }),
+                duration: MessageField::none(),
+                observed: Vec::new(),
+                termination: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2309,6 +2440,10 @@ fn validate_tool_call_completed_rejects_invalid_artifact_ref_result() {
                         broken_artifact_ref,
                     ))),
                 }),
+                duration: MessageField::none(),
+                observed: Vec::new(),
+                termination: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2333,6 +2468,9 @@ fn validate_file_changed_accepts_valid_before_and_after_ref() {
                 previous_path: None,
                 before_ref: MessageField::some(artifact_ref()),
                 after_ref: MessageField::some(artifact_ref()),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2355,6 +2493,9 @@ fn validate_file_changed_rejects_invalid_before_ref() {
                 previous_path: None,
                 before_ref: MessageField::some(broken_artifact_ref),
                 after_ref: MessageField::none(),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -2382,6 +2523,9 @@ fn validate_file_changed_rejects_invalid_after_ref() {
                 previous_path: None,
                 before_ref: MessageField::none(),
                 after_ref: MessageField::some(broken_artifact_ref),
+                diff: MessageField::none(),
+                tool_call_id: "tool-call-1".to_string(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3133,6 +3277,10 @@ fn validate_tool_call_completed_rejects_empty_text_result_content() {
                         },
                     ))),
                 }),
+                duration: MessageField::none(),
+                observed: Vec::new(),
+                termination: MessageField::none(),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3158,6 +3306,7 @@ fn validate_tool_call_requested_rejects_invalid_input_json() {
                 input_json: "{not json".to_string(),
                 parent_tool_use_id: None,
                 operation_id: None,
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3386,6 +3535,7 @@ fn validate_user_message_recorded_accepts_valid_created_at() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3410,6 +3560,7 @@ fn validate_user_message_recorded_rejects_invalid_created_at() {
                     usage: MessageField::none(),
                     created_at: MessageField::some(invalid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3439,6 +3590,7 @@ fn validate_user_message_recorded_rejects_missing_created_at() {
                     usage: MessageField::none(),
                     created_at: MessageField::none(),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3628,9 +3780,11 @@ fn validate_user_message_recorded_accepts_usage_without_cost() {
                         cache_creation_tokens: None,
                         cache_read_tokens: None,
                         cost: MessageField::none(),
+                        completeness: None,
                     }),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3655,6 +3809,7 @@ fn validate_user_message_recorded_accepts_valid_usage_currency_code() {
                     usage: MessageField::some(token_usage_with_currency("USD")),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3679,6 +3834,7 @@ fn validate_user_message_recorded_rejects_invalid_usage_currency_code() {
                     usage: MessageField::some(token_usage_with_currency("dollars")),
                     created_at: MessageField::some(valid_timestamp()),
                 }),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3755,6 +3911,7 @@ fn validate_assistant_message_failed_accepts_valid_usage_currency_code() {
                 reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
                 detail: None,
                 usage: MessageField::some(token_usage_with_currency("EUR")),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3773,6 +3930,7 @@ fn validate_assistant_message_failed_rejects_invalid_usage_currency_code() {
                 reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
                 detail: None,
                 usage: MessageField::some(token_usage_with_currency("E1")),
+                turn_id: "turn-1".to_string(),
             }
             .into(),
         ),
@@ -3828,6 +3986,744 @@ fn validate_checkpoint_produced_rejects_empty_implementation_version() {
         validate_session_event(&event),
         Err(SessionEventValidationError::EmptyIdentifier {
             field: "checkpoint.implementation_version"
+        })
+    );
+}
+
+#[test]
+fn validate_session_started_rejects_empty_workspace_id() {
+    let mut event = session_started();
+    event.workspace = MessageField::some(v1alpha1::WorkspaceRef {
+        workspace_id: String::new(),
+        ..workspace_ref()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "workspace.workspace_id"
+        })
+    );
+}
+
+#[test]
+fn validate_session_started_rejects_empty_workspace_uri() {
+    let mut event = session_started();
+    event.workspace = MessageField::some(v1alpha1::WorkspaceRef {
+        uri: String::new(),
+        ..workspace_ref()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "workspace.uri" })
+    );
+}
+
+#[test]
+fn validate_session_started_accepts_workspace_with_revision() {
+    let mut event = session_started();
+    event.workspace = MessageField::some(v1alpha1::WorkspaceRef {
+        revision: Some("0f1e2d3c".to_string()),
+        ..workspace_ref()
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_empty_turn_id() {
+    let event = v1alpha1::UserMessageRecorded {
+        session_id: "session-1".to_string(),
+        message: MessageField::some(v1alpha1::CanonicalMessage {
+            role: buffa::EnumValue::from(v1alpha1::MessageRole::User),
+            ..assistant_message()
+        }),
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_empty_turn_id() {
+    let mut event = assistant_message_started();
+    event.turn_id = String::new();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_assistant_message_started_accepts_valid_settings() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: Some(4096),
+        temperature: Some(0.0),
+        top_p: Some(0.95),
+        thinking_budget_tokens: Some(1024),
+        stop_sequences: vec!["</answer>".to_string()],
+        raw_settings: MessageField::some(artifact_ref()),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_non_finite_temperature() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: None,
+        temperature: Some(f64::NAN),
+        top_p: None,
+        thinking_budget_tokens: None,
+        stop_sequences: Vec::new(),
+        raw_settings: MessageField::none(),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::NonFiniteSetting {
+            field: "settings.temperature"
+        })
+    );
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_non_finite_top_p() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: None,
+        temperature: None,
+        top_p: Some(f64::INFINITY),
+        thinking_budget_tokens: None,
+        stop_sequences: Vec::new(),
+        raw_settings: MessageField::none(),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::NonFiniteSetting {
+            field: "settings.top_p"
+        })
+    );
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_empty_stop_sequence() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: None,
+        temperature: None,
+        top_p: None,
+        thinking_budget_tokens: None,
+        stop_sequences: vec![String::new()],
+        raw_settings: MessageField::none(),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "settings.stop_sequences[]"
+        })
+    );
+}
+
+#[test]
+fn validate_assistant_message_completed_rejects_empty_turn_id() {
+    let event = v1alpha1::AssistantMessageCompleted {
+        session_id: "session-1".to_string(),
+        message: MessageField::some(assistant_message()),
+        finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::EndTurn),
+        matched_stop_sequence: None,
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_assistant_message_failed_rejects_empty_turn_id() {
+    let event = v1alpha1::AssistantMessageFailed {
+        session_id: "session-1".to_string(),
+        message_id: "message-1".to_string(),
+        reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
+        detail: None,
+        usage: MessageField::none(),
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_requested_rejects_empty_turn_id() {
+    let event = v1alpha1::ToolCallRequested {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        tool_name: "search".to_string(),
+        input_json: "{}".to_string(),
+        parent_tool_use_id: None,
+        operation_id: None,
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_started_rejects_empty_turn_id() {
+    let event = v1alpha1::ToolCallStarted {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_failed_rejects_empty_turn_id() {
+    let event = v1alpha1::ToolCallFailed {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        error: "boom".to_string(),
+        reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+        turn_id: String::new(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_approved_accepts_unset_turn_id() {
+    let event = v1alpha1::ToolCallApproved {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        approved_by: "user-1".to_string(),
+        turn_id: None,
+    };
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_approved_rejects_set_but_empty_turn_id() {
+    let event = v1alpha1::ToolCallApproved {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        approved_by: "user-1".to_string(),
+        turn_id: Some(String::new()),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_denied_rejects_set_but_empty_turn_id() {
+    let event = v1alpha1::ToolCallDenied {
+        session_id: "session-1".to_string(),
+        tool_call_id: "tool-call-1".to_string(),
+        tool_execution_id: "tool-exec-1".to_string(),
+        denied_by: "policy-1".to_string(),
+        reason: None,
+        turn_id: Some(String::new()),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_empty_turn_id() {
+    let mut event = tool_call_completed();
+    event.turn_id = String::new();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_exit_code_termination() {
+    let mut event = tool_call_completed();
+    event.termination = MessageField::some(v1alpha1::CommandTermination {
+        outcome: Some(v1alpha1::command_termination::Outcome::ExitCode(1)),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_signal_termination() {
+    let mut event = tool_call_completed();
+    event.termination = MessageField::some(v1alpha1::CommandTermination {
+        outcome: Some(v1alpha1::command_termination::Outcome::Signal(9)),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_termination_without_outcome() {
+    let mut event = tool_call_completed();
+    event.termination = MessageField::some(v1alpha1::CommandTermination { outcome: None });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingOneof {
+            oneof: "command_termination.outcome"
+        })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_valid_duration() {
+    let mut event = tool_call_completed();
+    event.duration = MessageField::some(buffa_types::google::protobuf::Duration::from_secs_nanos(3, 500_000_000));
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_negative_duration() {
+    let mut event = tool_call_completed();
+    event.duration = MessageField::some(buffa_types::google::protobuf::Duration::from_secs_nanos(-1, 0));
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::InvalidDuration { field: "duration" })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_valid_observation() {
+    let mut event = tool_call_completed();
+    event.observed = vec![resource_observation()];
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_observation_with_empty_uri() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        uri: String::new(),
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "observed[].uri"
+        })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_complete_observation_without_digest() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        content_digest: MessageField::none(),
+        complete: Some(true),
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::CompleteObservationMissingDigest)
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_absent_resource_observation() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        content_digest: MessageField::none(),
+        complete: None,
+        ..resource_observation()
+    }];
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_observation_with_invalid_digest() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        content_digest: MessageField::some(v1alpha1::Digest {
+            algorithm: "md5".to_string(),
+            value: vec![0u8; 32],
+        }),
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UnsupportedDigestAlgorithm {
+            field: "observed[].content_digest"
+        })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_ranged_observation() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        range: MessageField::some(v1alpha1::ByteRange { offset: 0, length: 512 }),
+        complete: Some(false),
+        ..resource_observation()
+    }];
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_zero_length_range() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        range: MessageField::some(v1alpha1::ByteRange { offset: 16, length: 0 }),
+        complete: Some(false),
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyByteRange {
+            field: "observed[].range"
+        })
+    );
+}
+
+#[test]
+fn validate_file_changed_rejects_empty_tool_call_id() {
+    let mut event = file_changed();
+    event.tool_call_id = String::new();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "tool_call_id" })
+    );
+}
+
+#[test]
+fn validate_file_changed_rejects_empty_turn_id() {
+    let mut event = file_changed();
+    event.turn_id = String::new();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "turn_id" })
+    );
+}
+
+#[test]
+fn validate_file_changed_accepts_diff_with_counts_only() {
+    let mut event = file_changed();
+    event.diff = MessageField::some(v1alpha1::DiffSummary {
+        added_lines: Some(12),
+        removed_lines: Some(3),
+        truncated: None,
+        rendered: MessageField::none(),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_file_changed_accepts_truncated_diff_with_render() {
+    let mut event = file_changed();
+    event.diff = MessageField::some(v1alpha1::DiffSummary {
+        added_lines: Some(4000),
+        removed_lines: Some(0),
+        truncated: Some(true),
+        rendered: MessageField::some(artifact_ref()),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_file_changed_rejects_truncated_diff_without_render() {
+    let mut event = file_changed();
+    event.diff = MessageField::some(v1alpha1::DiffSummary {
+        added_lines: Some(4000),
+        removed_lines: Some(0),
+        truncated: Some(true),
+        rendered: MessageField::none(),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::TruncatedDiffWithoutRender)
+    );
+}
+
+#[test]
+fn validate_file_changed_rejects_invalid_rendered_diff_ref() {
+    let mut broken_artifact_ref = artifact_ref();
+    broken_artifact_ref.mime = String::new();
+
+    let mut event = file_changed();
+    event.diff = MessageField::some(v1alpha1::DiffSummary {
+        added_lines: None,
+        removed_lines: None,
+        truncated: None,
+        rendered: MessageField::some(broken_artifact_ref),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "artifact_ref.mime"
+        })
+    );
+}
+
+#[test]
+fn validate_artifact_ref_accepts_untruncated_size_greater_than_size() {
+    let mut event = file_changed();
+    event.after_ref = MessageField::some(v1alpha1::ArtifactRef {
+        untruncated_size_bytes: Some(4096),
+        ..artifact_ref()
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_artifact_ref_rejects_untruncated_size_equal_to_size() {
+    let mut event = file_changed();
+    event.after_ref = MessageField::some(v1alpha1::ArtifactRef {
+        untruncated_size_bytes: Some(128),
+        ..artifact_ref()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UntruncatedSizeNotGreater {
+            size: 128,
+            untruncated: 128
+        })
+    );
+}
+
+#[test]
+fn validate_artifact_ref_rejects_untruncated_size_below_size() {
+    let mut event = file_changed();
+    event.after_ref = MessageField::some(v1alpha1::ArtifactRef {
+        untruncated_size_bytes: Some(64),
+        ..artifact_ref()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UntruncatedSizeNotGreater {
+            size: 128,
+            untruncated: 64
+        })
+    );
+}
+
+#[test]
+fn validate_token_usage_accepts_final_completeness() {
+    let event = v1alpha1::AssistantMessageFailed {
+        session_id: "session-1".to_string(),
+        message_id: "message-1".to_string(),
+        reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Interrupted),
+        detail: None,
+        usage: MessageField::some(v1alpha1::TokenUsage {
+            completeness: Some(buffa::EnumValue::from(v1alpha1::UsageCompleteness::Partial)),
+            ..token_usage_with_currency("USD")
+        }),
+        turn_id: "turn-1".to_string(),
+    };
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_token_usage_rejects_unspecified_completeness() {
+    let event = v1alpha1::AssistantMessageFailed {
+        session_id: "session-1".to_string(),
+        message_id: "message-1".to_string(),
+        reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Interrupted),
+        detail: None,
+        usage: MessageField::some(v1alpha1::TokenUsage {
+            completeness: Some(buffa::EnumValue::from(v1alpha1::UsageCompleteness::Unspecified)),
+            ..token_usage_with_currency("USD")
+        }),
+        turn_id: "turn-1".to_string(),
+    };
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "usage.completeness"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_inline_provider_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: "server_tool_use".to_string(),
+                payload: Some(v1alpha1::provider_block::Payload::Inline(b"{}".to_vec())),
+            },
+        ))),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_accepts_ref_provider_content_block() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: "server_tool_use".to_string(),
+                payload: Some(v1alpha1::provider_block::Payload::Ref(Box::new(artifact_ref()))),
+            },
+        ))),
+    }]);
+
+    assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_provider_block_empty_provider() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: String::new(),
+                block_type: "server_tool_use".to_string(),
+                payload: Some(v1alpha1::provider_block::Payload::Inline(b"{}".to_vec())),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.provider.provider"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_provider_block_empty_block_type() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: String::new(),
+                payload: Some(v1alpha1::provider_block::Payload::Inline(b"{}".to_vec())),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.provider.block_type"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_provider_block_missing_payload() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: "server_tool_use".to_string(),
+                payload: None,
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::MissingOneof {
+            oneof: "provider_block.payload"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_provider_block_empty_inline_payload() {
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: "server_tool_use".to_string(),
+                payload: Some(v1alpha1::provider_block::Payload::Inline(Vec::new())),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "content_block.provider.inline"
+        })
+    );
+}
+
+#[test]
+fn validate_user_message_recorded_rejects_provider_block_invalid_ref_payload() {
+    let mut broken_artifact_ref = artifact_ref();
+    broken_artifact_ref.mime = String::new();
+
+    let event = user_message_event(vec![v1alpha1::ContentBlock {
+        kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+            v1alpha1::ProviderBlock {
+                provider: "anthropic".to_string(),
+                block_type: "server_tool_use".to_string(),
+                payload: Some(v1alpha1::provider_block::Payload::Ref(Box::new(broken_artifact_ref))),
+            },
+        ))),
+    }]);
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "artifact_ref.mime"
         })
     );
 }

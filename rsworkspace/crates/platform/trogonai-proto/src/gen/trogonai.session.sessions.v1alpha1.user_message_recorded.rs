@@ -20,12 +20,29 @@ pub struct UserMessageRecorded {
         CanonicalMessage,
         ::buffa::Inline<CanonicalMessage>,
     >,
+    /// The turn this message opens. A turn is one user-prompt-to-final-assistant-
+    /// message cycle, and every event produced within it repeats this id, so "what
+    /// happened in this turn" is a filter over a decoded field rather than a
+    /// reconstruction that walks message and tool-call joins in fold order. The id
+    /// is stamped rather than folded for the same reason tool_call_id and
+    /// tool_execution_id are both recorded: the boundary is a fact the writer knows
+    /// and the fold cannot recover, since concurrent Any-precondition appends give
+    /// no reliable "next event after" relation to infer it from (D11).
+    ///
+    /// Field 3: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for UserMessageRecorded {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("UserMessageRecorded")
             .field("session_id", &self.session_id)
             .field("message", &self.message)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -65,6 +82,7 @@ impl ::buffa::Message for UserMessageRecorded {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -83,6 +101,7 @@ impl ::buffa::Message for UserMessageRecorded {
             );
             self.message.write_to(__cache, buf);
         }
+        ::buffa::types::put_string_field(3u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -113,6 +132,13 @@ impl ::buffa::Message for UserMessageRecorded {
                     ctx,
                 )?;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -122,6 +148,7 @@ impl ::buffa::Message for UserMessageRecorded {
     fn clear(&mut self) {
         self.session_id.clear();
         self.message = ::buffa::MessageField::none();
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for UserMessageRecorded {

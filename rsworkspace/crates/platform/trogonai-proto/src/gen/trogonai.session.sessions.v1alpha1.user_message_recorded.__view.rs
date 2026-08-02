@@ -11,6 +11,17 @@ pub struct UserMessageRecordedView<'a> {
     pub message: ::buffa::MessageFieldView<
         super::super::__buffa::view::CanonicalMessageView<'a>,
     >,
+    /// The turn this message opens. A turn is one user-prompt-to-final-assistant-
+    /// message cycle, and every event produced within it repeats this id, so "what
+    /// happened in this turn" is a filter over a decoded field rather than a
+    /// reconstruction that walks message and tool-call joins in fold order. The id
+    /// is stamped rather than folded for the same reason tool_call_id and
+    /// tool_execution_id are both recorded: the boundary is a fact the writer knows
+    /// and the fold cannot recover, since concurrent Any-precondition appends give
+    /// no reliable "next event after" relation to infer it from (D11).
+    ///
+    /// Field 3: `turn_id`
+    pub turn_id: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -30,6 +41,14 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_message(&self) -> bool {
         self.message.is_set()
+    }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 2u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for UserMessageRecordedView<'a> {
@@ -89,6 +108,14 @@ impl<'a> ::buffa::MessageView<'a> for UserMessageRecordedView<'a> {
                     }
                 }
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 2u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -125,6 +152,7 @@ impl<'a> ::buffa::MessageView<'a> for UserMessageRecordedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            turn_id: self.turn_id.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -144,6 +172,7 @@ impl<'a> ::buffa::ViewEncode<'a> for UserMessageRecordedView<'a> {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -163,6 +192,7 @@ impl<'a> ::buffa::ViewEncode<'a> for UserMessageRecordedView<'a> {
             );
             self.message.write_to(__cache, buf);
         }
+        ::buffa::types::put_string_field(3u32, &self.turn_id, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -190,6 +220,9 @@ impl<'__a> ::serde::Serialize for UserMessageRecordedView<'__a> {
             if let ::core::option::Option::Some(__v) = self.message.as_option() {
                 __map.serialize_entry("message", __v)?;
             }
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
         }
         __map.end()
     }
@@ -299,6 +332,20 @@ impl UserMessageRecordedOwnedView {
         super::super::__buffa::view::CanonicalMessageView<'_>,
     > {
         &self.0.reborrow().message
+    }
+    /// The turn this message opens. A turn is one user-prompt-to-final-assistant-
+    /// message cycle, and every event produced within it repeats this id, so "what
+    /// happened in this turn" is a filter over a decoded field rather than a
+    /// reconstruction that walks message and tool-call joins in fold order. The id
+    /// is stamped rather than folded for the same reason tool_call_id and
+    /// tool_execution_id are both recorded: the boundary is a fact the writer knows
+    /// and the fold cannot recover, since concurrent Any-precondition appends give
+    /// no reliable "next event after" relation to infer it from (D11).
+    ///
+    /// Field 3: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<UserMessageRecordedView<'static>>>

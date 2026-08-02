@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// ModelSettings is the sampling configuration a generation actually ran with,
+// recorded on AssistantMessageStarted so a replay reproduces the request rather
+// than approximating it from whatever the caller's defaults are at replay time.
+// CanonicalMessage.model already pins which model answered; this pins how it was
+// asked. Every field has explicit presence: unset means the provider default
+// applied, which is a different fact from an explicitly configured zero.
+message ModelSettings {
+  uint64 max_output_tokens = 1;
+  double temperature = 2;
+  double top_p = 3;
+  // Extended-thinking budget, for providers that meter reasoning separately.
+  uint64 thinking_budget_tokens = 4;
+  repeated string stop_sequences = 5;
+  // Claim-check to the full provider-specific request settings, for the fields
+  // this message does not model. Kept out of line because it is replay input,
+  // not projection input: no reader interprets it (D11).
+  ArtifactRef raw_settings = 6;
+}

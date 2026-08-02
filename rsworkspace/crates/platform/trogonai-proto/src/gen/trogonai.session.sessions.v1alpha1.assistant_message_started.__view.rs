@@ -13,6 +13,20 @@ pub struct AssistantMessageStartedView<'a> {
     pub message_id: &'a str,
     /// Field 3: `model`
     pub model: &'a str,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id). Several
+    /// assistant messages share one turn whenever the turn ran a tool loop.
+    ///
+    /// Field 4: `turn_id`
+    pub turn_id: &'a str,
+    /// Sampling configuration this generation ran with; unset when every setting
+    /// was left at the provider default. Recorded beside model for the same reason
+    /// model is recorded here rather than looked up: a replay must reproduce the
+    /// request that was made, not the request today's defaults would produce.
+    ///
+    /// Field 5: `settings`
+    pub settings: ::buffa::MessageFieldView<
+        super::super::__buffa::view::ModelSettingsView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -40,6 +54,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_model(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
+    }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 8u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for AssistantMessageStartedView<'a> {
@@ -94,6 +116,35 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageStartedView<'a> {
                 view.model = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 4u64;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 8u64;
+            }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.settings.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.settings = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::ModelSettingsView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -123,25 +174,44 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageStartedView<'a> {
             session_id: self.session_id.to_string(),
             message_id: self.message_id.to_string(),
             model: self.model.to_string(),
+            turn_id: self.turn_id.to_string(),
+            settings: match self.settings.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::ModelSettings,
+                        ::buffa::Inline<super::super::ModelSettings>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageStartedView<'a> {
     #[allow(clippy::needless_borrow, clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.message_id) as u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.model) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.settings.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.settings.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
@@ -149,6 +219,15 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageStartedView<'a> {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.message_id, buf);
         ::buffa::types::put_string_field(3u32, &self.model, buf);
+        ::buffa::types::put_string_field(4u32, &self.turn_id, buf);
+        if self.settings.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.settings.write_to(__cache, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -177,6 +256,14 @@ impl<'__a> ::serde::Serialize for AssistantMessageStartedView<'__a> {
         }
         {
             __map.serialize_entry("model", self.model)?;
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.settings.as_option() {
+                __map.serialize_entry("settings", __v)?;
+            }
         }
         __map.end()
     }
@@ -287,6 +374,26 @@ impl AssistantMessageStartedOwnedView {
     #[must_use]
     pub fn model(&self) -> &'_ str {
         self.0.reborrow().model
+    }
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id). Several
+    /// assistant messages share one turn whenever the turn ran a tool loop.
+    ///
+    /// Field 4: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
+    }
+    /// Sampling configuration this generation ran with; unset when every setting
+    /// was left at the provider default. Recorded beside model for the same reason
+    /// model is recorded here rather than looked up: a replay must reproduce the
+    /// request that was made, not the request today's defaults would produce.
+    ///
+    /// Field 5: `settings`
+    #[must_use]
+    pub fn settings(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ModelSettingsView<'_>> {
+        &self.0.reborrow().settings
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AssistantMessageStartedView<'static>>>

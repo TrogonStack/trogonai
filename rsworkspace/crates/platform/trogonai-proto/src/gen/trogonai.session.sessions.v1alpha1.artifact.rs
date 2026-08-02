@@ -54,6 +54,19 @@ pub struct ArtifactRef {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub truncated: ::core::option::Option<bool>,
+    /// Size of the content before truncation, when the referenced bytes are
+    /// themselves a truncation of a larger original that was never stored. Unset
+    /// when size_bytes already is the full size. Recorded so a reader can tell
+    /// "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+    ///
+    /// Field 7: `untruncated_size_bytes`
+    #[serde(
+        rename = "untruncatedSizeBytes",
+        alias = "untruncated_size_bytes",
+        with = "::buffa::json_helpers::opt_uint64",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub untruncated_size_bytes: ::core::option::Option<u64>,
 }
 impl ::core::fmt::Debug for ArtifactRef {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -64,6 +77,7 @@ impl ::core::fmt::Debug for ArtifactRef {
             .field("mime", &self.mime)
             .field("preview", &self.preview)
             .field("truncated", &self.truncated)
+            .field("untruncated_size_bytes", &self.untruncated_size_bytes)
             .finish()
     }
 }
@@ -90,6 +104,13 @@ impl ArtifactRef {
     ///Sets [`Self::truncated`] to `Some(value)`, consuming and returning `self`.
     pub fn with_truncated(mut self, value: bool) -> Self {
         self.truncated = Some(value);
+        self
+    }
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::untruncated_size_bytes`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_untruncated_size_bytes(mut self, value: u64) -> Self {
+        self.untruncated_size_bytes = Some(value);
         self
     }
 }
@@ -130,6 +151,9 @@ impl ::buffa::Message for ArtifactRef {
         if self.truncated.is_some() {
             size += 1u64 + ::buffa::types::BOOL_ENCODED_LEN as u64;
         }
+        if let Some(v) = self.untruncated_size_bytes {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -155,6 +179,9 @@ impl ::buffa::Message for ArtifactRef {
         }
         if let Some(v) = self.truncated {
             ::buffa::types::put_bool_field(6u32, v, buf);
+        }
+        if let Some(v) = self.untruncated_size_bytes {
+            ::buffa::types::put_uint64_field(7u32, v, buf);
         }
     }
     fn merge_field(
@@ -219,6 +246,15 @@ impl ::buffa::Message for ArtifactRef {
                     ::buffa::types::decode_bool(buf)?,
                 );
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                self.untruncated_size_bytes = ::core::option::Option::Some(
+                    ::buffa::types::decode_uint64(buf)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -232,6 +268,7 @@ impl ::buffa::Message for ArtifactRef {
         self.mime.clear();
         self.preview = ::core::option::Option::None;
         self.truncated = ::core::option::Option::None;
+        self.untruncated_size_bytes = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ArtifactRef {

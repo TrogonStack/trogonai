@@ -2,6 +2,9 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "google/protobuf/duration.proto";
+import "trogonai/session/sessions/v1alpha1/command_termination.proto";
+import "trogonai/session/sessions/v1alpha1/resource_observation.proto";
 import "trogonai/session/sessions/v1alpha1/tool_call.proto";
 
 // ToolCallCompleted records that a tool call finished successfully. Per
@@ -15,4 +18,18 @@ message ToolCallCompleted {
   string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
   ToolCallResult result = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this call belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  // How the process ended, for a tool that executes one; unset for every other
+  // tool. A command that ran and exited non-zero completes here with result
+  // status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and a termination set; a
+  // command that never ran is a ToolCallFailed and has none.
+  CommandTermination termination = 6;
+  // Wall-clock execution time from start to this completion. Recorded rather
+  // than derived from the two events' append times, which measure when the
+  // writer got its append acknowledged, not how long the tool ran (D10).
+  google.protobuf.Duration duration = 7;
+  // Resources this call put into the model's context, with the digest each
+  // hashed to when it was read. Empty for a call that observed nothing.
+  repeated ResourceObservation observed = 8;
 }

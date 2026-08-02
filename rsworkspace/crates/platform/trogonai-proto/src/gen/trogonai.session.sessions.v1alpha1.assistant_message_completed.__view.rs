@@ -25,6 +25,10 @@ pub struct AssistantMessageCompletedView<'a> {
     ///
     /// Field 4: `matched_stop_sequence`
     pub matched_stop_sequence: ::core::option::Option<&'a str>,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    pub turn_id: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -52,6 +56,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_finish_reason(&self) -> bool {
         self.__buffa_required_seen_0 & 2u64 != 0
+    }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 4u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for AssistantMessageCompletedView<'a> {
@@ -128,6 +140,14 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageCompletedView<'a> {
                 )?;
                 view.matched_stop_sequence = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 4u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -166,6 +186,7 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageCompletedView<'a> {
             },
             finish_reason: self.finish_reason,
             matched_stop_sequence: self.matched_stop_sequence.map(|s| s.to_string()),
+            turn_id: self.turn_id.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -192,6 +213,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageCompletedView<'a> {
         if let Some(ref v) = self.matched_stop_sequence {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -215,6 +237,7 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageCompletedView<'a> {
         if let Some(ref v) = self.matched_stop_sequence {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.turn_id, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -248,6 +271,9 @@ impl<'__a> ::serde::Serialize for AssistantMessageCompletedView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.matched_stop_sequence {
             __map.serialize_entry("matchedStopSequence", __v)?;
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
         }
         __map.end()
     }
@@ -370,6 +396,13 @@ impl AssistantMessageCompletedOwnedView {
     #[must_use]
     pub fn matched_stop_sequence(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().matched_stop_sequence
+    }
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AssistantMessageCompletedView<'static>>>

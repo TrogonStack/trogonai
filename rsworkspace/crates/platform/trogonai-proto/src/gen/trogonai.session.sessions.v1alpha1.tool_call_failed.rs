@@ -233,6 +233,15 @@ pub struct ToolCallFailed {
     /// Field 5: `reason`
     #[serde(rename = "reason", with = "::buffa::json_helpers::proto_enum")]
     pub reason: ::buffa::EnumValue<ToolCallFailureReason>,
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 6: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for ToolCallFailed {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -242,6 +251,7 @@ impl ::core::fmt::Debug for ToolCallFailed {
             .field("tool_execution_id", &self.tool_execution_id)
             .field("error", &self.error)
             .field("reason", &self.reason)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -281,6 +291,7 @@ impl ::buffa::Message for ToolCallFailed {
             let val = self.reason.to_i32();
             size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -295,6 +306,7 @@ impl ::buffa::Message for ToolCallFailed {
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
         ::buffa::types::put_string_field(4u32, &self.error, buf);
         ::buffa::types::put_int32_field(5u32, self.reason.to_i32(), buf);
+        ::buffa::types::put_string_field(6u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -344,6 +356,13 @@ impl ::buffa::Message for ToolCallFailed {
                     ::buffa::types::decode_int32(buf)?,
                 );
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -356,6 +375,7 @@ impl ::buffa::Message for ToolCallFailed {
         self.tool_execution_id.clear();
         self.error.clear();
         self.reason = ::buffa::EnumValue::from(0);
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallFailed {

@@ -9,14 +9,17 @@ include!("trogonai.session.sessions.v1alpha1.tool_call.rs");
 include!("trogonai.session.sessions.v1alpha1.message.rs");
 include!("trogonai.session.sessions.v1alpha1.assistant_message_completed.rs");
 include!("trogonai.session.sessions.v1alpha1.assistant_message_failed.rs");
+include!("trogonai.session.sessions.v1alpha1.model_settings.rs");
 include!("trogonai.session.sessions.v1alpha1.assistant_message_started.rs");
 include!("trogonai.session.sessions.v1alpha1.cascade_policy.rs");
 include!("trogonai.session.sessions.v1alpha1.session_ordinal.rs");
 include!("trogonai.session.sessions.v1alpha1.checkpoint.rs");
 include!("trogonai.session.sessions.v1alpha1.checkpoint_produced.rs");
+include!("trogonai.session.sessions.v1alpha1.command_termination.rs");
 include!("trogonai.session.sessions.v1alpha1.compacted.rs");
 include!("trogonai.session.sessions.v1alpha1.delegation_detached.rs");
 include!("trogonai.session.sessions.v1alpha1.delegation_dispatched.rs");
+include!("trogonai.session.sessions.v1alpha1.diff_summary.rs");
 include!("trogonai.session.sessions.v1alpha1.execution_attempt_ended.rs");
 include!("trogonai.session.sessions.v1alpha1.execution_attempt_ready.rs");
 include!("trogonai.session.sessions.v1alpha1.execution_attempt_started.rs");
@@ -40,11 +43,13 @@ include!("trogonai.session.sessions.v1alpha1.session_hidden.rs");
 include!("trogonai.session.sessions.v1alpha1.session_renamed.rs");
 include!("trogonai.session.sessions.v1alpha1.session_rewound.rs");
 include!("trogonai.session.sessions.v1alpha1.execution_plan.rs");
+include!("trogonai.session.sessions.v1alpha1.workspace.rs");
 include!("trogonai.session.sessions.v1alpha1.session_started.rs");
 include!("trogonai.session.sessions.v1alpha1.session_unarchived.rs");
 include!("trogonai.session.sessions.v1alpha1.system_notice_recorded.rs");
 include!("trogonai.session.sessions.v1alpha1.todo_updated.rs");
 include!("trogonai.session.sessions.v1alpha1.tool_call_approved.rs");
+include!("trogonai.session.sessions.v1alpha1.resource_observation.rs");
 include!("trogonai.session.sessions.v1alpha1.tool_call_completed.rs");
 include!("trogonai.session.sessions.v1alpha1.tool_call_denied.rs");
 include!("trogonai.session.sessions.v1alpha1.tool_call_failed.rs");
@@ -82,15 +87,18 @@ pub mod __buffa {
         include!(
             "trogonai.session.sessions.v1alpha1.assistant_message_failed.__view.rs"
         );
+        include!("trogonai.session.sessions.v1alpha1.model_settings.__view.rs");
         include!(
             "trogonai.session.sessions.v1alpha1.assistant_message_started.__view.rs"
         );
         include!("trogonai.session.sessions.v1alpha1.session_ordinal.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.checkpoint.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.checkpoint_produced.__view.rs");
+        include!("trogonai.session.sessions.v1alpha1.command_termination.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.compacted.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.delegation_detached.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.delegation_dispatched.__view.rs");
+        include!("trogonai.session.sessions.v1alpha1.diff_summary.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.execution_attempt_ended.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.execution_attempt_ready.__view.rs");
         include!(
@@ -123,11 +131,13 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1alpha1.session_renamed.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.session_rewound.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.execution_plan.__view.rs");
+        include!("trogonai.session.sessions.v1alpha1.workspace.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.session_started.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.session_unarchived.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.system_notice_recorded.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.todo_updated.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.tool_call_approved.__view.rs");
+        include!("trogonai.session.sessions.v1alpha1.resource_observation.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.tool_call_completed.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.tool_call_denied.__view.rs");
         include!("trogonai.session.sessions.v1alpha1.tool_call_failed.__view.rs");
@@ -142,6 +152,9 @@ pub mod __buffa {
             include!("trogonai.session.sessions.v1alpha1.tool_call.__view_oneof.rs");
             include!("trogonai.session.sessions.v1alpha1.message.__view_oneof.rs");
             include!(
+                "trogonai.session.sessions.v1alpha1.command_termination.__view_oneof.rs"
+            );
+            include!(
                 "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__view_oneof.rs"
             );
             include!("trogonai.session.sessions.v1alpha1.events.__view_oneof.rs");
@@ -153,6 +166,7 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1alpha1.artifact.__oneof.rs");
         include!("trogonai.session.sessions.v1alpha1.tool_call.__oneof.rs");
         include!("trogonai.session.sessions.v1alpha1.message.__oneof.rs");
+        include!("trogonai.session.sessions.v1alpha1.command_termination.__oneof.rs");
         include!(
             "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__oneof.rs"
         );
@@ -173,18 +187,22 @@ pub mod __buffa {
         reg.register_json_any(super::__TEXT_TOOL_RESULT_JSON_ANY);
         reg.register_json_any(super::__CANONICAL_MESSAGE_JSON_ANY);
         reg.register_json_any(super::__CONTENT_BLOCK_JSON_ANY);
+        reg.register_json_any(super::__PROVIDER_BLOCK_JSON_ANY);
         reg.register_json_any(super::__THINKING_BLOCK_JSON_ANY);
         reg.register_json_any(super::__TOOL_USE_BLOCK_JSON_ANY);
         reg.register_json_any(super::__TOOL_RESULT_BLOCK_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_COMPLETED_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_FAILED_JSON_ANY);
+        reg.register_json_any(super::__MODEL_SETTINGS_JSON_ANY);
         reg.register_json_any(super::__ASSISTANT_MESSAGE_STARTED_JSON_ANY);
         reg.register_json_any(super::__SESSION_ORDINAL_JSON_ANY);
         reg.register_json_any(super::__CHECKPOINT_JSON_ANY);
         reg.register_json_any(super::__CHECKPOINT_PRODUCED_JSON_ANY);
+        reg.register_json_any(super::__COMMAND_TERMINATION_JSON_ANY);
         reg.register_json_any(super::__COMPACTED_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DETACHED_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DISPATCHED_JSON_ANY);
+        reg.register_json_any(super::__DIFF_SUMMARY_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_ENDED_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_READY_JSON_ANY);
         reg.register_json_any(super::__EXECUTION_ATTEMPT_STARTED_JSON_ANY);
@@ -211,12 +229,15 @@ pub mod __buffa {
         reg.register_json_any(super::__SESSION_RENAMED_JSON_ANY);
         reg.register_json_any(super::__SESSION_REWOUND_JSON_ANY);
         reg.register_json_any(super::__STORED_SESSION_EXECUTION_PLAN_JSON_ANY);
+        reg.register_json_any(super::__WORKSPACE_REF_JSON_ANY);
         reg.register_json_any(super::__SESSION_STARTED_JSON_ANY);
         reg.register_json_any(super::__SESSION_UNARCHIVED_JSON_ANY);
         reg.register_json_any(super::__SYSTEM_NOTICE_RECORDED_JSON_ANY);
         reg.register_json_any(super::__TODO_UPDATED_JSON_ANY);
         reg.register_json_any(super::__TODO_ITEM_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_APPROVED_JSON_ANY);
+        reg.register_json_any(super::__RESOURCE_OBSERVATION_JSON_ANY);
+        reg.register_json_any(super::__BYTE_RANGE_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_COMPLETED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_DENIED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_FAILED_JSON_ANY);
@@ -279,6 +300,10 @@ pub use self::__buffa::view::ContentBlockView;
 #[doc(inline)]
 pub use self::__buffa::view::ContentBlockOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::ProviderBlockView;
+#[doc(inline)]
+pub use self::__buffa::view::ProviderBlockOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::ThinkingBlockView;
 #[doc(inline)]
 pub use self::__buffa::view::ThinkingBlockOwnedView;
@@ -299,6 +324,10 @@ pub use self::__buffa::view::AssistantMessageFailedView;
 #[doc(inline)]
 pub use self::__buffa::view::AssistantMessageFailedOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::ModelSettingsView;
+#[doc(inline)]
+pub use self::__buffa::view::ModelSettingsOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::AssistantMessageStartedView;
 #[doc(inline)]
 pub use self::__buffa::view::AssistantMessageStartedOwnedView;
@@ -315,6 +344,10 @@ pub use self::__buffa::view::CheckpointProducedView;
 #[doc(inline)]
 pub use self::__buffa::view::CheckpointProducedOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::CommandTerminationView;
+#[doc(inline)]
+pub use self::__buffa::view::CommandTerminationOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::CompactedView;
 #[doc(inline)]
 pub use self::__buffa::view::CompactedOwnedView;
@@ -326,6 +359,10 @@ pub use self::__buffa::view::DelegationDetachedOwnedView;
 pub use self::__buffa::view::DelegationDispatchedView;
 #[doc(inline)]
 pub use self::__buffa::view::DelegationDispatchedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DiffSummaryView;
+#[doc(inline)]
+pub use self::__buffa::view::DiffSummaryOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ExecutionAttemptEndedView;
 #[doc(inline)]
@@ -431,6 +468,10 @@ pub use self::__buffa::view::StoredSessionExecutionPlanView;
 #[doc(inline)]
 pub use self::__buffa::view::StoredSessionExecutionPlanOwnedView;
 #[doc(inline)]
+pub use self::__buffa::view::WorkspaceRefView;
+#[doc(inline)]
+pub use self::__buffa::view::WorkspaceRefOwnedView;
+#[doc(inline)]
 pub use self::__buffa::view::SessionStartedView;
 #[doc(inline)]
 pub use self::__buffa::view::SessionStartedOwnedView;
@@ -454,6 +495,14 @@ pub use self::__buffa::view::TodoItemOwnedView;
 pub use self::__buffa::view::ToolCallApprovedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallApprovedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ResourceObservationView;
+#[doc(inline)]
+pub use self::__buffa::view::ResourceObservationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ByteRangeView;
+#[doc(inline)]
+pub use self::__buffa::view::ByteRangeOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ToolCallCompletedView;
 #[doc(inline)]

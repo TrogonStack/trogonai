@@ -26,12 +26,21 @@ pub struct SessionStarted {
         StoredSessionExecutionPlan,
         ::buffa::Inline<StoredSessionExecutionPlan>,
     >,
+    /// Workspace this session is bound to, carried inline so workspace-scoped
+    /// reads never decode plan_bytes. It must agree with the plan's working
+    /// directory; this field is the projection surface, the plan stays
+    /// authoritative.
+    ///
+    /// Field 3: `workspace`
+    #[serde(rename = "workspace")]
+    pub workspace: ::buffa::MessageField<WorkspaceRef, ::buffa::Inline<WorkspaceRef>>,
 }
 impl ::core::fmt::Debug for SessionStarted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("SessionStarted")
             .field("session_id", &self.session_id)
             .field("execution_plan", &self.execution_plan)
+            .field("workspace", &self.workspace)
             .finish()
     }
 }
@@ -71,6 +80,14 @@ impl ::buffa::Message for SessionStarted {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.workspace.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.workspace.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -88,6 +105,14 @@ impl ::buffa::Message for SessionStarted {
                 buf,
             );
             self.execution_plan.write_to(__cache, buf);
+        }
+        if self.workspace.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.workspace.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -119,6 +144,17 @@ impl ::buffa::Message for SessionStarted {
                     ctx,
                 )?;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.workspace.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -128,6 +164,7 @@ impl ::buffa::Message for SessionStarted {
     fn clear(&mut self) {
         self.session_id.clear();
         self.execution_plan = ::buffa::MessageField::none();
+        self.workspace = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for SessionStarted {

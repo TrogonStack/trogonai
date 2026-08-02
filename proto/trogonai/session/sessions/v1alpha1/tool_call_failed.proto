@@ -17,6 +17,8 @@ message ToolCallFailed {
   // from a genuine error without parsing the error string (parity with
   // AssistantMessageFailed).
   ToolCallFailureReason reason = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this call belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 6 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // ToolCallFailureReason is why a started tool call did not complete.

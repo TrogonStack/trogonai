@@ -8,4 +8,6 @@ message ToolCallStarted {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Turn this call belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 4 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -26,6 +26,11 @@ message ArtifactRef {
   string preview = 5;
   // True when preview is a truncation of the full content.
   bool truncated = 6;
+  // Size of the content before truncation, when the referenced bytes are
+  // themselves a truncation of a larger original that was never stored. Unset
+  // when size_bytes already is the full size. Recorded so a reader can tell
+  // "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+  uint64 untruncated_size_bytes = 7;
 }
 
 // ArtifactMetadata is the claim-check record carried by ArtifactRecorded. Its

@@ -25,6 +25,12 @@ pub struct ToolCallDeniedView<'a> {
     ///
     /// Field 5: `reason`
     pub reason: ::core::option::Option<&'a str>,
+    /// Turn the denied call belongs to (see UserMessageRecorded.turn_id). Optional
+    /// for the same reason as on ToolCallApproved: the refusing principal, policy,
+    /// or hook may not hold the turn context.
+    ///
+    /// Field 6: `turn_id`
+    pub turn_id: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -129,6 +135,13 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallDeniedView<'a> {
                 )?;
                 view.reason = Some(::buffa::types::borrow_str(&mut cur)?);
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -154,6 +167,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallDeniedView<'a> {
             tool_execution_id: self.tool_execution_id.to_string(),
             denied_by: self.denied_by.to_string(),
             reason: self.reason.map(|s| s.to_string()),
+            turn_id: self.turn_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -172,6 +186,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallDeniedView<'a> {
         if let Some(ref v) = self.reason {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
+        if let Some(ref v) = self.turn_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -188,6 +205,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallDeniedView<'a> {
         ::buffa::types::put_string_field(4u32, &self.denied_by, buf);
         if let Some(ref v) = self.reason {
             ::buffa::types::put_string_field(5u32, v, buf);
+        }
+        if let Some(ref v) = self.turn_id {
+            ::buffa::types::put_string_field(6u32, v, buf);
         }
     }
 }
@@ -223,6 +243,9 @@ impl<'__a> ::serde::Serialize for ToolCallDeniedView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.reason {
             __map.serialize_entry("reason", __v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.turn_id {
+            __map.serialize_entry("turnId", __v)?;
         }
         __map.end()
     }
@@ -345,6 +368,15 @@ impl ToolCallDeniedOwnedView {
     #[must_use]
     pub fn reason(&self) -> ::core::option::Option<&'_ str> {
         self.0.reborrow().reason
+    }
+    /// Turn the denied call belongs to (see UserMessageRecorded.turn_id). Optional
+    /// for the same reason as on ToolCallApproved: the refusing principal, policy,
+    /// or hook may not hold the turn context.
+    ///
+    /// Field 6: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().turn_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallDeniedView<'static>>>

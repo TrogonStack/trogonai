@@ -28,6 +28,15 @@ pub struct ToolCallStarted {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub tool_execution_id: ::buffa::alloc::string::String,
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 4: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for ToolCallStarted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -35,6 +44,7 @@ impl ::core::fmt::Debug for ToolCallStarted {
             .field("session_id", &self.session_id)
             .field("tool_call_id", &self.tool_call_id)
             .field("tool_execution_id", &self.tool_execution_id)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -69,6 +79,7 @@ impl ::buffa::Message for ToolCallStarted {
         size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u64;
         size
             += 1u64 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -81,6 +92,7 @@ impl ::buffa::Message for ToolCallStarted {
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
+        ::buffa::types::put_string_field(4u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -114,6 +126,13 @@ impl ::buffa::Message for ToolCallStarted {
                 )?;
                 ::buffa::types::merge_string(&mut self.tool_execution_id, buf)?;
             }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -124,6 +143,7 @@ impl ::buffa::Message for ToolCallStarted {
         self.session_id.clear();
         self.tool_call_id.clear();
         self.tool_execution_id.clear();
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallStarted {

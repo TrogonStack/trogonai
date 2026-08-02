@@ -35,6 +35,52 @@ pub struct ToolCallCompleted {
     /// Field 4: `result`
     #[serde(rename = "result")]
     pub result: ::buffa::MessageField<ToolCallResult, ::buffa::Inline<ToolCallResult>>,
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
+    /// How the process ended, for a tool that executes one; unset for every other
+    /// tool. A command that ran and exited non-zero completes here with result
+    /// status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and a termination set; a
+    /// command that never ran is a ToolCallFailed and has none.
+    ///
+    /// Field 6: `termination`
+    #[serde(
+        rename = "termination",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub termination: ::buffa::MessageField<
+        CommandTermination,
+        ::buffa::Inline<CommandTermination>,
+    >,
+    /// Wall-clock execution time from start to this completion. Recorded rather
+    /// than derived from the two events' append times, which measure when the
+    /// writer got its append acknowledged, not how long the tool ran (D10).
+    ///
+    /// Field 7: `duration`
+    #[serde(
+        rename = "duration",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub duration: ::buffa::MessageField<
+        ::buffa_types::google::protobuf::Duration,
+        ::buffa::Inline<::buffa_types::google::protobuf::Duration>,
+    >,
+    /// Resources this call put into the model's context, with the digest each
+    /// hashed to when it was read. Empty for a call that observed nothing.
+    ///
+    /// Field 8: `observed`
+    #[serde(
+        rename = "observed",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_empty_vec",
+        deserialize_with = "::buffa::json_helpers::null_as_default"
+    )]
+    pub observed: ::buffa::alloc::vec::Vec<ResourceObservation>,
 }
 impl ::core::fmt::Debug for ToolCallCompleted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -43,6 +89,10 @@ impl ::core::fmt::Debug for ToolCallCompleted {
             .field("tool_call_id", &self.tool_call_id)
             .field("tool_execution_id", &self.tool_execution_id)
             .field("result", &self.result)
+            .field("turn_id", &self.turn_id)
+            .field("termination", &self.termination)
+            .field("duration", &self.duration)
+            .field("observed", &self.observed)
             .finish()
     }
 }
@@ -85,6 +135,31 @@ impl ::buffa::Message for ToolCallCompleted {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.termination.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.termination.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.duration.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.duration.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.observed {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -104,6 +179,31 @@ impl ::buffa::Message for ToolCallCompleted {
                 buf,
             );
             self.result.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(5u32, &self.turn_id, buf);
+        if self.termination.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.termination.write_to(__cache, buf);
+        }
+        if self.duration.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                7u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.duration.write_to(__cache, buf);
+        }
+        for v in &self.observed {
+            ::buffa::types::put_len_delimited_header(
+                8u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -149,6 +249,47 @@ impl ::buffa::Message for ToolCallCompleted {
                     ctx,
                 )?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.termination.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.duration.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let mut elem = ::core::default::Default::default();
+                ctx.register_element_memory(
+                    ::buffa::__private::element_footprint(&elem),
+                )?;
+                ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
+                self.observed.push(elem);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -160,6 +301,10 @@ impl ::buffa::Message for ToolCallCompleted {
         self.tool_call_id.clear();
         self.tool_execution_id.clear();
         self.result = ::buffa::MessageField::none();
+        self.turn_id.clear();
+        self.termination = ::buffa::MessageField::none();
+        self.duration = ::buffa::MessageField::none();
+        self.observed.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallCompleted {

@@ -1,0 +1,47 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/digest.proto";
+
+// ResourceObservation records that a tool call put the content of a resource
+// into the model's context, and what that content hashed to at the moment it was
+// read. It is what makes a later write checkable: a replayed or retried write
+// carries the digest its decision was based on, and a projection can tell
+// "this write is a duplicate of one already applied" from "this write was
+// decided against content that has since changed" without keeping the bytes.
+//
+// Reads are recorded here, on the completion of the call that performed them,
+// and deliberately not as their own event: reads outnumber writes by more than
+// an order of magnitude, and a per-read event would make the dominant kind in
+// every session stream a fact no projection folds. The same reasoning applies
+// within a call: record an observation only for a resource whose content
+// actually entered the model's context, never for every path a search walked.
+//
+// A change with a proximate tool call is a FileChanged. A change first noticed
+// because a resource hashed differently than when it was last observed is not:
+// it surfaces as an observation with a new digest, with no FileChanged to
+// attribute it to, which is precisely the signal that something outside the
+// session moved underneath it.
+message ResourceObservation {
+  // Resource location, in the same URI form as WorkspaceRef.uri.
+  string uri = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the observed content. Unset when the resource was reported
+  // absent, which is itself an observation a later write may depend on.
+  Digest content_digest = 2;
+  // The observed extent when only part of the resource was read; unset when the
+  // observation covers the whole resource.
+  ByteRange range = 3;
+  // True when the observed content was the resource in full, with nothing
+  // elided by truncation or by a range limit. A write against a resource the
+  // model only saw part of is a weaker precondition than one against a resource
+  // it saw entirely, and that difference must be a recorded fact rather than
+  // inferred from the presence of range.
+  bool complete = 4;
+}
+
+// ByteRange is a half-open extent over a resource's bytes.
+message ByteRange {
+  uint64 offset = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 length = 2 [features.field_presence = LEGACY_REQUIRED];
+}
