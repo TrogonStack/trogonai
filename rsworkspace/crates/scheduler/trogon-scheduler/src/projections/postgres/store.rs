@@ -17,7 +17,7 @@
 
 use std::collections::HashSet;
 
-use buffa::MessageField;
+use buffa::{MessageField, ProtoBox};
 use buffa_types::google::protobuf::{Duration, Timestamp};
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::postgres::PgRow;
@@ -100,7 +100,9 @@ fn timestamp_to_datetime(ts: &Timestamp) -> Result<DateTime<Utc>, SchedulerError
     })
 }
 
-fn optional_datetime(ts: &MessageField<Timestamp>) -> Result<Option<DateTime<Utc>>, SchedulerError> {
+fn optional_datetime<P: ProtoBox<Timestamp>>(
+    ts: &MessageField<Timestamp, P>,
+) -> Result<Option<DateTime<Utc>>, SchedulerError> {
     ts.as_option().map(timestamp_to_datetime).transpose()
 }
 
@@ -116,13 +118,13 @@ fn datetime_to_timestamp(dt: &DateTime<Utc>) -> Timestamp {
     }
 }
 
-fn optional_timestamp(dt: Option<DateTime<Utc>>) -> MessageField<Timestamp> {
+fn optional_timestamp<P: ProtoBox<Timestamp>>(dt: Option<DateTime<Utc>>) -> MessageField<Timestamp, P> {
     dt.map_or_else(MessageField::none, |dt| MessageField::some(datetime_to_timestamp(&dt)))
 }
 
 /// Schedule intervals/TTLs are stored as whole seconds (`BIGINT`); sub-second
 /// precision is dropped, which is fine for a second-granularity read model.
-fn optional_duration(seconds: Option<i64>) -> MessageField<Duration> {
+fn optional_duration<P: ProtoBox<Duration>>(seconds: Option<i64>) -> MessageField<Duration, P> {
     seconds.map_or_else(MessageField::none, |seconds| {
         MessageField::some(Duration {
             seconds,
@@ -131,11 +133,15 @@ fn optional_duration(seconds: Option<i64>) -> MessageField<Duration> {
     })
 }
 
-fn timezone_text(tz: &MessageField<trogonai_proto::google::r#type::TimeZone>) -> Option<String> {
+fn timezone_text<P: ProtoBox<trogonai_proto::google::r#type::TimeZone>>(
+    tz: &MessageField<trogonai_proto::google::r#type::TimeZone, P>,
+) -> Option<String> {
     tz.as_option().map(|tz| tz.id.clone()).filter(|id| !id.is_empty())
 }
 
-fn optional_timezone(id: Option<String>) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
+fn optional_timezone<P: ProtoBox<trogonai_proto::google::r#type::TimeZone>>(
+    id: Option<String>,
+) -> MessageField<trogonai_proto::google::r#type::TimeZone, P> {
     match id.filter(|id| !id.is_empty()) {
         Some(id) => MessageField::some(trogonai_proto::google::r#type::TimeZone {
             id,

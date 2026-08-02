@@ -213,10 +213,16 @@ pub struct Compacted {
     pub summary_content: ::buffa::alloc::string::String,
     /// Field 4: `covers_from`
     #[serde(rename = "coversFrom", alias = "covers_from")]
-    pub covers_from: ::buffa::MessageField<SessionOrdinal>,
+    pub covers_from: ::buffa::MessageField<
+        SessionOrdinal,
+        ::buffa::Inline<SessionOrdinal>,
+    >,
     /// Field 5: `covers_through`
     #[serde(rename = "coversThrough", alias = "covers_through")]
-    pub covers_through: ::buffa::MessageField<SessionOrdinal>,
+    pub covers_through: ::buffa::MessageField<
+        SessionOrdinal,
+        ::buffa::Inline<SessionOrdinal>,
+    >,
     /// Why compaction fired; a command-time input not derivable from the log.
     ///
     /// Field 6: `trigger`
@@ -261,7 +267,7 @@ pub struct Compacted {
         rename = "usage",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub usage: ::buffa::MessageField<TokenUsage>,
+    pub usage: ::buffa::MessageField<TokenUsage, ::buffa::Inline<TokenUsage>>,
 }
 impl ::core::fmt::Debug for Compacted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -333,63 +339,65 @@ impl ::buffa::MessageName for Compacted {
 impl ::buffa::Message for Compacted {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.summary_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.summary_content) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.summary_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.summary_content) as u64;
         if self.covers_from.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.covers_from.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if self.covers_through.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.covers_through.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         {
             let val = self.trigger.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
         if let Some(ref v) = self.guidance {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if let Some(v) = self.tokens_before {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if let Some(v) = self.tokens_after {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if let Some(ref v) = self.model {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.usage.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.usage.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -397,11 +405,19 @@ impl ::buffa::Message for Compacted {
         ::buffa::types::put_string_field(2u32, &self.summary_id, buf);
         ::buffa::types::put_string_field(3u32, &self.summary_content, buf);
         if self.covers_from.is_set() {
-            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                4u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.covers_from.write_to(__cache, buf);
         }
         if self.covers_through.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.covers_through.write_to(__cache, buf);
         }
         ::buffa::types::put_int32_field(6u32, self.trigger.to_i32(), buf);
@@ -418,7 +434,11 @@ impl ::buffa::Message for Compacted {
             ::buffa::types::put_string_field(10u32, v, buf);
         }
         if self.usage.is_set() {
-            ::buffa::types::put_len_delimited_header(11u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.usage.write_to(__cache, buf);
         }
     }

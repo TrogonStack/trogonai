@@ -138,7 +138,7 @@ moka = { version = "=0.12.15", features = ["future"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.4"
-wasmtime = "=47.0.2"
+wasmtime = "=47.0.3"
 http = "=1.5.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
@@ -152,13 +152,13 @@ url = "=2.5.8"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
-wasmtime-wasi = "=46.0.1"
+wasmtime-wasi = "=47.0.3"
 wit-bindgen = "=0.60.0"
 
 # Auth callout
 hex = "=0.4.3"
 hmac = "=0.13.0"
-jsonwebtoken = "=11.0.0"
+jsonwebtoken = { version = "=11.0.0", features = ["rust_crypto"] }
 nats-jwt-rs = "=0.1.1"
 nkeys = { version = "=0.4.5", features = ["xkeys"] }
 rustls-pemfile = "=2.2.0"

@@ -162,7 +162,7 @@ impl SchedulesProjector {
             .store
             .get_projection(&routed.id)
             .await?
-            .map_or(ScheduleStreamState::Initial, ScheduleStreamState::Present);
+            .map_or(ScheduleStreamState::Initial, ScheduleStreamState::from);
         let after = match apply(&routed.schedule_id, before.clone(), &routed.event) {
             Ok(after) => after,
             Err(source) => {
