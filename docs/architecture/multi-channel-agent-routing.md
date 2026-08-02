@@ -59,38 +59,49 @@ The guard that keeps this from becoming a monolith: everything channel-neutral
 and render-command types) lives in a **shared crate**, not in the Telegram
 binary. A second channel imports the same brain; it never copies it.
 
-## The multi-channel end state
-
-When a second channel or a second consumer of conversations (audit, analytics)
-arrives, the bridge splits along the seams the shared crate already defines:
-
-```
-telegram.{update_type}  (stream TELEGRAM)                trogon-gateway
-      │
-      ▼
-channel.{prefix}.in.{channel}.{account}.{peer}           channel-bridge-telegram
-stream CHANNEL_IN_{prefix}, neutral inbound events       (normalize half)
-      │
-      ▼
-[identity, binding, conversation KV,                     channel-router
- per-conversation serialization, AgentPort]              (generic, channel-blind)
-      │
-      ▼
-channel.{prefix}.out.{channel}.{account}.{peer}          channel-router publishes,
-stream CHANNEL_OUT_{prefix}, render commands             channel-bridge-telegram
-      │                                                  (render half) consumes
-      ▼
-platform API calls
-```
-
-- `{channel}.{account}.{peer}` is the **endpoint address**; tokens must be
-  subject-safe and edges own the encoding.
-- The router subscribes `channel.{prefix}.in.>` and is channel-blind; a new
-  channel is a new edge binary and zero router changes.
-- The subjects carry exactly the types the shared crate already defines; the
-  extraction is deployment surgery, not schema design.
-
 ## Domain model
+
+Four words carry this whole design, so here they are with values taken from the
+running code.
+
+An **endpoint** is a mailbox: one place messages arrive and leave. It is three
+tokens, nothing more.
+
+| Token | What it is | A real value |
+| --- | --- | --- |
+| `channel` | which platform | `telegram` |
+| `account` | which of our bots on that platform | `mybot` |
+| `peer` | which chat on the far side | `-1001234567890` (a group), `42` (a DM) |
+
+Joined, that is `telegram.mybot.-1001234567890`, meaning "the chat
+-1001234567890, talking to @mybot, on Telegram". That exact string is the KV key
+today (`Endpoint::kv_key`) and becomes the tail of the NATS subject after
+extraction. One value, two uses, no re-encoding, which is the reason the tokens
+are restricted to characters that both KV keys and subject tokens accept.
+
+**`peer` is a chat, not a person.** Everyone in a group shares one endpoint,
+which is why the sender is checked separately before a destructive command: the
+chat being allowed says nothing about who spoke in it.
+
+A **principal** is the human. One person can hold several endpoints (a Telegram
+DM, a Discord DM, the CLI) and they all resolve to the same principal. That is
+the only thing that makes "continue this conversation somewhere else" mean
+anything.
+
+A **conversation** is the context the agent works in, and it is the root
+object: endpoints point at it, never the reverse.
+
+A **binding** is one KV entry, `endpoint -> conversation id`, and nothing more.
+A message arrives, the bridge looks up its endpoint, and either finds a
+conversation id or does not. If it does not, this is a new conversation:
+routing policy picks the agent once, the conversation is created, and the entry
+is written. The word makes it sound like a subsystem; it is a lookup table with
+one column.
+
+`{prefix}`, which appears in bucket and stream names below, is none of the
+above. It is the deployment namespace (`CHANNEL_PREFIX`, default `prod`) so
+staging and production can share a NATS cluster without sharing state. It never
+appears inside an endpoint.
 
 ```
 endpoint (channel, account, peer)     where messages arrive and leave
@@ -124,6 +135,42 @@ conversation                          the shared context, cross-channel
   can attach to one conversation, so each prompt records the endpoint it came
   from and the response renders there. Per-conversation serialization is
   mandatory: prompts from two channels into one session queue in order.
+
+## The multi-channel end state
+
+When a second channel or a second consumer of conversations (audit, analytics)
+arrives, the bridge splits along the seams the shared crate already defines:
+
+```
+telegram.{update_type}  (stream TELEGRAM)                trogon-gateway
+      │
+      ▼
+channel.{prefix}.in.{channel}.{account}.{peer}           channel-bridge-telegram
+stream CHANNEL_IN_{prefix}, neutral inbound events       (normalize half)
+      │
+      ▼
+[identity, binding, conversation KV,                     channel-router
+ per-conversation serialization, AgentPort]              (generic, channel-blind)
+      │
+      ▼
+channel.{prefix}.out.{channel}.{account}.{peer}          channel-router publishes,
+stream CHANNEL_OUT_{prefix}, render commands             channel-bridge-telegram
+      │                                                  (render half) consumes
+      ▼
+platform API calls
+```
+
+Filled in, an inbound subject reads
+`channel.prod.in.telegram.mybot.-1001234567890`: the deployment, the direction,
+then the endpoint address unchanged from its KV form.
+
+- The last three tokens are the **endpoint address** defined above. Edges own
+  the encoding, which is why `Endpoint` refuses tokens that would not survive
+  as a subject.
+- The router subscribes `channel.{prefix}.in.>` and is channel-blind; a new
+  channel is a new edge binary and zero router changes.
+- The subjects carry exactly the types the shared crate already defines; the
+  extraction is deployment surgery, not schema design.
 
 ## State: JetStream KV buckets
 
