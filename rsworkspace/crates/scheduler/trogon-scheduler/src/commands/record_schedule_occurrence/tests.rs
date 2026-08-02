@@ -24,7 +24,9 @@ fn rrule_schedule(count: u32) -> v1::Schedule {
     .unwrap()
 }
 
-fn timestamp(at: DateTime<Utc>) -> MessageField<buffa_types::google::protobuf::Timestamp> {
+fn timestamp<P: buffa::ProtoBox<buffa_types::google::protobuf::Timestamp>>(
+    at: DateTime<Utc>,
+) -> MessageField<buffa_types::google::protobuf::Timestamp, P> {
     MessageField::some(trogonai_proto::convert::timestamp_from_datetime(&at))
 }
 

@@ -33,6 +33,7 @@ impl<'a> ::buffa::MessageView<'a> for ResumeScheduleView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -83,15 +84,15 @@ impl<'a> ::buffa::ViewEncode<'a> for ResumeScheduleView<'a> {
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.schedule_id) as u32;
-        size
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.schedule_id) as u64;
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -175,7 +176,9 @@ impl ResumeScheduleOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ResumeSchedule,
@@ -191,13 +194,13 @@ impl ResumeScheduleOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ResumeSchedule, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ResumeSchedule {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

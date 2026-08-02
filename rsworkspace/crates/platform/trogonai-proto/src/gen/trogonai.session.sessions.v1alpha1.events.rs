@@ -41,14 +41,16 @@ impl ::buffa::MessageName for SessionEvent {
 impl ::buffa::Message for SessionEvent {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
                 __buffa::oneof::session_event::Event::SessionStarted(x) => {
@@ -56,240 +58,240 @@ impl ::buffa::Message for SessionEvent {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionClosed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionCancelled(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionHidden(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionForked(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionRewound(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::Compacted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::UserMessageRecorded(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::AssistantMessageStarted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::AssistantMessageCompleted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallRequested(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallApproved(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallDenied(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallStarted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallCompleted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ToolCallFailed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ArtifactRecorded(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::FileChanged(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ExecutionAttemptStarted(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ExecutionAttemptReady(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ExecutionAttemptEnded(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::CheckpointProduced(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::DelegationDispatched(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ParentLinked(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ParentTerminated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::DelegationDetached(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ParentHistoryInvalidated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ParentDetached(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ExternalDelegationDispatched(
                     x,
@@ -298,24 +300,24 @@ impl ::buffa::Message for SessionEvent {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::OperationReserved(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::OperationOutcomeRecorded(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::OperationCancellationRequested(
                     x,
@@ -324,73 +326,73 @@ impl ::buffa::Message for SessionEvent {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::ArtifactErased(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::RedactionApplied(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SystemNoticeRecorded(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::TodoUpdated(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionRenamed(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionArchived(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::session_event::Event::SessionUnarchived(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -399,7 +401,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionStarted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -407,7 +409,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionClosed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -415,7 +417,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionCancelled(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -423,7 +425,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -431,7 +433,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionHidden(x) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -439,7 +441,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionForked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -447,7 +449,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionRewound(x) => {
                     ::buffa::types::put_len_delimited_header(
                         7u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -455,7 +457,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::Compacted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         8u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -463,7 +465,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::UserMessageRecorded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         9u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -471,7 +473,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::AssistantMessageStarted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         10u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -479,7 +481,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::AssistantMessageCompleted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         11u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -487,7 +489,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::AssistantMessageFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         28u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -495,7 +497,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallRequested(x) => {
                     ::buffa::types::put_len_delimited_header(
                         12u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -503,7 +505,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallApproved(x) => {
                     ::buffa::types::put_len_delimited_header(
                         13u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -511,7 +513,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallDenied(x) => {
                     ::buffa::types::put_len_delimited_header(
                         29u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -519,7 +521,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallStarted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         14u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -527,7 +529,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallCompleted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         15u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -535,7 +537,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ToolCallFailed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         16u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -543,7 +545,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ArtifactRecorded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         17u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -551,7 +553,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::FileChanged(x) => {
                     ::buffa::types::put_len_delimited_header(
                         18u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -559,7 +561,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ExecutionAttemptStarted(x) => {
                     ::buffa::types::put_len_delimited_header(
                         19u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -567,7 +569,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ExecutionAttemptReady(x) => {
                     ::buffa::types::put_len_delimited_header(
                         20u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -575,7 +577,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ExecutionAttemptEnded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         21u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -583,7 +585,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::CheckpointProduced(x) => {
                     ::buffa::types::put_len_delimited_header(
                         30u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -591,7 +593,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::DelegationDispatched(x) => {
                     ::buffa::types::put_len_delimited_header(
                         22u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -599,7 +601,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ParentLinked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         23u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -607,7 +609,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ParentTerminated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         24u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -615,7 +617,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::DelegationDetached(x) => {
                     ::buffa::types::put_len_delimited_header(
                         25u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -623,7 +625,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ParentHistoryInvalidated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         33u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -631,7 +633,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ParentDetached(x) => {
                     ::buffa::types::put_len_delimited_header(
                         34u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -641,7 +643,7 @@ impl ::buffa::Message for SessionEvent {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         35u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -649,7 +651,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::OperationReserved(x) => {
                     ::buffa::types::put_len_delimited_header(
                         26u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -657,7 +659,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::OperationOutcomeRecorded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         27u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -667,7 +669,7 @@ impl ::buffa::Message for SessionEvent {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         36u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -675,7 +677,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::ArtifactErased(x) => {
                     ::buffa::types::put_len_delimited_header(
                         37u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -683,7 +685,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::RedactionApplied(x) => {
                     ::buffa::types::put_len_delimited_header(
                         38u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -691,7 +693,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SystemNoticeRecorded(x) => {
                     ::buffa::types::put_len_delimited_header(
                         31u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -699,7 +701,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::TodoUpdated(x) => {
                     ::buffa::types::put_len_delimited_header(
                         32u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -707,7 +709,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionRenamed(x) => {
                     ::buffa::types::put_len_delimited_header(
                         39u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -715,7 +717,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionArchived(x) => {
                     ::buffa::types::put_len_delimited_header(
                         40u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -723,7 +725,7 @@ impl ::buffa::Message for SessionEvent {
                 __buffa::oneof::session_event::Event::SessionUnarchived(x) => {
                     ::buffa::types::put_len_delimited_header(
                         41u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);

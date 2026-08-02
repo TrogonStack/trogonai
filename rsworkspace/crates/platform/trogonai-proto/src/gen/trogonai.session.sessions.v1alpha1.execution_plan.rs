@@ -22,7 +22,7 @@ pub struct StoredSessionExecutionPlan {
     ///
     /// Field 2: `plan_digest`
     #[serde(rename = "planDigest", alias = "plan_digest")]
-    pub plan_digest: ::buffa::MessageField<Digest>,
+    pub plan_digest: ::buffa::MessageField<Digest, ::buffa::Inline<Digest>>,
 }
 impl ::core::fmt::Debug for StoredSessionExecutionPlan {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -49,35 +49,41 @@ impl ::buffa::MessageName for StoredSessionExecutionPlan {
 impl ::buffa::Message for StoredSessionExecutionPlan {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::bytes_encoded_len(&self.plan_bytes) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::bytes_encoded_len(&self.plan_bytes) as u64;
         if self.plan_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.plan_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_bytes_field(1u32, &self.plan_bytes, buf);
+        ::buffa::types::put_shared_bytes_field(1u32, &self.plan_bytes, buf);
         if self.plan_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                2u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.plan_digest.write_to(__cache, buf);
         }
     }

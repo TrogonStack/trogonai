@@ -205,8 +205,8 @@ fn require_valid_timestamp(
         .map_err(|_| SessionEventValidationError::InvalidTimestamp { field })
 }
 
-fn require_set_timestamp(
-    timestamp: &buffa::MessageField<buffa_types::google::protobuf::Timestamp>,
+fn require_set_timestamp<P: buffa::ProtoBox<buffa_types::google::protobuf::Timestamp>>(
+    timestamp: &buffa::MessageField<buffa_types::google::protobuf::Timestamp, P>,
     field: &'static str,
 ) -> Result<(), SessionEventValidationError> {
     match timestamp.as_option() {

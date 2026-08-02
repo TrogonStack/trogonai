@@ -125,7 +125,7 @@ fn occurrence_recorded_event(id: &str, sequence: u64, at: &str) -> v1::ScheduleE
     }
 }
 
-fn present(state: ScheduleStreamState) -> projections_v1::ScheduleProjection {
+fn present(state: ScheduleStreamState) -> Box<projections_v1::ScheduleProjection> {
     match state {
         ScheduleStreamState::Present(view) => view,
         other => panic!("expected present schedule, got {other:?}"),
@@ -371,9 +371,9 @@ fn read_model_state_rejects_recreating_deleted_schedule() {
 fn round_trips_through_the_kv_codec() {
     // What the projection writes must decode back to an equal view.
     let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
-    let encoded = buffa::Message::encode_to_vec(&view);
+    let encoded = buffa::Message::encode_to_vec(view.as_ref());
     let decoded = <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&encoded).unwrap();
-    assert_eq!(decoded, view);
+    assert_eq!(decoded, *view);
 }
 
 #[test]
@@ -482,7 +482,7 @@ fn twin_converts_paused_status_and_delivery_with_source() {
 fn schedule_projection_converts_to_present_stream_state() {
     let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
     assert_eq!(
-        ScheduleStreamState::from(view.clone()),
+        ScheduleStreamState::from(*view.clone()),
         ScheduleStreamState::Present(view)
     );
 }

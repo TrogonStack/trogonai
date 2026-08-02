@@ -39,7 +39,7 @@ pub(crate) mod storage;
 /// A change to apply to the KV bucket for a single schedule.
 #[derive(Clone, PartialEq)]
 pub(crate) enum ProjectionChange {
-    Upsert(projections_v1::ScheduleProjection),
+    Upsert(Box<projections_v1::ScheduleProjection>),
     Delete(String),
 }
 
@@ -47,7 +47,7 @@ pub(crate) enum ProjectionChange {
 #[derive(Clone, PartialEq)]
 pub(crate) enum ScheduleStreamState {
     Initial,
-    Present(projections_v1::ScheduleProjection),
+    Present(Box<projections_v1::ScheduleProjection>),
     Deleted(String),
 }
 
@@ -101,7 +101,7 @@ pub(crate) fn apply(
 
     match (state, &event.event) {
         (ScheduleStreamState::Initial, Some(ScheduleEventCase::ScheduleCreated(inner))) => {
-            Ok(ScheduleStreamState::Present(apply_schedule_created(inner)?))
+            Ok(ScheduleStreamState::Present(Box::new(apply_schedule_created(inner)?)))
         }
         (
             ScheduleStreamState::Initial,
@@ -283,7 +283,7 @@ pub(crate) fn projection_change(before: &ScheduleStreamState, after: &ScheduleSt
 
 impl From<projections_v1::ScheduleProjection> for ScheduleStreamState {
     fn from(view: projections_v1::ScheduleProjection) -> Self {
-        Self::Present(view)
+        Self::Present(Box::new(view))
     }
 }
 
@@ -675,7 +675,7 @@ async fn maybe_advance_read_model_checkpoint(
 async fn apply_projection_change(kv: &kv::Store, change: &ProjectionChange) -> Result<(), SchedulerError> {
     match change {
         ProjectionChange::Upsert(view) => {
-            let value = buffa::Message::encode_to_vec(view);
+            let value = buffa::Message::encode_to_vec(view.as_ref());
             kv.put(read_model_key(&view.schedule_id), value.into())
                 .await
                 .map_err(|source| SchedulerError::kv_source("failed to store projected job state", source))?;

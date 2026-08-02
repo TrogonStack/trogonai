@@ -33,7 +33,10 @@ pub struct ExecutionAttemptStarted {
         rename = "sessionExecutionPlanDigest",
         alias = "session_execution_plan_digest"
     )]
-    pub session_execution_plan_digest: ::buffa::MessageField<Digest>,
+    pub session_execution_plan_digest: ::buffa::MessageField<
+        Digest,
+        ::buffa::Inline<Digest>,
+    >,
     /// Field 4: `attempt_number`
     #[serde(
         rename = "attemptNumber",
@@ -59,7 +62,10 @@ pub struct ExecutionAttemptStarted {
         alias = "restored_checkpoint",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub restored_checkpoint: ::buffa::MessageField<Checkpoint>,
+    pub restored_checkpoint: ::buffa::MessageField<
+        Checkpoint,
+        ::buffa::Inline<Checkpoint>,
+    >,
     /// Field 7: `resume_cursor`
     #[serde(
         rename = "resumeCursor",
@@ -76,7 +82,7 @@ pub struct ExecutionAttemptStarted {
     pub host_artifact_ref: ::buffa::alloc::string::String,
     /// Field 9: `host_artifact_digest`
     #[serde(rename = "hostArtifactDigest", alias = "host_artifact_digest")]
-    pub host_artifact_digest: ::buffa::MessageField<Digest>,
+    pub host_artifact_digest: ::buffa::MessageField<Digest, ::buffa::Inline<Digest>>,
     /// Field 10: `authenticated_remote_subject`
     #[serde(
         rename = "authenticatedRemoteSubject",
@@ -98,7 +104,10 @@ pub struct ExecutionAttemptStarted {
     ///
     /// Field 12: `started_at`
     #[serde(rename = "startedAt", alias = "started_at")]
-    pub started_at: ::buffa::MessageField<::buffa_types::google::protobuf::Timestamp>,
+    pub started_at: ::buffa::MessageField<
+        ::buffa_types::google::protobuf::Timestamp,
+        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
+    >,
 }
 impl ::core::fmt::Debug for ExecutionAttemptStarted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -177,78 +186,84 @@ impl ::buffa::MessageName for ExecutionAttemptStarted {
 impl ::buffa::Message for ExecutionAttemptStarted {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         size
-            += 1u32
-                + ::buffa::types::string_encoded_len(&self.execution_attempt_id) as u32;
+            += 1u64
+                + ::buffa::types::string_encoded_len(&self.execution_attempt_id) as u64;
         if self.session_execution_plan_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.session_execution_plan_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.attempt_number) as u32;
+        size += 1u64 + ::buffa::types::uint64_encoded_len(self.attempt_number) as u64;
         if let Some(ref v) = self.previous_attempt_id {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.restored_checkpoint.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.restored_checkpoint.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.resume_cursor {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         size
-            += 1u32 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u32;
+            += 1u64 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u64;
         if self.host_artifact_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.host_artifact_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.authenticated_remote_subject {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if let Some(ref v) = self.isolation_placement {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.started_at.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.started_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.execution_attempt_id, buf);
         if self.session_execution_plan_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.session_execution_plan_digest.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(4u32, self.attempt_number, buf);
@@ -256,7 +271,11 @@ impl ::buffa::Message for ExecutionAttemptStarted {
             ::buffa::types::put_string_field(5u32, v, buf);
         }
         if self.restored_checkpoint.is_set() {
-            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.restored_checkpoint.write_to(__cache, buf);
         }
         if let Some(ref v) = self.resume_cursor {
@@ -264,7 +283,11 @@ impl ::buffa::Message for ExecutionAttemptStarted {
         }
         ::buffa::types::put_string_field(8u32, &self.host_artifact_ref, buf);
         if self.host_artifact_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(9u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.host_artifact_digest.write_to(__cache, buf);
         }
         if let Some(ref v) = self.authenticated_remote_subject {
@@ -274,7 +297,11 @@ impl ::buffa::Message for ExecutionAttemptStarted {
             ::buffa::types::put_string_field(11u32, v, buf);
         }
         if self.started_at.is_set() {
-            ::buffa::types::put_len_delimited_header(12u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.started_at.write_to(__cache, buf);
         }
     }

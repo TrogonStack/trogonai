@@ -19,7 +19,7 @@ fn rrule_schedule(count: u32) -> v1::Schedule {
 fn enabled_state(
     last_occurrence_sequence: Option<u64>,
     pending_occurrence_at: Option<DateTime<Utc>>,
-    schedule: MessageField<v1::Schedule>,
+    schedule: MessageField<v1::Schedule, buffa::Inline<v1::Schedule>>,
 ) -> state_v1::State {
     state_v1::State {
         completed: None,

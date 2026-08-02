@@ -40,7 +40,7 @@ impl TryFrom<&ScheduleEventSchedule> for v1::Schedule {
             .into(),
             ScheduleEventSchedule::Cron { expr, timezone } => v1::schedule::Cron {
                 expr: expr.as_str().to_string(),
-                timezone: timezone.as_ref().map(timezone_from).unwrap_or_default(),
+                timezone: timezone.as_ref().map(timezone_from).into(),
             }
             .into(),
             ScheduleEventSchedule::RRule {
@@ -52,7 +52,7 @@ impl TryFrom<&ScheduleEventSchedule> for v1::Schedule {
             } => v1::schedule::RRule {
                 dtstart: MessageField::some(timestamp_from_datetime(dtstart)),
                 rrule: rrule.as_str().to_string(),
-                timezone: timezone.as_ref().map(timezone_from).unwrap_or_default(),
+                timezone: timezone.as_ref().map(timezone_from).into(),
                 rdate: rdate.iter().map(timestamp_from_datetime).collect(),
                 exdate: exdate.iter().map(timestamp_from_datetime).collect(),
             }
@@ -62,11 +62,11 @@ impl TryFrom<&ScheduleEventSchedule> for v1::Schedule {
     }
 }
 
-fn timezone_from(value: &TimeZone) -> MessageField<trogonai_proto::google::r#type::TimeZone> {
-    MessageField::some(trogonai_proto::google::r#type::TimeZone {
+fn timezone_from(value: &TimeZone) -> trogonai_proto::google::r#type::TimeZone {
+    trogonai_proto::google::r#type::TimeZone {
         id: value.id().to_string(),
         version: value.tzdb_version().as_str().to_string(),
-    })
+    }
 }
 
 #[cfg(test)]

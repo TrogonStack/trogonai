@@ -31,7 +31,7 @@ trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-std = { workspace = true }
 trogonai-proto = { path = "../../platform/trogonai-proto", default-features = false, features = ["schedules"] }
 wasmparser = "=0.252.0"
-wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
+wasmtime = { version = "=47.0.3", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
 
 [dev-dependencies]
 buffa = { workspace = true }
@@ -39,7 +39,7 @@ buffa-types = { workspace = true }
 trogon-decider-test = { path = "../../../cli/trogon-decider-test" }
 trogon-decider-wit = { workspace = true, features = ["host"] }
 trogon-scheduler-domain = { path = "../../scheduler/trogon-scheduler-domain" }
-wasmtime = { version = "=46.0.1", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
+wasmtime = { version = "=47.0.3", default-features = false, features = ["anyhow", "component-model", "runtime", "cranelift"] }
 wat = "1"
 
 [[test]]
