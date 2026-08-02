@@ -44,6 +44,29 @@ message ContentBlock {
     ToolResultBlock tool_result = 5;
     // Provider-encrypted reasoning with no visible text, kept verbatim.
     bytes redacted_thinking = 6;
+    ProviderBlock provider = 7;
+  }
+}
+
+// ProviderBlock is a content block this package does not model, kept verbatim so
+// a provider that ships a new block type does not force a schema change before a
+// session using it can be recorded or replayed. It is the same concession
+// ThinkingBlock.signature already makes, generalized: the alternative is
+// dropping the block, which silently corrupts replay of the turn that contained
+// it.
+//
+// Write-verbatim, read-never. A projection must never interpret this payload; a
+// block that any reader needs to understand is a block that has earned its own
+// arm in the oneof. Treating this as an extension point for our own data would
+// turn the canonical form back into an untyped provider blob.
+message ProviderBlock {
+  // Provider that emitted the block, for example "anthropic".
+  string provider = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The provider's own discriminator for the block, verbatim.
+  string block_type = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof payload {
+    bytes inline = 3;
+    ArtifactRef ref = 4;
   }
 }
 

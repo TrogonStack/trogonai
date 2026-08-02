@@ -68,6 +68,15 @@ pub struct ToolCallRequested {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub operation_id: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 8: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for ToolCallRequested {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -79,6 +88,7 @@ impl ::core::fmt::Debug for ToolCallRequested {
             .field("input_json", &self.input_json)
             .field("parent_tool_use_id", &self.parent_tool_use_id)
             .field("operation_id", &self.operation_id)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -143,6 +153,7 @@ impl ::buffa::Message for ToolCallRequested {
         if let Some(ref v) = self.operation_id {
             size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -163,6 +174,7 @@ impl ::buffa::Message for ToolCallRequested {
         if let Some(ref v) = self.operation_id {
             ::buffa::types::put_string_field(7u32, v, buf);
         }
+        ::buffa::types::put_string_field(8u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -234,6 +246,13 @@ impl ::buffa::Message for ToolCallRequested {
                     buf,
                 )?;
             }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -248,6 +267,7 @@ impl ::buffa::Message for ToolCallRequested {
         self.input_json.clear();
         self.parent_tool_use_id = ::core::option::Option::None;
         self.operation_id = ::core::option::Option::None;
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallRequested {

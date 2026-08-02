@@ -18,4 +18,8 @@ message ToolCallDenied {
   string denied_by = 4 [features.field_presence = LEGACY_REQUIRED];
   // Human-readable reason for the refusal; empty when none.
   string reason = 5;
+  // Turn the denied call belongs to (see UserMessageRecorded.turn_id). Optional
+  // for the same reason as on ToolCallApproved: the refusing principal, policy,
+  // or hook may not hold the turn context.
+  string turn_id = 6;
 }

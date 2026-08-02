@@ -143,6 +143,24 @@ pub enum SessionEventValidationError {
 
     #[error("{field} must be a valid ISO 4217 currency code")]
     InvalidCurrencyCode { field: &'static str },
+
+    #[error("{field} must be a non-negative duration with nanos below one second")]
+    InvalidDuration { field: &'static str },
+
+    #[error("{field} must be a finite number")]
+    NonFiniteSetting { field: &'static str },
+
+    #[error("untruncated_size_bytes ({untruncated}) must be greater than size_bytes ({size})")]
+    UntruncatedSizeNotGreater { size: u64, untruncated: u64 },
+
+    #[error("diff.rendered must be set when diff.truncated is true")]
+    TruncatedDiffWithoutRender,
+
+    #[error("{field}.length must be >= 1")]
+    EmptyByteRange { field: &'static str },
+
+    #[error("observed[].range must be unset when the resource was absent")]
+    RangeWithAbsentObservation,
 }
 
 fn require_non_empty(value: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
@@ -150,6 +168,13 @@ fn require_non_empty(value: &str, field: &'static str) -> Result<(), SessionEven
         Err(SessionEventValidationError::EmptyIdentifier { field })
     } else {
         Ok(())
+    }
+}
+
+fn require_non_empty_when_set(value: Option<&str>, field: &'static str) -> Result<(), SessionEventValidationError> {
+    match value {
+        Some(value) => require_non_empty(value, field),
+        None => Ok(()),
     }
 }
 
@@ -215,6 +240,23 @@ fn require_set_timestamp<P: buffa::ProtoBox<buffa_types::google::protobuf::Times
     }
 }
 
+fn require_valid_duration(
+    duration: &buffa_types::google::protobuf::Duration,
+    field: &'static str,
+) -> Result<(), SessionEventValidationError> {
+    crate::convert::std_from_duration(duration)
+        .map(|_| ())
+        .map_err(|_| SessionEventValidationError::InvalidDuration { field })
+}
+
+fn require_finite(value: f64, field: &'static str) -> Result<(), SessionEventValidationError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(SessionEventValidationError::NonFiniteSetting { field })
+    }
+}
+
 fn require_iso4217_currency_code(code: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
     if code.len() == 3 && code.bytes().all(|b| b.is_ascii_uppercase()) {
         Ok(())
@@ -229,6 +271,71 @@ fn validate_token_usage(
 ) -> Result<(), SessionEventValidationError> {
     if let Some(cost) = usage.cost.as_option() {
         require_iso4217_currency_code(&cost.currency_code, currency_code_field)?;
+    }
+    if let Some(completeness) = usage.completeness {
+        require_known_nonzero(completeness, "usage.completeness")?;
+    }
+    Ok(())
+}
+
+fn validate_model_settings(settings: &v1alpha1::ModelSettings) -> Result<(), SessionEventValidationError> {
+    if let Some(temperature) = settings.temperature {
+        require_finite(temperature, "settings.temperature")?;
+    }
+    if let Some(top_p) = settings.top_p {
+        require_finite(top_p, "settings.top_p")?;
+    }
+    for stop_sequence in &settings.stop_sequences {
+        require_non_empty(stop_sequence, "settings.stop_sequences[]")?;
+    }
+    if let Some(raw_settings) = settings.raw_settings.as_option() {
+        validate_artifact_ref(raw_settings)?;
+    }
+    Ok(())
+}
+
+fn validate_workspace_ref(workspace: &v1alpha1::WorkspaceRef) -> Result<(), SessionEventValidationError> {
+    require_non_empty(&workspace.workspace_id, "workspace.workspace_id")?;
+    require_non_empty(&workspace.uri, "workspace.uri")
+}
+
+fn validate_diff_summary(diff: &v1alpha1::DiffSummary) -> Result<(), SessionEventValidationError> {
+    let rendered = diff.rendered.as_option();
+    if diff.truncated == Some(true) && rendered.is_none() {
+        return Err(SessionEventValidationError::TruncatedDiffWithoutRender);
+    }
+    if let Some(rendered) = rendered {
+        validate_artifact_ref(rendered)?;
+    }
+    Ok(())
+}
+
+fn validate_resource_observation(
+    observation: &v1alpha1::ResourceObservation,
+) -> Result<(), SessionEventValidationError> {
+    require_non_empty(&observation.uri, "observed[].uri")?;
+    let range = observation.range.as_option();
+    match observation.outcome.as_ref() {
+        Some(v1alpha1::resource_observation::Outcome::ContentDigest(content_digest)) => {
+            require_digest(content_digest, "observed[].content_digest")?;
+        }
+        Some(v1alpha1::resource_observation::Outcome::Absent(_)) => {
+            if range.is_some() {
+                return Err(SessionEventValidationError::RangeWithAbsentObservation);
+            }
+        }
+        None => {
+            return Err(SessionEventValidationError::MissingOneof {
+                oneof: "observed[].outcome",
+            });
+        }
+    }
+    if let Some(range) = range
+        && range.length == 0
+    {
+        return Err(SessionEventValidationError::EmptyByteRange {
+            field: "observed[].range",
+        });
     }
     Ok(())
 }
@@ -277,6 +384,26 @@ fn validate_canonical_message(
                 validate_tool_call_result(&tool_result.result)?;
             }
             v1alpha1::content_block::Kind::RedactedThinking(_) => {}
+            v1alpha1::content_block::Kind::Provider(provider) => {
+                require_non_empty(&provider.provider, "content_block.provider.provider")?;
+                require_non_empty(&provider.block_type, "content_block.provider.block_type")?;
+                let Some(payload) = provider.payload.as_ref() else {
+                    return Err(SessionEventValidationError::MissingOneof {
+                        oneof: "provider_block.payload",
+                    });
+                };
+                match payload {
+                    v1alpha1::provider_block::Payload::Inline(inline) if inline.is_empty() => {
+                        return Err(SessionEventValidationError::EmptyIdentifier {
+                            field: "content_block.provider.inline",
+                        });
+                    }
+                    v1alpha1::provider_block::Payload::Inline(_) => {}
+                    v1alpha1::provider_block::Payload::Ref(artifact_ref) => {
+                        validate_artifact_ref(artifact_ref)?;
+                    }
+                }
+            }
         }
     }
     if let Some(usage) = message.usage.as_option() {
@@ -307,7 +434,16 @@ fn validate_checkpoint(checkpoint: &v1alpha1::Checkpoint) -> Result<(), SessionE
 fn validate_artifact_ref(artifact_ref: &v1alpha1::ArtifactRef) -> Result<(), SessionEventValidationError> {
     require_non_empty(&artifact_ref.artifact_id, "artifact_ref.artifact_id")?;
     require_digest(&artifact_ref.digest, "artifact_ref.digest")?;
-    require_non_empty(&artifact_ref.mime, "artifact_ref.mime")
+    require_non_empty(&artifact_ref.mime, "artifact_ref.mime")?;
+    if let Some(untruncated) = artifact_ref.untruncated_size_bytes
+        && untruncated <= artifact_ref.size_bytes
+    {
+        return Err(SessionEventValidationError::UntruncatedSizeNotGreater {
+            size: artifact_ref.size_bytes,
+            untruncated,
+        });
+    }
+    Ok(())
 }
 
 fn validate_artifact_metadata_source(
@@ -369,7 +505,7 @@ fn validate_session_started(event: &v1alpha1::SessionStarted) -> Result<(), Sess
         });
     }
     require_digest(&event.execution_plan.plan_digest, "execution_plan.plan_digest")?;
-    Ok(())
+    validate_workspace_ref(&event.workspace)
 }
 
 fn validate_session_closed(event: &v1alpha1::SessionClosed) -> Result<(), SessionEventValidationError> {
@@ -429,6 +565,7 @@ fn validate_compacted(event: &v1alpha1::Compacted) -> Result<(), SessionEventVal
 
 fn validate_user_message_recorded(event: &v1alpha1::UserMessageRecorded) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     validate_canonical_message(&event.message, "message.message_id")?;
     if event.message.role != v1alpha1::MessageRole::User {
         return Err(SessionEventValidationError::UnexpectedMessageRole {
@@ -444,13 +581,19 @@ fn validate_assistant_message_started(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.message_id, "message_id")?;
-    require_non_empty(&event.model, "model")
+    require_non_empty(&event.model, "model")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
+    if let Some(settings) = event.settings.as_option() {
+        validate_model_settings(settings)?;
+    }
+    Ok(())
 }
 
 fn validate_assistant_message_completed(
     event: &v1alpha1::AssistantMessageCompleted,
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     validate_canonical_message(&event.message, "message.message_id")?;
     if event.message.role != v1alpha1::MessageRole::Assistant {
         return Err(SessionEventValidationError::UnexpectedMessageRole {
@@ -474,6 +617,7 @@ fn validate_assistant_message_failed(
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.message_id, "message_id")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     require_known_nonzero(event.reason, "reason")?;
     if let Some(usage) = event.usage.as_option() {
         validate_token_usage(usage, "usage.cost.currency_code")?;
@@ -486,6 +630,7 @@ fn validate_tool_call_requested(event: &v1alpha1::ToolCallRequested) -> Result<(
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
     require_non_empty(&event.tool_name, "tool_name")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     require_valid_json(&event.input_json, "input_json")
 }
 
@@ -493,27 +638,45 @@ fn validate_tool_call_approved(event: &v1alpha1::ToolCallApproved) -> Result<(),
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    require_non_empty(&event.approved_by, "approved_by")
+    require_non_empty(&event.approved_by, "approved_by")?;
+    require_non_empty_when_set(event.turn_id.as_deref(), "turn_id")
 }
 
 fn validate_tool_call_denied(event: &v1alpha1::ToolCallDenied) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    require_non_empty(&event.denied_by, "denied_by")
+    require_non_empty(&event.denied_by, "denied_by")?;
+    require_non_empty_when_set(event.turn_id.as_deref(), "turn_id")
 }
 
 fn validate_tool_call_started(event: &v1alpha1::ToolCallStarted) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
-    require_non_empty(&event.tool_execution_id, "tool_execution_id")
+    require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
+    require_non_empty(&event.turn_id, "turn_id")
 }
 
 fn validate_tool_call_completed(event: &v1alpha1::ToolCallCompleted) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
-    validate_tool_call_result(&event.result)
+    require_non_empty(&event.turn_id, "turn_id")?;
+    validate_tool_call_result(&event.result)?;
+    if let Some(termination) = event.termination.as_option()
+        && termination.outcome.is_none()
+    {
+        return Err(SessionEventValidationError::MissingOneof {
+            oneof: "command_termination.outcome",
+        });
+    }
+    if let Some(duration) = event.duration.as_option() {
+        require_valid_duration(duration, "duration")?;
+    }
+    for observation in &event.observed {
+        validate_resource_observation(observation)?;
+    }
+    Ok(())
 }
 
 fn validate_tool_call_failed(event: &v1alpha1::ToolCallFailed) -> Result<(), SessionEventValidationError> {
@@ -521,6 +684,7 @@ fn validate_tool_call_failed(event: &v1alpha1::ToolCallFailed) -> Result<(), Ses
     require_non_empty(&event.tool_call_id, "tool_call_id")?;
     require_non_empty(&event.tool_execution_id, "tool_execution_id")?;
     require_non_empty(&event.error, "error")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     require_known_nonzero(event.reason, "reason")
 }
 
@@ -539,6 +703,8 @@ fn validate_artifact_recorded(event: &v1alpha1::ArtifactRecorded) -> Result<(), 
 fn validate_file_changed(event: &v1alpha1::FileChanged) -> Result<(), SessionEventValidationError> {
     require_non_empty(&event.session_id, "session_id")?;
     require_non_empty(&event.path, "path")?;
+    require_non_empty(&event.tool_call_id, "tool_call_id")?;
+    require_non_empty(&event.turn_id, "turn_id")?;
     require_known_nonzero(event.change_kind, "change_kind")?;
 
     let is_renamed = event.change_kind == v1alpha1::FileChangeKind::Renamed;
@@ -554,6 +720,9 @@ fn validate_file_changed(event: &v1alpha1::FileChanged) -> Result<(), SessionEve
     }
     if let Some(after_ref) = event.after_ref.as_option() {
         validate_artifact_ref(after_ref)?;
+    }
+    if let Some(diff) = event.diff.as_option() {
+        validate_diff_summary(diff)?;
     }
     Ok(())
 }

@@ -272,6 +272,15 @@ pub struct AssistantMessageFailed {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub usage: ::buffa::MessageField<TokenUsage, ::buffa::Inline<TokenUsage>>,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 6: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for AssistantMessageFailed {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -281,6 +290,7 @@ impl ::core::fmt::Debug for AssistantMessageFailed {
             .field("reason", &self.reason)
             .field("detail", &self.detail)
             .field("usage", &self.usage)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -340,6 +350,7 @@ impl ::buffa::Message for AssistantMessageFailed {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -363,6 +374,7 @@ impl ::buffa::Message for AssistantMessageFailed {
             );
             self.usage.write_to(__cache, buf);
         }
+        ::buffa::types::put_string_field(6u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -419,6 +431,13 @@ impl ::buffa::Message for AssistantMessageFailed {
                     ctx,
                 )?;
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -431,6 +450,7 @@ impl ::buffa::Message for AssistantMessageFailed {
         self.reason = ::buffa::EnumValue::from(0);
         self.detail = ::core::option::Option::None;
         self.usage = ::buffa::MessageField::none();
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AssistantMessageFailed {

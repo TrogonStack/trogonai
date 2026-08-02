@@ -3,14 +3,30 @@
 
 /// FileChanged records that a file changed, in arrival order. It is a commuting
 /// happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+///
+/// Every recorded change is attributed to the tool call that caused it. A change
+/// with no proximate call is not a FileChanged at all: it surfaces as a
+/// ResourceObservation whose digest differs from the last one recorded for that
+/// resource, which is the signal that something outside the session moved
+/// underneath it, and which must not be attributed to the session's own work.
 #[derive(Clone, Debug, Default)]
 pub struct FileChangedView<'a> {
     /// Field 1: `session_id`
     pub session_id: &'a str,
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     pub path: &'a str,
     /// Field 3: `change_kind`
     pub change_kind: ::buffa::EnumValue<super::super::FileChangeKind>,
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     pub previous_path: ::core::option::Option<&'a str>,
     /// Claim-check to the file's content before the change; unset for a create or
@@ -27,6 +43,23 @@ pub struct FileChangedView<'a> {
     /// Field 6: `after_ref`
     pub after_ref: ::buffa::MessageFieldView<
         super::super::__buffa::view::ArtifactRefView<'a>,
+    >,
+    /// The tool call that caused the change, joining to ToolCallCompleted. Without
+    /// it, "which call touched this file" is only answerable by correlating
+    /// adjacency in fold order, which concurrent Any-precondition appends make
+    /// unsound.
+    ///
+    /// Field 7: `tool_call_id`
+    pub tool_call_id: &'a str,
+    /// Turn the causing call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 8: `turn_id`
+    pub turn_id: &'a str,
+    /// Precomputed line counts and rendered diff; unset when no diff was computed.
+    ///
+    /// Field 9: `diff`
+    pub diff: ::buffa::MessageFieldView<
+        super::super::__buffa::view::DiffSummaryView<'a>,
     >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
@@ -55,6 +88,22 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     #[inline]
     pub const fn has_change_kind(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
+    }
+    /**Whether required field `tool_call_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_tool_call_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 8u64 != 0
+    }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 16u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
@@ -160,6 +209,43 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
                     }
                 }
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.tool_call_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 8u64;
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 16u64;
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.diff.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.diff = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DiffSummaryView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -202,6 +288,17 @@ impl<'a> ::buffa::MessageView<'a> for FileChangedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            tool_call_id: self.tool_call_id.to_string(),
+            turn_id: self.turn_id.to_string(),
+            diff: match self.diff.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::DiffSummary,
+                        ::buffa::Inline<super::super::DiffSummary>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -232,6 +329,16 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
         if self.after_ref.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.after_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.diff.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.diff.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -268,6 +375,16 @@ impl<'a> ::buffa::ViewEncode<'a> for FileChangedView<'a> {
                 buf,
             );
             self.after_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(7u32, &self.tool_call_id, buf);
+        ::buffa::types::put_string_field(8u32, &self.turn_id, buf);
+        if self.diff.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.diff.write_to(__cache, buf);
         }
     }
 }
@@ -309,6 +426,17 @@ impl<'__a> ::serde::Serialize for FileChangedView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.after_ref.as_option() {
                 __map.serialize_entry("afterRef", __v)?;
+            }
+        }
+        {
+            __map.serialize_entry("toolCallId", self.tool_call_id)?;
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.diff.as_option() {
+                __map.serialize_entry("diff", __v)?;
             }
         }
         __map.end()
@@ -407,6 +535,14 @@ impl FileChangedOwnedView {
     pub fn session_id(&self) -> &'_ str {
         self.0.reborrow().session_id
     }
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     #[must_use]
     pub fn path(&self) -> &'_ str {
@@ -417,6 +553,8 @@ impl FileChangedOwnedView {
     pub fn change_kind(&self) -> ::buffa::EnumValue<super::super::FileChangeKind> {
         self.0.reborrow().change_kind
     }
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     #[must_use]
     pub fn previous_path(&self) -> ::core::option::Option<&'_ str> {
@@ -442,6 +580,32 @@ impl FileChangedOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::ArtifactRefView<'_>> {
         &self.0.reborrow().after_ref
+    }
+    /// The tool call that caused the change, joining to ToolCallCompleted. Without
+    /// it, "which call touched this file" is only answerable by correlating
+    /// adjacency in fold order, which concurrent Any-precondition appends make
+    /// unsound.
+    ///
+    /// Field 7: `tool_call_id`
+    #[must_use]
+    pub fn tool_call_id(&self) -> &'_ str {
+        self.0.reborrow().tool_call_id
+    }
+    /// Turn the causing call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 8: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
+    }
+    /// Precomputed line counts and rendered diff; unset when no diff was computed.
+    ///
+    /// Field 9: `diff`
+    #[must_use]
+    pub fn diff(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DiffSummaryView<'_>> {
+        &self.0.reborrow().diff
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<FileChangedView<'static>>>

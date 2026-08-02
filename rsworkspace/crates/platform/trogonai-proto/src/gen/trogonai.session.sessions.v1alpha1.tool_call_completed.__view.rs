@@ -19,6 +19,35 @@ pub struct ToolCallCompletedView<'a> {
     pub result: ::buffa::MessageFieldView<
         super::super::__buffa::view::ToolCallResultView<'a>,
     >,
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    pub turn_id: &'a str,
+    /// How the process ended, for a tool that executes one; unset for every other
+    /// tool. A command that ran and exited non-zero completes here with result
+    /// status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and a termination set; a
+    /// command that never ran is a ToolCallFailed and has none.
+    ///
+    /// Field 6: `termination`
+    pub termination: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CommandTerminationView<'a>,
+    >,
+    /// Wall-clock execution time from start to this completion. Recorded rather
+    /// than derived from the two events' append times, which measure when the
+    /// writer got its append acknowledged, not how long the tool ran (D10).
+    ///
+    /// Field 7: `duration`
+    pub duration: ::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::DurationView<'a>,
+    >,
+    /// Resources this call put into the model's context, with the digest each
+    /// hashed to when it was read. Empty for a call that observed nothing.
+    ///
+    /// Field 8: `observed`
+    pub observed: ::buffa::RepeatedView<
+        'a,
+        super::super::__buffa::view::ResourceObservationView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -54,6 +83,14 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_result(&self) -> bool {
         self.result.is_set()
+    }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 8u64 != 0
     }
 }
 impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
@@ -129,6 +166,76 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
                     }
                 }
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 8u64;
+            }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.termination.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.termination = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CommandTerminationView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.duration.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.duration = ::buffa::MessageFieldView::set(
+                            <::buffa_types::google::protobuf::__buffa::view::DurationView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                ctx.register_element_memory(
+                    ::core::mem::size_of::<
+                        super::super::__buffa::view::ResourceObservationView,
+                    >(),
+                )?;
+                view.observed
+                    .push(
+                        <super::super::__buffa::view::ResourceObservationView as ::buffa::MessageView>::decode_view_ctx(
+                            sub,
+                            __sub_ctx,
+                        )?,
+                    );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -161,6 +268,30 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallCompletedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            turn_id: self.turn_id.to_string(),
+            termination: match self.termination.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CommandTermination,
+                        ::buffa::Inline<super::super::CommandTermination>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            duration: match self.duration.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        ::buffa_types::google::protobuf::Duration,
+                        ::buffa::Inline<::buffa_types::google::protobuf::Duration>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            observed: self
+                .observed
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect::<::core::result::Result<_, ::buffa::DecodeError>>()?,
             ..::core::default::Default::default()
         })
     }
@@ -178,6 +309,31 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallCompletedView<'a> {
         if self.result.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.result.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.termination.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.termination.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.duration.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.duration.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        for v in &self.observed {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -203,6 +359,31 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallCompletedView<'a> {
                 buf,
             );
             self.result.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(5u32, &self.turn_id, buf);
+        if self.termination.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.termination.write_to(__cache, buf);
+        }
+        if self.duration.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                7u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.duration.write_to(__cache, buf);
+        }
+        for v in &self.observed {
+            ::buffa::types::put_len_delimited_header(
+                8u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            v.write_to(__cache, buf);
         }
     }
 }
@@ -237,6 +418,22 @@ impl<'__a> ::serde::Serialize for ToolCallCompletedView<'__a> {
             if let ::core::option::Option::Some(__v) = self.result.as_option() {
                 __map.serialize_entry("result", __v)?;
             }
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.termination.as_option() {
+                __map.serialize_entry("termination", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.duration.as_option() {
+                __map.serialize_entry("duration", __v)?;
+            }
+        }
+        if !self.observed.is_empty() {
+            __map.serialize_entry("observed", &*self.observed)?;
         }
         __map.end()
     }
@@ -356,6 +553,53 @@ impl ToolCallCompletedOwnedView {
         super::super::__buffa::view::ToolCallResultView<'_>,
     > {
         &self.0.reborrow().result
+    }
+    /// Turn this call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
+    }
+    /// How the process ended, for a tool that executes one; unset for every other
+    /// tool. A command that ran and exited non-zero completes here with result
+    /// status TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and a termination set; a
+    /// command that never ran is a ToolCallFailed and has none.
+    ///
+    /// Field 6: `termination`
+    #[must_use]
+    pub fn termination(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::__buffa::view::CommandTerminationView<'_>,
+    > {
+        &self.0.reborrow().termination
+    }
+    /// Wall-clock execution time from start to this completion. Recorded rather
+    /// than derived from the two events' append times, which measure when the
+    /// writer got its append acknowledged, not how long the tool ran (D10).
+    ///
+    /// Field 7: `duration`
+    #[must_use]
+    pub fn duration(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        ::buffa_types::google::protobuf::__buffa::view::DurationView<'_>,
+    > {
+        &self.0.reborrow().duration
+    }
+    /// Resources this call put into the model's context, with the digest each
+    /// hashed to when it was read. Empty for a call that observed nothing.
+    ///
+    /// Field 8: `observed`
+    #[must_use]
+    pub fn observed(
+        &self,
+    ) -> &::buffa::RepeatedView<
+        '_,
+        super::super::__buffa::view::ResourceObservationView<'_>,
+    > {
+        &self.0.reborrow().observed
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallCompletedView<'static>>>

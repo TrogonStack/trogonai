@@ -35,6 +35,13 @@ pub struct ArtifactRefView<'a> {
     ///
     /// Field 6: `truncated`
     pub truncated: ::core::option::Option<bool>,
+    /// Size of the content before truncation, when the referenced bytes are
+    /// themselves a truncation of a larger original that was never stored. Unset
+    /// when size_bytes already is the full size. Recorded so a reader can tell
+    /// "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+    ///
+    /// Field 7: `untruncated_size_bytes`
+    pub untruncated_size_bytes: ::core::option::Option<u64>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -159,6 +166,15 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                 )?;
                 view.truncated = Some(::buffa::types::decode_bool(&mut cur)?);
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.untruncated_size_bytes = Some(
+                    ::buffa::types::decode_uint64(&mut cur)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -193,6 +209,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
             mime: self.mime.to_string(),
             preview: self.preview.map(|s| s.to_string()),
             truncated: self.truncated,
+            untruncated_size_bytes: self.untruncated_size_bytes,
             ..::core::default::Default::default()
         })
     }
@@ -220,6 +237,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
         if self.truncated.is_some() {
             size += 1u64 + ::buffa::types::BOOL_ENCODED_LEN as u64;
         }
+        if let Some(v) = self.untruncated_size_bytes {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -246,6 +266,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
         }
         if let Some(v) = self.truncated {
             ::buffa::types::put_bool_field(6u32, v, buf);
+        }
+        if let Some(v) = self.untruncated_size_bytes {
+            ::buffa::types::put_uint64_field(7u32, v, buf);
         }
     }
 }
@@ -290,6 +313,13 @@ impl<'__a> ::serde::Serialize for ArtifactRefView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.truncated {
             __map.serialize_entry("truncated", &__v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.untruncated_size_bytes {
+            __map
+                .serialize_entry(
+                    "untruncatedSizeBytes",
+                    &::buffa::json_helpers::ProtoJson(&__v),
+                )?;
         }
         __map.end()
     }
@@ -427,6 +457,16 @@ impl ArtifactRefOwnedView {
     #[must_use]
     pub fn truncated(&self) -> ::core::option::Option<bool> {
         self.0.reborrow().truncated
+    }
+    /// Size of the content before truncation, when the referenced bytes are
+    /// themselves a truncation of a larger original that was never stored. Unset
+    /// when size_bytes already is the full size. Recorded so a reader can tell
+    /// "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+    ///
+    /// Field 7: `untruncated_size_bytes`
+    #[must_use]
+    pub fn untruncated_size_bytes(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().untruncated_size_bytes
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ArtifactRefView<'static>>>

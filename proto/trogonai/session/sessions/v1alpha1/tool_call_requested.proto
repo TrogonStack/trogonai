@@ -23,4 +23,6 @@ message ToolCallRequested {
   // OperationReserved/OperationOutcomeRecorded (mirrors DelegationDispatched.operation_id).
   // Empty for a call that reserves no operation (e.g. a read-only tool).
   string operation_id = 7;
+  // Turn this call belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 8 [features.field_presence = LEGACY_REQUIRED];
 }

@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+import "trogonai/session/sessions/v1alpha1/artifact.proto";
+
+// DiffSummary is the precomputed shape of a recorded file change: exact line
+// counts inline, and the rendered diff out of line like any other large payload
+// (ADR#0031 §3). It exists so a change list renders from one read instead of
+// fetching both content refs and diffing them on every render, and so
+// added/removed line metrics fold from recorded facts rather than from a
+// separately maintained counter.
+message DiffSummary {
+  // Lines added by the change.
+  uint64 added_lines = 1;
+  // Lines removed by the change.
+  uint64 removed_lines = 2;
+  // The rendered diff omits hunks. The line counts stay exact regardless.
+  bool truncated = 3;
+  // Rendered unified diff, claim-checked. Unset when only counts were computed.
+  ArtifactRef rendered = 4;
+}

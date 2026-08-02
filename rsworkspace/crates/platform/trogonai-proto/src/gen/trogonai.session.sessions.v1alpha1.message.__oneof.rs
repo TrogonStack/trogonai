@@ -12,6 +12,7 @@ pub mod content_block {
         ToolUse(::buffa::alloc::boxed::Box<super::super::super::ToolUseBlock>),
         ToolResult(::buffa::alloc::boxed::Box<super::super::super::ToolResultBlock>),
         RedactedThinking(::buffa::alloc::vec::Vec<u8>),
+        Provider(::buffa::alloc::boxed::Box<super::super::super::ProviderBlock>),
     }
     impl ::buffa::Oneof for Kind {}
     impl From<super::super::super::ArtifactRef> for Kind {
@@ -54,6 +55,16 @@ pub mod content_block {
             Self::Some(Kind::from(v))
         }
     }
+    impl From<super::super::super::ProviderBlock> for Kind {
+        fn from(v: super::super::super::ProviderBlock) -> Self {
+            Self::Provider(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ProviderBlock> for ::core::option::Option<Kind> {
+        fn from(v: super::super::super::ProviderBlock) -> Self {
+            Self::Some(Kind::from(v))
+        }
+    }
     impl serde::Serialize for Kind {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -82,6 +93,47 @@ pub mod content_block {
                         "redactedThinking",
                         &::buffa::json_helpers::ProtoJson(v),
                     )?;
+                }
+                Self::Provider(v) => {
+                    map.serialize_entry("provider", v)?;
+                }
+            }
+            map.end()
+        }
+    }
+}
+pub mod provider_block {
+    #[allow(unused_imports)]
+    use super::*;
+    #[derive(Clone, PartialEq, Debug)]
+    pub enum Payload {
+        Inline(::buffa::alloc::vec::Vec<u8>),
+        Ref(::buffa::alloc::boxed::Box<super::super::super::ArtifactRef>),
+    }
+    impl ::buffa::Oneof for Payload {}
+    impl From<super::super::super::ArtifactRef> for Payload {
+        fn from(v: super::super::super::ArtifactRef) -> Self {
+            Self::Ref(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::ArtifactRef> for ::core::option::Option<Payload> {
+        fn from(v: super::super::super::ArtifactRef) -> Self {
+            Self::Some(Payload::from(v))
+        }
+    }
+    impl serde::Serialize for Payload {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            s: S,
+        ) -> ::core::result::Result<S::Ok, S::Error> {
+            use serde::ser::SerializeMap;
+            let mut map = s.serialize_map(Some(1))?;
+            match self {
+                Self::Inline(v) => {
+                    map.serialize_entry("inline", &::buffa::json_helpers::ProtoJson(v))?;
+                }
+                Self::Ref(v) => {
+                    map.serialize_entry("ref", v)?;
                 }
             }
             map.end()

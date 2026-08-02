@@ -17,6 +17,15 @@ pub struct SessionStartedView<'a> {
     pub execution_plan: ::buffa::MessageFieldView<
         super::super::__buffa::view::StoredSessionExecutionPlanView<'a>,
     >,
+    /// Workspace this session is bound to, carried inline so workspace-scoped
+    /// reads never decode plan_bytes. It must agree with the plan's working
+    /// directory; this field is the projection surface, the plan stays
+    /// authoritative.
+    ///
+    /// Field 3: `workspace`
+    pub workspace: ::buffa::MessageFieldView<
+        super::super::__buffa::view::WorkspaceRefView<'a>,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -36,6 +45,14 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_execution_plan(&self) -> bool {
         self.execution_plan.is_set()
+    }
+    /**Whether required field `workspace` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_workspace(&self) -> bool {
+        self.workspace.is_set()
     }
 }
 impl<'a> ::buffa::MessageView<'a> for SessionStartedView<'a> {
@@ -95,6 +112,27 @@ impl<'a> ::buffa::MessageView<'a> for SessionStartedView<'a> {
                     }
                 }
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.workspace.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.workspace = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::WorkspaceRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -125,6 +163,15 @@ impl<'a> ::buffa::MessageView<'a> for SessionStartedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            workspace: match self.workspace.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::WorkspaceRef,
+                        ::buffa::Inline<super::super::WorkspaceRef>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -139,6 +186,14 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionStartedView<'a> {
         if self.execution_plan.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.execution_plan.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.workspace.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.workspace.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -162,6 +217,14 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionStartedView<'a> {
                 buf,
             );
             self.execution_plan.write_to(__cache, buf);
+        }
+        if self.workspace.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.workspace.write_to(__cache, buf);
         }
     }
 }
@@ -189,6 +252,11 @@ impl<'__a> ::serde::Serialize for SessionStartedView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.execution_plan.as_option() {
                 __map.serialize_entry("executionPlan", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.workspace.as_option() {
+                __map.serialize_entry("workspace", __v)?;
             }
         }
         __map.end()
@@ -297,6 +365,18 @@ impl SessionStartedOwnedView {
         super::super::__buffa::view::StoredSessionExecutionPlanView<'_>,
     > {
         &self.0.reborrow().execution_plan
+    }
+    /// Workspace this session is bound to, carried inline so workspace-scoped
+    /// reads never decode plan_bytes. It must agree with the plan's working
+    /// directory; this field is the projection surface, the plan stays
+    /// authoritative.
+    ///
+    /// Field 3: `workspace`
+    #[must_use]
+    pub fn workspace(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::WorkspaceRefView<'_>> {
+        &self.0.reborrow().workspace
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<SessionStartedView<'static>>>

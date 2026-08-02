@@ -23,6 +23,16 @@ pub struct TokenUsageView<'a> {
     ///
     /// Field 5: `cost`
     pub cost: ::buffa::MessageFieldView<super::super::__buffa::view::CostView<'a>>,
+    /// Whether these counters are the provider's final accounting for the message
+    /// or a mid-generation reading. A partial reading exists so a turn that failed
+    /// or was interrupted still accounts for what it consumed, but summing partial
+    /// and final readings for the same message double-counts. Unset is read as
+    /// final, which is what every counter recorded before this field meant.
+    ///
+    /// Field 6: `completeness`
+    pub completeness: ::core::option::Option<
+        ::buffa::EnumValue<super::super::UsageCompleteness>,
+    >,
 }
 impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
     type Owned = super::super::TokenUsage;
@@ -103,6 +113,15 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
                     }
                 }
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.completeness = Some(
+                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -136,6 +155,7 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            completeness: self.completeness,
             ..::core::default::Default::default()
         })
     }
@@ -166,6 +186,9 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if let Some(ref v) = self.completeness {
+            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
+        }
         ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
@@ -195,6 +218,9 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
                 buf,
             );
             self.cost.write_to(__cache, buf);
+        }
+        if let Some(ref v) = self.completeness {
+            ::buffa::types::put_int32_field(6u32, v.to_i32(), buf);
         }
     }
 }
@@ -248,6 +274,9 @@ impl<'__a> ::serde::Serialize for TokenUsageView<'__a> {
             if let ::core::option::Option::Some(__v) = self.cost.as_option() {
                 __map.serialize_entry("cost", __v)?;
             }
+        }
+        if let ::core::option::Option::Some(ref __v) = self.completeness {
+            __map.serialize_entry("completeness", __v)?;
         }
         __map.end()
     }
@@ -374,6 +403,19 @@ impl TokenUsageOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CostView<'_>> {
         &self.0.reborrow().cost
+    }
+    /// Whether these counters are the provider's final accounting for the message
+    /// or a mid-generation reading. A partial reading exists so a turn that failed
+    /// or was interrupted still accounts for what it consumed, but summing partial
+    /// and final readings for the same message double-counts. Unset is read as
+    /// final, which is what every counter recorded before this field meant.
+    ///
+    /// Field 6: `completeness`
+    #[must_use]
+    pub fn completeness(
+        &self,
+    ) -> ::core::option::Option<::buffa::EnumValue<super::super::UsageCompleteness>> {
+        self.0.reborrow().completeness
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<TokenUsageView<'static>>>

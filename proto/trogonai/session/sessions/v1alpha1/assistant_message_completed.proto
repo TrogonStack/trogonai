@@ -20,6 +20,8 @@ message AssistantMessageCompleted {
   // The stop sequence that fired, set only when finish_reason is
   // FINISH_REASON_STOP_SEQUENCE; a one-time runtime observation, empty otherwise.
   string matched_stop_sequence = 4;
+  // Turn this generation belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 5 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // FinishReason is why a completed assistant turn stopped generating.
