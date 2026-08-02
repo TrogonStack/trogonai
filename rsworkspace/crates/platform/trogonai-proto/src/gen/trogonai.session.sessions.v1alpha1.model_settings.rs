@@ -5,8 +5,10 @@
 /// recorded on AssistantMessageStarted so a replay reproduces the request rather
 /// than approximating it from whatever the caller's defaults are at replay time.
 /// CanonicalMessage.model already pins which model answered; this pins how it was
-/// asked. Every field has explicit presence: unset means the provider default
-/// applied, which is a different fact from an explicitly configured zero.
+/// asked. Every scalar field has explicit presence: unset means the provider
+/// default applied, which is a different fact from an explicitly configured
+/// zero. stop_sequences is repeated and carries no presence, so an omitted list
+/// and an empty list are the same recorded fact.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
