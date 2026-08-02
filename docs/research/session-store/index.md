@@ -14,14 +14,16 @@ and evidence rules behind each product dossier remain reproducible.
 
 ## Status
 
-Synthesis complete. Nine product dossiers and the cross-product synthesis
+Synthesis complete. Ten product dossiers and the cross-product synthesis
 exist, and the decision record now exists as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
+The fx dossier was added after the synthesis and is not yet folded into it.
 
 ## Product dossiers
 
 - [Claude Agent SDK and Claude Code](./products/claude-agent-sdk.md)
 - [Codex CLI (OpenAI)](./products/codex-cli.md)
+- [fx (Vercel)](./products/fx.md)
 - [Gemini CLI (Google)](./products/gemini-cli.md)
 - [Goose (Block)](./products/goose.md)
 - [Grok Build](./products/grok-build.md)
@@ -29,6 +31,13 @@ exist, and the decision record now exists as draft
 - [LangGraph (LangChain)](./products/langgraph.md)
 - [OpenCode](./products/opencode.md)
 - [T3 Code](./products/t3code.md)
+
+## Comparisons against our design
+
+- [fx compared to our session event catalog](./fx-vs-session-events.md), a
+  field-level mapping of the fx format onto
+  `trogonai.session.sessions.v1alpha1`, separating what we may need to add
+  from what our model already handles better.
 
 ## Synthesis
 
