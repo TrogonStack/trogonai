@@ -1,10 +1,10 @@
 use teloxide::types::{Update, UpdateKind};
-use trogon_chat::{CommandTriggers, Endpoint, InboundChatEvent, Sender};
+use trogon_channel::{CommandTriggers, Endpoint, InboundEvent, Sender};
 
 /// Normalize a raw Telegram update into the channel-neutral event, or `None`
 /// for update kinds v1 does not carry (media, edits, membership, ...). The
 /// raw stream retains those with full fidelity for later.
-pub fn inbound_event(update: &Update, bot_account: &str, triggers: &CommandTriggers) -> Option<InboundChatEvent> {
+pub fn inbound_event(update: &Update, bot_account: &str, triggers: &CommandTriggers) -> Option<InboundEvent> {
     let UpdateKind::Message(msg) = &update.kind else {
         return None;
     };
@@ -21,7 +21,7 @@ pub fn inbound_event(update: &Update, bot_account: &str, triggers: &CommandTrigg
 
     let parsed = triggers.parse(text);
 
-    Some(InboundChatEvent {
+    Some(InboundEvent {
         endpoint,
         sender: Sender {
             platform_user_id: from.id.0.to_string(),

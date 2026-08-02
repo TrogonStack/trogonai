@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 acp-nats = { workspace = true }
-trogon-chat = { workspace = true }
+trogon-channel = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal"] }
 trogon-telemetry = { workspace = true }

@@ -7,8 +7,8 @@ use agent_client_protocol::schema::v1::{
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};
-use trogon_chat::{
-    AgentPort, AgentPortError, AgentSessionId, ConversationRecord, InboundChatEvent, PromptOutcome, ReleaseReason,
+use trogon_channel::{
+    AgentPort, AgentPortError, AgentSessionId, ConversationRecord, InboundEvent, PromptOutcome, ReleaseReason,
     ReleaseStep, SessionRelease,
 };
 
@@ -153,14 +153,14 @@ impl AcpPort {
 /// Human-readable context prefix: the only part of the conversational
 /// metadata a non-participating agent is guaranteed to see, since only prompt
 /// text reaches the model.
-fn prompt_text(event: &InboundChatEvent) -> String {
+fn prompt_text(event: &InboundEvent) -> String {
     let body = event.text.as_deref().unwrap_or_default();
     format!("[telegram message from {}]\n{}", event.sender.display_name, body)
 }
 
 /// Structured twin of the context prefix, for agents that opt into reading
 /// `_meta` (see the architecture doc's `_meta` convention).
-fn prompt_meta(event: &InboundChatEvent) -> agent_client_protocol::schema::v1::Meta {
+fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta {
     let mut meta = serde_json::Map::new();
     meta.insert(
         "chat".to_string(),
@@ -190,7 +190,7 @@ impl AgentPort for AcpPort {
         Ok(AgentSessionId::new(response.session_id.to_string()))
     }
 
-    async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error> {
+    async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error> {
         let mut request = PromptRequest::new(
             session.as_str().to_string(),
             vec![ContentBlock::Text(TextContent::new(prompt_text(event)))],

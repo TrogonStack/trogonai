@@ -1,5 +1,5 @@
 [package]
-name = "trogon-chat"
+name = "trogon-channel"
 version = "0.1.0"
 edition = "2024"
 

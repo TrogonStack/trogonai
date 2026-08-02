@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// behind it happens to understand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ChatCommand {
+pub enum Command {
     /// Release the conversation's current session. The agent binding is
     /// untouched; only the ephemeral session is replaced.
     NewSession,
@@ -39,7 +39,7 @@ impl Default for CommandTriggers {
 /// Message text after command extraction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedText {
-    pub command: Option<ChatCommand>,
+    pub command: Option<Command>,
     /// What remains once the trigger is removed, or the message unchanged when
     /// no trigger matched. `None` when nothing but the command was sent.
     pub body: Option<String>,
@@ -77,7 +77,7 @@ impl CommandTriggers {
         // several by suffixing it (`/new@somebot`). The suffix selects the
         // recipient and is not part of the trigger.
         let token = head.split('@').next().unwrap_or(head).to_ascii_lowercase();
-        let command = self.new_session.contains(&token).then_some(ChatCommand::NewSession);
+        let command = self.new_session.contains(&token).then_some(Command::NewSession);
 
         let body = match command {
             Some(_) => rest,
@@ -97,21 +97,21 @@ mod tests {
     #[test]
     fn bare_trigger_yields_a_command_and_no_body() {
         let parsed = CommandTriggers::default().parse("/new");
-        assert_eq!(parsed.command, Some(ChatCommand::NewSession));
+        assert_eq!(parsed.command, Some(Command::NewSession));
         assert_eq!(parsed.body, None);
     }
 
     #[test]
     fn trailing_text_becomes_the_body() {
         let parsed = CommandTriggers::default().parse("/reset  ship the thing ");
-        assert_eq!(parsed.command, Some(ChatCommand::NewSession));
+        assert_eq!(parsed.command, Some(Command::NewSession));
         assert_eq!(parsed.body.as_deref(), Some("ship the thing"));
     }
 
     #[test]
     fn account_suffix_and_case_do_not_defeat_the_trigger() {
         let parsed = CommandTriggers::default().parse("/New@SomeBot hello");
-        assert_eq!(parsed.command, Some(ChatCommand::NewSession));
+        assert_eq!(parsed.command, Some(Command::NewSession));
         assert_eq!(parsed.body.as_deref(), Some("hello"));
     }
 
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn triggers_are_configurable() {
         let triggers = CommandTriggers::new(["!Rotate".to_string()]).expect("valid triggers");
-        assert_eq!(triggers.parse("!rotate").command, Some(ChatCommand::NewSession));
+        assert_eq!(triggers.parse("!rotate").command, Some(Command::NewSession));
         assert_eq!(triggers.parse("/new").command, None);
     }
 

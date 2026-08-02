@@ -1,7 +1,7 @@
 use acp_nats::{AcpPrefix, NatsConfig};
 use anyhow::Context;
 use std::path::PathBuf;
-use trogon_chat::CommandTriggers;
+use trogon_channel::CommandTriggers;
 use trogon_std::env::ReadEnv;
 
 pub struct BridgeConfig {

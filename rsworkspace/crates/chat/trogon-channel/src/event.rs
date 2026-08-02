@@ -1,4 +1,4 @@
-use crate::command::ChatCommand;
+use crate::command::Command;
 use crate::endpoint::Endpoint;
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ pub struct Attachment {
 /// once the multi-channel extraction happens; until then it travels
 /// in-process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InboundChatEvent {
+pub struct InboundEvent {
     pub endpoint: Endpoint,
     pub sender: Sender,
     /// Message text with any command trigger already removed, so what reaches
@@ -35,7 +35,7 @@ pub struct InboundChatEvent {
     /// because the trigger vocabulary is a channel affordance; acted on by the
     /// routing layer and never forwarded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub command: Option<ChatCommand>,
+    pub command: Option<Command>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
     /// Platform message identity, for dedup, replies, and edits.

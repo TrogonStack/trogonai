@@ -7,9 +7,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
-use trogon_chat::store::PrincipalRecord;
-use trogon_chat::{
-    AgentPortError, AgentSessionId, Endpoint, InboundChatEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
+use trogon_channel::store::PrincipalRecord;
+use trogon_channel::{
+    AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
 };
 
 struct NatsServer {
@@ -54,18 +54,18 @@ struct FakePort {
     released: RefCell<Vec<String>>,
 }
 
-impl trogon_chat::AgentPort for FakePort {
+impl trogon_channel::AgentPort for FakePort {
     type Error = FakeError;
 
     async fn create_session(
         &self,
-        _conversation: &trogon_chat::ConversationRecord,
+        _conversation: &trogon_channel::ConversationRecord,
     ) -> Result<AgentSessionId, Self::Error> {
         *self.sessions_created.borrow_mut() += 1;
         Ok(AgentSessionId::new(format!("sess-{}", self.sessions_created.borrow())))
     }
 
-    async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error> {
+    async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error> {
         self.prompted
             .borrow_mut()
             .push((session.as_str().to_string(), event.text.clone().unwrap_or_default()));
@@ -86,7 +86,11 @@ impl trogon_chat::AgentPort for FakePort {
         Ok(())
     }
 
-    async fn release_session(&self, session: &AgentSessionId, _reason: trogon_chat::ReleaseReason) -> SessionRelease {
+    async fn release_session(
+        &self,
+        session: &AgentSessionId,
+        _reason: trogon_channel::ReleaseReason,
+    ) -> SessionRelease {
         self.released.borrow_mut().push(session.as_str().to_string());
         SessionRelease {
             cancelled: ReleaseStep::Done,
@@ -145,7 +149,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     .await
     .expect("create TELEGRAM stream");
 
-    let store = ChatStore::ensure(&js, "test").await.expect("ensure buckets");
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
     let principal = PrincipalId::new("telegram-42").expect("principal");
     let endpoint = Endpoint::new("telegram", "mybot", "42").expect("endpoint");
     store

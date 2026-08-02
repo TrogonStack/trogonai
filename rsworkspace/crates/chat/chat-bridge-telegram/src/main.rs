@@ -1,10 +1,10 @@
 //! Telegram chat bridge: the v1 direct path from the gateway's raw Telegram
 //! stream to an ACP agent. See `docs/architecture/multi-channel-agent-routing.md`.
 //!
-//! One worker, two halves: normalize (raw Update -> `InboundChatEvent`,
+//! One worker, two halves: normalize (raw Update -> `InboundEvent`,
 //! identity + conversation via KV, prompt via `AgentPort`) and render (agent
 //! session notifications -> Telegram API calls). Everything channel-neutral
-//! lives in `trogon-chat`; this binary is allowed to know about Telegram and
+//! lives in `trogon-channel`; this binary is allowed to know about Telegram and
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
@@ -28,8 +28,8 @@ use render::TelegramRenderClient;
 use std::sync::Arc;
 use teloxide::Bot;
 use tracing::{error, info, warn};
-use trogon_chat::store::PrincipalRecord;
-use trogon_chat::{ChatStore, Endpoint, PrincipalId};
+use trogon_channel::store::PrincipalRecord;
+use trogon_channel::{ChannelStore, Endpoint, PrincipalId};
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_std::signal::shutdown_signal;
@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let nats_client = acp_nats::nats::connect(config.acp.nats(), nats_connect_timeout).await?;
     let js = async_nats::jetstream::new(nats_client.clone());
 
-    let store = ChatStore::ensure(&js, &config.chat_prefix).await?;
+    let store = ChannelStore::ensure(&js, &config.chat_prefix).await?;
     seed_principals(&store, &config).await?;
 
     let stream = js.get_stream(&config.inbound_stream).await.map_err(|e| {
@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
-async fn seed_principals(store: &ChatStore, config: &BridgeConfig) -> anyhow::Result<()> {
+async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow::Result<()> {
     for user in &config.seed_users {
         let principal = PrincipalId::new(format!("telegram-{user}"))?;
         let endpoint = Endpoint::new("telegram", &config.bot_account, user.to_string())?;
@@ -97,7 +97,7 @@ async fn seed_principals(store: &ChatStore, config: &BridgeConfig) -> anyhow::Re
 
 async fn run(
     nats_client: async_nats::Client,
-    store: ChatStore,
+    store: ChannelStore,
     mut messages: async_nats::jetstream::consumer::pull::Stream,
     bot: Bot,
     config: BridgeConfig,

@@ -1,5 +1,5 @@
 use crate::conversation::ConversationRecord;
-use crate::event::InboundChatEvent;
+use crate::event::InboundEvent;
 use serde::{Deserialize, Serialize};
 
 /// An agent-side session handle. Opaque to everything except the port
@@ -88,7 +88,7 @@ pub trait AgentPort {
 
     /// Send one inbound event as a prompt and wait for the turn to end.
     /// Streamed output is delivered out-of-band by the implementation.
-    async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error>;
+    async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error>;
 
     async fn cancel(&self, session: &AgentSessionId) -> Result<(), Self::Error>;
 

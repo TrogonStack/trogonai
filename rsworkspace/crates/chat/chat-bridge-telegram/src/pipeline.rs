@@ -7,9 +7,9 @@ use crate::parse;
 use crate::render::{TEXT_CHUNK_LIMIT, TelegramRenderClient, chunk_text};
 use anyhow::Context as _;
 use tracing::{info, warn};
-use trogon_chat::{
-    AgentId, AgentPort, AgentPortError as _, ChatCommand, ChatStore, CommandTriggers, ConversationId,
-    ConversationRecord, InboundChatEvent, ReleaseReason,
+use trogon_channel::{
+    AgentId, AgentPort, AgentPortError as _, ChannelStore, Command, CommandTriggers, ConversationId,
+    ConversationRecord, InboundEvent, ReleaseReason,
 };
 
 /// What the bridge says back when a command has nothing else to do. A reset
@@ -18,7 +18,7 @@ use trogon_chat::{
 const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
 
 pub struct Pipeline<'a, P, O> {
-    pub store: &'a ChatStore,
+    pub store: &'a ChannelStore,
     pub port: &'a P,
     pub renderer: &'a TelegramRenderClient,
     pub outbound: &'a O,
@@ -41,7 +41,7 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
     /// Whether the individual who sent this message is a known principal. The
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
-    async fn sender_is_authorized(&self, event: &InboundChatEvent) -> anyhow::Result<bool> {
+    async fn sender_is_authorized(&self, event: &InboundEvent) -> anyhow::Result<bool> {
         let Some(endpoint) = parse::sender_endpoint(self.bot_account, &event.sender) else {
             return Ok(false);
         };
@@ -123,7 +123,7 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
             }
         };
 
-        if event.command == Some(ChatCommand::NewSession) {
+        if event.command == Some(Command::NewSession) {
             if self.sender_is_authorized(&event).await? {
                 self.release_current_session(&conversation_id, &mut record).await?;
                 if event.text.is_none() {

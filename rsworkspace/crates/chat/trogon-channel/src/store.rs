@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ChatStoreError {
+pub enum ChannelStoreError {
     #[error("failed to create KV bucket {bucket}: {source}")]
     CreateBucket {
         bucket: String,
@@ -30,14 +30,14 @@ pub struct PrincipalRecord {
 /// exactly one worker (the bridge today, the router after extraction). Config
 /// files never hold this state; the admin surface that seeds/mutates it is
 /// out of band by design.
-pub struct ChatStore {
+pub struct ChannelStore {
     principals: jetstream::kv::Store,
     endpoints: jetstream::kv::Store,
     bindings: jetstream::kv::Store,
     conversations: jetstream::kv::Store,
 }
 
-async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChatStoreError> {
+async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChannelStoreError> {
     if let Ok(store) = js.get_key_value(&bucket).await {
         return Ok(store);
     }
@@ -49,11 +49,11 @@ async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstr
         ..Default::default()
     })
     .await
-    .map_err(|source| ChatStoreError::CreateBucket { bucket, source })
+    .map_err(|source| ChannelStoreError::CreateBucket { bucket, source })
 }
 
-impl ChatStore {
-    pub async fn ensure(js: &jetstream::Context, prefix: &str) -> Result<Self, ChatStoreError> {
+impl ChannelStore {
+    pub async fn ensure(js: &jetstream::Context, prefix: &str) -> Result<Self, ChannelStoreError> {
         Ok(Self {
             principals: ensure_bucket(js, format!("chat_principals_{prefix}")).await?,
             endpoints: ensure_bucket(js, format!("chat_endpoints_{prefix}")).await?,
@@ -65,7 +65,7 @@ impl ChatStore {
     /// Identity: which principal owns this endpoint. `None` means the
     /// endpoint is unknown and the bridge must reject the message; this is
     /// the access-control mechanism.
-    pub async fn principal_for(&self, endpoint: &Endpoint) -> Result<Option<PrincipalId>, ChatStoreError> {
+    pub async fn principal_for(&self, endpoint: &Endpoint) -> Result<Option<PrincipalId>, ChannelStoreError> {
         match self.endpoints.get(endpoint.kv_key()).await? {
             Some(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
             None => Ok(None),
@@ -78,7 +78,7 @@ impl ChatStore {
         principal: &PrincipalId,
         record: &PrincipalRecord,
         endpoint: &Endpoint,
-    ) -> Result<(), ChatStoreError> {
+    ) -> Result<(), ChannelStoreError> {
         self.principals
             .put(principal.as_str(), serde_json::to_vec(record)?.into())
             .await?;
@@ -92,7 +92,7 @@ impl ChatStore {
     pub async fn conversation_for(
         &self,
         endpoint: &Endpoint,
-    ) -> Result<Option<(ConversationId, ConversationRecord)>, ChatStoreError> {
+    ) -> Result<Option<(ConversationId, ConversationRecord)>, ChannelStoreError> {
         let Some(bytes) = self.bindings.get(endpoint.kv_key()).await? else {
             return Ok(None);
         };
@@ -110,7 +110,7 @@ impl ChatStore {
         &self,
         endpoint: &Endpoint,
         record: &ConversationRecord,
-    ) -> Result<ConversationId, ChatStoreError> {
+    ) -> Result<ConversationId, ChannelStoreError> {
         let id = ConversationId::generate();
         self.conversations
             .put(id.as_str(), serde_json::to_vec(record)?.into())
@@ -126,7 +126,7 @@ impl ChatStore {
         &self,
         id: &ConversationId,
         record: &ConversationRecord,
-    ) -> Result<(), ChatStoreError> {
+    ) -> Result<(), ChannelStoreError> {
         self.conversations
             .put(id.as_str(), serde_json::to_vec(record)?.into())
             .await?;
