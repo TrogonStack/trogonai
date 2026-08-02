@@ -36,6 +36,44 @@ pub enum PromptOutcome {
     Truncated,
 }
 
+/// Port errors carry the one distinction the routing layer must act on. Every
+/// port classifies its own protocol's failures; nothing above this trait
+/// inspects error codes.
+pub trait AgentPortError: std::error::Error + 'static {
+    /// True only when the agent no longer has the session, which a fresh
+    /// session repairs. Transport failures, timeouts, and agent-internal
+    /// errors are false: rotating on those would discard a live conversation
+    /// that was merely unreachable for a moment.
+    fn is_session_lost(&self) -> bool;
+}
+
+/// Why a session is being released. Carried into port logs and available to
+/// protocols that can pass a reason to the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseReason {
+    /// The user asked for a fresh conversation.
+    NewSession,
+}
+
+/// How one step of the release ladder ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseStep {
+    Done,
+    /// The agent does not advertise the capability, so nothing was sent.
+    Unsupported,
+    /// The step was attempted and failed. Recorded, never fatal.
+    Failed,
+}
+
+/// Report of a best-effort release. The conversation has already dropped its
+/// pointer to the session by the time this runs, so no step here can fail the
+/// reset; the report exists so an operator can see what the agent did with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionRelease {
+    pub cancelled: ReleaseStep,
+    pub closed: ReleaseStep,
+}
+
 /// The one seam between chat routing and agent protocols. One implementation
 /// per protocol (ACP first; A2A and HTTP later); the implementation owns all
 /// protocol specifics including how streamed agent output reaches the
@@ -43,7 +81,7 @@ pub enum PromptOutcome {
 /// addressability already exists per protocol (see the architecture doc).
 #[allow(async_fn_in_trait)]
 pub trait AgentPort {
-    type Error: std::error::Error + 'static;
+    type Error: AgentPortError;
 
     /// Create a fresh session for a conversation on its bound agent.
     async fn create_session(&self, conversation: &ConversationRecord) -> Result<AgentSessionId, Self::Error>;
@@ -53,4 +91,9 @@ pub trait AgentPort {
     async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error>;
 
     async fn cancel(&self, session: &AgentSessionId) -> Result<(), Self::Error>;
+
+    /// Tell the agent the bridge is done with a session so it can stop work
+    /// and free resources. Infallible on purpose: an agent that cannot or will
+    /// not release must never wedge the conversation it was released from.
+    async fn release_session(&self, session: &AgentSessionId, reason: ReleaseReason) -> SessionRelease;
 }

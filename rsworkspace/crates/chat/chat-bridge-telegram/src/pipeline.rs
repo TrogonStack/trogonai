@@ -7,7 +7,15 @@ use crate::parse;
 use crate::render::{TEXT_CHUNK_LIMIT, TelegramRenderClient, chunk_text};
 use anyhow::Context as _;
 use tracing::{info, warn};
-use trogon_chat::{AgentId, AgentPort, ChatStore, ConversationRecord};
+use trogon_chat::{
+    AgentId, AgentPort, AgentPortError as _, ChatCommand, ChatStore, CommandTriggers, ConversationId,
+    ConversationRecord, InboundChatEvent, ReleaseReason,
+};
+
+/// What the bridge says back when a command has nothing else to do. A reset
+/// with no follow-up prompt produces no agent output, so without this the user
+/// gets silence.
+const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
 
 pub struct Pipeline<'a, P, O> {
     pub store: &'a ChatStore,
@@ -16,6 +24,7 @@ pub struct Pipeline<'a, P, O> {
     pub outbound: &'a O,
     pub bot_account: &'a str,
     pub agent_id: &'a str,
+    pub triggers: &'a CommandTriggers,
 }
 
 fn now_unix() -> i64 {
@@ -29,6 +38,44 @@ async fn ack(msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
 }
 
 impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
+    /// Whether the individual who sent this message is a known principal. The
+    /// conversation gate authorizes the chat, which in a group is everyone in
+    /// it; destructive commands ask the narrower question.
+    async fn sender_is_authorized(&self, event: &InboundChatEvent) -> anyhow::Result<bool> {
+        let Some(endpoint) = parse::sender_endpoint(self.bot_account, &event.sender) else {
+            return Ok(false);
+        };
+        Ok(self.store.principal_for(&endpoint).await?.is_some())
+    }
+
+    /// Drop the conversation's pointer to its session, then tell the agent it
+    /// can let go. In that order: a crash in between leaves an orphaned agent
+    /// session, which costs the agent some memory, where the reverse order
+    /// resurrects a session the user just asked to be rid of. Redelivery is
+    /// safe for the same reason, since the pointer is already gone.
+    async fn release_current_session(
+        &self,
+        conversation_id: &ConversationId,
+        record: &mut ConversationRecord,
+    ) -> anyhow::Result<()> {
+        let Some(session) = record.current_session.take() else {
+            return Ok(());
+        };
+        record.last_activity_at = now_unix();
+        self.store.update_conversation(conversation_id, record).await?;
+        self.renderer.discard(session.as_str());
+
+        let release = self.port.release_session(&session, ReleaseReason::NewSession).await;
+        info!(
+            conversation = %conversation_id,
+            session = %session,
+            cancelled = ?release.cancelled,
+            closed = ?release.closed,
+            "Released session"
+        );
+        Ok(())
+    }
+
     /// Process one raw gateway message end to end. Unrecoverable messages
     /// (unparseable, unauthorized, kinds v1 does not carry) are acked and
     /// dropped; processing errors return `Err` with the message unacked so
@@ -42,7 +89,7 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
             }
         };
 
-        let Some(event) = parse::inbound_event(&update, self.bot_account) else {
+        let Some(event) = parse::inbound_event(&update, self.bot_account, self.triggers) else {
             return ack(msg).await;
         };
 
@@ -76,6 +123,32 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
             }
         };
 
+        if event.command == Some(ChatCommand::NewSession) {
+            if self.sender_is_authorized(&event).await? {
+                self.release_current_session(&conversation_id, &mut record).await?;
+                if event.text.is_none() {
+                    self.outbound
+                        .send_text(chat_id, NEW_SESSION_ACKNOWLEDGEMENT.to_string())
+                        .await
+                        .context("telegram send failed")?;
+                    return ack(msg).await;
+                }
+            } else {
+                // The command is refused, not the message. Whatever followed
+                // the trigger is still the user talking to the agent, and the
+                // trigger itself is never forwarded.
+                warn!(
+                    conversation = %conversation_id,
+                    sender = %event.sender.platform_user_id,
+                    "Sender is not a linked principal; ignoring new-session command"
+                );
+            }
+        }
+
+        if event.text.is_none() {
+            return ack(msg).await;
+        }
+
         let mut active_session = match record.current_session.clone() {
             Some(session) => session,
             None => {
@@ -94,10 +167,13 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
 
         let outcome = match self.port.prompt(&active_session, &event).await {
             Ok(outcome) => outcome,
-            Err(first_error) => {
-                // Sessions are ephemeral and belong to the agent: repair the
-                // session in place, never re-run routing policy.
-                warn!(error = %first_error, session = %active_session, "Prompt failed; retrying with a fresh session");
+            // Only a session the agent no longer has is repaired here, and
+            // repaired in place: sessions are ephemeral and belong to the
+            // agent, so routing policy never re-runs. Every other failure is
+            // left to redelivery, because rotating on a timeout or a transport
+            // blip would throw away a conversation that was merely unreachable.
+            Err(first_error) if first_error.is_session_lost() => {
+                warn!(error = %first_error, session = %active_session, "Agent no longer has the session; retrying with a fresh one");
                 let fresh = self
                     .port
                     .create_session(&record)
@@ -105,12 +181,14 @@ impl<P: AgentPort, O: Outbound> Pipeline<'_, P, O> {
                     .map_err(|e| anyhow::anyhow!("create_session failed: {e}"))?;
                 record.current_session = Some(fresh.clone());
                 self.store.update_conversation(&conversation_id, &record).await?;
+                self.renderer.discard(active_session.as_str());
                 active_session = fresh;
                 self.port
                     .prompt(&active_session, &event)
                     .await
                     .map_err(|e| anyhow::anyhow!("prompt retry failed: {e}"))?
             }
+            Err(error) => return Err(anyhow::anyhow!("prompt failed: {error}")),
         };
 
         record.last_activity_at = now_unix();

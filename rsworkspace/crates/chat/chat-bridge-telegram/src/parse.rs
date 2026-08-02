@@ -1,10 +1,10 @@
 use teloxide::types::{Update, UpdateKind};
-use trogon_chat::{Endpoint, InboundChatEvent, Sender};
+use trogon_chat::{CommandTriggers, Endpoint, InboundChatEvent, Sender};
 
 /// Normalize a raw Telegram update into the channel-neutral event, or `None`
 /// for update kinds v1 does not carry (media, edits, membership, ...). The
 /// raw stream retains those with full fidelity for later.
-pub fn inbound_event(update: &Update, bot_account: &str) -> Option<InboundChatEvent> {
+pub fn inbound_event(update: &Update, bot_account: &str, triggers: &CommandTriggers) -> Option<InboundChatEvent> {
     let UpdateKind::Message(msg) = &update.kind else {
         return None;
     };
@@ -19,15 +19,31 @@ pub fn inbound_event(update: &Update, bot_account: &str) -> Option<InboundChatEv
         }
     };
 
+    let parsed = triggers.parse(text);
+
     Some(InboundChatEvent {
         endpoint,
         sender: Sender {
             platform_user_id: from.id.0.to_string(),
             display_name: from.full_name(),
         },
-        text: Some(text.to_string()),
+        text: parsed.body,
+        command: parsed.command,
         attachments: Vec::new(),
         message_ref: msg.id.0.to_string(),
         occurred_at: msg.date.timestamp(),
     })
+}
+
+/// The endpoint of whoever sent a message, which is not the conversation's
+/// endpoint: a group chat is one endpoint shared by everyone in it, so
+/// authorizing the chat says nothing about authorizing the speaker.
+pub fn sender_endpoint(bot_account: &str, sender: &Sender) -> Option<Endpoint> {
+    match Endpoint::new("telegram", bot_account, sender.platform_user_id.clone()) {
+        Ok(endpoint) => Some(endpoint),
+        Err(e) => {
+            tracing::warn!(error = %e, user_id = %sender.platform_user_id, "Sender has an unencodable endpoint");
+            None
+        }
+    }
 }

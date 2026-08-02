@@ -33,6 +33,16 @@ impl TelegramRenderClient {
             .remove(session_id)
             .filter(|s| !s.trim().is_empty())
     }
+
+    /// Drop whatever a session accumulated without sending it. A released
+    /// session can still have text in flight, and none of it belongs to the
+    /// conversation that moved on.
+    pub fn discard(&self, session_id: &str) {
+        self.buffers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(session_id);
+    }
 }
 
 impl Default for TelegramRenderClient {

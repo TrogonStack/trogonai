@@ -1,16 +1,16 @@
 use super::*;
 use crate::outbound::Outbound;
 use acp_nats::ClientHandler;
-use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent,
-};
+use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_chat::store::PrincipalRecord;
-use trogon_chat::{AgentSessionId, Endpoint, InboundChatEvent, PrincipalId, PromptOutcome};
+use trogon_chat::{
+    AgentPortError, AgentSessionId, Endpoint, InboundChatEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
+};
 
 struct NatsServer {
     _container: ContainerAsync<Nats>,
@@ -38,6 +38,12 @@ impl NatsServer {
 #[error("fake agent failure")]
 struct FakeError;
 
+impl AgentPortError for FakeError {
+    fn is_session_lost(&self) -> bool {
+        false
+    }
+}
+
 /// Simulates the agent side: mints sessions, records prompts, and streams a
 /// reply into the renderer the way real session notifications would.
 struct FakePort {
@@ -45,6 +51,7 @@ struct FakePort {
     reply: String,
     sessions_created: RefCell<u32>,
     prompted: RefCell<Vec<(String, String)>>,
+    released: RefCell<Vec<String>>,
 }
 
 impl trogon_chat::AgentPort for FakePort {
@@ -58,11 +65,7 @@ impl trogon_chat::AgentPort for FakePort {
         Ok(AgentSessionId::new(format!("sess-{}", self.sessions_created.borrow())))
     }
 
-    async fn prompt(
-        &self,
-        session: &AgentSessionId,
-        event: &InboundChatEvent,
-    ) -> Result<PromptOutcome, Self::Error> {
+    async fn prompt(&self, session: &AgentSessionId, event: &InboundChatEvent) -> Result<PromptOutcome, Self::Error> {
         self.prompted
             .borrow_mut()
             .push((session.as_str().to_string(), event.text.clone().unwrap_or_default()));
@@ -81,6 +84,14 @@ impl trogon_chat::AgentPort for FakePort {
 
     async fn cancel(&self, _session: &AgentSessionId) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    async fn release_session(&self, session: &AgentSessionId, _reason: trogon_chat::ReleaseReason) -> SessionRelease {
+        self.released.borrow_mut().push(session.as_str().to_string());
+        SessionRelease {
+            cancelled: ReleaseStep::Done,
+            closed: ReleaseStep::Done,
+        }
     }
 }
 
@@ -117,7 +128,8 @@ fn raw_update(update_id: u64, chat_id: i64, user_id: u64, text: &str) -> Vec<u8>
 }
 
 /// End to end against a real NATS: gateway-shaped raw updates in, identity
-/// gate, conversation + session KV, prompt, rendered reply out. One container
+/// gate, conversation + session KV, prompt, rendered reply out, and the reset
+/// command that rotates the session under a stable conversation. One container
 /// for the whole scenario.
 #[tokio::test]
 async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
@@ -145,6 +157,9 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         (1u64, 99i64, 99u64, "intruder"),
         (2, 42, 42, "hello"),
         (3, 42, 42, "again"),
+        (4, 42, 42, "/new"),
+        (5, 42, 42, "keep going"),
+        (6, 42, 42, "/reset finish up"),
     ] {
         js.publish("telegram.message", raw_update(update_id, chat, user, text).into())
             .await
@@ -172,8 +187,10 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         reply: "hi there".to_string(),
         sessions_created: RefCell::new(0),
         prompted: RefCell::new(Vec::new()),
+        released: RefCell::new(Vec::new()),
     };
     let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
     let pipeline = Pipeline {
         store: &store,
         port: &port,
@@ -181,14 +198,11 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         outbound: &outbound,
         bot_account: "mybot",
         agent_id: "default",
+        triggers: &triggers,
     };
 
-    for _ in 0..3 {
-        let msg = messages
-            .next()
-            .await
-            .expect("stream yields")
-            .expect("message received");
+    for _ in 0..6 {
+        let msg = messages.next().await.expect("stream yields").expect("message received");
         pipeline.handle_message(&msg).await.expect("handled");
     }
 
@@ -202,16 +216,24 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
             .is_none()
     );
 
-    // Both authorized messages flowed through one conversation and one session.
-    assert_eq!(*port.sessions_created.borrow(), 1);
+    // Consecutive messages share a session; each reset mints the next one, and
+    // the text after a trigger is prompted rather than forwarded verbatim.
+    assert_eq!(*port.sessions_created.borrow(), 3);
     assert_eq!(
         *port.prompted.borrow(),
         vec![
             ("sess-1".to_string(), "hello".to_string()),
             ("sess-1".to_string(), "again".to_string()),
+            ("sess-2".to_string(), "keep going".to_string()),
+            ("sess-3".to_string(), "finish up".to_string()),
         ]
     );
+    assert_eq!(
+        *port.released.borrow(),
+        vec!["sess-1".to_string(), "sess-2".to_string()]
+    );
 
+    // The conversation and its principal outlive every session rotation.
     let (_, record) = store
         .conversation_for(&endpoint)
         .await
@@ -220,20 +242,23 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     assert_eq!(record.principal, principal);
     assert_eq!(
         record.current_session.as_ref().map(AgentSessionId::as_str),
-        Some("sess-1")
+        Some("sess-3")
     );
 
-    assert_eq!(*outbound.typing.borrow(), 2);
+    assert_eq!(*outbound.typing.borrow(), 4);
     assert_eq!(
         *outbound.sent.borrow(),
-        vec![(42, "hi there".to_string()), (42, "hi there".to_string())]
+        vec![
+            (42, "hi there".to_string()),
+            (42, "hi there".to_string()),
+            (42, "Started a new session.".to_string()),
+            (42, "hi there".to_string()),
+            (42, "hi there".to_string()),
+        ]
     );
 
     // Everything acked: nothing left pending for redelivery.
-    let info = stream
-        .consumer_info("bridge-test")
-        .await
-        .expect("consumer info");
+    let info = stream.consumer_info("bridge-test").await.expect("consumer info");
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 0);
 }

@@ -149,11 +149,21 @@ extraction):
   endpoint:    { channel, account, peer },
   sender:      { platform_user_id, display_name },
   text:        string | null,
+  command:     bridge command | null,
   attachments: [ { kind, mime, size, object_ref, platform_ref } ],
   message_ref: platform message id (for dedup, replies, edits),
   occurred_at: timestamp
 }
 ```
+
+**Commands are extracted at the channel edge and never forwarded.** A trigger
+(`/new`, `/reset`, configurable) counts only as the whole first token of a
+message; anything after it stays in `text` and becomes the first prompt of
+whatever the command sets up. Leading-slash vocabulary is a channel affordance,
+so the bridge owns its own control words regardless of what the agent behind it
+happens to advertise. A destructive command additionally authorizes the sender's
+own endpoint rather than the conversation's, since a group chat is one endpoint
+shared by everyone in it.
 
 **Render commands** (a Rust enum in v1; the `chat.*.out.*` payload after
 extraction):
@@ -187,7 +197,19 @@ AgentPort:
   create_session / resume_session
   prompt(session, content) -> stream of agent events
   cancel(session)
+  release_session(session, reason) -> report
 ```
+
+- `release_session` is infallible by signature. The conversation drops its
+  pointer to the session and persists that *before* the agent is told, so a
+  crash mid-reset orphans an agent session (recoverable) instead of resurrecting
+  one the user asked to be rid of. Each step is capability-gated and best
+  effort; an agent that cannot release must never wedge the conversation it was
+  released from. Releasing is not deleting: the bridge is done with the session,
+  which is not the same as the user asking for its history to be destroyed.
+- Prompt failures rotate the session only when the agent says it does not have
+  it. Timeouts and transport errors redeliver instead, because rotating on those
+  discards a conversation that was merely unreachable for a moment.
 
 - v1 ships exactly one implementation: ACP, using the existing `acp-nats`
   client machinery. A2A and HTTP become additional implementations later.

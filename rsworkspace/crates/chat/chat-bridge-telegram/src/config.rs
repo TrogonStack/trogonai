@@ -1,6 +1,7 @@
 use acp_nats::{AcpPrefix, NatsConfig};
 use anyhow::Context;
 use std::path::PathBuf;
+use trogon_chat::CommandTriggers;
 use trogon_std::env::ReadEnv;
 
 pub struct BridgeConfig {
@@ -20,21 +21,21 @@ pub struct BridgeConfig {
     /// Telegram user ids seeded as principals at startup. Bootstrap only;
     /// ongoing administration mutates the KV buckets out of band.
     pub seed_users: Vec<i64>,
+    /// Message text the bridge answers to itself. Configurable so a deployment
+    /// can move out of the way of an agent that advertises the same triggers,
+    /// or set none at all to forward everything.
+    pub command_triggers: CommandTriggers,
 }
 
 impl BridgeConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> anyhow::Result<Self> {
-        let bot_token = env
-            .var("TELEGRAM_BOT_TOKEN")
-            .context("TELEGRAM_BOT_TOKEN not set")?;
+        let bot_token = env.var("TELEGRAM_BOT_TOKEN").context("TELEGRAM_BOT_TOKEN not set")?;
 
         let chat_prefix = env.var("CHAT_PREFIX").unwrap_or_else(|_| "prod".to_string());
         let inbound_stream = env
             .var("TELEGRAM_INBOUND_STREAM")
             .unwrap_or_else(|_| "TELEGRAM".to_string());
-        let bot_account = env
-            .var("TELEGRAM_BOT_ACCOUNT")
-            .unwrap_or_else(|_| "bot".to_string());
+        let bot_account = env.var("TELEGRAM_BOT_ACCOUNT").unwrap_or_else(|_| "bot".to_string());
         let agent_id = env.var("CHAT_AGENT_ID").unwrap_or_else(|_| "default".to_string());
         let agent_cwd = env
             .var("CHAT_AGENT_CWD")
@@ -54,6 +55,17 @@ impl BridgeConfig {
             Err(_) => Vec::new(),
         };
 
+        let command_triggers = match env.var("CHAT_NEW_SESSION_TRIGGERS") {
+            Ok(raw) => CommandTriggers::new(
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
+            )
+            .context("invalid CHAT_NEW_SESSION_TRIGGERS")?,
+            Err(_) => CommandTriggers::default(),
+        };
+
         let raw_prefix = env
             .var(acp_nats::ENV_ACP_PREFIX)
             .unwrap_or_else(|_| acp_nats::DEFAULT_ACP_PREFIX.to_string());
@@ -69,6 +81,7 @@ impl BridgeConfig {
             agent_id,
             agent_cwd,
             seed_users,
+            command_triggers,
         })
     }
 }

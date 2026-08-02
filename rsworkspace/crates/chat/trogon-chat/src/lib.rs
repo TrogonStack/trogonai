@@ -10,13 +10,17 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 pub mod agent_port;
+pub mod command;
 pub mod conversation;
 pub mod endpoint;
 pub mod event;
 pub mod render;
 pub mod store;
 
-pub use agent_port::{AgentPort, AgentSessionId, PromptOutcome};
+pub use agent_port::{
+    AgentPort, AgentPortError, AgentSessionId, PromptOutcome, ReleaseReason, ReleaseStep, SessionRelease,
+};
+pub use command::{ChatCommand, CommandTriggerError, CommandTriggers, ParsedText};
 pub use conversation::{AgentId, ConversationId, ConversationRecord};
 pub use endpoint::{Endpoint, EndpointError, PrincipalId};
 pub use event::{Attachment, InboundChatEvent, Sender};

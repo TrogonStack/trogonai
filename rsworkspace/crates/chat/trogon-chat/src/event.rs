@@ -1,3 +1,4 @@
+use crate::command::ChatCommand;
 use crate::endpoint::Endpoint;
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,14 @@ pub struct Attachment {
 pub struct InboundChatEvent {
     pub endpoint: Endpoint,
     pub sender: Sender,
+    /// Message text with any command trigger already removed, so what reaches
+    /// the agent is only what the user meant for it.
     pub text: Option<String>,
+    /// A bridge command found in the text. Extracted at the channel edge
+    /// because the trigger vocabulary is a channel affordance; acted on by the
+    /// routing layer and never forwarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<ChatCommand>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
     /// Platform message identity, for dedup, replies, and edits.

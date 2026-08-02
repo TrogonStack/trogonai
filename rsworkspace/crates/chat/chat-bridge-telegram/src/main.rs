@@ -16,7 +16,7 @@ mod pipeline;
 mod render;
 
 use acp_nats::{AgentHandler, ClientHandler};
-use acp_port::{AcpBridge, AcpPort};
+use acp_port::{AcpBridge, AcpPort, SessionMethods};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::InitializeRequest;
 use anyhow::Context as _;
@@ -25,7 +25,6 @@ use futures::StreamExt;
 use outbound::TelegramOutbound;
 use pipeline::Pipeline;
 use render::TelegramRenderClient;
-use std::rc::Rc;
 use std::sync::Arc;
 use teloxide::Bot;
 use tracing::{error, info, warn};
@@ -76,9 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let bot = Bot::new(config.bot_token.clone());
 
     let local = tokio::task::LocalSet::new();
-    let result = local
-        .run_until(run(nats_client, store, messages, bot, config))
-        .await;
+    let result = local.run_until(run(nats_client, store, messages, bot, config)).await;
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
@@ -116,7 +113,7 @@ async fn run(
         config.acp.clone(),
         notification_tx,
     ));
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Arc::new(TelegramRenderClient::new());
 
     let client_task = tokio::task::spawn_local(acp_nats::client::run(
         nats_client.clone(),
@@ -132,13 +129,18 @@ async fn run(
         }
     });
 
-    bridge
+    let initialized = bridge
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
         .map_err(|e| anyhow::anyhow!("ACP initialize failed: {e}"))?;
-    info!("ACP agent initialized; consuming inbound updates");
+    let session_methods = SessionMethods::advertised(&initialized);
+    info!(
+        protocol = %initialized.protocol_version,
+        session_methods = %session_methods,
+        "ACP agent initialized; consuming inbound updates"
+    );
 
-    let port = AcpPort::new(bridge.clone(), config.agent_cwd.clone());
+    let port = AcpPort::new(bridge.clone(), config.agent_cwd.clone(), session_methods);
     let telegram = TelegramOutbound::new(bot);
     let pipeline = Pipeline {
         store: &store,
@@ -147,6 +149,7 @@ async fn run(
         outbound: &telegram,
         bot_account: &config.bot_account,
         agent_id: &config.agent_id,
+        triggers: &config.command_triggers,
     };
 
     let shutdown = shutdown_signal();
