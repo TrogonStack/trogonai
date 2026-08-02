@@ -4075,6 +4075,21 @@ fn validate_assistant_message_started_accepts_valid_settings() {
 }
 
 #[test]
+fn validate_assistant_message_started_accepts_settings_without_raw_settings() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: Some(4096),
+        temperature: Some(1.0),
+        top_p: Some(0.5),
+        thinking_budget_tokens: None,
+        stop_sequences: vec!["</answer>".to_string()],
+        raw_settings: MessageField::none(),
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
 fn validate_assistant_message_started_rejects_non_finite_temperature() {
     let mut event = assistant_message_started();
     event.settings = MessageField::some(v1alpha1::ModelSettings {
@@ -4130,6 +4145,29 @@ fn validate_assistant_message_started_rejects_empty_stop_sequence() {
         validate_session_event(&event_of(event)),
         Err(SessionEventValidationError::EmptyIdentifier {
             field: "settings.stop_sequences[]"
+        })
+    );
+}
+
+#[test]
+fn validate_assistant_message_started_rejects_invalid_raw_settings() {
+    let mut event = assistant_message_started();
+    event.settings = MessageField::some(v1alpha1::ModelSettings {
+        max_output_tokens: None,
+        temperature: None,
+        top_p: None,
+        thinking_budget_tokens: None,
+        stop_sequences: Vec::new(),
+        raw_settings: MessageField::some(v1alpha1::ArtifactRef {
+            artifact_id: String::new(),
+            ..artifact_ref()
+        }),
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "artifact_ref.artifact_id"
         })
     );
 }
