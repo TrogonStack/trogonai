@@ -39,6 +39,10 @@ Thumbs.db
 # Logs
 *.log
 
+# trogonai internal
+.trogonai/
+*.internal.trogonai.md
+
 # Coverage
 lcov.info
 *.lcov
@@ -46,9 +50,6 @@ coverage.xml
 coverage-*.xml
 *.profraw
 *.profdata
-
-# Docker
-.dockerignore
 
 # NATS
 *.creds
