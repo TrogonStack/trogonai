@@ -32,13 +32,6 @@ The fx dossier was added after the synthesis and is not yet folded into it.
 - [OpenCode](./products/opencode.md)
 - [T3 Code](./products/t3code.md)
 
-## Comparisons against our design
-
-- [fx compared to our session event catalog](./fx-vs-session-events.md), a
-  field-level mapping of the fx format onto
-  `trogonai.session.sessions.v1alpha1`, separating what we may need to add
-  from what our model already handles better.
-
 ## Synthesis
 
 - [Synthesis: what the industry means by a "stored session"](./synthesis.md),

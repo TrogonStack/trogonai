@@ -2,6 +2,8 @@
 
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Mapped field-by-field onto our own catalog in
+[fx compared to our session event catalog](./fx-vs-session-events.md).
 Evidence snapshot retrieved 2026-08-01. fx ships as a closed-source native
 binary, so there is no repository or commit to cite and no source quotes are
 possible. Version-sensitive claims were checked against these anchors:
