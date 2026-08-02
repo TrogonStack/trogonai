@@ -440,13 +440,16 @@ identity without the turn context.
 **Reads are observations on the completing call, not facts of their own.** A
 session reads far more than it writes, so a per-read event would dominate the
 log while carrying almost no decision value. Instead `ToolCallCompleted` carries
-`repeated ResourceObservation observed`: the uri, the content digest, and the
+`repeated ResourceObservation observed`: the uri, what the read found, and the
 byte range actually seen, with `complete` distinguishing a whole-resource read
-from a partial one. An absent digest is itself an observation -- the resource was
-reported absent, and a later write may depend on that. This is what makes a
-replayed write checkable rather than merely repeatable: the observations are the
-preconditions the call was decided under, so a replay can compare current
-digests against them and refuse a stale apply. It keeps
+from a partial one. Absence is a recorded outcome rather than a missing digest,
+so a producer that failed to hash content is never mistaken for one that
+looked and found nothing, and an absent outcome marked complete is a
+confirmed-absent-in-full precondition exactly as strong as a whole-resource
+read. This is what makes a replayed write checkable rather than merely
+repeatable: the observations are the preconditions the call was decided under,
+so a replay can compare current digests against them and refuse a stale
+apply. It keeps
 [ADR#0024](./0024-agent-platform-stream-topology.md)'s "a fact is recorded once"
 rule intact by hanging the read set on the fact that already exists rather than
 multiplying events.
@@ -515,7 +518,8 @@ the rest. At minimum the validator rejects:
   glossary correction).
 - Set oneofs: `ContentBlock.kind`, `ToolCallResult.kind`,
   `ArtifactMetadata.source`, `OperationOutcomeRecorded.outcome`,
-  `CommandTermination.outcome`, `ProviderBlock.payload`.
+  `CommandTermination.outcome`, `ProviderBlock.payload`,
+  `ResourceObservation.outcome`.
 - Role agreement: `UserMessageRecorded.message.role` is `USER`;
   `AssistantMessageCompleted.message.role` is `ASSISTANT`.
 - Started-and-completed assistant message id and model agreement.
@@ -541,8 +545,9 @@ the rest. At minimum the validator rejects:
   producer bug.
 - `DiffSummary.rendered` present whenever `DiffSummary.truncated` is true: a
   truncated diff with nothing to fetch is unreadable.
-- `ResourceObservation` with a non-empty uri, a nonzero `range.length` when a
-  range is given, and a `content_digest` whenever `complete` is true.
+- `ResourceObservation` with a non-empty uri, a set `outcome`, a nonzero
+  `range.length` when a range is given, and no `range` when the outcome is
+  absent.
 
 Every unset oneof, unspecified enum, and malformed shape above is rejected
 before append, never persisted and reconciled later.

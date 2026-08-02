@@ -157,6 +157,9 @@ pub mod __buffa {
             include!(
                 "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__view_oneof.rs"
             );
+            include!(
+                "trogonai.session.sessions.v1alpha1.resource_observation.__view_oneof.rs"
+            );
             include!("trogonai.session.sessions.v1alpha1.events.__view_oneof.rs");
         }
     }
@@ -170,6 +173,7 @@ pub mod __buffa {
         include!(
             "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__oneof.rs"
         );
+        include!("trogonai.session.sessions.v1alpha1.resource_observation.__oneof.rs");
         include!("trogonai.session.sessions.v1alpha1.events.__oneof.rs");
     }
     /// Register this package's `Any` type entries and extension entries.
@@ -237,6 +241,7 @@ pub mod __buffa {
         reg.register_json_any(super::__TODO_ITEM_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_APPROVED_JSON_ANY);
         reg.register_json_any(super::__RESOURCE_OBSERVATION_JSON_ANY);
+        reg.register_json_any(super::__RESOURCE_ABSENT_JSON_ANY);
         reg.register_json_any(super::__BYTE_RANGE_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_COMPLETED_JSON_ANY);
         reg.register_json_any(super::__TOOL_CALL_DENIED_JSON_ANY);
@@ -499,6 +504,10 @@ pub use self::__buffa::view::ToolCallApprovedOwnedView;
 pub use self::__buffa::view::ResourceObservationView;
 #[doc(inline)]
 pub use self::__buffa::view::ResourceObservationOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::ResourceAbsentView;
+#[doc(inline)]
+pub use self::__buffa::view::ResourceAbsentOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::ByteRangeView;
 #[doc(inline)]

@@ -979,13 +979,17 @@ fn tool_call_completed_round_trips_termination_duration_and_observations() {
                 observed: vec![
                     v1alpha1::ResourceObservation {
                         uri: "file:///workspace/src/main.rs".to_string(),
-                        content_digest: MessageField::some(digest()),
+                        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+                            digest(),
+                        ))),
                         range: MessageField::none(),
                         complete: Some(true),
                     },
                     v1alpha1::ResourceObservation {
                         uri: "file:///workspace/src/lib.rs".to_string(),
-                        content_digest: MessageField::some(digest()),
+                        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+                            digest(),
+                        ))),
                         range: MessageField::some(v1alpha1::ByteRange { offset: 64, length: 32 }),
                         complete: Some(false),
                     },

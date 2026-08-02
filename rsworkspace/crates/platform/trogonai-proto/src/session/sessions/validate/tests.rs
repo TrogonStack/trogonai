@@ -80,7 +80,9 @@ fn file_changed() -> v1alpha1::FileChanged {
 fn resource_observation() -> v1alpha1::ResourceObservation {
     v1alpha1::ResourceObservation {
         uri: "file:///workspace/src/new.rs".to_string(),
-        content_digest: MessageField::some(digest()),
+        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+            digest(),
+        ))),
         range: MessageField::none(),
         complete: Some(true),
     }
@@ -4390,25 +4392,27 @@ fn validate_tool_call_completed_rejects_observation_with_empty_uri() {
 }
 
 #[test]
-fn validate_tool_call_completed_rejects_complete_observation_without_digest() {
+fn validate_tool_call_completed_accepts_complete_absent_observation() {
     let mut event = tool_call_completed();
     event.observed = vec![v1alpha1::ResourceObservation {
-        content_digest: MessageField::none(),
+        outcome: Some(v1alpha1::resource_observation::Outcome::Absent(Box::new(
+            v1alpha1::ResourceAbsent {},
+        ))),
+        range: MessageField::none(),
         complete: Some(true),
         ..resource_observation()
     }];
 
-    assert_eq!(
-        validate_session_event(&event_of(event)),
-        Err(SessionEventValidationError::CompleteObservationMissingDigest)
-    );
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
 }
 
 #[test]
 fn validate_tool_call_completed_accepts_absent_resource_observation() {
     let mut event = tool_call_completed();
     event.observed = vec![v1alpha1::ResourceObservation {
-        content_digest: MessageField::none(),
+        outcome: Some(v1alpha1::resource_observation::Outcome::Absent(Box::new(
+            v1alpha1::ResourceAbsent {},
+        ))),
         complete: None,
         ..resource_observation()
     }];
@@ -4417,13 +4421,48 @@ fn validate_tool_call_completed_accepts_absent_resource_observation() {
 }
 
 #[test]
+fn validate_tool_call_completed_rejects_missing_observation_outcome() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        outcome: None,
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingOneof {
+            oneof: "observed[].outcome"
+        })
+    );
+}
+
+#[test]
+fn validate_tool_call_completed_rejects_range_with_absent_observation() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        outcome: Some(v1alpha1::resource_observation::Outcome::Absent(Box::new(
+            v1alpha1::ResourceAbsent {},
+        ))),
+        range: MessageField::some(v1alpha1::ByteRange { offset: 0, length: 512 }),
+        ..resource_observation()
+    }];
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::RangeWithAbsentObservation)
+    );
+}
+
+#[test]
 fn validate_tool_call_completed_rejects_observation_with_invalid_digest() {
     let mut event = tool_call_completed();
     event.observed = vec![v1alpha1::ResourceObservation {
-        content_digest: MessageField::some(v1alpha1::Digest {
-            algorithm: "md5".to_string(),
-            value: vec![0u8; 32],
-        }),
+        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+            v1alpha1::Digest {
+                algorithm: "md5".to_string(),
+                value: vec![0u8; 32],
+            },
+        ))),
         ..resource_observation()
     }];
 
@@ -4441,6 +4480,18 @@ fn validate_tool_call_completed_accepts_ranged_observation() {
     event.observed = vec![v1alpha1::ResourceObservation {
         range: MessageField::some(v1alpha1::ByteRange { offset: 0, length: 512 }),
         complete: Some(false),
+        ..resource_observation()
+    }];
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_tool_call_completed_accepts_full_range_with_complete() {
+    let mut event = tool_call_completed();
+    event.observed = vec![v1alpha1::ResourceObservation {
+        range: MessageField::some(v1alpha1::ByteRange { offset: 0, length: 512 }),
+        complete: Some(true),
         ..resource_observation()
     }];
 

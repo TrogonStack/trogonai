@@ -21,26 +21,24 @@
 /// attribute it to, which is precisely the signal that something outside the
 /// session moved underneath it.
 #[derive(Clone, PartialEq, Default)]
-#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[derive(::serde::Serialize)]
 #[serde(default)]
 pub struct ResourceObservation {
-    /// Resource location, in the same URI form as WorkspaceRef.uri.
+    /// Resource location, in the same URI form as WorkspaceRef.uri. For a
+    /// resource inside the workspace this is workspace.uri + "/" +
+    /// FileChanged.path, which is the join a projection uses to attribute or
+    /// exclude a later digest change against that path; a resource with no such
+    /// join (a fetched URL, an MCP resource) can only ever appear here, never as
+    /// a FileChanged.
     ///
     /// Field 1: `uri`
     #[serde(rename = "uri", with = "::buffa::json_helpers::proto_string")]
     pub uri: ::buffa::alloc::string::String,
-    /// Digest over the observed content. Unset when the resource was reported
-    /// absent, which is itself an observation a later write may depend on.
-    ///
-    /// Field 2: `content_digest`
-    #[serde(
-        rename = "contentDigest",
-        alias = "content_digest",
-        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
-    )]
-    pub content_digest: ::buffa::MessageField<Digest, ::buffa::Inline<Digest>>,
-    /// The observed extent when only part of the resource was read; unset when the
-    /// observation covers the whole resource.
+    /// The extent actually read, when the read did not necessarily span the whole
+    /// resource. This is provenance of what was fetched, not a claim about
+    /// coverage: complete carries that claim, so a full-covering range alongside
+    /// complete is not a contradiction. Unset when the outcome is absent, where
+    /// there is no extent to record.
     ///
     /// Field 3: `range`
     #[serde(
@@ -48,11 +46,13 @@ pub struct ResourceObservation {
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
     pub range: ::buffa::MessageField<ByteRange, ::buffa::Inline<ByteRange>>,
-    /// True when the observed content was the resource in full, with nothing
-    /// elided by truncation or by a range limit. A write against a resource the
-    /// model only saw part of is a weaker precondition than one against a resource
-    /// it saw entirely, and that difference must be a recorded fact rather than
-    /// inferred from the presence of range.
+    /// True when the observation covered the resource in its entirety, with
+    /// nothing elided by truncation or by a range limit. A write against a
+    /// resource the model only saw part of is a weaker precondition than one
+    /// against a resource it saw entirely, and that difference must be a recorded
+    /// fact rather than inferred from the presence of range. With an absent
+    /// outcome it asserts the resource was confirmed absent in full, which is the
+    /// precondition a create-if-not-exists write depends on.
     ///
     /// Field 4: `complete`
     #[serde(
@@ -60,14 +60,16 @@ pub struct ResourceObservation {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub complete: ::core::option::Option<bool>,
+    #[serde(flatten)]
+    pub outcome: ::core::option::Option<__buffa::oneof::resource_observation::Outcome>,
 }
 impl ::core::fmt::Debug for ResourceObservation {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("ResourceObservation")
             .field("uri", &self.uri)
-            .field("content_digest", &self.content_digest)
             .field("range", &self.range)
             .field("complete", &self.complete)
+            .field("outcome", &self.outcome)
             .finish()
     }
 }
@@ -108,13 +110,25 @@ impl ::buffa::Message for ResourceObservation {
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
         size += 1u64 + ::buffa::types::string_encoded_len(&self.uri) as u64;
-        if self.content_digest.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.content_digest.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
-                    + inner_size as u64;
+        if let ::core::option::Option::Some(ref v) = self.outcome {
+            match v {
+                __buffa::oneof::resource_observation::Outcome::ContentDigest(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
+                __buffa::oneof::resource_observation::Outcome::Absent(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
+            }
         }
         if self.range.is_set() {
             let __slot = __cache.reserve();
@@ -137,13 +151,25 @@ impl ::buffa::Message for ResourceObservation {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.uri, buf);
-        if self.content_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(
-                2u32,
-                u64::from(__cache.consume_next()),
-                buf,
-            );
-            self.content_digest.write_to(__cache, buf);
+        if let ::core::option::Option::Some(ref v) = self.outcome {
+            match v {
+                __buffa::oneof::resource_observation::Outcome::ContentDigest(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        2u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::resource_observation::Outcome::Absent(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        5u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+            }
         }
         if self.range.is_set() {
             ::buffa::types::put_len_delimited_header(
@@ -180,11 +206,44 @@ impl ::buffa::Message for ResourceObservation {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::Message::merge_length_delimited(
-                    self.content_digest.get_or_insert_default(),
-                    buf,
-                    ctx,
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::resource_observation::Outcome::ContentDigest(
+                        ref mut existing,
+                    ),
+                ) = self.outcome
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.outcome = ::core::option::Option::Some(
+                        __buffa::oneof::resource_observation::Outcome::ContentDigest(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
                 )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::resource_observation::Outcome::Absent(
+                        ref mut existing,
+                    ),
+                ) = self.outcome
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.outcome = ::core::option::Option::Some(
+                        __buffa::oneof::resource_observation::Outcome::Absent(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
             }
             3u32 => {
                 ::buffa::encoding::check_wire_type(
@@ -214,9 +273,139 @@ impl ::buffa::Message for ResourceObservation {
     }
     fn clear(&mut self) {
         self.uri.clear();
-        self.content_digest = ::buffa::MessageField::none();
+        self.outcome = ::core::option::Option::None;
         self.range = ::buffa::MessageField::none();
         self.complete = ::core::option::Option::None;
+    }
+}
+impl<'de> serde::Deserialize<'de> for ResourceObservation {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        struct _V;
+        impl<'de> serde::de::Visitor<'de> for _V {
+            type Value = ResourceObservation;
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("struct ResourceObservation")
+            }
+            #[allow(clippy::field_reassign_with_default)]
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> ::core::result::Result<ResourceObservation, A::Error> {
+                let mut __f_uri: ::core::option::Option<
+                    ::buffa::alloc::string::String,
+                > = None;
+                let mut __f_range: ::core::option::Option<
+                    ::buffa::MessageField<ByteRange, ::buffa::Inline<ByteRange>>,
+                > = None;
+                let mut __f_complete: ::core::option::Option<
+                    ::core::option::Option<bool>,
+                > = None;
+                let mut __oneof_outcome: ::core::option::Option<
+                    __buffa::oneof::resource_observation::Outcome,
+                > = None;
+                while let Some(key) = map.next_key::<::buffa::alloc::string::String>()? {
+                    match key.as_str() {
+                        "uri" => {
+                            __f_uri = Some({
+                                struct _S;
+                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                    type Value = ::buffa::alloc::string::String;
+                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                        self,
+                                        d: D,
+                                    ) -> ::core::result::Result<
+                                        ::buffa::alloc::string::String,
+                                        D::Error,
+                                    > {
+                                        ::buffa::json_helpers::proto_string::deserialize(d)
+                                    }
+                                }
+                                map.next_value_seed(_S)?
+                            });
+                        }
+                        "range" => {
+                            __f_range = Some(
+                                map
+                                    .next_value::<
+                                        ::buffa::MessageField<ByteRange, ::buffa::Inline<ByteRange>>,
+                                    >()?,
+                            );
+                        }
+                        "complete" => {
+                            __f_complete = Some(
+                                map.next_value::<::core::option::Option<bool>>()?,
+                            );
+                        }
+                        "contentDigest" | "content_digest" => {
+                            let v: ::core::option::Option<Digest> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            Digest,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_outcome.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'outcome'",
+                                        ),
+                                    );
+                                }
+                                __oneof_outcome = Some(
+                                    __buffa::oneof::resource_observation::Outcome::ContentDigest(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "absent" => {
+                            let v: ::core::option::Option<ResourceAbsent> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            ResourceAbsent,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_outcome.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'outcome'",
+                                        ),
+                                    );
+                                }
+                                __oneof_outcome = Some(
+                                    __buffa::oneof::resource_observation::Outcome::Absent(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                let mut __r = <ResourceObservation as ::core::default::Default>::default();
+                if let ::core::option::Option::Some(v) = __f_uri {
+                    __r.uri = v;
+                }
+                if let ::core::option::Option::Some(v) = __f_range {
+                    __r.range = v;
+                }
+                if let ::core::option::Option::Some(v) = __f_complete {
+                    __r.complete = v;
+                }
+                __r.outcome = __oneof_outcome;
+                Ok(__r)
+            }
+        }
+        d.deserialize_map(_V)
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ResourceObservation {
@@ -237,6 +426,103 @@ pub const __RESOURCE_OBSERVATION_JSON_ANY: ::buffa::type_registry::JsonAnyEntry 
     type_url: "type.googleapis.com/trogonai.session.sessions.v1alpha1.ResourceObservation",
     to_json: ::buffa::type_registry::any_to_json::<ResourceObservation>,
     from_json: ::buffa::type_registry::any_from_json::<ResourceObservation>,
+    is_wkt: false,
+};
+pub mod resource_observation {
+    #[allow(unused_imports)]
+    use super::*;
+    #[doc(inline)]
+    pub use super::__buffa::oneof::resource_observation::Outcome;
+    #[doc(inline)]
+    pub use super::__buffa::view::oneof::resource_observation::Outcome as OutcomeView;
+}
+/// ResourceAbsent is the observation arm for a resource that was looked for and
+/// found not to exist. It carries no fields: the fact is the absence itself, and
+/// it is a message rather than a bool so the arm can gain detail later without
+/// changing the shape of the outcome.
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct ResourceAbsent {}
+impl ::core::fmt::Debug for ResourceAbsent {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("ResourceAbsent").finish()
+    }
+}
+impl ResourceAbsent {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ResourceAbsent";
+}
+::buffa::impl_default_instance!(ResourceAbsent);
+impl ::buffa::MessageName for ResourceAbsent {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1alpha1";
+    const NAME: &'static str = "ResourceAbsent";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1alpha1.ResourceAbsent";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ResourceAbsent";
+}
+impl ::buffa::Message for ResourceAbsent {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let size = 0u64;
+        ::buffa::saturate_size(size)
+    }
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        _buf: &mut impl ::buffa::EncodeSink,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {}
+}
+impl ::buffa::json_helpers::ProtoElemJson for ResourceAbsent {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __RESOURCE_ABSENT_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.session.sessions.v1alpha1.ResourceAbsent",
+    to_json: ::buffa::type_registry::any_to_json::<ResourceAbsent>,
+    from_json: ::buffa::type_registry::any_from_json::<ResourceAbsent>,
     is_wkt: false,
 };
 /// ByteRange is a half-open extent over a resource's bytes.

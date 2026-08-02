@@ -159,8 +159,8 @@ pub enum SessionEventValidationError {
     #[error("{field}.length must be >= 1")]
     EmptyByteRange { field: &'static str },
 
-    #[error("content_digest must be set when complete is true")]
-    CompleteObservationMissingDigest,
+    #[error("observed[].range must be unset when the resource was absent")]
+    RangeWithAbsentObservation,
 }
 
 fn require_non_empty(value: &str, field: &'static str) -> Result<(), SessionEventValidationError> {
@@ -314,13 +314,23 @@ fn validate_resource_observation(
     observation: &v1alpha1::ResourceObservation,
 ) -> Result<(), SessionEventValidationError> {
     require_non_empty(&observation.uri, "observed[].uri")?;
-    let content_digest = observation.content_digest.as_option();
-    if let Some(content_digest) = content_digest {
-        require_digest(content_digest, "observed[].content_digest")?;
-    } else if observation.complete == Some(true) {
-        return Err(SessionEventValidationError::CompleteObservationMissingDigest);
+    let range = observation.range.as_option();
+    match observation.outcome.as_ref() {
+        Some(v1alpha1::resource_observation::Outcome::ContentDigest(content_digest)) => {
+            require_digest(content_digest, "observed[].content_digest")?;
+        }
+        Some(v1alpha1::resource_observation::Outcome::Absent(_)) => {
+            if range.is_some() {
+                return Err(SessionEventValidationError::RangeWithAbsentObservation);
+            }
+        }
+        None => {
+            return Err(SessionEventValidationError::MissingOneof {
+                oneof: "observed[].outcome",
+            });
+        }
     }
-    if let Some(range) = observation.range.as_option()
+    if let Some(range) = range
         && range.length == 0
     {
         return Err(SessionEventValidationError::EmptyByteRange {
