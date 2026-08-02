@@ -1,4 +1,4 @@
-//! Telegram chat bridge: the v1 direct path from the gateway's raw Telegram
+//! Telegram channel bridge: the v1 direct path from the gateway's raw Telegram
 //! stream to an ACP agent. See `docs/architecture/multi-channel-agent-routing.md`.
 //!
 //! One worker, two halves: normalize (raw Update -> `InboundEvent`,
@@ -20,6 +20,7 @@ use acp_port::{AcpBridge, AcpPort, SessionMethods};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::InitializeRequest;
 use anyhow::Context as _;
+use async_nats::jetstream::consumer::DeliverPolicy;
 use config::BridgeConfig;
 use futures::StreamExt;
 use outbound::TelegramOutbound;
@@ -35,18 +36,24 @@ use trogon_std::fs::SystemFs;
 use trogon_std::signal::shutdown_signal;
 use trogon_telemetry::ServiceName;
 
+/// Durable consumer identity on the inbound stream. JetStream keys the ack
+/// floor by this string, so it is deployment state rather than a build
+/// artifact name: a literal here means a future crate rename cannot silently
+/// strand every deployment's position in the stream.
+const INBOUND_DURABLE: &str = "channel-bridge-telegram";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = BridgeConfig::from_env(&SystemEnv)?;
-    trogon_telemetry::init_logger(ServiceName::ChatBridgeTelegram, [], &SystemEnv, &SystemFs);
+    trogon_telemetry::init_logger(ServiceName::ChannelBridgeTelegram, [], &SystemEnv, &SystemFs);
 
-    info!("Telegram chat bridge starting");
+    info!("Telegram channel bridge starting");
 
     let nats_connect_timeout = acp_nats::nats_connect_timeout(&SystemEnv);
     let nats_client = acp_nats::nats::connect(config.acp.nats(), nats_connect_timeout).await?;
     let js = async_nats::jetstream::new(nats_client.clone());
 
-    let store = ChannelStore::ensure(&js, &config.chat_prefix).await?;
+    let store = ChannelStore::ensure(&js, &config.channel_prefix).await?;
     seed_principals(&store, &config).await?;
 
     let stream = js.get_stream(&config.inbound_stream).await.map_err(|e| {
@@ -55,12 +62,17 @@ async fn main() -> anyhow::Result<()> {
             config.inbound_stream
         )
     })?;
-    let consumer_name = format!("chat-bridge-telegram-{}", config.chat_prefix);
+    let consumer_name = format!("{INBOUND_DURABLE}-{}", config.channel_prefix);
     let consumer = stream
         .get_or_create_consumer(
             &consumer_name,
             async_nats::jetstream::consumer::pull::Config {
                 durable_name: Some(consumer_name.clone()),
+                // Honoured only when the durable does not exist yet, so a
+                // first run answers what arrives from now on instead of
+                // replaying everything the stream still retains. Restarts
+                // resume from the durable's own ack floor.
+                deliver_policy: DeliverPolicy::New,
                 // Generous ack window: a prompt turn can legitimately run for
                 // minutes before the turn ends and we ack.
                 ack_wait: std::time::Duration::from_secs(600),
@@ -102,7 +114,7 @@ async fn run(
     bot: Bot,
     config: BridgeConfig,
 ) -> anyhow::Result<()> {
-    let meter = trogon_telemetry::meter("chat-bridge-telegram");
+    let meter = trogon_telemetry::meter("channel-bridge-telegram");
     let (notification_tx, mut notification_rx) = tokio::sync::mpsc::channel(64);
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(

@@ -3,7 +3,7 @@
 //! See `docs/architecture/multi-channel-agent-routing.md`. This crate owns the
 //! vocabulary (endpoints, principals, conversations, inbound events, render
 //! commands), the JetStream KV registries, and the [`AgentPort`] trait through
-//! which bridges reach agents. Channel binaries (e.g. `chat-bridge-telegram`)
+//! which bridges reach agents. Channel binaries (e.g. `channel-bridge-telegram`)
 //! contain platform I/O only; nothing in this crate may reference a specific
 //! platform or agent protocol.
 //!

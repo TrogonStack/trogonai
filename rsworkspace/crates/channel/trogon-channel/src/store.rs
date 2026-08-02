@@ -41,7 +41,7 @@ async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstr
     if let Ok(store) = js.get_key_value(&bucket).await {
         return Ok(store);
     }
-    info!(bucket = %bucket, "Creating chat KV bucket");
+    info!(bucket = %bucket, "Creating channel KV bucket");
     js.create_key_value(jetstream::kv::Config {
         bucket: bucket.clone(),
         history: 5,
@@ -55,10 +55,10 @@ async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstr
 impl ChannelStore {
     pub async fn ensure(js: &jetstream::Context, prefix: &str) -> Result<Self, ChannelStoreError> {
         Ok(Self {
-            principals: ensure_bucket(js, format!("chat_principals_{prefix}")).await?,
-            endpoints: ensure_bucket(js, format!("chat_endpoints_{prefix}")).await?,
-            bindings: ensure_bucket(js, format!("chat_bindings_{prefix}")).await?,
-            conversations: ensure_bucket(js, format!("chat_conversations_{prefix}")).await?,
+            principals: ensure_bucket(js, format!("channel_principals_{prefix}")).await?,
+            endpoints: ensure_bucket(js, format!("channel_endpoints_{prefix}")).await?,
+            bindings: ensure_bucket(js, format!("channel_bindings_{prefix}")).await?,
+            conversations: ensure_bucket(js, format!("channel_conversations_{prefix}")).await?,
         })
     }
 

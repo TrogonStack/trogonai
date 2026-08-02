@@ -47,8 +47,8 @@ trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
-trogon-channel = { path = "crates/chat/trogon-channel" }
-chat-bridge-telegram = { path = "crates/chat/chat-bridge-telegram" }
+trogon-channel = { path = "crates/channel/trogon-channel" }
+channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }

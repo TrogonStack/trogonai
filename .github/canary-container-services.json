@@ -4,9 +4,9 @@
     "context": "./rsworkspace",
     "dockerfile": "./devops/docker/compose/services/trogon-gateway/Dockerfile"
   },
-  "chat-bridge-telegram": {
-    "image": "trogonai/chat-bridge-telegram",
+  "channel-bridge-telegram": {
+    "image": "trogonai/channel-bridge-telegram",
     "context": "./rsworkspace",
-    "dockerfile": "./devops/docker/compose/services/chat-bridge-telegram/Dockerfile"
+    "dockerfile": "./devops/docker/compose/services/channel-bridge-telegram/Dockerfile"
   }
 }

@@ -17,13 +17,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json -p chat-bridge-telegram
+RUN cargo chef cook --release --recipe-path recipe.json -p channel-bridge-telegram
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-RUN cargo build --release -p chat-bridge-telegram && \
-    strip target/release/chat-bridge-telegram
+RUN cargo build --release -p channel-bridge-telegram && \
+    strip target/release/channel-bridge-telegram
 
 # ── Stage 4: runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-20260518-slim AS runtime
@@ -34,10 +34,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN useradd --no-create-home --shell /usr/sbin/nologin trogon
 
-COPY --from=builder /build/target/release/chat-bridge-telegram /usr/local/bin/chat-bridge-telegram
+COPY --from=builder /build/target/release/channel-bridge-telegram /usr/local/bin/channel-bridge-telegram
 
 USER trogon
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/usr/local/bin/chat-bridge-telegram"]
+ENTRYPOINT ["/usr/local/bin/channel-bridge-telegram"]

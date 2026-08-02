@@ -1,5 +1,5 @@
 [package]
-name = "chat-bridge-telegram"
+name = "channel-bridge-telegram"
 version = "0.1.0"
 edition = "2024"
 

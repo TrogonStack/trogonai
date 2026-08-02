@@ -17,7 +17,7 @@ pub enum EndpointError {
 }
 
 /// Where a message arrives and leaves: a platform, a bot account on it, and a
-/// chat/user on that platform. Many endpoints can point at one conversation.
+/// peer on that platform. Many endpoints can point at one conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Endpoint {
     channel: String,

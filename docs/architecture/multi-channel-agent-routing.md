@@ -1,6 +1,6 @@
 # Multi-Channel Agent Routing
 
-How a chat channel (Telegram first, Discord and others later) binds to an AI
+How a channel (Telegram first, Discord and others later) binds to an AI
 agent. This document records two things: the **v1 implementation**, which goes
 directly from the raw Telegram stream to an ACP agent through one bridge
 worker, and the **multi-channel end state**, whose seams v1 keeps as code
@@ -24,7 +24,7 @@ Telegram ─HTTP─▶ telegram.{update_type}                  trogon-gateway (e
                  stream TELEGRAM, raw verbatim JSON
                       │
                       ▼ durable consumer
-                 normalize: parse Update, endpoint,      chat-bridge-telegram
+                 normalize: parse Update, endpoint,      channel-bridge-telegram
                  eager-download attachments              (one worker)
                  identity + binding via KV
                  dispatch prompt via AgentPort
@@ -33,7 +33,7 @@ Telegram ─HTTP─▶ telegram.{update_type}                  trogon-gateway (e
                  ═══ agent works, streams notifications ═══
                       │
                       ▼ render notifications
-                 Telegram Bot API calls                  chat-bridge-telegram
+                 Telegram Bot API calls                  channel-bridge-telegram
                  (send, edit-in-place, chunk, throttle)
 ```
 
@@ -41,7 +41,7 @@ Two workers total, one of which already exists. The bridge is the fusion of
 what the end state calls the "edge" and the "router". We fuse them because:
 
 - The prompt/notification traffic **already crosses NATS** inside `acp-nats`;
-  a `chat.>` middle namespace would add hops without adding a capability v1
+  a `channel.>` middle namespace would add hops without adding a capability v1
   needs. ACP over NATS is our version of the direct function call OpenClaw and
   Hermes make in-process (both reference systems are monoliths whose channel
   handlers call the agent loop as a library).
@@ -63,16 +63,16 @@ arrives, the bridge splits along the seams the shared crate already defines:
 telegram.{update_type}  (stream TELEGRAM)                trogon-gateway
       │
       ▼
-chat.{prefix}.in.{channel}.{account}.{peer}              chat-edge-telegram
-stream CHAT_IN_{prefix}, neutral inbound events          (normalize half)
+channel.{prefix}.in.{channel}.{account}.{peer}           channel-bridge-telegram
+stream CHANNEL_IN_{prefix}, neutral inbound events       (normalize half)
       │
       ▼
-[identity, binding, conversation KV,                     chat-router
+[identity, binding, conversation KV,                     channel-router
  per-conversation serialization, AgentPort]              (generic, channel-blind)
       │
       ▼
-chat.{prefix}.out.{channel}.{account}.{peer}             chat-router publishes,
-stream CHAT_OUT_{prefix}, render commands                chat-edge-telegram
+channel.{prefix}.out.{channel}.{account}.{peer}          channel-router publishes,
+stream CHANNEL_OUT_{prefix}, render commands             channel-bridge-telegram
       │                                                  (render half) consumes
       ▼
 platform API calls
@@ -80,7 +80,7 @@ platform API calls
 
 - `{channel}.{account}.{peer}` is the **endpoint address**; tokens must be
   subject-safe and edges own the encoding.
-- The router subscribes `chat.{prefix}.in.>` and is channel-blind; a new
+- The router subscribes `channel.{prefix}.in.>` and is channel-blind; a new
   channel is a new edge binary and zero router changes.
 - The subjects carry exactly the types the shared crate already defines; the
   extraction is deployment surgery, not schema design.
@@ -130,10 +130,10 @@ truth and whatever tool mutates it is pluggable.
 
 | Bucket | Key | Value |
 | --- | --- | --- |
-| `chat_principals_{prefix}` | principal id | display info, policy flags |
-| `chat_endpoints_{prefix}` | endpoint address | principal id |
-| `chat_bindings_{prefix}` | endpoint address | conversation id |
-| `chat_conversations_{prefix}` | conversation id | principal id, agent_id, current_session, activity timestamps |
+| `channel_principals_{prefix}` | principal id | display info, policy flags |
+| `channel_endpoints_{prefix}` | endpoint address | principal id |
+| `channel_bindings_{prefix}` | endpoint address | conversation id |
+| `channel_conversations_{prefix}` | conversation id | principal id, agent_id, current_session, activity timestamps |
 
 Access control is identity: an endpoint that resolves to no principal is
 rejected (or ignored) at the bridge. This replaces the per-channel allowlist
@@ -141,7 +141,7 @@ concept with one channel-neutral mechanism.
 
 ## Shared-crate types (the wire schemas in waiting)
 
-**Inbound chat event** (a Rust type in v1; the `chat.*.in.*` payload after
+**Inbound event** (a Rust type in v1; the `channel.*.in.*` payload after
 extraction):
 
 ```
@@ -165,7 +165,7 @@ happens to advertise. A destructive command additionally authorizes the sender's
 own endpoint rather than the conversation's, since a group chat is one endpoint
 shared by everyone in it.
 
-**Render commands** (a Rust enum in v1; the `chat.*.out.*` payload after
+**Render commands** (a Rust enum in v1; the `channel.*.out.*` payload after
 extraction):
 
 | Command | Purpose |
@@ -245,7 +245,7 @@ retains full fidelity for replay when a future need appears.
 
 ## Decisions and rejected alternatives
 
-1. **V1 goes direct: one bridge worker, no `chat.>` subjects yet.** The
+1. **V1 goes direct: one bridge worker, no `channel.>` subjects yet.** The
    neutral vocabulary ships as types in a shared crate; the namespace is the
    documented extraction path, triggered by a second channel or a second
    consumer. Rationale: acp-nats already provides the NATS seam and its
@@ -276,9 +276,9 @@ retains full fidelity for replay when a future need appears.
 
 - `telegram-agent`: its `llm.rs` and `conversation.rs` are the wrong layer
   (channels must not own a model loop) and disappear. Its consumer skeleton
-  seeds `chat-bridge-telegram`.
+  seeds `channel-bridge-telegram`.
 - `telegram-bot`: its bridge/transform and outbound halves fold into
-  `chat-bridge-telegram`, re-targeted at the shared-crate types; the typed
+  `channel-bridge-telegram`, re-targeted at the shared-crate types; the typed
   Telegram event vocabulary in `telegram-types` is explicitly not the neutral
   model and shrinks to whatever the bridge still needs internally.
 - `telegram-nats` (`tgbot.>` subjects, per-prefix streams): transitional,
@@ -295,7 +295,7 @@ retains full fidelity for replay when a future need appears.
 1. User sends "hello" to the bot on Telegram. Telegram POSTs the webhook;
    trogon-gateway validates and publishes the raw Update to
    `telegram.message` (stream `TELEGRAM`).
-2. chat-bridge-telegram consumes it, parses the Update, encodes the endpoint
+2. channel-bridge-telegram consumes it, parses the Update, encodes the endpoint
    address, and eager-downloads any attachments into the object store.
 3. The bridge resolves endpoint to principal (reject if unknown), endpoint to
    conversation (create via routing policy if absent, writing the sticky

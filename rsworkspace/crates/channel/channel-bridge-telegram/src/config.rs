@@ -7,7 +7,7 @@ use trogon_std::env::ReadEnv;
 pub struct BridgeConfig {
     pub acp: acp_nats::Config,
     /// Environment/tenant token for KV buckets and the durable consumer name.
-    pub chat_prefix: String,
+    pub channel_prefix: String,
     /// JetStream stream the trogon-gateway Telegram source provisions.
     pub inbound_stream: String,
     pub bot_token: String,
@@ -31,38 +31,38 @@ impl BridgeConfig {
     pub fn from_env<E: ReadEnv>(env: &E) -> anyhow::Result<Self> {
         let bot_token = env.var("TELEGRAM_BOT_TOKEN").context("TELEGRAM_BOT_TOKEN not set")?;
 
-        let chat_prefix = env.var("CHAT_PREFIX").unwrap_or_else(|_| "prod".to_string());
+        let channel_prefix = env.var("CHANNEL_PREFIX").unwrap_or_else(|_| "prod".to_string());
         let inbound_stream = env
             .var("TELEGRAM_INBOUND_STREAM")
             .unwrap_or_else(|_| "TELEGRAM".to_string());
         let bot_account = env.var("TELEGRAM_BOT_ACCOUNT").unwrap_or_else(|_| "bot".to_string());
-        let agent_id = env.var("CHAT_AGENT_ID").unwrap_or_else(|_| "default".to_string());
+        let agent_id = env.var("CHANNEL_AGENT_ID").unwrap_or_else(|_| "default".to_string());
         let agent_cwd = env
-            .var("CHAT_AGENT_CWD")
+            .var("CHANNEL_AGENT_CWD")
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::temp_dir());
 
-        let seed_users = match env.var("CHAT_SEED_TELEGRAM_USERS") {
+        let seed_users = match env.var("CHANNEL_SEED_TELEGRAM_USERS") {
             Ok(raw) => raw
                 .split(',')
                 .filter(|s| !s.trim().is_empty())
                 .map(|s| {
                     s.trim()
                         .parse::<i64>()
-                        .with_context(|| format!("invalid Telegram user id in CHAT_SEED_TELEGRAM_USERS: {s:?}"))
+                        .with_context(|| format!("invalid Telegram user id in CHANNEL_SEED_TELEGRAM_USERS: {s:?}"))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?,
             Err(_) => Vec::new(),
         };
 
-        let command_triggers = match env.var("CHAT_NEW_SESSION_TRIGGERS") {
+        let command_triggers = match env.var("CHANNEL_NEW_SESSION_TRIGGERS") {
             Ok(raw) => CommandTriggers::new(
                 raw.split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(String::from),
             )
-            .context("invalid CHAT_NEW_SESSION_TRIGGERS")?,
+            .context("invalid CHANNEL_NEW_SESSION_TRIGGERS")?,
             Err(_) => CommandTriggers::default(),
         };
 
@@ -74,7 +74,7 @@ impl BridgeConfig {
 
         Ok(Self {
             acp,
-            chat_prefix,
+            channel_prefix,
             inbound_stream,
             bot_token,
             bot_account,

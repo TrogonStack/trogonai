@@ -45,21 +45,21 @@ services:
       start_period: 10s
       retries: 3
 
-  # Telegram chat bridge: consumes the gateway's raw TELEGRAM stream and
+  # Telegram channel bridge: consumes the gateway's raw TELEGRAM stream and
   # drives the shared agent over acp-nats. Needs the gateway's Telegram
   # source enabled (provisions the stream) and an agent behind acp-nats.
-  chat-bridge-telegram:
+  channel-bridge-telegram:
     build:
       context: ../../../rsworkspace
-      dockerfile: ../devops/docker/compose/services/chat-bridge-telegram/Dockerfile
+      dockerfile: ../devops/docker/compose/services/channel-bridge-telegram/Dockerfile
     env_file:
       - path: .env
         required: false
     environment:
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
-      CHAT_SEED_TELEGRAM_USERS: "${CHAT_SEED_TELEGRAM_USERS:-}"
-      CHAT_PREFIX: "${CHAT_PREFIX:-prod}"
-      CHAT_NEW_SESSION_TRIGGERS: "${CHAT_NEW_SESSION_TRIGGERS:-/new,/reset}"
+      CHANNEL_SEED_TELEGRAM_USERS: "${CHANNEL_SEED_TELEGRAM_USERS:-}"
+      CHANNEL_PREFIX: "${CHANNEL_PREFIX:-prod}"
+      CHANNEL_NEW_SESSION_TRIGGERS: "${CHANNEL_NEW_SESSION_TRIGGERS:-/new,/reset}"
       TELEGRAM_INBOUND_STREAM: "${TELEGRAM_INBOUND_STREAM:-TELEGRAM}"
       ACP_PREFIX: "${ACP_PREFIX:-acp}"
       NATS_URL: "nats:4222"

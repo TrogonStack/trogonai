@@ -74,7 +74,7 @@ pub struct SessionRelease {
     pub closed: ReleaseStep,
 }
 
-/// The one seam between chat routing and agent protocols. One implementation
+/// The one seam between channel routing and agent protocols. One implementation
 /// per protocol (ACP first; A2A and HTTP later); the implementation owns all
 /// protocol specifics including how streamed agent output reaches the
 /// renderer. Deliberately not a NATS namespace: protocol-neutral agent

@@ -21,7 +21,7 @@ pub struct Attachment {
 }
 
 /// A normalized inbound message: what any channel bridge produces after
-/// stripping its platform's shape. This type is the `chat.*.in.*` payload
+/// stripping its platform's shape. This type is the `channel.*.in.*` payload
 /// once the multi-channel extraction happens; until then it travels
 /// in-process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
