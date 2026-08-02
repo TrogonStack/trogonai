@@ -16,15 +16,32 @@ use trogon_scheduler::{
     projections_v1,
 };
 
+fn fixture_schedule_id(label: &str) -> String {
+    match label {
+        "missing" => "00000000000000000000000000000001",
+        "alpha" => "00000000000000000000000000000002",
+        "beta" => "00000000000000000000000000000003",
+        "keep" => "00000000000000000000000000000004",
+        "stale" => "00000000000000000000000000000005",
+        "orders" => "00000000000000000000000000000006",
+        "binary" => "00000000000000000000000000000007",
+        "broken" => "00000000000000000000000000000008",
+        "ok" => "00000000000000000000000000000009",
+        "absent" => "0000000000000000000000000000000a",
+        _ => panic!("missing explicit schedule ID fixture for {label}"),
+    }
+    .to_string()
+}
+
 fn id(raw: &str) -> ScheduleId {
-    ScheduleId::parse(raw).unwrap()
+    ScheduleId::parse(&fixture_schedule_id(raw)).unwrap()
 }
 
 /// A complete projection so the query side's `schedule_from_view` decodes it
 /// cleanly: it needs schedule, delivery, and message present.
 fn schedule_projection(id: &str) -> projections_v1::ScheduleProjection {
     projections_v1::ScheduleProjection {
-        schedule_id: id.to_string(),
+        schedule_id: fixture_schedule_id(id),
         schedule: MessageField::some(projections_v1::Schedule {
             kind: Some(
                 projections_v1::schedule::Every {
@@ -77,7 +94,7 @@ async fn upsert_get_list_delete_round_trip() {
         .await
         .unwrap()
         .expect("alpha present");
-    assert_eq!(alpha.schedule_id, "alpha");
+    assert_eq!(alpha.schedule_id, fixture_schedule_id("alpha"));
 
     let mut ids: Vec<String> = store
         .list_projections()
@@ -87,7 +104,9 @@ async fn upsert_get_list_delete_round_trip() {
         .map(|projection| projection.schedule_id)
         .collect();
     ids.sort();
-    assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
+    let mut expected_ids = vec![fixture_schedule_id("alpha"), fixture_schedule_id("beta")];
+    expected_ids.sort();
+    assert_eq!(ids, expected_ids);
 
     // Upsert is idempotent: replacing an existing row keeps a single entry.
     store.upsert_projection(&schedule_projection("alpha")).await.unwrap();
@@ -138,7 +157,7 @@ async fn schedule_fields_are_stored_as_typed_columns() {
     let row = sqlx::query(
         "SELECT schedule_kind, delivery_kind, delivery_subject FROM schedules_projection WHERE schedule_id = $1",
     )
-    .bind("orders")
+    .bind(fixture_schedule_id("orders"))
     .fetch_one(store.pool())
     .await
     .unwrap();
@@ -193,8 +212,9 @@ async fn corrupt_row_is_unreadable_not_silently_repaired() {
     sqlx::query(
         "INSERT INTO schedules_projection \
              (schedule_id, status, schedule_kind, cron_expr, delivery_kind, delivery_subject, message_headers) \
-         VALUES ('broken', 'scheduled', 'cron', '* * * * *', 'nats_message', 'agent.run', '[{\"name\": 5, \"value\": \"x\"}]')",
+         VALUES ($1, 'scheduled', 'cron', '* * * * *', 'nats_message', 'agent.run', '[{\"name\": 5, \"value\": \"x\"}]')",
     )
+    .bind(fixture_schedule_id("broken"))
     .execute(store.pool())
     .await
     .unwrap();
@@ -215,7 +235,7 @@ async fn corrupt_row_is_unreadable_not_silently_repaired() {
         .collect();
     assert_eq!(
         ids,
-        vec!["ok".to_string()],
+        vec![fixture_schedule_id("ok")],
         "list skips the corrupt row, keeps the rest"
     );
 }
@@ -226,21 +246,20 @@ async fn projection_queries_read_through_the_backend() {
     let (_container, store) = start().await;
     store.upsert_projection(&schedule_projection("orders")).await.unwrap();
 
-    let fetched =
-        projection_queries::get_schedule(&store, GetScheduleCommand::new(ScheduleId::parse("orders").unwrap()))
-            .await
-            .unwrap()
-            .expect("orders present");
-    assert_eq!(fetched.id, "orders");
+    let fetched = projection_queries::get_schedule(&store, GetScheduleCommand::new(id("orders")))
+        .await
+        .unwrap()
+        .expect("orders present");
+    assert_eq!(fetched.id, fixture_schedule_id("orders"));
 
     let listed = projection_queries::list_schedules(&store, ListSchedulesCommand)
         .await
         .unwrap();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "orders");
+    assert_eq!(listed[0].id, fixture_schedule_id("orders"));
 
     assert!(
-        projection_queries::get_schedule(&store, GetScheduleCommand::new(ScheduleId::parse("absent").unwrap()))
+        projection_queries::get_schedule(&store, GetScheduleCommand::new(id("absent")))
             .await
             .unwrap()
             .is_none()

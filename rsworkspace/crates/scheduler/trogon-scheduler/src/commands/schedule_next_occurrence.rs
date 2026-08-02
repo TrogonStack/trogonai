@@ -64,14 +64,14 @@ impl ScheduleNextOccurrence {
 }
 
 impl Decider for ScheduleNextOccurrence {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = ScheduleNextOccurrenceError;
     type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -133,7 +133,7 @@ impl Decider for ScheduleNextOccurrence {
                     .plan_next(cursor)
                     .map_err(|source| ScheduleNextOccurrenceError::NextOccurrence { source })?;
 
-                let event = recurrence_event(command.id.as_str(), step, last_sequence, command.now)?;
+                let event = recurrence_event(&command.id.to_string(), step, last_sequence, command.now)?;
 
                 Ok(Decision::event(event))
             }

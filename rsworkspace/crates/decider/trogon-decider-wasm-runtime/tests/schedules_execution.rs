@@ -21,6 +21,9 @@ use trogon_decider_wit::host::CommandEnvelope;
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, v1};
 
+const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
+const MISSING_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bea";
+
 fn schedules_wasm() -> Vec<u8> {
     let relative = "../../../target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm";
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
@@ -105,7 +108,7 @@ async fn create_takes_the_no_stream_fast_path() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();
 
-    let result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
@@ -119,7 +122,7 @@ async fn create_takes_the_no_stream_fast_path() {
         vec![StreamWritePrecondition::NoStream]
     );
     assert_eq!(
-        event_store.stored_event_types("backup"),
+        event_store.stored_event_types(SCHEDULE_ID),
         vec![v1::ScheduleCreated::FULL_NAME.to_string()]
     );
 }
@@ -129,7 +132,7 @@ async fn descriptor_precondition_wins_over_builder_override_for_replay() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .with_write_precondition(StreamWritePrecondition::Any)
         .execute()
         .await
@@ -147,7 +150,7 @@ async fn builder_no_stream_skips_replay_when_descriptor_has_no_precondition() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();
 
-    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("missing"))
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command(MISSING_SCHEDULE_ID))
         .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
@@ -166,7 +169,7 @@ async fn builder_no_stream_skips_snapshot_and_stream_reads_when_descriptor_has_n
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("missing"))
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command(MISSING_SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
@@ -185,11 +188,11 @@ async fn pause_replays_history_and_appends_at_observed_position() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("pause succeeds");
@@ -211,7 +214,7 @@ async fn pausing_a_missing_schedule_is_rejected() {
     let module = schedules_module();
     let event_store = InMemoryEventStore::default();
 
-    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("missing"))
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command(MISSING_SCHEDULE_ID))
         .execute()
         .await
     else {
@@ -248,19 +251,19 @@ async fn snapshot_round_trip_matches_full_replay() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
         .expect("create succeeds");
 
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     let snapshot = snapshot_store
         .get(snapshot_id.as_str())
         .expect("create must write a snapshot");
     assert_eq!(snapshot.position, position(1));
 
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
@@ -278,13 +281,13 @@ async fn a_snapshot_ahead_of_the_stream_is_rejected() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     snapshot_store.insert(
         snapshot_id.as_str(),
         trogon_decider_runtime::Snapshot::new(position(5), OpaqueSnapshotPayload::new(Vec::new())),
     );
 
-    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
@@ -302,13 +305,13 @@ async fn a_snapshot_read_failure_is_rejected_by_default() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
     snapshot_store.fail_reads();
 
-    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let Err(error) = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
@@ -327,13 +330,13 @@ async fn discard_and_replay_recovers_from_a_snapshot_read_failure() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
     snapshot_store.fail_reads();
 
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
         .execute()
@@ -343,7 +346,7 @@ async fn discard_and_replay_recovers_from_a_snapshot_read_failure() {
     assert_eq!(result.stream_position, position(2));
     assert_eq!(event_store.reads_from(), vec![ReadFrom::Beginning]);
 
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     let snapshot = snapshot_store
         .get(snapshot_id.as_str())
         .expect("a fresh snapshot replaces the unreadable one");
@@ -357,18 +360,18 @@ async fn discard_and_replay_recovers_from_a_snapshot_ahead_of_stream() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
 
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     snapshot_store.insert(
         snapshot_id.as_str(),
         trogon_decider_runtime::Snapshot::new(position(5), OpaqueSnapshotPayload::new(Vec::new())),
     );
 
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
         .execute()
@@ -402,19 +405,19 @@ async fn builder_overrides_shape_the_appended_events() {
     let header_name = trogon_decider_runtime::HeaderName::new("trace-id").expect("valid header name");
     let headers = trogon_decider_runtime::Headers::one(header_name, "abc-123").expect("valid header value");
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .with_headers(headers)
         .with_event_id_generator(FixedUuidGenerator(fixed_id))
         .execute()
         .await
         .expect("create succeeds");
 
-    let stored = event_store.stored_events("backup");
+    let stored = event_store.stored_events(SCHEDULE_ID);
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].id, trogon_decider_runtime::EventId::new(fixed_id));
     assert_eq!(stored[0].headers.get_str("trace-id"), Some("abc-123"));
 
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_write_precondition(StreamWritePrecondition::Any)
         .execute()
         .await
@@ -434,12 +437,12 @@ async fn an_empty_snapshot_store_falls_back_to_full_replay() {
     let snapshot_store = InMemorySnapshotStore::default();
     let scheduler = ImmediateSnapshotTaskScheduler;
 
-    WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds");
 
-    let result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
@@ -447,7 +450,7 @@ async fn an_empty_snapshot_store_falls_back_to_full_replay() {
 
     assert_eq!(result.stream_position, position(2));
     assert_eq!(event_store.reads_from(), vec![ReadFrom::Beginning]);
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     assert!(snapshot_store.get(snapshot_id.as_str()).is_some());
 }
 
@@ -459,14 +462,14 @@ async fn a_failing_snapshot_write_does_not_fail_the_command() {
     let scheduler = ImmediateSnapshotTaskScheduler;
     snapshot_store.fail_writes();
 
-    let result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    let result = WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
         .expect("create succeeds even when the snapshot write fails");
 
     assert_eq!(result.stream_position, position(1));
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "backup");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), SCHEDULE_ID);
     assert!(snapshot_store.get(snapshot_id.as_str()).is_none());
 }
 
@@ -489,13 +492,13 @@ async fn the_pooling_allocator_engine_executes_the_fixture_end_to_end() {
     let module = WasmDeciderModule::load(engine, &schedules_wasm()).expect("module loads under the pooling allocator");
     let event_store = InMemoryEventStore::default();
 
-    let create_result = WasmCommandExecution::new(&module, &event_store, &create_command("backup"))
+    let create_result = WasmCommandExecution::new(&module, &event_store, &create_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("create succeeds under the pooling allocator");
     assert_eq!(create_result.stream_position, position(1));
 
-    let pause_result = WasmCommandExecution::new(&module, &event_store, &pause_command("backup"))
+    let pause_result = WasmCommandExecution::new(&module, &event_store, &pause_command(SCHEDULE_ID))
         .execute()
         .await
         .expect("pause succeeds under the pooling allocator");

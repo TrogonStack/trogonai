@@ -98,7 +98,7 @@ pub fn encode_checkpoint_record(record: &ScheduleCheckpointRecord) -> Result<Vec
     let message = v1::Message::from(&MessageEnvelope::from(&record.message));
 
     let stored = checkpoints_v1::ScheduleCheckpoint {
-        schedule_id: Some(record.schedule_id.as_str().to_string()),
+        schedule_id: Some(record.schedule_id.to_string()),
         status: Some(checkpoint_status_to_proto(record.status).into()),
         last_applied_stream_position: Some(record.last_applied_stream_position.as_u64()),
         last_applied_event_id: record.last_applied_event_id.clone(),

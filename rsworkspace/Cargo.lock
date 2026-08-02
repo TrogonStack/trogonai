@@ -6860,7 +6860,6 @@ name = "trogon-scheduler"
 version = "0.1.0"
 dependencies = [
  "async-nats",
- "base64 0.23.0",
  "buffa",
  "buffa-types",
  "bytes",
@@ -6910,6 +6909,7 @@ dependencies = [
  "trogon-decider",
  "trogon-decider-runtime",
  "trogonai-proto",
+ "uuid",
 ]
 
 [[package]]
@@ -7245,7 +7245,6 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
- "sha1_smol",
  "wasm-bindgen",
 ]
 

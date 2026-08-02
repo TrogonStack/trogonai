@@ -24,7 +24,7 @@ pub mod mocks;
 pub use commands::{
     CreateSchedule, CreateScheduleDecideError, EvolveError, PauseSchedule, PauseScheduleError,
     RecordScheduleOccurrence, RecordScheduleOccurrenceError, RemoveSchedule, RemoveScheduleError, ResumeSchedule,
-    ResumeScheduleError, ScheduleNextOccurrence, ScheduleNextOccurrenceError,
+    ResumeScheduleError, ScheduleNextOccurrence, ScheduleNextOccurrenceError, mint_schedule_id,
 };
 pub use config::ScheduleWriteCondition;
 pub use constants::{SCHEDULES_BUCKET, SCHEDULES_CHECKPOINT_KEY};

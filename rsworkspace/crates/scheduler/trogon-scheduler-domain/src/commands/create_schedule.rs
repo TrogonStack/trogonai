@@ -35,7 +35,7 @@ pub enum CreateScheduleDecideError {
 }
 
 impl Decider for CreateSchedule {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = CreateScheduleDecideError;
@@ -44,7 +44,7 @@ impl Decider for CreateSchedule {
     const WRITE_PRECONDITION: Option<WritePrecondition> = Some(WritePrecondition::NoStream);
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -70,7 +70,7 @@ impl Decider for CreateSchedule {
                 Ok(Decision::event(v1::ScheduleEvent {
                     event: Some(
                         v1::ScheduleCreated {
-                            schedule_id: command.id.as_str().to_string(),
+                            schedule_id: command.id.to_string(),
                             status: MessageField::some(v1::ScheduleStatus::from(command.status)),
                             schedule: MessageField::some(
                                 v1::Schedule::try_from(&schedule)

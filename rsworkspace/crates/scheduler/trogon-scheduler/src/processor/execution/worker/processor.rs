@@ -25,7 +25,7 @@ use crate::processor::execution::checkpoints::{
 use crate::processor::execution::execution_schedules::{ExecutionScheduleWriteError, ExecutionScheduleWriter};
 use crate::processor::execution::reconciliation::{
     CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE, DecodedScheduleEvent, ReconcileAction, ReconcileError, Reconciliation,
-    ScheduleChange, ScheduleEventDecodeError, ScheduleKey, ScheduleRequestError, ScheduleSubject, reconcile,
+    ScheduleChange, ScheduleEventDecodeError, ScheduleRequestError, ScheduleSubject, reconcile,
     schedule_change_from_stream_event, stream_routing_matches_payload,
 };
 use crate::telemetry::metrics::ProcessorMetrics;
@@ -201,9 +201,9 @@ where
         + trogon_nats::jetstream::JetStreamKvCreate
         + trogon_nats::jetstream::JetStreamKeyValueUpdate
         + trogon_nats::jetstream::JetStreamKvKeys,
-    E: StreamRead<str> + StreamAppend<str>,
-    <E as StreamRead<str>>::Error: std::error::Error + Send + Sync + 'static,
-    <E as StreamAppend<str>>::Error: std::error::Error + Send + Sync + 'static,
+    E: StreamRead<ScheduleId> + StreamAppend<ScheduleId>,
+    <E as StreamRead<ScheduleId>>::Error: std::error::Error + Send + Sync + 'static,
+    <E as StreamAppend<ScheduleId>>::Error: std::error::Error + Send + Sync + 'static,
 {
     /// Assembles a processor over its execution schedule writer, checkpoint store,
     /// and the schedule event store used to arm recurrence occurrences.
@@ -243,7 +243,7 @@ where
             trogon_semconv::span::SCHEDULER_PROCESS_SCHEDULE_EVENT,
             stream_id = %stream_event.stream_id,
             stream_position = %stream_event.stream_position,
-            schedule_key = tracing::field::Empty,
+            schedule_id = tracing::field::Empty,
             event_type = tracing::field::Empty,
             outcome = tracing::field::Empty,
         );
@@ -299,7 +299,7 @@ where
                     PoisonReasonError::EventDecode {
                         source: ScheduleEventDecodeError::StreamRoutingMismatch {
                             stream_id: stream_event.stream_id.clone(),
-                            schedule_id: change.schedule_id().as_str().to_string(),
+                            schedule_id: change.schedule_id().to_string(),
                         },
                     },
                 ))
@@ -307,12 +307,14 @@ where
         }
 
         let schedule_id = change.schedule_id().clone();
-        let key = ScheduleKey::derive(&schedule_id);
-        tracing::Span::current().record(trogon_semconv::attribute::SCHEDULE_KEY, key.simple());
+        tracing::Span::current().record(
+            trogon_semconv::attribute::SCHEDULE_ID,
+            tracing::field::display(&schedule_id),
+        );
         let event_id = stream_event.event.id.to_string();
         let position = stream_event.stream_position;
 
-        let load_step = match self.checkpoints.load(&key).await {
+        let load_step = match self.checkpoints.load(&schedule_id).await {
             Ok(loaded) => CheckpointLoadStep::Loaded(loaded),
             Err(error) if error.is_transient() => return Err(RetryableError::Checkpoint { source: error }),
             Err(error) => {
@@ -336,7 +338,7 @@ where
                     // future event for this schedule will poison the same
                     // way until an operator deletes the entry.
                     tracing::error!(
-                        schedule_key = key.simple(),
+                        schedule_id = %schedule_id,
                         revision = corrupt_revision,
                         "poisoning corrupt checkpoint without repairing it; delete the KV entry to revive the schedule"
                     );
@@ -523,7 +525,7 @@ where
         &self,
         next_checkpoint: &ScheduleCheckpointRecord,
     ) -> Result<Processed, RetryableError> {
-        match self.checkpoints.load(&next_checkpoint.key()).await {
+        match self.checkpoints.load(&next_checkpoint.schedule_id).await {
             Ok(Some(loaded))
                 if loaded.record.last_applied_stream_position >= next_checkpoint.last_applied_stream_position =>
             {
@@ -603,8 +605,7 @@ fn recover_corrupt_checkpoint(
         | ScheduleChange::Completed { .. } => return Ok(None),
     };
 
-    let key = ScheduleKey::derive(schedule_id);
-    let subject = ScheduleSubject::execution(&key);
+    let subject = ScheduleSubject::execution(schedule_id);
     Ok(Some(Reconciliation {
         action: ReconcileAction::Purge(subject),
         next_checkpoint: ScheduleCheckpointRecord {

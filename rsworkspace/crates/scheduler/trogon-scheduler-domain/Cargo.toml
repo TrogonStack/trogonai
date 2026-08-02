@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 trogon-decider = { workspace = true }
 trogon-decider-runtime = { workspace = true, optional = true }
 trogonai-proto = { path = "../../platform/trogonai-proto", default-features = false, features = ["schedules"] }
+uuid = { version = "=1.24.0", default-features = false }
 
 [dev-dependencies]
 proptest = "1"

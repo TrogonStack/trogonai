@@ -26,6 +26,8 @@ use trogonai_proto::scheduler::schedules::{CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHED
 const EVENTS_STREAM: &str = "WASM_EXECUTION_EVENTS";
 const EVENTS_SUBJECT: &str = "wasm.execution.events.>";
 const SNAPSHOT_BUCKET: &str = "WASM_EXECUTION_SNAPSHOTS";
+const WITHOUT_SNAPSHOT_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bec";
+const WITH_SNAPSHOT_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bed";
 
 #[derive(Clone, Copy)]
 struct TestSubjectResolver;
@@ -154,12 +156,12 @@ async fn builder_no_stream_skips_live_jetstream_replay() {
     let module = schedules_module();
     let (_server, store) = live_store().await;
 
-    WasmCommandExecution::new(&module, &store, &create_command("without-snapshot"))
+    WasmCommandExecution::new(&module, &store, &create_command(WITHOUT_SNAPSHOT_SCHEDULE_ID))
         .execute()
         .await
         .expect("seed schedule history in JetStream");
 
-    let Err(error) = WasmCommandExecution::new(&module, &store, &pause_command("without-snapshot"))
+    let Err(error) = WasmCommandExecution::new(&module, &store, &pause_command(WITHOUT_SNAPSHOT_SCHEDULE_ID))
         .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
         .await
@@ -167,7 +169,7 @@ async fn builder_no_stream_skips_live_jetstream_replay() {
         panic!("pause unexpectedly succeeded");
     };
     assert!(matches!(error, WasmCommandError::Rejected(_)), "{error}");
-    assert_only_creation_is_stored(&store, "without-snapshot").await;
+    assert_only_creation_is_stored(&store, WITHOUT_SNAPSHOT_SCHEDULE_ID).await;
 }
 
 #[tokio::test]
@@ -176,13 +178,13 @@ async fn builder_no_stream_skips_live_jetstream_snapshot_and_replay() {
     let (_server, store) = live_store().await;
 
     let snapshot_scheduler = DrainableSnapshotTaskScheduler::new();
-    WasmCommandExecution::new(&module, &store, &create_command("with-snapshot"))
+    WasmCommandExecution::new(&module, &store, &create_command(WITH_SNAPSHOT_SCHEDULE_ID))
         .with_snapshot_store(&store, &snapshot_scheduler)
         .execute()
         .await
         .expect("seed schedule history and snapshot in JetStream");
     snapshot_scheduler.drain().await;
-    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), "with-snapshot");
+    let snapshot_id = WasmSnapshotId::new(module.name(), module.version(), WITH_SNAPSHOT_SCHEDULE_ID);
     let snapshot = <JetStreamStore<TestSubjectResolver> as SnapshotRead<OpaqueSnapshotPayload, str>>::read_snapshot(
         &store,
         ReadSnapshotRequest {
@@ -193,7 +195,7 @@ async fn builder_no_stream_skips_live_jetstream_snapshot_and_replay() {
     .expect("read seeded snapshot from JetStream");
     assert!(snapshot.snapshot.is_some());
 
-    let Err(error) = WasmCommandExecution::new(&module, &store, &pause_command("with-snapshot"))
+    let Err(error) = WasmCommandExecution::new(&module, &store, &pause_command(WITH_SNAPSHOT_SCHEDULE_ID))
         .with_snapshot_store(&store, &snapshot_scheduler)
         .with_write_precondition(StreamWritePrecondition::NoStream)
         .execute()
@@ -202,5 +204,5 @@ async fn builder_no_stream_skips_live_jetstream_snapshot_and_replay() {
         panic!("pause unexpectedly succeeded");
     };
     assert!(matches!(error, WasmCommandError::Rejected(_)), "{error}");
-    assert_only_creation_is_stored(&store, "with-snapshot").await;
+    assert_only_creation_is_stored(&store, WITH_SNAPSHOT_SCHEDULE_ID).await;
 }

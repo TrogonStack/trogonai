@@ -61,7 +61,7 @@ impl RRuleWakeupPayload {
 
     pub(crate) fn encode(&self) -> Result<Vec<u8>, RRuleWakeupPayloadEncodeError> {
         let wire = RRuleWakeupPayloadWire {
-            schedule_id: self.schedule_id.as_str().to_string(),
+            schedule_id: self.schedule_id.to_string(),
             occurrence_at: self.occurrence_at.to_rfc3339_opts(SecondsFormat::AutoSi, true),
         };
         serde_json::to_vec(&wire).map_err(|source| RRuleWakeupPayloadEncodeError::Json { source })

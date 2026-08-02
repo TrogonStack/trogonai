@@ -43,8 +43,8 @@ fn minimal_create_proto(id: &str) -> v1::CreateSchedule {
 
 #[test]
 fn create_schedule_command_round_trips_from_proto() {
-    let command = CreateSchedule::try_from(minimal_create_proto("backup")).unwrap();
-    assert_eq!(command.id.as_str(), "backup");
+    let command = CreateSchedule::try_from(minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45")).unwrap();
+    assert_eq!(command.id.to_string(), "0198fa2f6d0a7b1a8cf9f762e73a1c45");
     assert_eq!(command.status, ScheduleEventStatus::Scheduled);
 }
 
@@ -74,7 +74,7 @@ fn timezone(id: &str) -> trogonai_proto::google::r#type::TimeZone {
 }
 
 fn create_proto_with_schedule(kind: v1::schedule::Kind) -> v1::CreateSchedule {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.schedule = MessageField::some(v1::Schedule { kind: Some(kind) });
     proto
 }
@@ -122,7 +122,7 @@ fn create_with_rrule_schedule_round_trips() {
 
 #[test]
 fn create_with_paused_status_round_trips() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.status = MessageField::some(v1::ScheduleStatus {
         kind: Some(v1::schedule_status::Paused {}.into()),
     });
@@ -132,7 +132,7 @@ fn create_with_paused_status_round_trips() {
 
 #[test]
 fn create_with_delivery_ttl_and_source_round_trips() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.delivery = MessageField::some(v1::Delivery {
         kind: Some(
             v1::delivery::NatsMessage {
@@ -160,7 +160,7 @@ fn create_with_delivery_ttl_and_source_round_trips() {
 
 #[test]
 fn create_with_non_json_content_and_headers_round_trips() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.message = MessageField::some(v1::Message {
         content: MessageField::some(content_v1alpha1::Content {
             content_type: "text/plain".to_string(),
@@ -176,7 +176,7 @@ fn create_with_non_json_content_and_headers_round_trips() {
 
 #[test]
 fn create_rejects_empty_schedule_id() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.schedule_id = String::new();
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -186,7 +186,7 @@ fn create_rejects_empty_schedule_id() {
 
 #[test]
 fn create_rejects_missing_status() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.status = MessageField::none();
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -196,7 +196,7 @@ fn create_rejects_missing_status() {
 
 #[test]
 fn create_rejects_status_without_kind() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.status = MessageField::some(v1::ScheduleStatus { kind: None });
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -206,7 +206,7 @@ fn create_rejects_status_without_kind() {
 
 #[test]
 fn create_rejects_missing_schedule() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.schedule = MessageField::none();
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -224,14 +224,14 @@ fn create_rejects_schedule_without_kind() {
 }
 
 fn create_proto_with_schedule_none() -> v1::CreateSchedule {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.schedule = MessageField::some(v1::Schedule { kind: None });
     proto
 }
 
 #[test]
 fn create_rejects_missing_delivery() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.delivery = MessageField::none();
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -241,7 +241,7 @@ fn create_rejects_missing_delivery() {
 
 #[test]
 fn create_rejects_delivery_without_nats_message() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.delivery = MessageField::some(v1::Delivery { kind: None });
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -251,7 +251,7 @@ fn create_rejects_delivery_without_nats_message() {
 
 #[test]
 fn create_rejects_source_without_kind() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.delivery = MessageField::some(v1::Delivery {
         kind: Some(
             v1::delivery::NatsMessage {
@@ -270,7 +270,7 @@ fn create_rejects_source_without_kind() {
 
 #[test]
 fn create_rejects_missing_message() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.message = MessageField::none();
     assert!(matches!(
         CreateSchedule::try_from(proto),
@@ -280,7 +280,7 @@ fn create_rejects_missing_message() {
 
 #[test]
 fn create_rejects_missing_message_content() {
-    let mut proto = minimal_create_proto("backup");
+    let mut proto = minimal_create_proto("0198fa2f6d0a7b1a8cf9f762e73a1c45");
     proto.message = MessageField::some(v1::Message {
         content: MessageField::none(),
         headers: Vec::new(),
@@ -322,17 +322,17 @@ fn create_rejects_missing_every_duration() {
 #[test]
 fn pause_command_round_trips() {
     let command = PauseSchedule::try_from(v1::PauseSchedule {
-        schedule_id: "backup".to_string(),
+        schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
     })
     .unwrap();
-    assert_eq!(command.id.as_str(), "backup");
+    assert_eq!(command.id.to_string(), "0198fa2f6d0a7b1a8cf9f762e73a1c45");
 }
 
 #[test]
 fn remove_command_round_trips() {
     assert!(
         RemoveSchedule::try_from(v1::RemoveSchedule {
-            schedule_id: "backup".to_string(),
+            schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
         })
         .is_ok()
     );
@@ -352,7 +352,7 @@ fn remove_command_requires_schedule_id() {
 fn resume_command_round_trips() {
     assert!(
         ResumeSchedule::try_from(v1::ResumeSchedule {
-            schedule_id: "backup".to_string(),
+            schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c45".to_string(),
         })
         .is_ok()
     );

@@ -377,16 +377,17 @@ fn round_trips_through_the_kv_codec() {
 }
 
 #[test]
-fn read_model_token_from_event_subject_extracts_last_segment() {
-    let subject = format!("{EVENTS_SUBJECT_PREFIX}deadbeef");
-    assert_eq!(read_model_token_from_event_subject(&subject).unwrap(), "deadbeef");
+fn schedule_id_from_event_subject_extracts_last_segment() {
+    let id = crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c07").unwrap();
+    let subject = format!("{EVENTS_SUBJECT_PREFIX}{id}");
+    assert_eq!(schedule_id_from_event_subject(&subject).unwrap(), id);
 }
 
 #[test]
-fn read_model_token_rejects_foreign_and_empty_subjects() {
-    assert!(read_model_token_from_event_subject("other.subject.deadbeef").is_err());
+fn schedule_id_parser_rejects_foreign_and_empty_subjects() {
+    assert!(schedule_id_from_event_subject("other.subject.deadbeef").is_err());
     let empty_token = EVENTS_SUBJECT_PREFIX.to_string();
-    assert!(read_model_token_from_event_subject(&empty_token).is_err());
+    assert!(schedule_id_from_event_subject(&empty_token).is_err());
 }
 
 #[test]

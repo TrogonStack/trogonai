@@ -220,13 +220,14 @@ impl<Resolver> JetStreamStore<Resolver> {
 #[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamRead<StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
 
     async fn read_stream(&self, request: ReadStreamRequest<'_, StreamId>) -> Result<ReadStreamResponse, Self::Error> {
         let stream_id = request.stream_id;
+        let stream_id_text = stream_id.to_string();
         let subject_state = self
             .subject_resolver
             .resolve_subject_state(self.events_stream(), stream_id)
@@ -242,7 +243,7 @@ where
         let to_sequence = current_position.as_u64();
         let events = read_subject_stream(
             self.events_stream(),
-            stream_id.as_ref(),
+            stream_id_text.as_str(),
             subject_state.subject.as_str(),
             from_sequence,
             to_sequence,
@@ -268,7 +269,7 @@ fn stream_read_from_to_sequence(from: ReadFrom) -> u64 {
 #[cfg(not(coverage))]
 impl<StreamId, Resolver> StreamAppend<StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + ToString + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Resolver: StreamSubjectResolver<StreamId>,
 {
     type Error = JetStreamStoreError<Resolver::Error>;
@@ -283,7 +284,7 @@ where
         let span = tracing::info_span!(
             span::DECIDER_APPEND_STREAM,
             otel.kind = "client",
-            stream_id = %stream_id.as_ref(),
+            stream_id = %stream_id,
             write_precondition = %write_precondition_attribute(expected_state).as_str(),
         );
 
@@ -331,7 +332,7 @@ where
 #[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotRead<Payload, StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Payload: SnapshotPayloadDecode + SnapshotType + Send,
     <Payload as SnapshotPayloadDecode>::Error: std::error::Error + Send + Sync + 'static,
     <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
@@ -347,7 +348,7 @@ where
         &self,
         request: ReadSnapshotRequest<'_, StreamId>,
     ) -> Result<ReadSnapshotResponse<Payload>, Self::Error> {
-        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref())
+        crate::snapshot_store::read_snapshot(self.snapshot_bucket(), &request.snapshot_id.to_string())
             .await
             .map(|snapshot| ReadSnapshotResponse { snapshot })
             .map_err(JetStreamStoreError::Snapshot)
@@ -357,7 +358,7 @@ where
 #[cfg(not(coverage))]
 impl<StreamId, Payload, Resolver> SnapshotWrite<Payload, StreamId> for JetStreamStore<Resolver>
 where
-    StreamId: AsRef<str> + Send + Sync + ?Sized,
+    StreamId: std::fmt::Display + Send + Sync + ?Sized,
     Payload: SnapshotPayloadEncode + SnapshotType + Send,
     <Payload as SnapshotPayloadEncode>::Error: std::error::Error + Send + Sync + 'static,
     <Payload as SnapshotType>::Error: std::error::Error + Send + Sync + 'static,
@@ -373,10 +374,14 @@ where
         &self,
         request: WriteSnapshotRequest<'_, Payload, StreamId>,
     ) -> Result<WriteSnapshotResponse, Self::Error> {
-        crate::snapshot_store::write_snapshot(self.snapshot_bucket(), request.snapshot_id.as_ref(), request.snapshot)
-            .await
-            .map(|()| WriteSnapshotResponse)
-            .map_err(JetStreamStoreError::Snapshot)
+        crate::snapshot_store::write_snapshot(
+            self.snapshot_bucket(),
+            &request.snapshot_id.to_string(),
+            request.snapshot,
+        )
+        .await
+        .map(|()| WriteSnapshotResponse)
+        .map_err(JetStreamStoreError::Snapshot)
     }
 }
 

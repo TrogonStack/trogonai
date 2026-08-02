@@ -27,14 +27,14 @@ impl RemoveSchedule {
 }
 
 impl Decider for RemoveSchedule {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = RemoveScheduleError;
     type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -60,7 +60,7 @@ impl Decider for RemoveSchedule {
                 Ok(Decision::event(v1::ScheduleEvent {
                     event: Some(
                         v1::ScheduleRemoved {
-                            schedule_id: command.id.as_str().to_string(),
+                            schedule_id: command.id.to_string(),
                         }
                         .into(),
                     ),

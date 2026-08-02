@@ -27,8 +27,8 @@ use trogon_nats::jetstream::{
     JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamPublisher,
     JetStreamSubjectPurger,
 };
+use trogon_std::{NowV7, UuidV7Generator};
 use trogonai_proto::scheduler::schedules::v1;
-use uuid::Uuid;
 
 use crate::processor::execution::checkpoints::{corrupt_checkpoint_schedule, rewrite_checkpoint_watermark};
 
@@ -361,9 +361,9 @@ pub fn stream_event_with_headers(
     let content = event.encode().expect("schedule event encodes");
     let r#type = event.event_type().expect("schedule event has a type").to_string();
     StreamEvent {
-        stream_id: schedule_id.to_string(),
+        stream_id: ScheduleId::parse(schedule_id).unwrap().to_string(),
         event: Event {
-            id: EventId::new(deterministic_event_id(schedule_id, position)),
+            id: EventId::new(UuidV7Generator.now_v7()),
             r#type,
             content,
             headers,
@@ -376,9 +376,9 @@ pub fn stream_event_with_headers(
 /// A foreign envelope whose event type is not owned by the scheduler decider.
 pub fn foreign_stream_event(position: u64) -> StreamEvent {
     StreamEvent {
-        stream_id: "orders/created".to_string(),
+        stream_id: "0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string(),
         event: Event {
-            id: EventId::new(deterministic_event_id("foreign", position)),
+            id: EventId::new(UuidV7Generator.now_v7()),
             r#type: "trogonai.other.v1.SomethingElse".to_string(),
             content: vec![1, 2, 3],
             headers: Headers::empty(),
@@ -392,9 +392,9 @@ pub fn foreign_stream_event(position: u64) -> StreamEvent {
 /// payload, exercising the durable failure-record path.
 pub fn malformed_stream_event(position: u64) -> StreamEvent {
     StreamEvent {
-        stream_id: "orders/created".to_string(),
+        stream_id: "0198fa2f6d0a7b1a8cf9f762e73a1c01".to_string(),
         event: Event {
-            id: EventId::new(deterministic_event_id("malformed", position)),
+            id: EventId::new(UuidV7Generator.now_v7()),
             r#type: "trogonai.scheduler.schedules.v1.ScheduleCreated".to_string(),
             content: vec![0xff, 0xff, 0xff, 0xff],
             headers: Headers::empty(),
@@ -414,10 +414,6 @@ pub fn recorded_at() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn deterministic_event_id(seed: &str, position: u64) -> Uuid {
-    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("{seed}:{position}").as_bytes())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MemoryEventStoreError {
     #[error("optimistic concurrency conflict")]
@@ -433,8 +429,9 @@ pub struct MemoryEventStore {
 
 impl MemoryEventStore {
     pub fn events(&self, stream_id: &str) -> Vec<StreamEvent> {
+        let stream_id = ScheduleId::parse(stream_id).unwrap();
         futures::executor::block_on(self.read_stream(ReadStreamRequest {
-            stream_id,
+            stream_id: &stream_id,
             from: ReadFrom::Beginning,
         }))
         .unwrap()
@@ -446,12 +443,12 @@ impl MemoryEventStore {
     }
 }
 
-impl StreamRead<str> for MemoryEventStore {
+impl StreamRead<ScheduleId> for MemoryEventStore {
     type Error = MemoryEventStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(&self, request: ReadStreamRequest<'_, ScheduleId>) -> Result<ReadStreamResponse, Self::Error> {
         let streams = self.streams.lock().unwrap();
-        let events = streams.get(request.stream_id).cloned().unwrap_or_default();
+        let events = streams.get(&request.stream_id.to_string()).cloned().unwrap_or_default();
         let current_position = Self::position_for_len(events.len());
         let from = match request.from {
             ReadFrom::Beginning => 1,
@@ -478,10 +475,13 @@ impl StreamRead<str> for MemoryEventStore {
     }
 }
 
-impl StreamAppend<str> for MemoryEventStore {
+impl StreamAppend<ScheduleId> for MemoryEventStore {
     type Error = MemoryEventStoreError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, ScheduleId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let mut streams = self.streams.lock().unwrap();
         let events = streams.entry(request.stream_id.to_string()).or_default();
         let current_position = Self::position_for_len(events.len());

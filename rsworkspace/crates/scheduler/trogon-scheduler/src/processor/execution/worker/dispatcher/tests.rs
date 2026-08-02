@@ -19,7 +19,6 @@ use crate::commands::domain::{
 use crate::processor::execution::checkpoints::ScheduleCheckpointStore;
 use crate::processor::execution::execution_schedules::ExecutionScheduleWriter;
 use crate::processor::execution::reconciliation::{DecodedScheduleEvent, ScheduleSubject};
-use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
 use crate::processor::execution::worker::ProcessorMetrics;
 
 #[derive(Clone)]
@@ -71,7 +70,7 @@ fn created(id: &str, schedule: Schedule) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: ScheduleId::parse(id).unwrap().to_string(),
                 status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Scheduled)),
                 schedule: MessageField::some(v1::Schedule::try_from(&ScheduleEventSchedule::from(&schedule)).unwrap()),
                 delivery: MessageField::some(
@@ -94,7 +93,7 @@ fn paused(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::SchedulePaused {
-                schedule_id: id.to_string(),
+                schedule_id: ScheduleId::parse(id).unwrap().to_string(),
             }
             .into(),
         ),
@@ -105,7 +104,7 @@ fn resumed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleResumed {
-                schedule_id: id.to_string(),
+                schedule_id: ScheduleId::parse(id).unwrap().to_string(),
             }
             .into(),
         ),
@@ -116,7 +115,7 @@ fn removed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: id.to_string(),
+                schedule_id: ScheduleId::parse(id).unwrap().to_string(),
             }
             .into(),
         ),
@@ -143,8 +142,8 @@ fn clock() -> Clock {
     Arc::new(recorded_at)
 }
 
-fn key_for_stream(id: &str) -> ScheduleKey {
-    ScheduleKey::for_stream(&StreamRoutingId::from(id))
+fn key_for_stream(id: &str) -> String {
+    ScheduleId::parse(id).unwrap().to_string()
 }
 
 async fn drain(mut reports: mpsc::Receiver<DispatchReport>, expected: usize) -> Vec<DispatchReport> {
@@ -164,9 +163,9 @@ async fn records_for_one_schedule_are_processed_in_submission_order() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let key = key_for_stream(id);
-    let subject = ScheduleSubject::execution(&key);
+    let subject = ScheduleSubject::execution(&ScheduleId::parse(key.as_str()).unwrap());
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log.clone());
 
@@ -200,7 +199,7 @@ async fn records_for_one_schedule_are_processed_in_submission_order() {
         ]
     );
 
-    let stored = kv.contains(&format!("v1.{}", key.simple()));
+    let stored = kv.contains(&format!("v1.{key}"));
     assert!(stored, "checkpoint record persists");
     assert_eq!(execution.scheduled_count(subject.as_str()), 0);
     assert_eq!(log.lock().unwrap().len(), 4);
@@ -220,7 +219,13 @@ async fn distinct_schedules_all_make_progress_and_lanes_are_evicted() {
 
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log);
-    let ids = ["a", "b", "c", "d", "e"];
+    let ids = [
+        "0198fa2f6d0a7b1a8cf9f762e73a1c08",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c09",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c0a",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c0b",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c0c",
+    ];
     for (offset, id) in ids.iter().enumerate() {
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
         handle
@@ -257,7 +262,7 @@ async fn transient_failure_is_retried_not_acked() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log.clone());
     let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
@@ -269,7 +274,7 @@ async fn transient_failure_is_retried_not_acked() {
 
     assert!(reports[0].result.is_err());
     assert!(matches!(log.lock().unwrap().as_slice(), [Settlement::Retry]));
-    assert!(!kv.contains(&format!("v1.{}", key_for_stream(id).simple())));
+    assert!(!kv.contains(&format!("v1.{}", key_for_stream(id))));
 }
 
 #[tokio::test]
@@ -278,15 +283,15 @@ async fn paused_create_does_not_publish() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let key = key_for_stream(id);
-    let subject = ScheduleSubject::execution(&key);
+    let subject = ScheduleSubject::execution(&ScheduleId::parse(key.as_str()).unwrap());
     let log = Arc::new(Mutex::new(Vec::new()));
 
     let event = v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: ScheduleId::parse(id).unwrap().to_string(),
                 status: MessageField::some(v1::ScheduleStatus::from(ScheduleEventStatus::Paused)),
                 schedule: MessageField::some(
                     v1::Schedule::try_from(&ScheduleEventSchedule::from(
@@ -319,7 +324,7 @@ async fn paused_create_does_not_publish() {
 
     assert_eq!(reports[0].result.clone().unwrap(), ProcessedOutcome::StoredPaused);
     assert_eq!(execution.scheduled_count(subject.as_str()), 0);
-    assert!(kv.contains(&format!("v1.{}", key.simple())));
+    assert!(kv.contains(&format!("v1.{key}")));
 }
 
 #[tokio::test(start_paused = true)]
@@ -336,7 +341,10 @@ async fn full_report_channel_does_not_block_dispatcher_completion() {
 
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log);
-    for (position, id) in ["a", "b"].into_iter().enumerate() {
+    for (position, id) in ["0198fa2f6d0a7b1a8cf9f762e73a1c08", "0198fa2f6d0a7b1a8cf9f762e73a1c09"]
+        .into_iter()
+        .enumerate()
+    {
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
         handle
             .submit(stream_event(&event, id, position as u64 + 1), message.clone())
@@ -390,7 +398,7 @@ async fn redelivered_record_is_processed() {
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
     let log = Arc::new(Mutex::new(Vec::new()));
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
     handle
         .submit(
@@ -418,7 +426,7 @@ async fn missing_checkpoint_is_retried_below_the_delivery_ceiling() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let log = Arc::new(Mutex::new(Vec::new()));
     handle
         .submit(stream_event(&paused(id), id, 2), mock_message(log.clone()))
@@ -439,7 +447,7 @@ async fn missing_checkpoint_is_poisoned_at_the_delivery_ceiling() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let log = Arc::new(Mutex::new(Vec::new()));
     handle
         .submit(
@@ -529,7 +537,7 @@ async fn settlement_panic_does_not_abort_dispatcher() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, PanickingMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
     handle
         .submit(stream_event(&event, id, 1), PanickingMessage)
@@ -622,7 +630,7 @@ async fn settlement_panic_on_retry_does_not_abort_dispatcher() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, SelectivePanickingMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     handle
         .submit(
             stream_event(&paused(id), id, 1),
@@ -645,7 +653,7 @@ async fn processor_panic_is_recovered_and_settled() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     kv.panic_on_next_entry();
     let log = Arc::new(Mutex::new(Vec::new()));
     handle
@@ -681,7 +689,7 @@ async fn poison_failure_panic_falls_back_to_retry() {
     let report = poison_record(
         processor,
         mock_message(Arc::new(Mutex::new(Vec::new()))),
-        key_for_stream("malformed"),
+        key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c22"),
         StreamPosition::try_new(9).unwrap(),
         failure,
     )
@@ -726,7 +734,7 @@ async fn settlement_error_is_reported() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, FailingMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     handle
         .submit(
             stream_event(
@@ -802,7 +810,14 @@ async fn dispatcher_finishes_when_report_receiver_is_dropped() {
 
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log);
-    for (index, id) in ["a", "b", "c"].into_iter().enumerate() {
+    for (index, id) in [
+        "0198fa2f6d0a7b1a8cf9f762e73a1c08",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c09",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c0a",
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
         handle
             .submit(stream_event(&event, id, index as u64 + 1), message.clone())
@@ -832,7 +847,14 @@ async fn slow_report_consumer_still_receives_all_reports() {
 
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log);
-    for (index, id) in ["a", "b", "c"].into_iter().enumerate() {
+    for (index, id) in [
+        "0198fa2f6d0a7b1a8cf9f762e73a1c08",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c09",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c0a",
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
         handle
             .submit(stream_event(&event, id, index as u64 + 1), message.clone())
@@ -862,14 +884,18 @@ async fn mismatched_stream_ids_for_one_schedule_stay_on_one_lane() {
     );
 
     let schedule = Schedule::every(std::time::Duration::from_secs(30)).unwrap();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let message = mock_message(Arc::new(Mutex::new(Vec::new())));
 
     let mut first = stream_event(&created(id, schedule.clone()), id, 1);
     first.stream_id = "wrong/create".to_string();
     handle.submit(first, message.clone()).await.unwrap();
 
-    let second = stream_event(&created("other/schedule", schedule), "other/schedule", 2);
+    let second = stream_event(
+        &created("0198fa2f6d0a7b1a8cf9f762e73a1c21", schedule),
+        "0198fa2f6d0a7b1a8cf9f762e73a1c21",
+        2,
+    );
     handle.submit(second, message.clone()).await.unwrap();
 
     let mut third = stream_event(&paused(id), id, 3);
@@ -905,7 +931,7 @@ async fn same_lane_resumes_after_the_first_record_finishes() {
         },
     );
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let log = Arc::new(Mutex::new(Vec::new()));
     let message = mock_message(log);
     for position in 1..=2 {
@@ -934,7 +960,7 @@ async fn dropped_report_receiver_stops_drain_early() {
     let (handle, join, reports) =
         spawn_dispatcher::<_, _, _, _, MockMessage>(processor, clock(), DispatcherConfig::default());
 
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let event = created(id, Schedule::every(std::time::Duration::from_secs(30)).unwrap());
     handle
         .submit(
@@ -956,7 +982,7 @@ fn flush_pending_reports_clears_queue_when_channel_is_closed() {
 
     let report = DispatchReport {
         stream_position: StreamPosition::try_new(1).unwrap(),
-        lane: key_for_stream("flush-closed"),
+        lane: key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c25"),
         result: Ok(ProcessedOutcome::Published),
     };
 
@@ -974,12 +1000,12 @@ fn flush_pending_reports_clears_queue_when_channel_is_closed() {
 #[test]
 fn flush_pending_reports_drains_every_report_when_channel_has_capacity() {
     let (tx, mut rx) = mpsc::channel::<DispatchReport>(8);
-    let lane = key_for_stream("flush-ok");
+    let lane = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c27");
     let mut pending_reports = std::collections::VecDeque::new();
     for stream_position in 1..=4 {
         pending_reports.push_back(DispatchReport {
             stream_position: StreamPosition::try_new(stream_position).unwrap(),
-            lane,
+            lane: lane.clone(),
             result: Ok(ProcessedOutcome::Published),
         });
     }
@@ -999,11 +1025,11 @@ async fn drain_one_reserved_report_sends_front_report_through_permit() {
     let (tx, mut rx) = mpsc::channel::<DispatchReport>(4);
     let permit = tx.reserve().await.expect("permit must reserve");
 
-    let lane = key_for_stream("drain-ok");
+    let lane = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c24");
     let mut pending_reports = std::collections::VecDeque::new();
     pending_reports.push_back(DispatchReport {
         stream_position: StreamPosition::try_new(1).unwrap(),
-        lane,
+        lane: lane.clone(),
         result: Ok(ProcessedOutcome::Published),
     });
 
@@ -1015,11 +1041,11 @@ async fn drain_one_reserved_report_sends_front_report_through_permit() {
 
 #[test]
 fn drain_one_reserved_report_clears_queue_when_channel_closed() {
-    let lane = key_for_stream("drain-closed");
+    let lane = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c23");
     let mut pending_reports = std::collections::VecDeque::new();
     pending_reports.push_back(DispatchReport {
         stream_position: StreamPosition::try_new(1).unwrap(),
-        lane,
+        lane: lane.clone(),
         result: Ok(ProcessedOutcome::Published),
     });
 
@@ -1031,10 +1057,10 @@ fn drain_one_reserved_report_clears_queue_when_channel_closed() {
 #[test]
 fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
     let (tx, _rx) = mpsc::channel::<DispatchReport>(1);
-    let lane = key_for_stream("flush-full");
+    let lane = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c26");
     let blocker = DispatchReport {
         stream_position: StreamPosition::try_new(1).unwrap(),
-        lane,
+        lane: lane.clone(),
         result: Ok(ProcessedOutcome::Published),
     };
     tx.try_send(blocker).expect("seeded send must fit");
@@ -1057,20 +1083,20 @@ fn flush_pending_reports_stops_when_channel_is_full_without_clearing_queue() {
 
 #[test]
 fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
-    let key = key_for_stream("in-flight-key");
+    let key = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c28");
 
     let mut in_flight = HashSet::new();
-    in_flight.insert(key);
+    in_flight.insert(key.clone());
 
     let event = super::super::testkit::malformed_stream_event(1);
-    let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> = HashMap::new();
-    pending.entry(key).or_default().push_back((
+    let mut pending: HashMap<String, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> = HashMap::new();
+    pending.entry(key.clone()).or_default().push_back((
         event,
         DecodedScheduleEvent::Undecoded,
         mock_message(Arc::new(Mutex::new(Vec::new()))),
     ));
 
-    let outcome = resolve_ready_key(key, &in_flight, &mut pending);
+    let outcome = resolve_ready_key(key.clone(), &in_flight, &mut pending);
 
     assert!(
         matches!(outcome, ReadyOutcome::AlreadyInFlight),
@@ -1084,12 +1110,12 @@ fn resolve_ready_key_returns_already_in_flight_when_key_is_in_flight() {
 
 #[test]
 fn resolve_ready_key_returns_empty_queue_when_pending_entry_is_absent() {
-    let key = key_for_stream("no-pending-key");
+    let key = key_for_stream("0198fa2f6d0a7b1a8cf9f762e73a1c29");
 
-    let in_flight: HashSet<ScheduleKey> = HashSet::new();
-    let mut pending: HashMap<ScheduleKey, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> = HashMap::new();
+    let in_flight: HashSet<String> = HashSet::new();
+    let mut pending: HashMap<String, VecDeque<(StreamEvent, DecodedScheduleEvent, MockMessage)>> = HashMap::new();
 
-    let outcome = resolve_ready_key(key, &in_flight, &mut pending);
+    let outcome = resolve_ready_key(key.clone(), &in_flight, &mut pending);
 
     assert!(
         matches!(outcome, ReadyOutcome::EmptyQueue),

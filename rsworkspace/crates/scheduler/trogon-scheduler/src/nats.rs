@@ -1,6 +1,7 @@
 #![cfg_attr(coverage, allow(dead_code, unused_imports))]
 
 use crate::{
+    commands::domain::ScheduleId,
     config::ScheduleWriteState,
     constants::{EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX},
     error::SchedulerError,
@@ -8,16 +9,8 @@ use crate::{
 use async_nats::jetstream::{self, stream::RetentionPolicy};
 use std::time::Duration;
 
-pub(crate) fn event_subject(job_id: &str) -> String {
-    // The subject's final token is the schedule's derived routing key, not the raw
-    // id: the raw id may contain characters a NATS subject token rejects (dots,
-    // slashes, ...), and the read-model catch-up fold matches each event to its
-    // schedule by comparing this token to `read_model_key(payload id)`. Publishing
-    // the raw id here breaks that match, so a fold rebuild drops every schedule.
-    format!(
-        "{EVENTS_SUBJECT_PREFIX}{}",
-        crate::projections::storage::read_model_key(job_id)
-    )
+pub(crate) fn event_subject(schedule_id: &ScheduleId) -> String {
+    format!("{EVENTS_SUBJECT_PREFIX}{schedule_id}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

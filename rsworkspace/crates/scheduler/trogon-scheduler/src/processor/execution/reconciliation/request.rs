@@ -1,5 +1,3 @@
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 
 use crate::commands::domain::{
@@ -8,15 +6,11 @@ use crate::commands::domain::{
 };
 
 use super::RRuleExpansionError;
-use super::{
-    GoDurationError, RRuleWakeupPayload, RRuleWakeupPayloadEncodeError, ScheduleKey, ScheduleSubject,
-    format_go_duration,
-};
+use super::{GoDurationError, RRuleWakeupPayload, RRuleWakeupPayloadEncodeError, ScheduleSubject, format_go_duration};
 use crate::constants::{
     CONTENT_TYPE_HEADER, NATS_RESERVED_HEADERS, NATS_SCHEDULE_HEADER, NATS_SCHEDULE_SOURCE_HEADER,
-    NATS_SCHEDULE_TARGET_HEADER, NATS_SCHEDULE_TIME_ZONE_HEADER, NATS_SCHEDULE_TTL_HEADER,
-    TROGON_SCHEDULE_ID_B64_HEADER, TROGON_SCHEDULE_KEY_HEADER, TROGON_SCHEDULE_OCCURRENCE_AT_HEADER,
-    TROGON_SCHEDULE_OCCURRENCE_SEQUENCE_HEADER, TROGON_SCHEDULE_RESERVED_PREFIX,
+    NATS_SCHEDULE_TARGET_HEADER, NATS_SCHEDULE_TIME_ZONE_HEADER, NATS_SCHEDULE_TTL_HEADER, TROGON_SCHEDULE_ID_HEADER,
+    TROGON_SCHEDULE_OCCURRENCE_AT_HEADER, TROGON_SCHEDULE_OCCURRENCE_SEQUENCE_HEADER, TROGON_SCHEDULE_RESERVED_PREFIX,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -119,9 +113,8 @@ impl ScheduleRequest {
         at: DateTime<Utc>,
         delivery: &Delivery,
     ) -> Result<Self, ScheduleRequestError> {
-        let key = ScheduleKey::derive(schedule_id);
-        let subject = ScheduleSubject::execution(&key);
-        let target = ScheduleSubject::rrule_wakeup(&key);
+        let subject = ScheduleSubject::execution(schedule_id);
+        let target = ScheduleSubject::rrule_wakeup(schedule_id);
         let payload = RRuleWakeupPayload::new(schedule_id.clone(), at)
             .encode()
             .map_err(|source| ScheduleRequestError::RRuleWakeupPayloadEncode { source })?;
@@ -136,9 +129,7 @@ impl ScheduleRequest {
             push_header(&mut headers, NATS_SCHEDULE_TTL_HEADER, formatted)?;
         }
         push_header(&mut headers, CONTENT_TYPE_HEADER, "application/json")?;
-        push_header(&mut headers, TROGON_SCHEDULE_KEY_HEADER, key.simple())?;
-        let schedule_id_b64 = URL_SAFE_NO_PAD.encode(schedule_id.as_str());
-        push_header(&mut headers, TROGON_SCHEDULE_ID_B64_HEADER, schedule_id_b64)?;
+        push_header(&mut headers, TROGON_SCHEDULE_ID_HEADER, schedule_id.to_string())?;
 
         Ok(Self {
             subject,
@@ -154,8 +145,7 @@ impl ScheduleRequest {
         delivery: &Delivery,
         message: &ScheduleMessage,
     ) -> Result<Self, ScheduleRequestError> {
-        let key = ScheduleKey::derive(schedule_id);
-        let subject = ScheduleSubject::execution(&key);
+        let subject = ScheduleSubject::execution(schedule_id);
 
         let Delivery::NatsEvent { route, ttl, source } = delivery;
         if ScheduleSubject::is_scheduler_internal(route.as_str()) {
@@ -180,9 +170,7 @@ impl ScheduleRequest {
         }
         let content_type = message.content.content_type().as_str().to_string();
         push_header(&mut headers, CONTENT_TYPE_HEADER, content_type)?;
-        push_header(&mut headers, TROGON_SCHEDULE_KEY_HEADER, key.simple())?;
-        let schedule_id_b64 = URL_SAFE_NO_PAD.encode(schedule_id.as_str());
-        push_header(&mut headers, TROGON_SCHEDULE_ID_B64_HEADER, schedule_id_b64)?;
+        push_header(&mut headers, TROGON_SCHEDULE_ID_HEADER, schedule_id.to_string())?;
 
         for header in message.headers.as_slice() {
             let name = header.name().as_str();
@@ -245,7 +233,6 @@ impl DispatchRequest {
         delivery: &Delivery,
         message: &ScheduleMessage,
     ) -> Result<Self, ScheduleRequestError> {
-        let key = ScheduleKey::derive(schedule_id);
         let Delivery::NatsEvent { route, source, .. } = delivery;
         if ScheduleSubject::is_scheduler_internal(route.as_str()) {
             return Err(ScheduleRequestError::TargetIsSchedulerInternal {
@@ -259,9 +246,7 @@ impl DispatchRequest {
         let mut headers = Vec::new();
         let content_type = message.content.content_type().as_str().to_string();
         push_header(&mut headers, CONTENT_TYPE_HEADER, content_type)?;
-        push_header(&mut headers, TROGON_SCHEDULE_KEY_HEADER, key.simple())?;
-        let schedule_id_b64 = URL_SAFE_NO_PAD.encode(schedule_id.as_str());
-        push_header(&mut headers, TROGON_SCHEDULE_ID_B64_HEADER, schedule_id_b64)?;
+        push_header(&mut headers, TROGON_SCHEDULE_ID_HEADER, schedule_id.to_string())?;
         if let Some((sequence, occurrence_at)) = occurrence {
             push_header(
                 &mut headers,

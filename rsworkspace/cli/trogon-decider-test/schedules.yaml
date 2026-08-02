@@ -9,7 +9,7 @@ scenarios:
     given: []
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
       status:
         scheduled: {}
       schedule:
@@ -25,7 +25,7 @@ scenarios:
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
           status:
             scheduled: {}
           schedule:
@@ -42,7 +42,7 @@ scenarios:
   - name: reject create when schedule already exists
     given:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
         status:
           scheduled: {}
         schedule:
@@ -57,7 +57,7 @@ scenarios:
             data: { utf8: '{"kind":"heartbeat"}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
       status:
         scheduled: {}
       schedule:
@@ -76,7 +76,7 @@ scenarios:
   - name: pause an existing schedule
     given:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
         status:
           scheduled: {}
         schedule:
@@ -91,24 +91,24 @@ scenarios:
             data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
 
   - name: reject pause when schedule missing
     given: []
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
     then:
       rejected: true
 
   - name: resume a paused schedule
     given:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
         status:
           scheduled: {}
         schedule:
@@ -122,19 +122,19 @@ scenarios:
             content_type: application/json
             data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleResumed
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
 
   - name: remove an existing schedule
     given:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
         status:
           scheduled: {}
         schedule:
@@ -149,16 +149,16 @@ scenarios:
             data: { utf8: '{}' }
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.RemoveSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
     then:
       events:
         - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
 
   - name: reject create after schedule removed
     given:
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
         status:
           scheduled: {}
         schedule:
@@ -172,10 +172,10 @@ scenarios:
             content_type: application/json
             data: { utf8: '{}' }
       - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleRemoved
-        schedule_id: backup
+        schedule_id: "0198be07a38479e1a376f250f9181be9"
     when:
       '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
-      schedule_id: backup
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
       status:
         scheduled: {}
       schedule:
@@ -195,7 +195,7 @@ scenarios:
     steps:
       - when:
           '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.CreateSchedule
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
           status:
             scheduled: {}
           schedule:
@@ -211,7 +211,7 @@ scenarios:
         then:
           events:
             - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleCreated
-              schedule_id: backup
+              schedule_id: "0198be07a38479e1a376f250f9181be9"
               status:
                 scheduled: {}
               schedule:
@@ -226,15 +226,15 @@ scenarios:
                   data: { utf8: '{"kind":"heartbeat"}' }
       - when:
           '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
         then:
           events:
             - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.SchedulePaused
-              schedule_id: backup
+              schedule_id: "0198be07a38479e1a376f250f9181be9"
       - when:
           '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ResumeSchedule
-          schedule_id: backup
+          schedule_id: "0198be07a38479e1a376f250f9181be9"
         then:
           events:
             - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleResumed
-              schedule_id: backup
+              schedule_id: "0198be07a38479e1a376f250f9181be9"
