@@ -49,3 +49,4 @@ future implementation work.
 - [ADR#0041: Canonical MCP JSON-RPC Bodies over NATS (Draft)](./0041-canonical-mcp-jsonrpc-bodies-over-nats.md)
 - [ADR#0042: NATS Trace Context and Message Path Tracing (Draft)](./0042-nats-trace-context-and-message-path-tracing.md)
 - [ADR#0043: Agent Instructions Ownership and Shape (Draft)](./0043-agent-instructions-ownership-and-shape.md)
+- [ADR#0044: Inbound Media Is Fetched Out of Band by a Dedicated Consumer (Draft)](./0044-inbound-media-fetch-out-of-band.md)

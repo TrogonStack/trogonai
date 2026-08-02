@@ -8,15 +8,15 @@ pub struct Sender {
     pub display_name: String,
 }
 
-/// Media that arrived with a message, already claim-checked: the bytes live in
-/// the object store and `object_ref` points at them. `platform_ref` keeps the
-/// platform's own handle (e.g. a Telegram `file_id`) for provenance.
+/// Media that arrived with a message, as a handle rather than as bytes.
+/// `platform_ref` is the platform's own reference (e.g. a Telegram `file_id`);
+/// redeeming it happens out of band, so this type never asserts that bytes
+/// exist yet. See ADR#0044.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attachment {
     pub kind: String,
     pub mime: String,
     pub size: u64,
-    pub object_ref: String,
     pub platform_ref: String,
 }
 

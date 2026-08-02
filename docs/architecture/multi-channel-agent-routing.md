@@ -21,21 +21,26 @@ designed channel-neutral from day one even while only Telegram exists.
                  SUBJECTS / PROTOCOL                     WORKER
 
 Telegram ─HTTP─▶ telegram.{update_type}                  trogon-gateway (exists)
-                 stream TELEGRAM, raw verbatim JSON
+                 stream TELEGRAM, raw verbatim JSON      (inbound path only)
                       │
                       ▼ durable consumer
                  normalize: parse Update, endpoint,      channel-bridge-telegram
-                 eager-download attachments              (one worker)
-                 identity + binding via KV
+                 identity + binding via KV,              (one worker, both halves)
                  dispatch prompt via AgentPort
                       │
                       ▼ acp-nats (already NATS-native)
                  ═══ agent works, streams notifications ═══
                       │
                       ▼ render notifications
-                 Telegram Bot API calls                  channel-bridge-telegram
-                 (send, edit-in-place, chunk, throttle)
+                 Telegram Bot API calls ─HTTPS─▶         channel-bridge-telegram
+                 (send, edit-in-place, chunk, throttle)  (same process as above)
 ```
+
+**The two legs are not symmetric.** Inbound goes through the gateway, which
+owns the webhook and publishes verbatim. Outbound does not: the bridge holds a
+`teloxide::Bot` and calls `send_message`, `edit_message_text`, and
+`send_chat_action` against the Telegram API itself. The gateway has no outbound
+role in v1, which is why the bot token lives in both processes.
 
 Two workers total, one of which already exists. The bridge is the fusion of
 what the end state calls the "edge" and the "router". We fuse them because:
@@ -150,7 +155,7 @@ extraction):
   sender:      { platform_user_id, display_name },
   text:        string | null,
   command:     bridge command | null,
-  attachments: [ { kind, mime, size, object_ref, platform_ref } ],
+  attachments: [ { kind, mime, size, platform_ref } ],
   message_ref: platform message id (for dedup, replies, edits),
   occurred_at: timestamp
 }
@@ -180,13 +185,13 @@ The render vocabulary is the one contract every channel implements; it stays
 small on purpose. Both reference systems studied (OpenClaw, Hermes) converged
 on essentially this set.
 
-**Attachments are eager claim-check.** At normalize time the bridge downloads
-the media from the platform (only the token holder can redeem a Telegram
-`file_id`), stores the bytes in the object store, and the event carries the
-reference. Nothing downstream ever needs platform credentials or a callback.
-Lazy fetch-on-demand was rejected: it needs a request/reply surface, fails
-mid-conversation instead of at ingestion, and platform download URLs expire.
-Size is capped at the bridge.
+**Inbound media is fetched out of band** by a dedicated downloader on its own
+durable consumer of the raw stream, never by the gateway and never inline in a
+turn. The inbound event carries only `platform_ref`; readiness lives in a
+`channel_media_{prefix}` KV record that a reader awaits by watch, at the moment
+the agent opens the file. Outbound is not symmetric: `send_attachment` keeps
+its `object_ref`, because the agent produced that file and there is nothing to
+redeem. See [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md).
 
 ## Agent dispatch: the AgentPort trait
 
@@ -264,13 +269,17 @@ retains full fidelity for replay when a future need appears.
    creation.** Live conversations never hop agents because config changed.
 5. **State in JetStream KV, not config files.** Admin surface out of band and
    unspecified (CLI/config now, GUI or MCP later).
-6. **Eager claim-check attachments**, size-capped at the bridge.
+6. **Inbound media fetched out of band** by a dedicated stream consumer, with
+   readiness in KV and the wait deferred to the agent's own tool call
+   ([ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md)).
 7. **Platform structure over ACP via `_meta`**, dual-carried (text for any
    agent, `_meta` for participating agents); interactivity degrades
    gracefully with non-participating agents.
 8. **Text rendering via edit-in-place streaming** (`edit_text`), the pattern
    both OpenClaw and Hermes converged on.
-9. **No ADRs for this**: local domain design, recorded here.
+9. **Recorded here, not in ADRs**, except where a decision constrains a
+   component outside this design. Media placement did, because it decides what
+   the gateway is allowed to become, so it is [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md).
 
 ## Consequences for existing crates
 
@@ -295,8 +304,9 @@ retains full fidelity for replay when a future need appears.
 1. User sends "hello" to the bot on Telegram. Telegram POSTs the webhook;
    trogon-gateway validates and publishes the raw Update to
    `telegram.message` (stream `TELEGRAM`).
-2. channel-bridge-telegram consumes it, parses the Update, encodes the endpoint
-   address, and eager-downloads any attachments into the object store.
+2. channel-bridge-telegram consumes it, parses the Update, and encodes the
+   endpoint address. Any attachment contributes its `platform_ref` and nothing
+   is downloaded on this path.
 3. The bridge resolves endpoint to principal (reject if unknown), endpoint to
    conversation (create via routing policy if absent, writing the sticky
    `agent_id`), and ensures a live session on that agent through the ACP
