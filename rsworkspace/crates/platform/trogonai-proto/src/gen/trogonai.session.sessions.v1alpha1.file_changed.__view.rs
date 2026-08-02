@@ -13,10 +13,20 @@
 pub struct FileChangedView<'a> {
     /// Field 1: `session_id`
     pub session_id: &'a str,
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     pub path: &'a str,
     /// Field 3: `change_kind`
     pub change_kind: ::buffa::EnumValue<super::super::FileChangeKind>,
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     pub previous_path: ::core::option::Option<&'a str>,
     /// Claim-check to the file's content before the change; unset for a create or
@@ -525,6 +535,14 @@ impl FileChangedOwnedView {
     pub fn session_id(&self) -> &'_ str {
         self.0.reborrow().session_id
     }
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     #[must_use]
     pub fn path(&self) -> &'_ str {
@@ -535,6 +553,8 @@ impl FileChangedOwnedView {
     pub fn change_kind(&self) -> ::buffa::EnumValue<super::super::FileChangeKind> {
         self.0.reborrow().change_kind
     }
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     #[must_use]
     pub fn previous_path(&self) -> ::core::option::Option<&'_ str> {

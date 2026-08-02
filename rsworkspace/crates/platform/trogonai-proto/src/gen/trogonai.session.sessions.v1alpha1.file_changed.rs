@@ -20,6 +20,14 @@ pub struct FileChanged {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub session_id: ::buffa::alloc::string::String,
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     #[serde(rename = "path", with = "::buffa::json_helpers::proto_string")]
     pub path: ::buffa::alloc::string::String,
@@ -30,6 +38,8 @@ pub struct FileChanged {
         with = "::buffa::json_helpers::proto_enum"
     )]
     pub change_kind: ::buffa::EnumValue<FileChangeKind>,
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     #[serde(
         rename = "previousPath",

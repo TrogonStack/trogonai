@@ -16,8 +16,16 @@ import "trogonai/session/sessions/v1alpha1/file_change.proto";
 // underneath it, and which must not be attributed to the session's own work.
 message FileChanged {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Workspace-relative path to the changed file (forward slashes, no leading
+  // slash). A projection joins this to ResourceObservation.uri by resolving
+  // workspace.uri + "/" + path against the session's WorkspaceRef.uri
+  // (ADR#0035): that is how it tells whether a later digest change for the
+  // same resource was session-authored. A resource with no workspace path --
+  // a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+  // with no FileChanged to join against.
   string path = 2 [features.field_presence = LEGACY_REQUIRED];
   FileChangeKind change_kind = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Same workspace-relative form as path.
   string previous_path = 4;
   // Claim-check to the file's content before the change; unset for a create or
   // when content was not captured. Recorded because our checkpoints are opaque,

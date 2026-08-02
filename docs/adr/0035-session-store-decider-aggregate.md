@@ -458,6 +458,15 @@ proximate tool call is not an unattributed `FileChanged`; it surfaces as a
 observed, which is the honest shape for "something changed and we do not know
 who did it."
 
+The two facts only share a resource when their locations resolve to the same
+URI: `ResourceObservation.uri` is already in that form, while `FileChanged.path`
+is workspace-relative and must be resolved against the session's
+`WorkspaceRef.uri` (`workspace.uri + "/" + path`) before the comparison holds.
+The asymmetry is deliberate: `FileChanged` is inherently workspace-scoped,
+while `ResourceObservation` also covers resources a workspace-relative path
+cannot name at all, such as a fetched URL or an MCP resource, and those have no
+`FileChanged` counterpart to join against.
+
 **Typed process outcome.** `ToolCallCompleted.termination` carries a
 `CommandTermination` oneof of `exit_code` or `signal`, plus a
 `google.protobuf.Duration duration`. It belongs to the execution/audit fold, not
