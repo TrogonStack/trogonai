@@ -14,7 +14,7 @@ and evidence rules behind each product dossier remain reproducible.
 
 ## Status
 
-Synthesis complete. Ten product dossiers and the cross-product synthesis
+Synthesis complete. The product dossiers and the cross-product synthesis
 exist, and the decision record now exists as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
 The fx dossier was added after the synthesis and is not yet folded into it.
