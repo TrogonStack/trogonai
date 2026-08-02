@@ -36,7 +36,9 @@ and we get their effect for free:
 
 The corollary is the cost: fx pays one large write per turn and loses an
 in-flight turn on crash, while we pay N small writes and can always resume
-mid-turn. That is settled by ADR#0035 and is not reopened here.
+mid-turn. That is settled by
+[ADR#0035](../../adr/0035-session-store-decider-aggregate.md) and is not
+reopened here.
 
 The rest of this document is about the fields where fx is carrying real
 information that our catalog does not model.
