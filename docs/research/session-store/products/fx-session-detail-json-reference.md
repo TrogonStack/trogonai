@@ -150,7 +150,7 @@ A command that continued outside the foreground agent turn.
 | `kind` | `"background_command"` | yes | History variant. |
 | `user` | [User turn](#user-turn) | yes | Request that started the command. |
 | `assistant` | string | no | Assistant text associated with the command. Omitted when absent. |
-| `execution` | [Execution memory](#execution-memory) | no | Omitted when empty. |
+| `execution` | [Execution memory](#execution-memory) | no | May be omitted when empty; a present object with empty arrays, as in the example, is also valid. |
 | `log_path` | string | yes | Path to the command log. Treat the path as local to the Fx installation. |
 | `expect_url` | boolean | yes | Whether Fx expected the command to expose a server URL. |
 | `url` | string or null | yes | Discovered server URL, if available. |
@@ -190,7 +190,7 @@ active tool call may both be null.
 | `assistant` | string or null | yes | Partial assistant response, if one was produced. |
 | `tool_call` | [Interrupted tool call](#interrupted-tool-call) or null | yes | Tool call active at interruption, if any. |
 | `completed_tool_names` | array of strings | yes | Tools completed before interruption. |
-| `execution` | [Execution memory](#execution-memory) | no | Omitted when empty. |
+| `execution` | [Execution memory](#execution-memory) | no | May be omitted when empty; a present object with empty arrays, as in the example, is also valid. |
 
 ### Compacted summary
 
