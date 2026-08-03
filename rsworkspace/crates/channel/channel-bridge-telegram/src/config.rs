@@ -13,7 +13,7 @@ pub struct BridgeConfig {
     pub bot_token: String,
     /// Endpoint account token; identifies which bot account on Telegram.
     pub bot_account: String,
-    /// Agent every new conversation binds to (v1 routing policy: single agent).
+    /// Agent every new conversation binds to; the routing policy is one agent.
     pub agent_id: String,
     /// Workspace the agent roots its sessions in; agent configuration, never
     /// a channel concern (see the architecture doc).

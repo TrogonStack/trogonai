@@ -79,7 +79,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7> Pipeline<'_, P, O, G> {
     }
 
     /// Process one raw gateway message end to end. Unrecoverable messages
-    /// (unparseable, unauthorized, kinds v1 does not carry) are acked and
+    /// (unparseable, unauthorized, kinds the bridge does not carry) are acked and
     /// dropped; processing errors return `Err` with the message unacked so
     /// JetStream redelivers.
     pub async fn handle_message(&self, msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
@@ -110,8 +110,8 @@ impl<P: AgentPort, O: Outbound, G: NowV7> Pipeline<'_, P, O, G> {
         let (conversation_id, mut record) = match self.store.conversation_for(&event.endpoint).await? {
             Some(found) => found,
             None => {
-                // Routing policy, v1: every new conversation binds to the
-                // single configured agent. Sticky from here on.
+                // Routing policy: every new conversation binds to the single
+                // configured agent. Sticky from here on.
                 let record = ConversationRecord {
                     principal: principal.clone(),
                     agent_id: AgentId::new(self.agent_id),

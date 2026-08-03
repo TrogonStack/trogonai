@@ -2,8 +2,8 @@ use teloxide::types::{Update, UpdateKind};
 use trogon_channel::{CommandTriggers, Endpoint, InboundEvent, Sender};
 
 /// Normalize a raw Telegram update into the channel-neutral event, or `None`
-/// for update kinds v1 does not carry (media, edits, membership, ...). The
-/// raw stream retains those with full fidelity for later.
+/// for update kinds the bridge does not carry (media, edits, membership, ...).
+/// The raw stream retains those with full fidelity for later.
 pub fn inbound_event(update: &Update, bot_account: &str, triggers: &CommandTriggers) -> Option<InboundEvent> {
     let UpdateKind::Message(msg) = &update.kind else {
         return None;

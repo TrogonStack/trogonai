@@ -28,7 +28,7 @@ pub struct PrincipalRecord {
 }
 
 /// The four registries behind conversations, all JetStream KV, all owned by
-/// exactly one worker (the bridge today, the router after extraction). Config
+/// exactly one worker, the bridge. Config
 /// files never hold this state; the admin surface that seeds/mutates it is
 /// out of band by design.
 pub struct ChannelStore {

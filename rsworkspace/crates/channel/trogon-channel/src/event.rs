@@ -21,9 +21,8 @@ pub struct Attachment {
 }
 
 /// A normalized inbound message: what any channel bridge produces after
-/// stripping its platform's shape. This type is the `channel.*.in.*` payload
-/// once the multi-channel extraction happens; until then it travels
-/// in-process.
+/// stripping its platform's shape. Travels in process; `Serialize` because the
+/// shape is the cross-channel contract, not because anything publishes it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboundEvent {
     pub endpoint: Endpoint,

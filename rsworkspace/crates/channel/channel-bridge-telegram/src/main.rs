@@ -1,5 +1,5 @@
-//! Telegram channel bridge: the v1 direct path from the gateway's raw Telegram
-//! stream to an ACP agent. See `docs/architecture/multi-channel-agent-routing.md`.
+//! Telegram channel bridge: the path from the gateway's raw Telegram stream to
+//! an ACP agent. See `docs/architecture/multi-channel-agent-routing.md`.
 //!
 //! One worker, two halves: normalize (raw Update -> `InboundEvent`,
 //! identity + conversation via KV, prompt via `AgentPort`) and render (agent

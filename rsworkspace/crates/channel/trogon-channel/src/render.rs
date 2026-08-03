@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 /// The channel-neutral output vocabulary: the one contract every channel
 /// bridge implements. Kept deliberately small; platform-specific richness
 /// (e.g. Telegram inline buttons) rides agent `_meta` and is rendered by the
-/// bridge that understands it. This enum is the `channel.*.out.*` payload once
-/// the multi-channel extraction happens.
+/// bridge that understands it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum RenderCommand {

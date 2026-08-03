@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Characters permitted in endpoint tokens: the intersection of what NATS KV
-/// keys accept and what NATS subject tokens accept, so an endpoint can address
-/// both a KV entry and (after extraction) a subject without re-encoding.
+/// Characters permitted in endpoint tokens. Tokens are joined with `.` into
+/// one composite key, so `.` is out; the rest is the intersection of what NATS
+/// KV keys and NATS subject tokens accept, which keeps the composite usable as
+/// either without re-encoding.
 fn is_safe_token(token: &str) -> bool {
     !token.is_empty()
         && token
