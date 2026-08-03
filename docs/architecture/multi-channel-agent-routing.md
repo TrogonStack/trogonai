@@ -62,7 +62,8 @@ binary. A second channel imports the same brain; it never copies it.
 ## Domain model
 
 Four words carry this whole design, so here they are with values taken from the
-running code.
+running code. Each also has a one-paragraph entry in the
+[glossary](../glossary/index.md) under "Channels and conversations".
 
 An **endpoint** is a mailbox: one place messages arrive and leave. It is three
 tokens, nothing more.
@@ -83,10 +84,11 @@ are restricted to characters that both KV keys and subject tokens accept.
 which is why the sender is checked separately before a destructive command: the
 chat being allowed says nothing about who spoke in it.
 
-A **principal** is the human. One person can hold several endpoints (a Telegram
-DM, a Discord DM, the CLI) and they all resolve to the same principal. That is
-the only thing that makes "continue this conversation somewhere else" mean
-anything.
+A **principal** is the identity an endpoint resolves to, normally a human. One
+person can hold several endpoints (a Telegram DM, a Discord DM, the CLI) and they
+all resolve to the same principal. That is the only thing that makes "continue
+this conversation somewhere else" mean anything. A group chat is the exception,
+covered below.
 
 A **conversation** is the context the agent works in, and it is the root
 object: endpoints point at it, never the reverse.
@@ -135,6 +137,42 @@ conversation                          the shared context, cross-channel
   can attach to one conversation, so each prompt records the endpoint it came
   from and the response renders there. Per-conversation serialization is
   mandatory: prompts from two channels into one session queue in order.
+
+### Groups: what an endpoint actually authorizes
+
+Both lookups key on the **chat** endpoint, never on the sender's:
+`principal_for(endpoint)` is the access gate and `conversation_for(endpoint)` is
+the binding. The individual who typed is consulted in exactly one place,
+`sender_is_authorized`, and only before a destructive command.
+
+In a direct message the distinction is invisible, because Telegram gives a
+private chat the same id as the user it belongs to. Seeding a user id through
+`CHANNEL_SEED_TELEGRAM_USERS` writes the endpoint `telegram.{account}.{user_id}`,
+which is also that DM's endpoint, so one write authorizes the person and their
+first message creates the conversation bound to that same endpoint.
+
+In a group the two come apart. A group's chat id is a distinct negative number
+that equals no user id, so seeding members does nothing for the room: the
+bridge finds no principal, logs, acks, and drops. A group works only once an
+operator links the group's own chat endpoint to a principal, and then:
+
+- **The room is the unit of conversation.** One endpoint means one binding, one
+  conversation, one session. Members share the agent's context, which is the
+  reason to put a bot in a room at all.
+- **Authorizing the room authorizes everyone in it**, including whoever joins
+  later. Ordinary messages have no per-member gate, deliberately. This is
+  exactly why the narrower sender check guards `/new`: an unlinked member can
+  talk to the agent but cannot destroy the room's session.
+- **That principal names a room, not a human.** `ConversationRecord.principal`
+  holds it, so for group conversations "principal" stops meaning "the person",
+  and a room principal cannot participate in cross-channel continuation, which
+  is a per-human idea.
+
+The last point is a known imprecision, not a result we are happy with. The fix
+is either a principal kind (human or room) or a conversation owner distinct from
+the principal, and it stays deferred until a second channel makes cross-channel
+continuation real. Until then groups work correctly and the vocabulary is
+slightly dishonest about them.
 
 ## The multi-channel end state
 
@@ -314,17 +352,23 @@ retains full fidelity for replay when a future need appears.
    needs to prompt agents.
 4. **Conversation is the root; binding is sticky; policy runs once at
    creation.** Live conversations never hop agents because config changed.
-5. **State in JetStream KV, not config files.** Admin surface out of band and
+5. **The chat is the unit of identity and conversation, not the speaker.** A
+   group is one endpoint, so it gets one shared conversation and one shared
+   authorization. Per-member conversations inside a room were rejected: they
+   defeat the reason a bot is in a room. The cost is that a group's principal
+   names a room rather than a person, accepted for now and revisited when
+   cross-channel continuation becomes real.
+6. **State in JetStream KV, not config files.** Admin surface out of band and
    unspecified (CLI/config now, GUI or MCP later).
-6. **Inbound media fetched out of band** by a dedicated stream consumer, with
+7. **Inbound media fetched out of band** by a dedicated stream consumer, with
    readiness in KV and the wait deferred to the agent's own tool call
    ([ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md)).
-7. **Platform structure over ACP via `_meta`**, dual-carried (text for any
+8. **Platform structure over ACP via `_meta`**, dual-carried (text for any
    agent, `_meta` for participating agents); interactivity degrades
    gracefully with non-participating agents.
-8. **Text rendering via edit-in-place streaming** (`edit_text`), the pattern
+9. **Text rendering via edit-in-place streaming** (`edit_text`), the pattern
    both OpenClaw and Hermes converged on.
-9. **Recorded here, not in ADRs**, except where a decision constrains a
+10. **Recorded here, not in ADRs**, except where a decision constrains a
    component outside this design. Media placement did, because it decides what
    the gateway is allowed to become, so it is [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md).
 

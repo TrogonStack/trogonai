@@ -44,6 +44,10 @@ export default async () => {
             { text: "Key Management", link: "/architecture/key-management" },
             { text: "Key States", link: "/architecture/key-states" },
             {
+              text: "Multi-Channel Agent Routing",
+              link: "/architecture/multi-channel-agent-routing",
+            },
+            {
               text: "OpenTelemetry Transport Context",
               link: "/architecture/opentelemetry-transport-context",
             },
