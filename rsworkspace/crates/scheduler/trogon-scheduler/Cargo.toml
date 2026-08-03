@@ -25,7 +25,6 @@ postgres = ["dep:sqlx"]
 thiserror = { workspace = true }
 trogon-telemetry = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream", "kv", "server_2_12"] }
-base64 = { workspace = true }
 sqlx = { workspace = true, optional = true }
 buffa = { workspace = true }
 buffa-types = { workspace = true }
@@ -48,7 +47,7 @@ trogon-decider-runtime = { workspace = true }
 trogon-scheduler-domain = { path = "../trogon-scheduler-domain", features = ["runtime-snapshot"] }
 trogonai-proto = { workspace = true, features = ["schedules", "runtime-host"] }
 trogon-std = { workspace = true, features = ["uuid"] }
-uuid = { workspace = true, features = ["v5"] }
+uuid = { workspace = true }
 
 [dev-dependencies]
 buffa = { workspace = true }

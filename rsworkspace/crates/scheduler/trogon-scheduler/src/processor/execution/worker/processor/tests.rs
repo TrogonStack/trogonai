@@ -17,7 +17,7 @@ use crate::commands::domain::{
 };
 use crate::processor::execution::checkpoints::{ReconcileOutcome, ScheduleCheckpointStore, ScheduleStatus};
 use crate::processor::execution::execution_schedules::ExecutionScheduleWriter;
-use crate::processor::execution::reconciliation::{ScheduleKey, ScheduleSubject, StreamRoutingId};
+use crate::processor::execution::reconciliation::ScheduleSubject;
 
 type Processor = ScheduleProcessor<InMemoryExecution, InMemoryExecution, InMemoryKv, MemoryEventStore>;
 
@@ -54,7 +54,7 @@ impl Harness {
     }
 
     fn checkpoint_key(&self, id: &str) -> String {
-        format!("v1.{}", key_for_stream(id).simple())
+        format!("v1.{}", key_for_stream(id))
     }
 
     async fn process(&self, event: &v1::ScheduleEvent, id: &str, position: u64) -> Processed {
@@ -96,7 +96,7 @@ fn created_with_delivery(
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 status: MessageField::some(v1::ScheduleStatus::from(status)),
                 schedule: MessageField::some(v1::Schedule::try_from(&ScheduleEventSchedule::from(&schedule)).unwrap()),
                 delivery: MessageField::some(v1::Delivery::try_from(&ScheduleEventDelivery::from(&delivery)).unwrap()),
@@ -111,7 +111,7 @@ fn paused(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::SchedulePaused {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
             }
             .into(),
         ),
@@ -122,7 +122,7 @@ fn resumed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleResumed {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
             }
             .into(),
         ),
@@ -133,7 +133,7 @@ fn removed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
             }
             .into(),
         ),
@@ -144,7 +144,7 @@ fn occurrence_recorded(id: &str, occurrence_sequence: u64, occurrence_at: &str) 
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(occurrence_sequence),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                     &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
@@ -160,7 +160,7 @@ fn occurrence_scheduled(id: &str, occurrence_at: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(2),
                 occurrence_at: MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                     &DateTime::parse_from_rfc3339(occurrence_at).unwrap().with_timezone(&Utc),
@@ -176,7 +176,7 @@ fn completed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCompleted {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 last_occurrence_sequence: Some(2),
             }
             .into(),
@@ -201,8 +201,8 @@ fn checkpoint_record(id: &str, schedule: Schedule, delivery: Delivery) -> Schedu
     }
 }
 
-fn key_for_stream(id: &str) -> ScheduleKey {
-    ScheduleKey::for_stream(&StreamRoutingId::from(id))
+fn key_for_stream(id: &str) -> crate::commands::domain::ScheduleId {
+    schedule_id(id)
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn unsupported_outcome_has_a_metric_label() {
 #[tokio::test]
 async fn enabled_create_publishes_and_persists() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     let processed = harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -228,7 +228,7 @@ async fn enabled_create_publishes_and_persists() {
 #[tokio::test]
 async fn enabled_create_matches_the_e2e_io_contract_with_mocks() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let key = key_for_stream(id);
     let subject = harness.subject(id);
     let event = created(id, ScheduleEventStatus::Scheduled, every());
@@ -246,11 +246,7 @@ async fn enabled_create_matches_the_e2e_io_contract_with_mocks() {
     assert_eq!(headers.get("Nats-Schedule-Target").unwrap().as_str(), "agent.run");
     assert_eq!(headers.get("Nats-Msg-Id").unwrap().as_str(), event_id.as_str());
     assert_eq!(headers.get("Content-Type").unwrap().as_str(), "application/json");
-    assert_eq!(headers.get("Trogon-Schedule-Key").unwrap().as_str(), key.simple());
-    assert_eq!(
-        headers.get("Trogon-Schedule-Id-B64").unwrap().as_str(),
-        "b3JkZXJzL2NyZWF0ZWQ"
-    );
+    assert_eq!(headers.get("Trogon-Schedule-Id").unwrap().as_str(), key.to_string());
     assert_eq!(
         harness.execution.payload_for(subject.as_str()).unwrap().as_ref(),
         br#"{"ok":true}"#
@@ -262,8 +258,8 @@ async fn enabled_create_matches_the_e2e_io_contract_with_mocks() {
         .unwrap()
         .unwrap()
         .record;
-    assert_eq!(checkpoint.schedule_id.as_str(), id);
-    assert_eq!(checkpoint.key(), key);
+    assert_eq!(checkpoint.schedule_id, key);
+    assert_eq!(checkpoint.key(), &key);
     assert_eq!(checkpoint.subject(), subject);
     assert_eq!(checkpoint.status, ScheduleStatus::Scheduled);
     assert_eq!(checkpoint.last_applied_stream_position.as_u64(), 1);
@@ -277,7 +273,7 @@ async fn enabled_create_matches_the_e2e_io_contract_with_mocks() {
 async fn trace_context_is_present_on_the_execution_publish() {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
     let headers = Headers::one(HeaderName::new("traceparent").unwrap(), traceparent).unwrap();
     let event = created(id, ScheduleEventStatus::Scheduled, every());
@@ -312,7 +308,7 @@ async fn self_process_with_headers(
 #[tokio::test]
 async fn past_due_at_expires_without_publishing() {
     let harness = Harness::new();
-    let id = "orders/once";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c20";
     let past = Schedule::At {
         at: DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
             .unwrap()
@@ -330,7 +326,7 @@ async fn past_due_at_expires_without_publishing() {
 #[tokio::test]
 async fn resuming_a_past_due_at_reports_a_distinct_resumed_expired_outcome() {
     let harness = Harness::new();
-    let id = "orders/once";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c20";
     let past = Schedule::At {
         at: DateTime::parse_from_rfc3339("2000-01-01T00:00:00Z")
             .unwrap()
@@ -350,7 +346,7 @@ async fn resuming_a_past_due_at_reports_a_distinct_resumed_expired_outcome() {
 #[tokio::test]
 async fn enabled_rrule_arms_then_publishes_the_next_one_shot_wakeup() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let wakeup = ScheduleSubject::rrule_wakeup(&key_for_stream(id));
     let create = crate::CreateSchedule {
         id: schedule_id(id),
@@ -384,14 +380,18 @@ async fn enabled_rrule_arms_then_publishes_the_next_one_shot_wakeup() {
             .payload_for(harness.subject(id).as_str())
             .unwrap()
             .as_ref(),
-        br#"{"schedule_id":"recurring","occurrence_at":"2026-06-04T00:00:00Z"}"#
+        format!(
+            r#"{{"schedule_id":"{}","occurrence_at":"2026-06-04T00:00:00Z"}}"#,
+            schedule_id(id)
+        )
+        .as_bytes()
     );
 }
 
 #[tokio::test]
 async fn rrule_recorded_dispatches_scheduled_publishes_and_completed_expires() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
 
     // Seed the schedule into the event store so the arm command can read it.
     let create = crate::CreateSchedule {
@@ -488,7 +488,7 @@ async fn rrule_recorded_dispatches_scheduled_publishes_and_completed_expires() {
 #[tokio::test]
 async fn arm_is_idempotent_when_already_armed() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let create = crate::CreateSchedule {
         id: schedule_id(id),
         status: ScheduleEventStatus::Scheduled,
@@ -521,7 +521,7 @@ async fn arm_is_idempotent_when_already_armed() {
 #[tokio::test]
 async fn arm_is_idempotent_when_completion_was_appended_before_checkpoint_save() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let create = crate::CreateSchedule {
         id: schedule_id(id),
         status: ScheduleEventStatus::Scheduled,
@@ -557,7 +557,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
         .processor
         .apply_action(
             &ReconcileAction::ArmNext {
-                schedule_id: schedule_id("missing"),
+                schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c14"),
                 now: recorded_at(),
             },
             "event-missing",
@@ -570,7 +570,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
     CommandExecution::new(
         &harness.event_store,
         &crate::CreateSchedule {
-            id: schedule_id("deleted"),
+            id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c18"),
             status: ScheduleEventStatus::Scheduled,
             schedule: Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=3", None).unwrap(),
             delivery: Delivery::nats_event("agent.run").unwrap(),
@@ -582,7 +582,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
     .expect("seed schedule");
     CommandExecution::new(
         &harness.event_store,
-        &crate::RemoveSchedule::new(schedule_id("deleted")),
+        &crate::RemoveSchedule::new(schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c18")),
     )
     .execute()
     .await
@@ -592,7 +592,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
         .processor
         .apply_action(
             &ReconcileAction::ArmNext {
-                schedule_id: schedule_id("deleted"),
+                schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c18"),
                 now: recorded_at(),
             },
             "event-deleted",
@@ -606,7 +606,7 @@ async fn arm_reports_missing_or_deleted_schedules_for_retry() {
 #[tokio::test]
 async fn rrule_pause_purges_then_resume_rearms() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let create = crate::CreateSchedule {
         id: schedule_id(id),
         status: ScheduleEventStatus::Scheduled,
@@ -651,7 +651,7 @@ async fn rrule_pause_purges_then_resume_rearms() {
 #[tokio::test]
 async fn paused_rrule_recorded_occurrence_still_dispatches_user_message() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let create = crate::CreateSchedule {
         id: schedule_id(id),
         status: ScheduleEventStatus::Scheduled,
@@ -713,7 +713,7 @@ async fn paused_rrule_recorded_occurrence_still_dispatches_user_message() {
 async fn direct_dispatch_action_uses_the_event_id_without_disambiguation() {
     let harness = Harness::new();
     let request = crate::processor::execution::reconciliation::DispatchRequest::build(
-        &schedule_id("recurring"),
+        &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"),
         &Delivery::nats_event("agent.run").unwrap(),
         &message(),
     )
@@ -742,7 +742,11 @@ async fn rrule_occurrence_event_reports_missing_checkpoints() {
     let error = harness
         .processor
         .process(
-            &stream_event(&occurrence_recorded("missing", 1, "2026-06-04T00:00:00Z"), "missing", 2),
+            &stream_event(
+                &occurrence_recorded("0198fa2f6d0a7b1a8cf9f762e73a1c14", 1, "2026-06-04T00:00:00Z"),
+                "0198fa2f6d0a7b1a8cf9f762e73a1c14",
+                2,
+            ),
             now(),
         )
         .await
@@ -754,7 +758,7 @@ async fn rrule_occurrence_event_reports_missing_checkpoints() {
 #[tokio::test]
 async fn rrule_occurrence_event_acks_non_rrule_checkpoints_as_duplicate_stale() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let record = checkpoint_record(id, every(), Delivery::nats_event("agent.run").unwrap());
     ScheduleCheckpointStore::new(harness.kv.clone())
         .save(&record, None)
@@ -771,7 +775,7 @@ async fn rrule_occurrence_event_acks_non_rrule_checkpoints_as_duplicate_stale() 
 #[tokio::test]
 async fn rrule_occurrence_event_rejects_scheduler_internal_targets() {
     let harness = Harness::new();
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let rrule = Schedule::rrule("2026-06-03T00:00:00Z", "FREQ=DAILY;COUNT=2", None).unwrap();
     let record = checkpoint_record(id, rrule, Delivery::nats_event(harness.subject(id).as_str()).unwrap());
     ScheduleCheckpointStore::new(harness.kv.clone())
@@ -789,7 +793,7 @@ async fn rrule_occurrence_event_rejects_scheduler_internal_targets() {
 #[tokio::test]
 async fn paused_create_stores_without_publishing() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     let processed = harness
         .process(&created(id, ScheduleEventStatus::Paused, every()), id, 1)
@@ -803,7 +807,7 @@ async fn paused_create_stores_without_publishing() {
 #[tokio::test]
 async fn pause_then_resume_purges_then_republishes() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -822,7 +826,7 @@ async fn pause_then_resume_purges_then_republishes() {
 #[tokio::test]
 async fn remove_purges_and_marks_removed() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -836,26 +840,21 @@ async fn remove_purges_and_marks_removed() {
 #[tokio::test]
 async fn duplicate_redelivery_after_ack_is_a_no_op() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
+    let record = stream_event(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1);
 
-    harness
-        .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
-        .await;
+    harness.process_stream(&record).await;
     assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
 
-    // Redeliver the exact same record (same stream position).
-    let again = harness
-        .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
-        .await;
+    let again = harness.process_stream(&record).await;
     assert_eq!(again.outcome, ProcessedOutcome::DuplicateStale);
-    // No second schedule was published.
     assert_eq!(harness.execution.scheduled_count(harness.subject(id).as_str()), 1);
 }
 
 #[tokio::test]
 async fn stale_record_below_watermark_is_a_no_op() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 5)
@@ -870,7 +869,7 @@ async fn stale_record_below_watermark_is_a_no_op() {
 #[tokio::test]
 async fn crash_after_execution_schedule_write_before_checkpoint_write_retries_and_converges() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     // Execution schedule write (purge+publish) succeeds, but the checkpoint create fails transiently.
     harness.kv.fail_next_create();
 
@@ -898,7 +897,7 @@ async fn crash_after_execution_schedule_write_before_checkpoint_write_retries_an
 #[tokio::test]
 async fn transient_execution_schedule_failure_does_not_advance_checkpoint() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     harness.execution.fail_next_publish();
 
     let error = harness
@@ -944,9 +943,23 @@ async fn foreign_event_is_skipped_and_acked() {
 }
 
 #[tokio::test]
+async fn decoded_foreign_event_is_skipped_and_acked() {
+    let harness = Harness::new();
+
+    let processed = harness
+        .processor
+        .process_decoded(&foreign_stream_event(4), DecodedScheduleEvent::Foreign, now())
+        .await
+        .expect("durable outcome");
+
+    assert_eq!(processed.outcome, ProcessedOutcome::SkippedForeign);
+    assert_eq!(processed.ack, AckAction::Ack);
+}
+
+#[tokio::test]
 async fn mismatched_stream_routing_is_durably_recorded_before_term() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let mut event = stream_event(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1);
     event.stream_id = "wrong-stream".to_string();
 
@@ -960,7 +973,7 @@ async fn mismatched_stream_routing_is_durably_recorded_before_term() {
 #[tokio::test]
 async fn schedule_change_without_checkpoint_is_a_transient_retry_not_a_poison() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     // A pause arrives before any checkpoint exists (e.g. KV loss before replay).
     let error = harness
@@ -972,7 +985,10 @@ async fn schedule_change_without_checkpoint_is_a_transient_retry_not_a_poison() 
     assert!(matches!(error, RetryableError::MissingCheckpoint { .. }));
     assert_eq!(
         error.to_string(),
-        "no checkpoint yet for schedule 'orders/created', retrying"
+        format!(
+            "no checkpoint yet for schedule '{}', retrying",
+            schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01")
+        )
     );
     // It is not written as a poison record.
     assert!(!harness.kv.contains("failure.v1.SCHEDULER_SCHEDULE_EVENTS.2"));
@@ -982,7 +998,7 @@ async fn schedule_change_without_checkpoint_is_a_transient_retry_not_a_poison() 
 #[tokio::test]
 async fn stale_corrupt_checkpoint_create_redelivery_repairs_the_record() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1009,7 +1025,7 @@ async fn stale_corrupt_checkpoint_create_redelivery_repairs_the_record() {
 #[tokio::test]
 async fn truncated_corrupt_checkpoint_redelivery_repairs_then_resume_succeeds() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1037,16 +1053,17 @@ async fn truncated_corrupt_checkpoint_redelivery_repairs_then_resume_succeeds() 
 #[tokio::test]
 async fn corrupt_resumed_duplicate_acks_without_repair() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
         .await;
     harness.process(&paused(id), id, 2).await;
-    harness.process(&resumed(id), id, 3).await;
+    let resumed = stream_event(&resumed(id), id, 3);
+    harness.process_stream(&resumed).await;
     harness.kv.truncate_tail(&harness.checkpoint_key(id), 5);
 
-    let again = harness.process(&resumed(id), id, 3).await;
+    let again = harness.process_stream(&resumed).await;
 
     assert_eq!(again.outcome, ProcessedOutcome::DuplicateStale);
     assert_eq!(again.ack, AckAction::Ack);
@@ -1055,7 +1072,7 @@ async fn corrupt_resumed_duplicate_acks_without_repair() {
 #[tokio::test]
 async fn inflated_corrupt_watermark_does_not_skip_newer_events() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1073,7 +1090,7 @@ async fn inflated_corrupt_watermark_does_not_skip_newer_events() {
 #[tokio::test]
 async fn corrupt_cached_checkpoint_control_event_purges_and_overwrites_tombstone() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1108,7 +1125,7 @@ async fn corrupt_cached_checkpoint_control_event_purges_and_overwrites_tombstone
 #[tokio::test]
 async fn corrupt_cached_checkpoint_create_event_rebuilds_checkpoint() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1136,7 +1153,7 @@ async fn corrupt_cached_checkpoint_create_event_rebuilds_checkpoint() {
 #[tokio::test]
 async fn transient_load_failure_is_retried() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     harness.kv.fail_next_entry();
 
     let error = harness
@@ -1157,7 +1174,7 @@ async fn transient_load_failure_is_retried() {
 #[tokio::test]
 async fn transient_purge_failure_is_retried() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
         .await;
@@ -1178,7 +1195,7 @@ async fn transient_purge_failure_is_retried() {
 #[tokio::test]
 async fn checkpoint_create_race_loser_acks_duplicate_stale() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     // The winner already applied position 1 and saved its checkpoint.
     harness
@@ -1202,7 +1219,7 @@ async fn checkpoint_create_race_loser_acks_duplicate_stale() {
 #[tokio::test]
 async fn checkpoint_update_cas_loss_retries_and_converges() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
         .await;
@@ -1232,7 +1249,7 @@ async fn checkpoint_update_cas_loss_retries_and_converges() {
 #[tokio::test]
 async fn transient_checkpoint_update_failure_is_retried() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
         .await;
@@ -1250,7 +1267,7 @@ async fn transient_checkpoint_update_failure_is_retried() {
 #[tokio::test]
 async fn kv_loss_is_recovered_by_replaying_creation() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1279,7 +1296,7 @@ fn record_redelivery_is_infallible() {
 #[tokio::test]
 async fn corrupt_cached_checkpoint_resume_event_is_poisoned() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
 
     harness
         .process(&created(id, ScheduleEventStatus::Scheduled, every()), id, 1)
@@ -1311,7 +1328,7 @@ fn outcome_from_maps_duplicate_stale() {
 #[test]
 fn recover_corrupt_checkpoint_without_revision_is_a_no_op() {
     let change = ScheduleChange::Paused {
-        schedule_id: schedule_id("orders/created"),
+        schedule_id: schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01"),
     };
     assert!(
         recover_corrupt_checkpoint(&change, StreamPosition::try_new(2).unwrap(), Some("evt"), None, now())
@@ -1322,7 +1339,7 @@ fn recover_corrupt_checkpoint_without_revision_is_a_no_op() {
 
 #[test]
 fn recover_corrupt_checkpoint_removed_event_purges() {
-    let id = schedule_id("orders/created");
+    let id = schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c01");
     let change = ScheduleChange::Removed {
         schedule_id: id.clone(),
     };
@@ -1343,7 +1360,7 @@ fn recover_corrupt_checkpoint_removed_event_purges() {
 #[tokio::test]
 async fn schedule_request_failure_during_create_is_poisoned() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let subject = ScheduleSubject::execution(&key_for_stream(id));
     let delivery = Delivery::nats_event(subject.as_str()).unwrap();
 
@@ -1362,7 +1379,7 @@ async fn schedule_request_failure_during_create_is_poisoned() {
 #[tokio::test]
 async fn corrupt_create_with_invalid_delivery_is_poisoned_on_schedule_request() {
     let harness = Harness::new();
-    let id = "orders/created";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c01";
     let subject = ScheduleSubject::execution(&key_for_stream(id));
     let delivery = Delivery::nats_event(subject.as_str()).unwrap();
 

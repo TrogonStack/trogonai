@@ -73,14 +73,14 @@ impl RecordScheduleOccurrence {
 }
 
 impl Decider for RecordScheduleOccurrence {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = RecordScheduleOccurrenceError;
     type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -143,7 +143,7 @@ impl Decider for RecordScheduleOccurrence {
                 let recorded = v1::ScheduleEvent {
                     event: Some(
                         v1::ScheduleOccurrenceRecorded {
-                            schedule_id: command.id.as_str().to_string(),
+                            schedule_id: command.id.to_string(),
                             occurrence_sequence: Some(occurrence_sequence.as_u64()),
                             occurrence_at: buffa::MessageField::some(trogonai_proto::convert::timestamp_from_datetime(
                                 &command.occurrence_at,
@@ -175,7 +175,7 @@ impl Decider for RecordScheduleOccurrence {
                 }
 
                 let follow_up = recurrence_event(
-                    command.id.as_str(),
+                    &command.id.to_string(),
                     step,
                     occurrence_sequence.as_u64(),
                     command.recorded_at,

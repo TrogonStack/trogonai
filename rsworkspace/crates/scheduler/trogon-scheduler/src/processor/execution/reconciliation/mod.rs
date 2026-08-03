@@ -3,7 +3,6 @@ mod reconcile;
 mod recorded_events;
 mod request;
 mod rrule_wakeup_payload;
-mod schedule_key;
 mod schedule_subject;
 
 pub(crate) use crate::commands::domain::RecurrenceError as RRuleExpansionError;
@@ -23,5 +22,4 @@ pub(crate) use request::{DispatchRequest, ScheduleRequest, ScheduleRequestError}
 pub(crate) use rrule_wakeup_payload::{
     RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, RRuleWakeupPayloadEncodeError,
 };
-pub(crate) use schedule_key::{ScheduleKey, StreamRoutingId};
 pub(crate) use schedule_subject::ScheduleSubject;

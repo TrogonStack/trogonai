@@ -5,7 +5,7 @@ use crate::commands::domain as command_domain;
 use crate::{
     CreateSchedule, GetSchedule, ListSchedules, MessageContent, MessageEnvelope, MessageHeaders, PauseSchedule,
     RemoveSchedule, ResumeSchedule, Schedule, ScheduleEventDelivery, ScheduleEventSchedule, ScheduleEventStatus,
-    ScheduleId, ScheduleWriteCondition,
+    ScheduleWriteCondition,
 };
 
 fn position(value: u64) -> StreamPosition {
@@ -17,7 +17,7 @@ fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
 
 fn base_schedule(id: &str) -> Schedule {
     Schedule {
-        id: id.to_string(),
+        id: crate::queries::ScheduleId::parse(id).unwrap().to_string(),
         status: ScheduleEventStatus::Scheduled,
         completed: false,
         next_occurrence_at: None,
@@ -33,7 +33,10 @@ fn base_schedule(id: &str) -> Schedule {
         message: MessageEnvelope {
             // Mirrors the content type the command domain emits by default
             // (`MessageContent::from_static`), proving content type round-trips.
-            content: MessageContent::from_static("application/octet-stream", r#"{"kind":"heartbeat"}"#),
+            content: MessageContent::from_static(
+                "application/octet-stream",
+                r#"{"kind":"0198fa2f6d0a7b1a8cf9f762e73a1c19"}"#,
+            ),
             headers: MessageHeaders::default(),
         },
     }
@@ -46,7 +49,7 @@ fn command_base_schedule(id: &str) -> CreateSchedule {
         schedule: command_domain::Schedule::every(std::time::Duration::from_secs(30)).unwrap(),
         delivery: command_domain::Delivery::nats_event("agent.run").unwrap(),
         message: command_domain::ScheduleMessage {
-            content: command_domain::MessageContent::from_static(r#"{"kind":"heartbeat"}"#),
+            content: command_domain::MessageContent::from_static(r#"{"kind":"0198fa2f6d0a7b1a8cf9f762e73a1c19"}"#),
             headers: command_domain::ScheduleHeaders::default(),
         },
     }
@@ -59,35 +62,44 @@ fn expected_schedule(id: &str) -> Schedule {
 #[tokio::test]
 async fn mock_scheduler_store_covers_crud_and_read_model() {
     let store = MockSchedulerStore::new();
-    store.seed_schedule(base_schedule("seeded"));
+    store.seed_schedule(base_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c12"));
 
     let seeded = store
-        .get_schedule(GetSchedule::new(ScheduleId::parse("seeded").unwrap()))
+        .get_schedule(GetSchedule::new(
+            crate::queries::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c12").unwrap(),
+        ))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(seeded, expected_schedule("seeded"));
+    assert_eq!(seeded, expected_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c12"));
 
-    CommandExecution::new(&store, &command_base_schedule("alpha"))
+    CommandExecution::new(&store, &command_base_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c11"))
         .execute()
         .await
         .unwrap();
     let alpha = store
-        .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
+        .get_schedule(GetSchedule::new(
+            crate::queries::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c11").unwrap(),
+        ))
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(alpha, expected_schedule("alpha"));
+    assert_eq!(alpha, expected_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c11"));
 
-    CommandExecution::new(&store, &PauseSchedule::new(command_schedule_id("alpha")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(
+        &store,
+        &PauseSchedule::new(command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c11")),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
     assert_eq!(
         store
-            .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
+            .get_schedule(GetSchedule::new(
+                crate::queries::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c11").unwrap()
+            ))
             .await
             .unwrap()
             .unwrap()
@@ -98,21 +110,26 @@ async fn mock_scheduler_store_covers_crud_and_read_model() {
     let listed = store.list_schedules(ListSchedules).await.unwrap();
     assert_eq!(listed.len(), 2);
 
-    CommandExecution::new(&store, &RemoveSchedule::new(command_schedule_id("alpha")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap();
+    CommandExecution::new(
+        &store,
+        &RemoveSchedule::new(command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c11")),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap();
     assert!(
         store
-            .get_schedule(GetSchedule::new(ScheduleId::parse("alpha").unwrap()))
+            .get_schedule(GetSchedule::new(
+                crate::queries::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c11").unwrap()
+            ))
             .await
             .unwrap()
             .is_none()
     );
 
-    let deleted_error = CommandExecution::new(&store, &command_base_schedule("alpha"))
+    let deleted_error = CommandExecution::new(&store, &command_base_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c11"))
         .execute()
         .await
         .unwrap_err();
@@ -135,27 +152,33 @@ async fn mock_scheduler_store_rejects_invalid_specs_and_state_errors() {
         command_domain::SamplingSubjectError::Invalid { .. }
     ));
 
-    CommandExecution::new(&store, &command_base_schedule("alpha"))
+    CommandExecution::new(&store, &command_base_schedule("0198fa2f6d0a7b1a8cf9f762e73a1c11"))
         .execute()
         .await
         .unwrap();
-    let same_state_error = CommandExecution::new(&store, &ResumeSchedule::new(command_schedule_id("alpha")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap_err();
+    let same_state_error = CommandExecution::new(
+        &store,
+        &ResumeSchedule::new(command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c11")),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap_err();
     assert!(matches!(
         same_state_error,
         CommandError::Decide(crate::ResumeScheduleError::AlreadyActive { .. })
     ));
 
-    let missing_error = CommandExecution::new(&store, &PauseSchedule::new(command_schedule_id("missing")))
-        .with_snapshot(&store)
-        .with_task_runtime(ImmediateSnapshotTaskScheduler)
-        .execute()
-        .await
-        .unwrap_err();
+    let missing_error = CommandExecution::new(
+        &store,
+        &PauseSchedule::new(command_schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c14")),
+    )
+    .with_snapshot(&store)
+    .with_task_runtime(ImmediateSnapshotTaskScheduler)
+    .execute()
+    .await
+    .unwrap_err();
     assert!(matches!(
         missing_error,
         CommandError::Decide(crate::PauseScheduleError::ScheduleNotFound { .. })
@@ -165,14 +188,20 @@ async fn mock_scheduler_store_rejects_invalid_specs_and_state_errors() {
 #[test]
 fn ensure_write_condition_covers_accept_and_conflict_paths() {
     ScheduleWriteCondition::MustNotExist
-        .ensure("alpha", ScheduleWriteState::new(None, false))
+        .ensure("0198fa2f6d0a7b1a8cf9f762e73a1c11", ScheduleWriteState::new(None, false))
         .unwrap();
     ScheduleWriteCondition::MustBeAtPosition(position(3))
-        .ensure("alpha", ScheduleWriteState::new(Some(position(3)), true))
+        .ensure(
+            "0198fa2f6d0a7b1a8cf9f762e73a1c11",
+            ScheduleWriteState::new(Some(position(3)), true),
+        )
         .unwrap();
 
     let error = ScheduleWriteCondition::MustNotExist
-        .ensure("alpha", ScheduleWriteState::new(Some(position(4)), true))
+        .ensure(
+            "0198fa2f6d0a7b1a8cf9f762e73a1c11",
+            ScheduleWriteState::new(Some(position(4)), true),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -183,7 +212,10 @@ fn ensure_write_condition_covers_accept_and_conflict_paths() {
     ));
 
     let error = ScheduleWriteCondition::MustBeAtPosition(position(3))
-        .ensure("alpha", ScheduleWriteState::new(Some(position(4)), true))
+        .ensure(
+            "0198fa2f6d0a7b1a8cf9f762e73a1c11",
+            ScheduleWriteState::new(Some(position(4)), true),
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -203,7 +235,7 @@ fn created_event(
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: command_schedule_id(id).to_string(),
                 status: MessageField::some(v1::ScheduleStatus {
                     kind: Some(v1::schedule_status::Scheduled {}.into()),
                 }),
@@ -227,9 +259,10 @@ async fn append_events(
     precondition: StreamWritePrecondition,
 ) -> Result<(), SchedulerError> {
     let encoded = events.iter().map(encode_event).collect();
+    let stream_id = command_schedule_id(id);
     store
         .append_stream(AppendStreamRequest {
-            stream_id: id,
+            stream_id: &stream_id,
             stream_write_precondition: precondition,
             events: encoded,
         })
@@ -254,7 +287,7 @@ fn rich_delivery() -> ScheduleEventDelivery {
 fn rich_message() -> MessageEnvelope {
     MessageEnvelope {
         content: MessageContent::from_static("text/plain", "hi"),
-        headers: MessageHeaders::from_pairs([("x-kind", "heartbeat")]),
+        headers: MessageHeaders::from_pairs([("x-kind", "0198fa2f6d0a7b1a8cf9f762e73a1c19")]),
     }
 }
 
@@ -262,16 +295,19 @@ fn rich_message() -> MessageEnvelope {
 async fn append_round_trips_every_schedule_kind() {
     let store = MockSchedulerStore::new();
     let kinds = [
-        ("at", ScheduleEventSchedule::At { at: dt(1_700_000_000) }),
         (
-            "cron",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c31",
+            ScheduleEventSchedule::At { at: dt(1_700_000_000) },
+        ),
+        (
+            "0198fa2f6d0a7b1a8cf9f762e73a1c32",
             ScheduleEventSchedule::Cron {
                 expr: "0 * * * *".to_string(),
                 timezone: Some("UTC".to_string()),
             },
         ),
         (
-            "rrule",
+            "0198fa2f6d0a7b1a8cf9f762e73a1c33",
             ScheduleEventSchedule::RRule {
                 dtstart: dt(1_700_000_000),
                 rrule: "FREQ=DAILY".to_string(),
@@ -291,7 +327,7 @@ async fn append_round_trips_every_schedule_kind() {
         .await
         .unwrap();
         let got = store
-            .get_schedule(GetSchedule::new(ScheduleId::parse(id).unwrap()))
+            .get_schedule(GetSchedule::new(crate::queries::ScheduleId::parse(id).unwrap()))
             .await
             .unwrap()
             .unwrap();
@@ -311,7 +347,7 @@ async fn append_round_trips_every_schedule_kind() {
 #[tokio::test]
 async fn append_projects_full_lifecycle_and_reads_stream() {
     let store = MockSchedulerStore::new();
-    let id = "alpha";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c11";
     append_events(
         &store,
         id,
@@ -334,7 +370,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
         &[
             lifecycle_event(
                 v1::ScheduleOccurrenceScheduled {
-                    schedule_id: id.to_string(),
+                    schedule_id: command_schedule_id(id).to_string(),
                     occurrence_sequence: Some(1),
                     occurrence_at: MessageField::none(),
                     scheduled_at: MessageField::none(),
@@ -343,7 +379,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
             ),
             lifecycle_event(
                 v1::ScheduleOccurrenceRecorded {
-                    schedule_id: id.to_string(),
+                    schedule_id: command_schedule_id(id).to_string(),
                     occurrence_sequence: Some(1),
                     occurrence_at: MessageField::none(),
                     recorded_at: MessageField::none(),
@@ -352,19 +388,19 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
             ),
             lifecycle_event(
                 v1::SchedulePaused {
-                    schedule_id: id.to_string(),
+                    schedule_id: command_schedule_id(id).to_string(),
                 }
                 .into(),
             ),
             lifecycle_event(
                 v1::ScheduleResumed {
-                    schedule_id: id.to_string(),
+                    schedule_id: command_schedule_id(id).to_string(),
                 }
                 .into(),
             ),
             lifecycle_event(
                 v1::ScheduleCompleted {
-                    schedule_id: id.to_string(),
+                    schedule_id: command_schedule_id(id).to_string(),
                     last_occurrence_sequence: Some(1),
                 }
                 .into(),
@@ -376,15 +412,16 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
     .unwrap();
 
     let completed = store
-        .get_schedule(GetSchedule::new(ScheduleId::parse(id).unwrap()))
+        .get_schedule(GetSchedule::new(crate::queries::ScheduleId::parse(id).unwrap()))
         .await
         .unwrap()
         .unwrap();
     assert!(completed.completed);
 
+    let stream_id = command_schedule_id(id);
     let from_start = store
         .read_stream(ReadStreamRequest {
-            stream_id: id,
+            stream_id: &stream_id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -392,7 +429,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
     assert!(from_start.events.len() >= 6);
     let from_position = store
         .read_stream(ReadStreamRequest {
-            stream_id: id,
+            stream_id: &stream_id,
             from: ReadFrom::Position(position(3)),
         })
         .await
@@ -404,7 +441,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
         id,
         &[lifecycle_event(
             v1::ScheduleRemoved {
-                schedule_id: id.to_string(),
+                schedule_id: command_schedule_id(id).to_string(),
             }
             .into(),
         )],
@@ -414,7 +451,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
     .unwrap();
     assert!(
         store
-            .get_schedule(GetSchedule::new(ScheduleId::parse(id).unwrap()))
+            .get_schedule(GetSchedule::new(crate::queries::ScheduleId::parse(id).unwrap()))
             .await
             .unwrap()
             .is_none()
@@ -424,7 +461,7 @@ async fn append_projects_full_lifecycle_and_reads_stream() {
 #[tokio::test]
 async fn append_enforces_write_preconditions() {
     let store = MockSchedulerStore::new();
-    let id = "beta";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c34";
     let create = created_event(
         id,
         ScheduleEventSchedule::Every {
@@ -477,10 +514,10 @@ async fn append_pause_without_prior_create_is_an_error() {
     let store = MockSchedulerStore::new();
     let result = append_events(
         &store,
-        "ghost",
+        "0198fa2f6d0a7b1a8cf9f762e73a1c35",
         &[lifecycle_event(
             v1::SchedulePaused {
-                schedule_id: "ghost".to_string(),
+                schedule_id: "0198fa2f6d0a7b1a8cf9f762e73a1c35".to_string(),
             }
             .into(),
         )],

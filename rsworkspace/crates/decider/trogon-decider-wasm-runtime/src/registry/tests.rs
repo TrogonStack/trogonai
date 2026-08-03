@@ -10,6 +10,8 @@ use crate::test_doubles::{InMemoryEventStore, InMemorySnapshotStore};
 use crate::test_fixture::schedules_bytes;
 use crate::{WasmCommandExecution, WasmDeciderEngine, WasmEngineConfig, WasmSnapshotId};
 
+const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
+
 fn schedules_module() -> WasmDeciderModule {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
     WasmDeciderModule::load(engine, &schedules_bytes()).expect("module loads")
@@ -270,13 +272,13 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
     let scheduler = ImmediateSnapshotTaskScheduler;
 
     let v1_create_module = handle.route(&create_type()).expect("v1 routes create");
-    WasmCommandExecution::new(&v1_create_module, &event_store, &create_command("backup"))
+    WasmCommandExecution::new(&v1_create_module, &event_store, &create_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
         .expect("create succeeds against v1");
 
-    let v1_snapshot_id = WasmSnapshotId::new(v1_create_module.name(), v1_create_module.version(), "backup");
+    let v1_snapshot_id = WasmSnapshotId::new(v1_create_module.name(), v1_create_module.version(), SCHEDULE_ID);
     assert_eq!(
         snapshot_store
             .get(v1_snapshot_id.as_str())
@@ -291,7 +293,7 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
     let v2_pause_module = handle.route(&pause_type()).expect("v2 now routes pause");
     assert_eq!(v2_pause_module.version().as_str(), "0.2.0");
 
-    let result = WasmCommandExecution::new(&v2_pause_module, &event_store, &pause_command("backup"))
+    let result = WasmCommandExecution::new(&v2_pause_module, &event_store, &pause_command(SCHEDULE_ID))
         .with_snapshot_store(&snapshot_store, &scheduler)
         .execute()
         .await
@@ -304,7 +306,7 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
         "v2 has no snapshot of its own yet, so it must do a full replay rather than resume v1's snapshot position"
     );
 
-    let v2_snapshot_id = WasmSnapshotId::new(v2_pause_module.name(), v2_pause_module.version(), "backup");
+    let v2_snapshot_id = WasmSnapshotId::new(v2_pause_module.name(), v2_pause_module.version(), SCHEDULE_ID);
     assert_ne!(v1_snapshot_id, v2_snapshot_id);
     assert!(
         snapshot_store.get(v1_snapshot_id.as_str()).is_some(),

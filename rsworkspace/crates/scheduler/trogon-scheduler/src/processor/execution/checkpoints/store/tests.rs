@@ -6,7 +6,7 @@ use trogon_decider_runtime::StreamPosition;
 use trogon_nats::jetstream::MockJetStreamKvStore;
 
 use super::*;
-use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleId, ScheduleMessage};
+use crate::commands::domain::{Delivery, MessageContent, Schedule, ScheduleHeaders, ScheduleMessage};
 use crate::processor::execution::checkpoints::corrupt_checkpoint_schedule;
 use crate::processor::execution::checkpoints::{ReconcileOutcome, ScheduleStatus};
 
@@ -30,7 +30,7 @@ fn record(id: &str) -> ScheduleCheckpointRecord {
 async fn save_creates_when_no_revision_and_updates_when_present() {
     let kv = MockJetStreamKvStore::new();
     let store = ScheduleCheckpointStore::new(kv.clone());
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
 
     store.save(&record, None).await.unwrap();
     assert_eq!(kv.create_calls().len(), 1);
@@ -47,7 +47,10 @@ async fn save_rejects_revision_zero() {
     let kv = MockJetStreamKvStore::new();
     let store = ScheduleCheckpointStore::new(kv);
 
-    let error = store.save(&record("orders"), Some(0)).await.unwrap_err();
+    let error = store
+        .save(&record("0198fa2f6d0a7b1a8cf9f762e73a1c05"), Some(0))
+        .await
+        .unwrap_err();
     assert!(matches!(error, CheckpointStoreError::InvalidRevision));
     assert!(!error.is_transient());
 }
@@ -58,7 +61,10 @@ async fn save_update_cas_loss_is_a_conflict() {
     kv.enqueue_update_result(Err(kv::UpdateErrorKind::WrongLastRevision));
     let store = ScheduleCheckpointStore::new(kv);
 
-    let error = store.save(&record("orders"), Some(3)).await.unwrap_err();
+    let error = store
+        .save(&record("0198fa2f6d0a7b1a8cf9f762e73a1c05"), Some(3))
+        .await
+        .unwrap_err();
 
     assert!(matches!(error, CheckpointStoreError::Conflict));
     assert!(!error.is_transient());
@@ -70,7 +76,10 @@ async fn save_create_already_exists_is_a_conflict() {
     kv.enqueue_create_result(Err(kv::CreateErrorKind::AlreadyExists));
     let store = ScheduleCheckpointStore::new(kv);
 
-    let error = store.save(&record("orders"), None).await.unwrap_err();
+    let error = store
+        .save(&record("0198fa2f6d0a7b1a8cf9f762e73a1c05"), None)
+        .await
+        .unwrap_err();
 
     assert!(matches!(error, CheckpointStoreError::Conflict));
     assert!(!error.is_transient());
@@ -79,12 +88,12 @@ async fn save_create_already_exists_is_a_conflict() {
 #[tokio::test]
 async fn load_decodes_entry_and_reports_revision() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     let encoded = Bytes::from(encode_checkpoint_record(&record).unwrap());
     kv.enqueue_entry(encoded, 9, kv::Operation::Put);
 
     let store = ScheduleCheckpointStore::new(kv);
-    let loaded = store.load(&record.key()).await.unwrap().unwrap();
+    let loaded = store.load(record.key()).await.unwrap().unwrap();
     assert_eq!(loaded.revision, 9);
     assert_eq!(loaded.record, record);
 }
@@ -95,7 +104,7 @@ async fn deleted_entries_are_absent() {
     kv.enqueue_entry(Bytes::new(), 4, kv::Operation::Delete);
     let store = ScheduleCheckpointStore::new(kv);
     let loaded = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap();
     assert!(loaded.is_none());
@@ -107,7 +116,7 @@ async fn missing_entry_is_absent() {
     kv.enqueue_entry_none();
     let store = ScheduleCheckpointStore::new(kv);
     let loaded = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap();
     assert!(loaded.is_none());
@@ -116,7 +125,7 @@ async fn missing_entry_is_absent() {
 #[tokio::test]
 async fn load_by_subject_reads_the_same_key_space() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry(
         Bytes::from(encode_checkpoint_record(&record).unwrap()),
         7,
@@ -127,13 +136,13 @@ async fn load_by_subject_reads_the_same_key_space() {
     let loaded = store.load_by_subject(&record.subject()).await.unwrap().unwrap();
     assert_eq!(loaded.record.schedule_id, record.schedule_id);
     assert_eq!(loaded.revision, 7);
-    assert_eq!(kv.entry_calls()[0], format!("v1.{}", record.key().simple()));
+    assert_eq!(kv.entry_calls()[0], format!("v1.{}", record.key()));
 }
 
 #[tokio::test]
 async fn load_by_subject_revision_supports_optimistic_save() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry(
         Bytes::from(encode_checkpoint_record(&record).unwrap()),
         11,
@@ -150,9 +159,9 @@ async fn load_by_subject_revision_supports_optimistic_save() {
 }
 
 #[tokio::test]
-async fn load_by_id_reads_the_derived_key_space() {
+async fn load_by_id_reads_the_schedule_id_key_space() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry(
         Bytes::from(encode_checkpoint_record(&record).unwrap()),
         3,
@@ -163,13 +172,13 @@ async fn load_by_id_reads_the_derived_key_space() {
     let loaded = store.load_by_id(&record.schedule_id).await.unwrap().unwrap();
 
     assert_eq!(loaded.record.schedule_id, record.schedule_id);
-    assert_eq!(kv.entry_calls()[0], format!("v1.{}", record.key().simple()));
+    assert_eq!(kv.entry_calls()[0], format!("v1.{}", record.key()));
 }
 
 #[tokio::test]
 async fn load_by_subject_missing_entry_is_absent() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry_none();
     let store = ScheduleCheckpointStore::new(kv);
 
@@ -181,7 +190,7 @@ async fn load_by_subject_missing_entry_is_absent() {
 #[tokio::test]
 async fn load_by_subject_deleted_entry_is_absent() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry(Bytes::new(), 4, kv::Operation::Purge);
     let store = ScheduleCheckpointStore::new(kv);
 
@@ -193,9 +202,9 @@ async fn load_by_subject_deleted_entry_is_absent() {
 #[tokio::test]
 async fn list_skips_failure_and_non_checkpoint_keys() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.set_keys_result(Ok(vec![
-        format!("v1.{}", record.key().simple()),
+        format!("v1.{}", record.key()),
         "failure.v1.STREAM.7".to_string(),
     ]));
     kv.enqueue_get_some(Bytes::from(encode_checkpoint_record(&record).unwrap()));
@@ -205,14 +214,14 @@ async fn list_skips_failure_and_non_checkpoint_keys() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].schedule_id, record.schedule_id);
     // Only the checkpoint key triggers a value read.
-    assert_eq!(kv.get_calls(), vec![format!("v1.{}", record.key().simple())]);
+    assert_eq!(kv.get_calls(), vec![format!("v1.{}", record.key())]);
 }
 
 #[tokio::test]
 async fn list_skips_corrupt_checkpoint_records() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
-    let healthy_key = format!("v1.{}", record.key().simple());
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
+    let healthy_key = format!("v1.{}", record.key());
     kv.set_keys_result(Ok(vec!["v1.corrupt".to_string(), healthy_key.clone()]));
     kv.enqueue_get_some(Bytes::from_static(b"not proto"));
     kv.enqueue_get_some(Bytes::from(encode_checkpoint_record(&record).unwrap()));
@@ -266,7 +275,7 @@ async fn backend_errors_are_transient() {
     kv.enqueue_entry_error(kv::EntryErrorKind::Other);
     let store = ScheduleCheckpointStore::new(kv);
     let error = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap_err();
     assert!(error.is_transient());
@@ -278,7 +287,7 @@ async fn invalid_key_backend_errors_are_permanent() {
     kv.enqueue_entry_error(kv::EntryErrorKind::InvalidKey);
     let store = ScheduleCheckpointStore::new(kv);
     let error = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap_err();
 
@@ -308,7 +317,7 @@ async fn corrupt_stored_bytes_are_a_codec_error() {
     kv.enqueue_entry(Bytes::from_static(b"not proto"), 1, kv::Operation::Put);
     let store = ScheduleCheckpointStore::new(kv);
     let error = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap_err();
     assert!(!error.is_transient());
@@ -318,12 +327,12 @@ async fn corrupt_stored_bytes_are_a_codec_error() {
 #[tokio::test]
 async fn corrupt_stored_bytes_capture_watermark_when_envelope_parses() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     let corrupt = corrupt_checkpoint_schedule(&encode_checkpoint_record(&record).unwrap());
     kv.enqueue_entry(Bytes::from(corrupt), 1, kv::Operation::Put);
     let store = ScheduleCheckpointStore::new(kv);
     let error = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap_err();
 
@@ -336,7 +345,7 @@ async fn corrupt_stored_bytes_capture_watermark_when_envelope_parses() {
 #[tokio::test]
 async fn corrupt_subject_load_captures_revision() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
     kv.enqueue_entry(Bytes::from_static(b"not proto"), 5, kv::Operation::Put);
     let store = ScheduleCheckpointStore::new(kv);
 
@@ -351,7 +360,7 @@ async fn backend_errors_have_no_corrupt_revision() {
     kv.enqueue_entry_error(kv::EntryErrorKind::Other);
     let store = ScheduleCheckpointStore::new(kv);
     let error = store
-        .load(&ScheduleKey::derive(&ScheduleId::parse("orders").unwrap()))
+        .load(&crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c05").unwrap())
         .await
         .unwrap_err();
 
@@ -363,8 +372,8 @@ async fn backend_errors_have_no_corrupt_revision() {
 #[tokio::test]
 async fn list_skips_checkpoint_keys_without_values() {
     let kv = MockJetStreamKvStore::new();
-    let record = record("orders");
-    kv.set_keys_result(Ok(vec![format!("v1.{}", record.key().simple())]));
+    let record = record("0198fa2f6d0a7b1a8cf9f762e73a1c05");
+    kv.set_keys_result(Ok(vec![format!("v1.{}", record.key())]));
     kv.enqueue_get_none();
     let store = ScheduleCheckpointStore::new(kv);
 

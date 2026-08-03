@@ -17,6 +17,7 @@ use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue, JetS
 use crate::kv::open_events_stream;
 use crate::{
     ScheduleEventCase,
+    commands::domain::ScheduleId,
     constants::{EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PREFIX, SCHEDULES_CHECKPOINT_KEY},
     error::SchedulerError,
     projections_v1, v1,
@@ -24,7 +25,6 @@ use crate::{
 
 #[cfg(not(coverage))]
 use storage::get_or_create_schedules_bucket;
-use storage::read_model_key;
 
 /// The read model's KV storage contract (bucket, key scheme, checkpoint key),
 /// owned by the projection that defines that layout.
@@ -390,36 +390,35 @@ where
     // Reconcile the bucket against the freshly folded state. This catch-up replays
     // the full event log from empty, so `states` is authoritative for which
     // schedules should have a row. Deleting every current entry that is not one of
-    // them removes both pre-v2 (raw schedule id) rows and any stale row whose
-    // updating events were skipped during the fold, so a clean rebuild never leaves
-    // an outdated projection behind.
+    // them removes any stale row whose updating events were skipped during the
+    // fold, so a clean rebuild never leaves an outdated projection behind.
     let live_keys: HashSet<String> = states
         .values()
         .filter_map(|state| match state {
-            ScheduleStreamState::Present(view) => Some(read_model_key(&view.schedule_id)),
+            ScheduleStreamState::Present(view) => Some(view.schedule_id.clone()),
             ScheduleStreamState::Initial | ScheduleStreamState::Deleted(_) => None,
         })
         .collect();
-    reconcile_read_model_keys(&bucket, &live_keys).await?;
+    reconcile_projection_keys(&bucket, &live_keys).await?;
 
     write_read_model_checkpoint(&bucket, target).await
 }
 
 /// Reconciles the bucket to the freshly folded state: deletes every entry that is
-/// neither the checkpoint nor one of `live_keys` (the derived keys of the
-/// schedules the rebuild folded as present).
+/// neither the checkpoint nor one of the schedule ids the rebuild folded as
+/// present.
 ///
 /// Because catch-up replays the full event log from empty, `live_keys` is the
-/// authoritative set of rows that should exist. Deleting the rest removes pre-v2
-/// raw-id rows and any stale row whose updating events were skipped during the
-/// fold, so a clean rebuild can never leave an outdated projection behind.
+/// authoritative set of rows that should exist. Deleting the rest removes any
+/// stale row whose updating events were skipped during the fold, so a clean
+/// rebuild can never leave an outdated projection behind.
 ///
 /// This trades the earlier shape-only conservatism for correctness, so it relies
 /// on the single-active-writer invariant (see the module docs): with a concurrent
 /// writer — a misconfigured rolling restart — it could delete a row a peer just
 /// created, which that peer's next event or restart re-creates.
 #[cfg(not(coverage))]
-async fn reconcile_read_model_keys(bucket: &kv::Store, live_keys: &HashSet<String>) -> Result<(), SchedulerError> {
+async fn reconcile_projection_keys(bucket: &kv::Store, live_keys: &HashSet<String>) -> Result<(), SchedulerError> {
     let mut keys = bucket.keys().await.map_err(|source| {
         SchedulerError::kv_source("failed to list schedules read-model keys for reconcile", source)
     })?;
@@ -471,25 +470,20 @@ async fn fold_catch_up_message(
         // read model, skip without disturbing state.
         return Ok(());
     };
-    let subject_token = match read_model_token_from_event_subject(event.stream_id()) {
+    let subject_schedule_id = match schedule_id_from_event_subject(event.stream_id()) {
         Ok(token) => token,
         Err(source) => {
             tracing::warn!(%source, "skipping schedule event with unrecognized subject during read-model catch-up");
             return Ok(());
         }
     };
-    // The subject carries the schedule's derived routing token, not the raw id;
-    // the raw id lives in the event payload. Recover it from the payload and
-    // confirm it routes to this subject, so a misrouted event can never fold into
-    // another schedule's view — and so `apply`'s id check matches the stream id
-    // instead of rejecting every replayed event.
     let Some(schedule_id) = event_schedule_id(&decoded) else {
-        tracing::warn!(%subject_token, "skipping schedule event without a payload schedule id during read-model catch-up");
+        tracing::warn!(%subject_schedule_id, "skipping schedule event without a payload schedule id during read-model catch-up");
         return Ok(());
     };
-    if read_model_key(schedule_id) != subject_token {
+    if schedule_id != subject_schedule_id.to_string() {
         tracing::warn!(
-            %subject_token,
+            %subject_schedule_id,
             %schedule_id,
             "skipping schedule event whose payload id does not route to its subject during read-model catch-up"
         );
@@ -602,7 +596,7 @@ async fn read_projected_view(
     id: &str,
 ) -> Result<Option<projections_v1::ScheduleProjection>, SchedulerError> {
     let Some(value) = bucket
-        .get(read_model_key(id))
+        .get(id)
         .await
         .map_err(|source| SchedulerError::kv_source("failed to read projected schedule", source))?
     else {
@@ -676,12 +670,12 @@ async fn apply_projection_change(kv: &kv::Store, change: &ProjectionChange) -> R
     match change {
         ProjectionChange::Upsert(view) => {
             let value = buffa::Message::encode_to_vec(view.as_ref());
-            kv.put(read_model_key(&view.schedule_id), value.into())
+            kv.put(view.schedule_id.clone(), value.into())
                 .await
                 .map_err(|source| SchedulerError::kv_source("failed to store projected job state", source))?;
         }
         ProjectionChange::Delete(id) => {
-            kv.delete(read_model_key(id))
+            kv.delete(id)
                 .await
                 .map_err(|source| SchedulerError::kv_source("failed to delete projected job state", source))?;
         }
@@ -713,19 +707,8 @@ fn apply_event_to_read_model_state(
     Ok(change)
 }
 
-/// Extracts a schedule event subject's derived routing token — the 32-hex
-/// `key.simple()` the publisher appends as the subject's last segment.
-///
-/// The subject is `EVENTS_SUBJECT_PREFIX` then `.` then the derived key (never the
-/// raw schedule id, so this cannot recover the id; the raw id is read from the
-/// event payload). The token is used only to confirm an event routes to the
-/// schedule named in its payload before that event is folded.
-pub(crate) fn read_model_token_from_event_subject(subject: &str) -> Result<String, SchedulerError> {
-    // Confirm the subject is a schedule event, then take its final dot-segment as
-    // the key. `key.simple()` never contains a dot, so the last segment is always
-    // the whole token — correct whether or not `EVENTS_SUBJECT_PREFIX` itself ends
-    // in a dot (stripping a prefix without the trailing dot would otherwise leave a
-    // leading `.` that never matches the derived KV key).
+/// Extracts the schedule id appended to a schedule event subject.
+pub(crate) fn schedule_id_from_event_subject(subject: &str) -> Result<ScheduleId, SchedulerError> {
     let rest = subject.strip_prefix(EVENTS_SUBJECT_PREFIX).ok_or_else(|| {
         SchedulerError::event_source(
             "failed to derive schedule routing token from event subject",
@@ -739,7 +722,8 @@ pub(crate) fn read_model_token_from_event_subject(subject: &str) -> Result<Strin
             std::io::Error::other(subject.to_string()),
         ));
     }
-    Ok(token.to_string())
+    ScheduleId::parse(token)
+        .map_err(|source| SchedulerError::event_source("schedule event subject has an invalid schedule id", source))
 }
 
 #[cfg(test)]

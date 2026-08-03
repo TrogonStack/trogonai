@@ -881,7 +881,6 @@ impl<'a, E, C, S, G> CommandExecution<'a, E, C, S, G> {
     where
         C: Decider,
         C::Event: Clone + EventType + EventIdentity + EventEncode,
-        C::StreamId: AsRef<str>,
         E: StreamAppend<C::StreamId>,
         G: NowV7,
         CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
@@ -963,7 +962,7 @@ impl<E, C, G> CommandExecution<'_, E, C, WithoutSnapshots, G>
 where
     C: Decider,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
-    C::StreamId: AsRef<str>,
+    C::StreamId: std::fmt::Display,
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
     G: NowV7,
     CommandEventTypeError<C>: std::error::Error + Send + Sync + 'static,
@@ -998,7 +997,7 @@ where
 
     async fn execute_inner(self) -> CommandWithoutSnapshotsResult<E, C> {
         let stream_id = self.command.stream_id();
-        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
+        tracing::Span::current().record(attribute::STREAM_ID, tracing::field::display(stream_id));
         if has_no_stream_write_precondition::<C>(self.write_precondition) {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -1038,7 +1037,7 @@ where
     C: Decider,
     C::State: Clone + Send + 'static,
     C::Event: Clone + EventType + EventIdentity + EventEncode + EventDecode,
-    C::StreamId: AsRef<str> + ToOwned,
+    C::StreamId: std::fmt::Display + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     E: StreamRead<C::StreamId> + StreamAppend<C::StreamId>,
     S: Clone + SnapshotRead<C::State, C::StreamId> + SnapshotWrite<C::State, C::StreamId> + 'static,
@@ -1083,7 +1082,7 @@ where
 
     async fn execute_inner(self) -> CommandWithSnapshotsResult<E, S, C> {
         let stream_id = self.command.stream_id();
-        tracing::Span::current().record(attribute::STREAM_ID, stream_id.as_ref());
+        tracing::Span::current().record(attribute::STREAM_ID, tracing::field::display(stream_id));
         if has_no_stream_write_precondition::<C>(self.write_precondition) {
             let (append_outcome, events, state) = self.append_decision(None, stream_id, C::initial_state()).await?;
 
@@ -1107,7 +1106,7 @@ where
             });
         }
 
-        let stream_id_display = stream_id.as_ref().to_string();
+        let stream_id_display = stream_id.to_string();
         let read_snapshot_span = tracing::info_span!(
             span::DECIDER_READ_SNAPSHOT,
             stream_id = %stream_id_display,
@@ -1307,7 +1306,7 @@ fn maybe_take_snapshot<S, C, P, Spawn, F>(
 ) where
     C: Decider,
     C::State: Clone + SnapshotType + Send + 'static,
-    C::StreamId: AsRef<str> + ToOwned,
+    C::StreamId: std::fmt::Display + ToOwned,
     <C::StreamId as ToOwned>::Owned: Borrow<C::StreamId> + Send + 'static,
     S: Clone + SnapshotWrite<C::State, C::StreamId> + 'static,
     S::Error: std::fmt::Display + Send + 'static,
@@ -1337,12 +1336,12 @@ fn schedule_snapshot_write<S, State, StreamId, Spawn>(
     S: SnapshotWrite<State, StreamId> + Clone + Send + Sync + 'static,
     S::Error: std::fmt::Display + Send + 'static,
     State: SnapshotType + Send + 'static,
-    StreamId: AsRef<str> + ToOwned + ?Sized,
+    StreamId: std::fmt::Display + ToOwned + ?Sized,
     StreamId::Owned: Borrow<StreamId> + Send + 'static,
     Spawn: SnapshotTaskScheduler + Send + Sync,
 {
     let snapshot_store = snapshot_store.clone();
-    let stream_id_for_log = stream_id.as_ref().to_string();
+    let stream_id_for_log = stream_id.to_string();
     let stream_id = stream_id.to_owned();
 
     schedule_snapshot_task.schedule(async move {

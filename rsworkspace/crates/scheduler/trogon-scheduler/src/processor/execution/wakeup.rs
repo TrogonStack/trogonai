@@ -10,9 +10,7 @@ use trogon_std::time::{EpochClock, SystemClock};
 use crate::commands::domain::ScheduleId;
 use crate::commands::{EvolveError, RecordScheduleOccurrence, RecordScheduleOccurrenceError};
 use crate::constants::{RRULE_WAKEUP_CONSUMER, RRULE_WAKEUP_FILTER};
-use crate::processor::execution::reconciliation::{
-    RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, ScheduleKey, ScheduleSubject,
-};
+use crate::processor::execution::reconciliation::{RRuleWakeupPayload, RRuleWakeupPayloadDecodeError, ScheduleSubject};
 use trogonai_proto::scheduler::schedules::ScheduleEventPayloadError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,9 +101,9 @@ impl<E, C> RRuleWakeupProcessor<E, C> {
 
 impl<E, C> RRuleWakeupProcessor<E, C>
 where
-    E: StreamRead<str> + StreamAppend<str>,
-    <E as StreamRead<str>>::Error: std::error::Error + Send + Sync + 'static,
-    <E as StreamAppend<str>>::Error: std::error::Error + Send + Sync + 'static,
+    E: StreamRead<ScheduleId> + StreamAppend<ScheduleId>,
+    <E as StreamRead<ScheduleId>>::Error: std::error::Error + Send + Sync + 'static,
+    <E as StreamAppend<ScheduleId>>::Error: std::error::Error + Send + Sync + 'static,
     C: EpochClock,
 {
     pub async fn process(&self, subject: &str, payload: &[u8]) -> Result<RRuleWakeupOutcome, RRuleWakeupError> {
@@ -150,7 +148,7 @@ fn ensure_subject_matches_payload(
     subject: &RRuleWakeupSubjectInput,
     schedule_id: &ScheduleId,
 ) -> Result<(), RRuleWakeupError> {
-    let expected = ScheduleSubject::rrule_wakeup(&ScheduleKey::derive(schedule_id));
+    let expected = ScheduleSubject::rrule_wakeup(schedule_id);
     if subject.as_str() == expected.as_str() {
         return Ok(());
     }

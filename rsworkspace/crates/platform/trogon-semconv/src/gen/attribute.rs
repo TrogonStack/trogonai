@@ -498,8 +498,8 @@ pub const REQUEST_ID: &str = "request_id";
 /// Sentry resource targeted by the webhook
 pub const RESOURCE: &str = "resource";
 
-/// Key uniquely identifying the schedule the record applies to
-pub const SCHEDULE_KEY: &str = "schedule_key";
+/// Identifier of the schedule the record applies to
+pub const SCHEDULE_ID: &str = "schedule_id";
 
 /// NATS server URLs used to establish the connection
 pub const SERVERS: &str = "servers";

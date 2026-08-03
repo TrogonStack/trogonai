@@ -46,7 +46,7 @@ fn created(id: &str, enabled: bool, schedule: v1::Schedule) -> v1::ScheduleEvent
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCreated {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 status: MessageField::some(v1::ScheduleStatus { kind: Some(kind) }),
                 schedule: MessageField::some(schedule),
                 delivery: MessageField::default(),
@@ -61,7 +61,7 @@ fn removed(id: &str) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleRemoved {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
             }
             .into(),
         ),
@@ -72,7 +72,7 @@ fn recorded(id: &str, sequence: u64, at: DateTime<Utc>) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceRecorded {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(sequence),
                 occurrence_at: MessageField::some(timestamp_from_datetime(&at)),
                 recorded_at: MessageField::some(timestamp_from_datetime(&at)),
@@ -91,7 +91,7 @@ fn occurrence_scheduled(
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleOccurrenceScheduled {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 occurrence_sequence: Some(sequence),
                 occurrence_at: MessageField::some(timestamp_from_datetime(&occurrence_at)),
                 scheduled_at: MessageField::some(timestamp_from_datetime(&scheduled_at)),
@@ -105,7 +105,7 @@ fn occurrence_completed(id: &str, last_sequence: u64) -> v1::ScheduleEvent {
     v1::ScheduleEvent {
         event: Some(
             v1::ScheduleCompleted {
-                schedule_id: id.to_string(),
+                schedule_id: schedule_id(id).to_string(),
                 last_occurrence_sequence: Some(last_sequence),
             }
             .into(),
@@ -115,8 +115,11 @@ fn occurrence_completed(id: &str, last_sequence: u64) -> v1::ScheduleEvent {
 
 #[test]
 fn decider_identity_delegates_to_schedule_state() {
-    let command = command("recurring", Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap());
-    assert_eq!(command.stream_id(), "recurring");
+    let command = command(
+        "0198fa2f6d0a7b1a8cf9f762e73a1c15",
+        Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap(),
+    );
+    assert_eq!(command.stream_id(), &schedule_id("0198fa2f6d0a7b1a8cf9f762e73a1c15"));
     assert_eq!(
         ScheduleNextOccurrence::initial_state(),
         super::super::state::initial_state()
@@ -125,7 +128,7 @@ fn decider_identity_delegates_to_schedule_state() {
 
 #[test]
 fn arms_the_first_occurrence_for_a_created_schedule() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -141,7 +144,7 @@ fn arms_the_first_occurrence_for_a_created_schedule() {
 
 #[test]
 fn arms_after_the_last_recent_recorded_occurrence() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
     let now = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
 
@@ -159,7 +162,7 @@ fn arms_after_the_last_recent_recorded_occurrence() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn arms_after_old_recorded_occurrence_without_grace_skip() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let last = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
     let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
 
@@ -177,7 +180,7 @@ fn arms_after_old_recorded_occurrence_without_grace_skip() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn arms_the_occurrence_strictly_after_the_last_recorded_one() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let last = Utc.with_ymd_and_hms(2026, 6, 4, 0, 0, 0).unwrap();
     // Resume shortly after the last recorded occurrence: the cursor must skip
     // it and arm the next one, not re-arm the one already recorded.
@@ -196,7 +199,7 @@ fn arms_the_occurrence_strictly_after_the_last_recorded_one() {
 
 #[test]
 fn completes_when_no_future_occurrence_remains() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -207,7 +210,7 @@ fn completes_when_no_future_occurrence_remains() {
 
 #[test]
 fn rejects_occurrence_sequence_overflow() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -224,7 +227,7 @@ fn rejects_occurrence_sequence_overflow() {
 
 #[test]
 fn rejects_when_already_armed() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let pending = Utc.with_ymd_and_hms(2026, 6, 3, 0, 0, 0).unwrap();
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
@@ -239,7 +242,7 @@ fn rejects_when_already_armed() {
 
 #[test]
 fn rejects_when_already_completed() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 10, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -250,7 +253,7 @@ fn rejects_when_already_completed() {
 
 #[test]
 fn rejects_paused_deleted_and_missing_schedules() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -271,7 +274,7 @@ fn rejects_paused_deleted_and_missing_schedules() {
 
 #[test]
 fn rejects_when_schedule_definition_is_missing() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()
@@ -282,7 +285,7 @@ fn rejects_when_schedule_definition_is_missing() {
 
 #[test]
 fn rejects_invalid_last_recorded_timestamp() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let invalid = buffa_types::google::protobuf::Timestamp {
         seconds: i64::MAX,
         nanos: 0,
@@ -307,7 +310,7 @@ fn rejects_invalid_last_recorded_timestamp() {
 
 #[test]
 fn rejects_malformed_state_values() {
-    let id = "recurring";
+    let id = "0198fa2f6d0a7b1a8cf9f762e73a1c15";
     let now = Utc.with_ymd_and_hms(2026, 6, 1, 0, 0, 0).unwrap();
 
     TestCase::<ScheduleNextOccurrence>::new()

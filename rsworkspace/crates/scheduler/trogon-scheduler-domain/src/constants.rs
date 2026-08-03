@@ -6,8 +6,6 @@ use std::num::NonZeroU64;
 #[cfg(feature = "runtime-snapshot")]
 use trogon_decider_runtime::FrequencySnapshot;
 
-pub(crate) const MAX_LENGTH: usize = 256;
-
 pub(crate) const RESERVED_SCHEDULE_HEADERS: [&str; 5] = [
     "Nats-Schedule",
     "Nats-Schedule-Source",

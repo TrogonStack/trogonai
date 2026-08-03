@@ -13,22 +13,6 @@ use trogon_nats::jetstream::{JetStreamCreateKeyValue, JetStreamGetKeyValue};
 
 use crate::constants::SCHEDULES_BUCKET;
 use crate::error::SchedulerError;
-use crate::processor::execution::reconciliation::{ScheduleKey, StreamRoutingId};
-
-/// Derives the KV key for a schedule's read-model entry.
-///
-/// A schedule id may be any string the command domain allows — dots, slashes,
-/// `:`, `@`, non-ASCII, up to 256 chars — which is not always a valid NATS KV
-/// key. Keying by a derived 32-hex token (the same scheme the execution worker
-/// uses for its checkpoint) makes every schedule both storable and addressable,
-/// regardless of the characters in its id.
-pub(crate) fn read_model_key(schedule_id: &str) -> String {
-    ScheduleKey::for_stream(&StreamRoutingId::from(schedule_id)).simple()
-}
-
-#[cfg(test)]
-mod tests;
-
 #[cfg(not(coverage))]
 pub(crate) async fn get_or_create_schedules_bucket<J>(js: &J) -> Result<kv::Store, SchedulerError>
 where

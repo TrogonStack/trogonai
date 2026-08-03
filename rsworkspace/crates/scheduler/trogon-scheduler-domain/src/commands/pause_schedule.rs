@@ -29,14 +29,14 @@ impl PauseSchedule {
 }
 
 impl Decider for PauseSchedule {
-    type StreamId = str;
+    type StreamId = ScheduleId;
     type State = state_v1::State;
     type Event = v1::ScheduleEvent;
     type DecideError = PauseScheduleError;
     type EvolveError = super::EvolveError;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.id.as_str()
+        &self.id
     }
 
     fn initial_state() -> Self::State {
@@ -67,7 +67,7 @@ impl Decider for PauseSchedule {
             state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED => Ok(Decision::event(v1::ScheduleEvent {
                 event: Some(
                     v1::SchedulePaused {
-                        schedule_id: command.id.as_str().to_string(),
+                        schedule_id: command.id.to_string(),
                     }
                     .into(),
                 ),
