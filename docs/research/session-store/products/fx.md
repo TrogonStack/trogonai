@@ -19,7 +19,7 @@ possible. Version-sensitive claims were checked against these anchors:
   `{"kind":"compacted_summary","summary":`, and so on), so the binary
   contains the wire spelling of every field and every tagged variant
   verbatim, including paths no local session exercised.
-- The binary's own machine-readable surfaces: `fx session --json`,
+- The binary's own machine-readable surfaces: `fx session <id> --json`,
   `fx sessions --json`, `fx doctor`, `fx --help`.
 
 > Evidence tags. Because this is a black-box reconstruction rather than a
@@ -347,11 +347,17 @@ Two versions ship simultaneously and mean different things [observed]:
 
 - `"schema_version": 3` is what `checkpoint.json` stores durably: it
   includes `files` and the full presentation payloads.
-- `"schema_version": 2` is what `fx session --json` emits: the same
-  `tool_steps` with `output_handle`, `committed_file_presentation`,
-  `command_output_replay`, `command_process_presentation`, and `files`
-  **dropped**. The public projection is a lossy downgrade of the durable
-  record, not the durable record itself.
+- `"schema_version": 2` is what `fx session <id> --json` emits: the same
+  record with only `command_output_replay` and `command_process_presentation`
+  **dropped** from tool results [observed]. `files`, `output_handle`,
+  `preview`, and `committed_file_presentation` are all retained. A
+  field-level diff of `checkpoint.json` against the CLI output for the same
+  session (this build, a session that exercised `run_command`, 211 steps /
+  263 results / 234 file entries, identical counts and key sets on both
+  sides except those two keys) settles this; an earlier revision of this
+  dossier claimed all five fields were dropped, which the diff refutes. The
+  projection is documented as a beta read contract in the
+  [session detail JSON reference](./fx-session-detail-json-reference.md).
 
 ```json
 {"schema_version":3,
@@ -520,7 +526,11 @@ checkpoints, against 2 turn commits.
 [observed / literal]: `session_detail`, `sessions`, `session_summary`,
 `session_migration`, `session_recovery` (with `source_id`, `recovered_id`,
 and outcomes `recovered`, `recovered_with_unverified_artifacts`,
-`indeterminate`), `workspace`.
+`indeterminate`), `workspace`. The `session_detail` shape is documented as a
+beta read contract in the
+[session detail JSON reference](./fx-session-detail-json-reference.md),
+including an error envelope (`{"kind":"session","error":…,"code":…}`) this
+dossier had not catalogued.
 
 ```json
 {"kind":"session_detail","id":"…","created_at_ms":…,"updated_at_ms":…,
@@ -656,13 +666,20 @@ importing directly:
 
 Two costs are equally instructive as anti-patterns: **full pre-image inlining**
 (`previous_content` per edit, no dedup, no content addressing, megabyte
-checkpoints for a single turn) and the **lossy public projection**: the
-`schema_version: 2` execution record emitted by `fx session --json` silently
-drops handles, diffs, and the file ledger, so anything built on the CLI's
-JSON sees a strictly weaker record than the store holds. If we expose a
-read API over the Session Store, its projection needs to be a documented,
-separately versioned contract rather than an older internal shape reused as
-the public one.
+checkpoints for a single turn) and the **underversioned public projection**:
+the `schema_version: 2` execution record emitted by `fx session <id> --json`
+drops
+`command_output_replay` and `command_process_presentation` (so the public JSON
+has no structured exit code or signal), omits the session-level metadata the
+store holds (workspace, model, effort, token totals, title, preview), and the
+top-level response carries no `schema_version` of its own, only the nested
+execution object's. The projection is at least a documented beta contract now
+(see the [session detail JSON reference](./fx-session-detail-json-reference.md)),
+but the emitted JSON can also contain unescaped control characters in strings,
+which strict JSON parsers reject [observed]. If we expose a read API over the
+Session Store, its projection needs to be a documented contract versioned at
+the top level, emitting strictly valid JSON, rather than an older internal
+shape reused as the public one.
 
 ## Open questions
 

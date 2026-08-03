@@ -6,7 +6,9 @@ and separates three things: where fx carries structure we do not, where our
 model is stronger, and where the difference is a trade-off rather than a gap.
 
 Sources are the fx dossier (evidence tags `[observed]` / `[literal]` carry
-over unchanged) and the 52 `.proto` files under
+over unchanged), the documented CLI read contract in the
+[fx session detail JSON reference](./fx-session-detail-json-reference.md),
+and the 57 `.proto` files under
 `proto/trogonai/session/sessions/v1alpha1/`. Where a conclusion here differs
 from an accepted record in the [ADR index](../../../adr/index.md), the ADR is
 authoritative. This document proposes; it does not decide.
@@ -58,28 +60,30 @@ information that our catalog does not model.
 | `HistoryTurn{compacted_summary}` | `Compacted` | Ours |
 | `UserMessage{text, images[]}` | `CanonicalMessage` with `ContentBlock` oneof | Ours (blocks, thinking, signatures) |
 | `ToolCall{id, name, arguments_json}` | `ToolCallRequested{tool_call_id, tool_name, input_json}` | Equivalent |
-| `ToolCall.provider_result`, `ToolResult.provider_native` | No equivalent | **Gap** |
+| `ToolCall.provider_result`, `ToolResult.provider_native` | `ProviderBlock` arm on `ContentBlock` | Closed in `v1alpha1` (write-verbatim, read-never) |
 | `ToolResult.output` | `TextToolResult.content` | Equivalent |
 | `ToolResult.output_handle` + `preview` | `ArtifactRef{artifact_id, digest, preview}` | Ours (content-addressed) |
-| `ToolResult.output_bytes` vs `stored_output_bytes` | `ArtifactRef.size_bytes` (one number) | **Gap**, small |
+| `ToolResult.output_bytes` vs `stored_output_bytes` | `ArtifactRef.size_bytes` + `untruncated_size_bytes` | Closed in `v1alpha1` |
 | `ToolResult.status` | `ToolCallResultStatus` + `ToolCallFailureReason` | Ours |
-| `command_process_presentation{exit_code, signal}` | No equivalent | **Gap** |
+| `command_process_presentation{exit_code, signal}` | `ToolCallCompleted.termination` (`CommandTermination`) + `duration` | Closed in `v1alpha1` |
 | `command_output_replay{handle, framed_bytes}` | No equivalent | Gap, optional |
 | `CommittedFilePresentation.previous_content` (inline) | `FileChanged.before_ref` | Ours, decisively |
-| `CommittedFilePresentation.lines[]`, `additions`, `deletions` | No equivalent | **Gap** |
-| `CommittedFilePresentation.lifecycle_id{turn_id, call_id}` | `tool_call_id` only | **Gap** (no turn identity) |
-| `execution.files[].action = read` | No equivalent | **Gap** |
-| `execution.files[].stale`, `model_view_covers_full_file` | No equivalent | Trade-off, do not copy verbatim |
+| `CommittedFilePresentation.lines[]`, `additions`, `deletions` | `FileChanged.diff` (`DiffSummary`: exact counts, rendered artifact) | Closed in `v1alpha1`, minus a structured per-line array |
+| `CommittedFilePresentation.lifecycle_id{turn_id, call_id}` | `FileChanged.turn_id` + `tool_call_id` | Closed in `v1alpha1` |
+| `execution.files[].action = read` (of 9 action values) | `ToolCallCompleted.observed` (`ResourceObservation`) | Closed in `v1alpha1` for content reads; no list/search/copy taxonomy |
+| `execution.files[].stale`, `model_view_covers_full_file` | `ResourceObservation.complete` + `range` for coverage; freshness stays in the fold | Coverage closed in `v1alpha1`; `stale` deliberately not copied |
 | `UsageSnapshot` counters | `TokenUsage` + `Cost{amount_micros, rate_ref}` | Ours |
-| `usage.billing`, `*_complete` flags | No equivalent | **Gap** |
+| `usage.billing`, `*_complete` flags | `TokenUsage.completeness` | Closed in `v1alpha1` |
 | `usage.pending[]`, `settled_through_sequence` | Not in the session stream | Ours, deliberately |
-| `preferences{model, effort, fast_mode}` + `preferences_changed` | `CanonicalMessage.model` only | **Gap** |
-| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | Opaque `StoredSessionExecutionPlan.plan_bytes` | **Gap** |
+| `preferences{model, effort, fast_mode}` + `preferences_changed` | `AssistantMessageStarted.settings` (`ModelSettings`) | Closed in `v1alpha1` (per-completion; a change is two adjacent facts) |
+| `workspace_root`, `origin_workspace_root`, `workspace_rebound` | `SessionStarted.workspace` (`WorkspaceRef`) | Closed in `v1alpha1`; rebinding is out of scope (new session or fork) |
 | `conversation_language` | No equivalent | Gap, minor |
 | `display.json{title, preview}` | `SessionRenamed` + read model | Equivalent |
 | subagent relationship pages, channel families | `DelegationDispatched`, `ParentLinked`, `CascadePolicy` | Ours, decisively |
 | `session migrate` with a journaled migration record | No equivalent | **Gap**, cheap to close |
-| `fx session --json` `schema_version: 2` projection | Not yet designed | Warning |
+| `fx session <id> --json` read contract (documented beta, unversioned top level) | Not yet designed | Warning (see below) |
+| `fx session <id> --json` error envelope `{kind, error, code}` | Not yet designed | Warning (query error shapes undecided) |
+| `ToolResult.permission_feedback[]` (flat strings) | `ToolCallApproved` / `ToolCallDenied` | Ours (typed approval lifecycle) |
 
 ## What we should consider changing
 
@@ -87,7 +91,8 @@ Ordered by how much is lost today, not by implementation cost.
 
 Status note: items 1, 2, 3, 5, 6, 7, 8, and the `untruncated_size_bytes` part of
 item 10 have since been implemented in `v1alpha1` and folded into
-[ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) facet 3. Item 4
+[ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) facet 3, and
+the mapping table above reflects that ("Closed in `v1alpha1`" rows). Item 4
 was implemented as `ResourceObservation` on `ToolCallCompleted` rather than as a
 `FileRead` event, for the reason given in that section. Items 9 and the rest of
 10 remain open.
@@ -257,10 +262,11 @@ migration from an operational memory into a fact.
 
 - `background_command` turns: fx models "the work was handed to a background
   process and the turn ends here" as a distinct turn kind with a
-  `background_record_id`. We have no notion of a tool call whose result
-  arrives outside the session's own timeline. The operation ledger
-  (`OperationReserved` / `OperationOutcomeRecorded`) is the natural home if
-  we want one.
+  `background_record_id` (the documented read contract also carries
+  `log_path`, `expect_url`, and `url`). We have no notion of a tool call
+  whose result arrives outside the session's own timeline. The operation
+  ledger (`OperationReserved` / `OperationOutcomeRecorded`) is the natural
+  home if we want one.
 - `conversation_language` at session scope. Small, but it is a real product
   behaviour and it is not derivable after redaction.
 - `command_output_replay`: fx keeps framed terminal tapes so a UI can replay
@@ -372,13 +378,23 @@ model is fine, a rollup in the event is a second source of truth.
   is a fact about the world that can change after the event is written. Once
   it is in the event, it is either wrong or it forces a rewrite. Freshness
   belongs in the fold.
-- **A lossy public projection.** `fx session --json` emits `ExecutionRecord`
-  `schema_version: 2`, silently dropping handles, diffs, and the file ledger
-  from the `schema_version: 3` record the store actually holds. Anything
-  built on the CLI's JSON sees a strictly weaker session than exists. When we
-  expose a read API over the Session Store, its projection has to be a
-  documented contract with its own version, never an older internal shape
-  reused as the public one.
+- **An underversioned public projection.** `fx session <id> --json` emits
+  `ExecutionRecord` `schema_version: 2`. An earlier revision of this document
+  claimed it silently drops handles, diffs, and the file ledger; a field-level
+  diff of the CLI output against the durable `schema_version: 3` checkpoint for
+  the same session (v0.3.64) refutes that. The real drop is only
+  `command_output_replay` and `command_process_presentation`, so the public
+  JSON hides exit codes and replay tapes but keeps handles, diffs, and the
+  file ledger, and the projection is now a documented beta contract, the
+  [session detail JSON reference](./fx-session-detail-json-reference.md). What
+  survives of the criticism: the top-level response carries no
+  `schema_version` of its own (only the nested execution object does), it
+  omits the session-level metadata the store holds (workspace, model, token
+  totals, title, preview), and the emitted JSON can contain unescaped control
+  characters that strict parsers reject. When we expose a read API over the
+  Session Store, its projection has to be a documented contract versioned at
+  the top level and emitting strictly valid JSON, never an older internal
+  shape reused as the public one.
 - **Denormalised counters in the manifest.** `history_len`,
   `total_input_tokens`, `total_output_tokens`, `event_log_bytes`, and
   `last_event_seq` are all recomputable and all capable of drifting from the
