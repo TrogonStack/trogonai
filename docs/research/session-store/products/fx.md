@@ -19,7 +19,7 @@ possible. Version-sensitive claims were checked against these anchors:
   `{"kind":"compacted_summary","summary":`, and so on), so the binary
   contains the wire spelling of every field and every tagged variant
   verbatim, including paths no local session exercised.
-- The binary's own machine-readable surfaces: `fx session --json`,
+- The binary's own machine-readable surfaces: `fx session <id> --json`,
   `fx sessions --json`, `fx doctor`, `fx --help`.
 
 > Evidence tags. Because this is a black-box reconstruction rather than a
@@ -667,7 +667,8 @@ importing directly:
 Two costs are equally instructive as anti-patterns: **full pre-image inlining**
 (`previous_content` per edit, no dedup, no content addressing, megabyte
 checkpoints for a single turn) and the **underversioned public projection**:
-the `schema_version: 2` execution record emitted by `fx session --json` drops
+the `schema_version: 2` execution record emitted by `fx session <id> --json`
+drops
 `command_output_replay` and `command_process_presentation` (so the public JSON
 has no structured exit code or signal), omits the session-level metadata the
 store holds (workspace, model, effort, token totals, title, preview), and the

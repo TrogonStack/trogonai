@@ -81,8 +81,8 @@ information that our catalog does not model.
 | `display.json{title, preview}` | `SessionRenamed` + read model | Equivalent |
 | subagent relationship pages, channel families | `DelegationDispatched`, `ParentLinked`, `CascadePolicy` | Ours, decisively |
 | `session migrate` with a journaled migration record | No equivalent | **Gap**, cheap to close |
-| `fx session --json` read contract (documented beta, unversioned top level) | Not yet designed | Warning (see below) |
-| `fx session --json` error envelope `{kind, error, code}` | Not yet designed | Warning (query error shapes undecided) |
+| `fx session <id> --json` read contract (documented beta, unversioned top level) | Not yet designed | Warning (see below) |
+| `fx session <id> --json` error envelope `{kind, error, code}` | Not yet designed | Warning (query error shapes undecided) |
 | `ToolResult.permission_feedback[]` (flat strings) | `ToolCallApproved` / `ToolCallDenied` | Ours (typed approval lifecycle) |
 
 ## What we should consider changing
@@ -378,7 +378,7 @@ model is fine, a rollup in the event is a second source of truth.
   is a fact about the world that can change after the event is written. Once
   it is in the event, it is either wrong or it forces a rewrite. Freshness
   belongs in the fold.
-- **An underversioned public projection.** `fx session --json` emits
+- **An underversioned public projection.** `fx session <id> --json` emits
   `ExecutionRecord` `schema_version: 2`. An earlier revision of this document
   claimed it silently drops handles, diffs, and the file ledger; a field-level
   diff of the CLI output against the durable `schema_version: 3` checkpoint for
