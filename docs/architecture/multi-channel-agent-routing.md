@@ -202,9 +202,22 @@ Filled in, an inbound subject reads
 `channel.prod.in.telegram.mybot.-1001234567890`: the deployment, the direction,
 then the endpoint address unchanged from its KV form.
 
+- **`in` and `out` are relative to the user, not to the component.** The edge
+  publishes to `in` and consumes from `out`; the router does the reverse, so the
+  same token names one process's input and another's output. Naming the payload
+  instead (`event` and `render`, matching the types the shared crate already
+  defines) would remove the ambiguity. Left open deliberately: these subjects
+  exist only on paper, and the choice belongs to the change that first creates
+  them.
 - The last three tokens are the **endpoint address** defined above. Edges own
   the encoding, which is why `Endpoint` refuses tokens that would not survive
   as a subject.
+- Direction precedes the endpoint so the address stays a contiguous suffix,
+  byte-identical to `Endpoint::kv_key()`. It also has to exist: the address is
+  the same value both ways, so without it an inbound event and a render command
+  for one chat would collide on one subject, the router would consume its own
+  output, and `CHANNEL_IN_{prefix}` and `CHANNEL_OUT_{prefix}` could not be
+  separate streams.
 - The router subscribes `channel.{prefix}.in.>` and is channel-blind; a new
   channel is a new edge binary and zero router changes.
 - The subjects carry exactly the types the shared crate already defines; the
