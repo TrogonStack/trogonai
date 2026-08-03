@@ -32,6 +32,7 @@ use trogon_decider_runtime::{CommandExecution, ReadFrom, ReadStreamRequest, Stre
 use trogon_nats::NatsConfig;
 use trogon_nats::jetstream::JetStreamSubjectPurger;
 use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::{NowV7, UuidV7Generator};
 
 use super::checkpoints::{ReconcileOutcome, ScheduleCheckpointRecord, ScheduleCheckpointStore, ScheduleStatus};
 use super::execution_schedules::ExecutionScheduleWriter;
@@ -127,6 +128,10 @@ fn test_nonce() -> u128 {
         .as_nanos()
 }
 
+fn test_schedule_id() -> ScheduleId {
+    UuidV7Generator.now_v7().into()
+}
+
 fn utc_seconds(datetime: chrono::DateTime<Utc>) -> String {
     datetime.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
@@ -207,7 +212,7 @@ async fn purge_then_publish_converges_and_state_persists_against_live_nats() {
     let checkpoints = ScheduleCheckpointStore::new(checkpoint_kv);
 
     let nonce = test_nonce();
-    let id = crate::mint_schedule_id();
+    let id = test_schedule_id();
     let subject = ScheduleSubject::execution(&id);
     let request = request(&id);
 
@@ -275,7 +280,7 @@ async fn create_command_event_is_processed_into_a_live_execution_schedule() {
     let store = JetStreamStore::builder(context.clone(), events_stream.clone(), snapshot_kv)
         .with_subject_resolver(ScheduleEventSubjectResolver);
 
-    let id = crate::mint_schedule_id();
+    let id = test_schedule_id();
     let subject = ScheduleSubject::execution(&id);
     execution_stream
         .purge_subject_messages(subject.as_str())
@@ -349,7 +354,7 @@ async fn rrule_command_event_is_processed_and_continued_against_live_nats() {
     let first_occurrence_text = utc_seconds(first_occurrence);
     let second_occurrence_text = utc_seconds(second_occurrence);
 
-    let id = crate::mint_schedule_id();
+    let id = test_schedule_id();
     let subject = ScheduleSubject::execution(&id);
     let wakeup_subject = ScheduleSubject::rrule_wakeup(&id);
     execution_stream

@@ -29,8 +29,10 @@ fn rejects_non_uuid_text() {
 #[test]
 fn supports_standard_string_conversions_and_display() {
     let id = ScheduleId::parse(ID).unwrap();
+    let uuid = Uuid::parse_str(ID).unwrap();
 
-    assert_eq!(*id.as_uuid(), Uuid::parse_str(ID).unwrap());
+    assert_eq!(*id.as_uuid(), uuid);
+    assert_eq!(ScheduleId::from(uuid), id);
     assert_eq!(ID.parse::<ScheduleId>().unwrap().to_string(), ID);
     assert_eq!(id.to_string(), ID);
     assert_eq!(
