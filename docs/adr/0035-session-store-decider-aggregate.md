@@ -186,7 +186,7 @@ command by a three-way classification of the fact being appended, not uniformly
 | Precondition | Commands (named by the fact recorded) | Why |
 | --- | --- | --- |
 | `NoStream` (guard `0`) | `CreateSession` records `[SessionStarted]`; `ForkSession` records `[SessionStarted, SessionForked]`; delegated child creation records `[SessionStarted, ParentLinked]` | Creation is atomic and exactly-once; the stream must not already exist. |
-| `At(current_position)` | `SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`, `SessionRewound`, `Compacted`, `ExecutionAttemptStarted`, `ExecutionAttemptReady`, `ExecutionAttemptEnded`, `ToolCallApproved`, `ToolCallDenied`, `OperationReserved`, `OperationOutcomeRecorded`, `OperationCancellationRequested`, `DelegationDispatched`, `ExternalDelegationDispatched`, `ParentTerminated`, `ParentHistoryInvalidated`, `DelegationDetached`, `ParentDetached`, `RedactionApplied`, `ArtifactErased` | `decide` genuinely branches on the current head for each of these: one active attempt, Ready-after-Started, mutually exclusive approve/deny and complete/fail decisions, one terminal outcome per ledger operation, and one saga step per dispatch or detach. A stale decision here would violate an invariant, so it must be rejected, not appended. |
+| `At(current_position)` | `SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`, `SessionRewound`, `Compacted`, `ExecutionAttemptStarted`, `ExecutionAttemptReady`, `ExecutionAttemptEnded`, `ToolCallApproved`, `ToolCallDenied`, `OperationReserved`, `OperationOutcomeRecorded`, `OperationCancellationRequested`, `DelegationDispatched`, `ExternalDelegationDispatched`, `ParentTerminated`, `ParentHistoryInvalidated`, `DelegationDetached`, `ParentDetached`, `RedactionApplied`, `ArtifactErased` | `decide` genuinely branches on the current head for each of these: one active attempt, Ready-after-Started, mutually exclusive approve/deny decisions, one outcome per execution attempt, one terminal outcome per ledger operation, and one saga step per dispatch or detach. A stale decision here would violate an invariant, so it must be rejected, not appended. |
 | `Any` (no server-side guard) | `UserMessageRecorded`, `AssistantMessageStarted`, `AssistantMessageCompleted`, `AssistantMessageFailed`, `ToolCallRequested`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `ArtifactRecorded`, `FileChanged`, `CheckpointProduced`, `SystemNoticeRecorded`, `TodoUpdated`, `SessionRenamed`, `SessionArchived`, `SessionUnarchived` | These commute: `decide` does not need the exact head to be correct, appends never overwrite, and the highest-volume path stays retry-free. |
 
 `StreamExists` is never used, because it sends no server-side guard.
@@ -205,6 +205,20 @@ instead:
   surfaced by a projection flag, never folded into state. Because fold order is
   the stream's own total order, this is replay-deterministic regardless of
   arrival timing.
+- **An orphan happened-fact folds as unjoined, never as rejected.** The same
+  absence of a head guard that lets two outcomes land also lets a fact land
+  with nothing to join to: a `ToolCallStarted` whose `tool_call_id` matches no
+  `ToolCallRequested`, an `AssistantMessageCompleted` or
+  `AssistantMessageFailed` whose `message_id` matches no
+  `AssistantMessageStarted`, or a completion whose `model` disagrees with its
+  start. `decide` reads no state for any of these, so nothing can refuse them.
+  Where the entity exists and the fact disagrees with it, the started entity's
+  own value stands (the start's `model` wins over a completion that contradicts
+  it); where the entity does not exist, the fact joins to nothing and changes no
+  entity state. Either way it is retained on the log and surfaced by the same
+  projection flag as a late conflicting outcome. These are producer bugs, and
+  the store's job is to make them visible, not to pretend an unguarded append
+  could have prevented them.
 - **`TodoUpdated`: highest-`revision`-wins.** Every update carries a required,
   monotonic `revision` from the session's single logical writer (the active
   attempt's loop); the fold keeps whichever update has the highest revision seen
@@ -650,14 +664,24 @@ The Session-owned append and replay boundary, outside
 `validate_session_event`, verifies that the decoded type belongs to Session and
 that its payload `session_id` matches the addressed stream. The Session command
 boundary also computes request digests over the exact bytes it will persist.
-`decide` and `evolve` own every history-dependent relationship: assistant
-start/completion id and model joins, tool lifecycle joins, in-session ordinal
-existence and compaction ordering, exact attempt lineage, first-wins checkpoint
-evidence selection, complete restored-checkpoint equality with that evidence,
-continued effectiveness of `covers_through` after rewind, and equality with the
-stored Session plan.
+`decide` and `evolve` own every history-dependent relationship, and which of the
+two owns a given one follows from whether its command reads state at all.
+`decide` owns the relationships whose command declares a state read in the
+command matrix: in-session ordinal existence and compaction ordering, exact
+attempt lineage, first-wins checkpoint evidence selection, complete
+restored-checkpoint equality with that evidence, continued effectiveness of
+`covers_through` after rewind, and equality with the stored Session plan. Those
+are checked before the append and rejected if they fail.
+`evolve` owns the relationships carried by commuting facts whose state read is
+`none` -- the assistant start/completion id and model joins, and the tool
+lifecycle joins. Those append under `Any` with nothing to check against, so they
+are fold rules rather than append-time rejections: an unmatched or disagreeing
+fact lands on the log and is surfaced by a projection flag, exactly as the `Any`
+fold rules above prescribe.
 This split prevents a local payload validator from claiming facts that only
-the command context or folded history can prove.
+the command context or folded history can prove, and it keeps the command
+matrix honest: a command whose state read is `none` cannot enforce a join, so
+the matrix states its join as the fold rule it is.
 
 Every unset oneof, unspecified enum, and malformed same-event shape above is
 rejected before append, never persisted and reconciled later.
@@ -1016,12 +1040,12 @@ decision.
 | `EraseArtifact` | head | `At` | `[ArtifactErased]` | artifact exists and is claim-checked | `artifact_id` + erasure-request id |
 | `RecordUserMessage` | none | `Any` | `[UserMessageRecorded]` | role is `USER` | `message_id` |
 | `StartAssistantMessage` | none | `Any` | `[AssistantMessageStarted]` | none | `message_id` |
-| `CompleteAssistantMessage` | none | `Any` | `[AssistantMessageCompleted]` | role is `ASSISTANT`; id/model agree with start | `message_id` |
-| `FailAssistantMessage` | none | `Any` | `[AssistantMessageFailed]` | id references a started message; first terminal outcome per id wins | `message_id` |
+| `CompleteAssistantMessage` | none | `Any` | `[AssistantMessageCompleted]` | role is `ASSISTANT` (append-time payload check); id and model agree with start (fold rule: the start's model stands, the disagreement is flagged) | `message_id` |
+| `FailAssistantMessage` | none | `Any` | `[AssistantMessageFailed]` | id references a started message, and first terminal outcome per id wins (both fold rules: an orphan or late outcome is flagged, not refused) | `message_id` |
 | `RequestToolCall` | none | `Any` | `[ToolCallRequested]` | none | `tool_call_id` |
-| `StartToolCall` | none | `Any` | `[ToolCallStarted]` | `tool_call_id` matches a request | `tool_call_id` |
-| `CompleteToolCall` | none | `Any` | `[ToolCallCompleted]` | first-terminal-outcome-wins vs. `ToolCallFailed` | `tool_execution_id` |
-| `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` | `tool_execution_id` |
+| `StartToolCall` | none | `Any` | `[ToolCallStarted]` | `tool_call_id` matches a request (fold rule: an orphan start joins to nothing and is flagged) | `tool_call_id` |
+| `CompleteToolCall` | none | `Any` | `[ToolCallCompleted]` | first-terminal-outcome-wins vs. `ToolCallFailed` (fold rule) | `tool_execution_id` |
+| `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` (fold rule) | `tool_execution_id` |
 | `RecordArtifact` | none | `Any` | `[ArtifactRecorded]` | source oneof set; MIME fallback rule | `artifact_id` |
 | `RecordFileChange` | none | `Any` | `[FileChanged]` | `RENAMED` requires `previous_path`; others omit it | change id |
 | `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible; attempt and plan match; `covers_through` settled; first evidence wins per `checkpoint_id` | `checkpoint_id` + canonical digest of the complete checkpoint evidence |
@@ -1178,8 +1202,11 @@ hot path without inheriting its weak lifecycle guarantees.
   these deterministically -- first-terminal-outcome-wins per entity,
   highest-revision-wins for `TodoUpdated`, first terminal marker wins for the
   session itself -- rather than the store rejecting either at write time
-  (facet 2); every read model over the transcript must be written to honor
-  these fold rules, not just tolerate late facts.
+  (facet 2). The same applies to a fact with nothing to join to, since these
+  commands read no state: an orphan `ToolCallStarted` or an
+  `AssistantMessageCompleted` naming a `message_id` that was never started folds
+  as unjoined and flagged. Every read model over the transcript must be written
+  to honor these fold rules, not just tolerate late facts.
 - No caller migration is needed on the curated line (greenfield). The platform
   `crates/session` domain model is salvaged; its persistence is rewritten as a
   decider, and the switching subsystem is dropped pending [ADR#0031](./0031-agent-implementation-and-session-plan.md).
