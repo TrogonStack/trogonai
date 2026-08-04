@@ -56,8 +56,9 @@ implemented in the substrate today:
   already satisfied on this substrate for free, unless an aggregate opts out.
 - **Physical sequence is the order of record.**
   [ADR#0013](./0013-origin-stream-sequence-header.md) makes the current JetStream
-  stream sequence authoritative for checkpoints, high-water marks, and optimistic
-  concurrency, and confines `Trogon-Origin-Stream-Sequence` to provenance on
+  stream sequence authoritative for [read-side checkpoints](../glossary/checkpoint),
+  high-water marks, and optimistic concurrency, and confines
+  `Trogon-Origin-Stream-Sequence` to provenance on
   restore/backfill/migration/rebuild only.
 
 Prior art exists but on the wrong mechanism. The `origin/platform` branch carries
@@ -140,8 +141,9 @@ flag flips).
 `SessionId` is an opaque addressing key; order and durable cross-references are
 separate concerns from identity (forced decision #2). A payload that must
 reference another event's position -- a fork's inherited-prefix boundary, a
-rewind's inclusive keep-through boundary, a compaction's covered range, a checkpoint's
-coverage, a delegated child's dispatch point -- uses `SessionOrdinal`: the
+rewind's inclusive keep-through boundary, a compaction's covered range, a
+harness recovery checkpoint's coverage, a delegated child's dispatch
+point -- uses `SessionOrdinal`: the
 1-indexed position of an already-appended event within its own subject's fold
 order, derived by counting at fold time, never read from JetStream message
 metadata. Because it is fold-derived rather than physically assigned, it is
@@ -171,7 +173,8 @@ even though both are per-session integers: the prior art's `Seq` was assigned
 ADR supersedes. `SessionOrdinal` guards nothing and is assigned by nobody; it
 exists purely as a fold-derived reference to something that already happened.
 Physical JetStream sequence remains authoritative for OCC guards, processor
-checkpoints, and consumption ([ADR#0013](./0013-origin-stream-sequence-header.md));
+[checkpoints](../glossary/checkpoint), and consumption
+([ADR#0013](./0013-origin-stream-sequence-header.md));
 a `SessionOrdinal` never substitutes for it, and a physical sequence never
 enters a domain payload.
 
@@ -183,12 +186,12 @@ command by a three-way classification of the fact being appended, not uniformly
 | Precondition | Commands (named by the fact recorded) | Why |
 | --- | --- | --- |
 | `NoStream` (guard `0`) | `CreateSession` records `[SessionStarted]`; `ForkSession` records `[SessionStarted, SessionForked]`; delegated child creation records `[SessionStarted, ParentLinked]` | Creation is atomic and exactly-once; the stream must not already exist. |
-| `At(current_position)` | `SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`, `SessionRewound`, `Compacted`, `ExecutionAttemptStarted`, `ExecutionAttemptReady`, `ExecutionAttemptEnded`, `ToolCallApproved`, `ToolCallDenied`, `OperationReserved`, `OperationOutcomeRecorded`, `OperationCancellationRequested`, `DelegationDispatched`, `ExternalDelegationDispatched`, `ParentTerminated`, `ParentHistoryInvalidated`, `DelegationDetached`, `ParentDetached`, `RedactionApplied`, `ArtifactErased` | `decide` genuinely branches on the current head for each of these: one active attempt, Ready-after-Started, mutually exclusive approve/deny and complete/fail decisions, one terminal outcome per ledger operation, one saga step per dispatch or detach. A stale decision here would violate an invariant, so it must be rejected, not appended. |
+| `At(current_position)` | `SessionClosed`, `SessionCancelled`, `SessionFailed`, `SessionHidden`, `SessionRewound`, `Compacted`, `ExecutionAttemptStarted`, `ExecutionAttemptReady`, `ExecutionAttemptEnded`, `ToolCallApproved`, `ToolCallDenied`, `OperationReserved`, `OperationOutcomeRecorded`, `OperationCancellationRequested`, `DelegationDispatched`, `ExternalDelegationDispatched`, `ParentTerminated`, `ParentHistoryInvalidated`, `DelegationDetached`, `ParentDetached`, `RedactionApplied`, `ArtifactErased` | `decide` genuinely branches on the current head for each of these: one active attempt, Ready-after-Started, mutually exclusive approve/deny and complete/fail decisions, one terminal outcome per ledger operation, and one saga step per dispatch or detach. A stale decision here would violate an invariant, so it must be rejected, not appended. |
 | `Any` (no server-side guard) | `UserMessageRecorded`, `AssistantMessageStarted`, `AssistantMessageCompleted`, `AssistantMessageFailed`, `ToolCallRequested`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `ArtifactRecorded`, `FileChanged`, `CheckpointProduced`, `SystemNoticeRecorded`, `TodoUpdated`, `SessionRenamed`, `SessionArchived`, `SessionUnarchived` | These commute: `decide` does not need the exact head to be correct, appends never overwrite, and the highest-volume path stays retry-free. |
 
 `StreamExists` is never used, because it sends no server-side guard.
 
-Two of these lists need one more rule each, because commuting is not the same
+Some `Any` facts need an explicit fold rule, because commuting is not the same
 claim as conflict-free (forced decision #4's correction): a handful of `Any`
 facts can still disagree about a shared entity, and an append-only log cannot
 resolve that by refusing the write. The fold resolves it deterministically
@@ -208,6 +211,12 @@ instead:
   so far, independent of arrival order -- which is what makes it truly commuting
   rather than merely unguarded. Ties resolve to the first occurrence in fold
   order.
+- **`CheckpointProduced`: first evidence per checkpoint id wins.** The first
+  admitted artifact evidence for a `checkpoint_id` is the value restoration may
+  select. A later payload reusing that id is retained for audit but cannot
+  replace the first value. The command idempotency key includes the artifact
+  digest, so conflicting evidence remains visible while byte-identical
+  redelivery collapses through the event identity contract below.
 - **Post-terminal happened-facts remain audit-only**, generalizing the existing
   rule: a session's first terminal marker is authoritative, and any
   happened-fact folded after it (a late `ToolCallCompleted`, for instance) is
@@ -294,9 +303,10 @@ the other substrate obligations below, not hoped for). A duplicate id beyond
 that horizon is impossible by that invariant, not merely unlikely. Entity-keyed
 facts are additionally immune regardless of the id set: a duplicate terminal
 outcome no-ops under first-terminal-outcome-wins per entity id, a repeated
-`TodoUpdated` no-ops under highest-revision-wins, and checkpoint, artifact, and
-operation facts collapse on their own stable ids -- the seen-key horizon is
-defense for the purely arrival-ordered facts (`UserMessageRecorded`,
+`TodoUpdated` no-ops under highest-revision-wins, harness recovery checkpoint
+evidence applies first-wins per checkpoint id, and artifact and operation facts
+collapse on their own stable ids --
+the seen-key horizon is defense for the purely arrival-ordered facts (`UserMessageRecorded`,
 `FileChanged`, `SystemNoticeRecorded`). Beyond the dedup window, a guarded
 (`At`) command's retry re-replays and no-ops on its idempotency key as before;
 an `Any` fact past the window relies on this reader-side collapse by identical
@@ -342,13 +352,27 @@ every event file, and `state`/`projections`/`checkpoints` sibling subtrees whose
 read-model value types are redefined locally to decouple their evolution from the
 write side.
 
-Every event is decoded and validated through its generated codec on both append
-and replay (forced decision #9,
-[ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md)): a malformed
-payload is rejected at the boundary and never reaches durable storage. This ADR
-adds an observable decode-failure metric for session events -- the decider crate
-emits no such metric today and its append/replay decode-error paths are currently
-silent -- following [ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md)'s principle that boundary decode failures must be
+Validation belongs to a Session-owned append and replay boundary, not the
+generic runtime or NATS adapter. Otherwise domain-specific ownership and stream
+address checks either leak into infrastructure or can be skipped by another
+Session write path. That boundary validates a whole batch before publish,
+requires each decoded event to be an owned Session event whose payload
+`session_id` matches the addressed stream, and revalidates replay before
+`evolve` (forced decision #9,
+[ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md)).
+`validate_session_event` owns local same-event shape checks. Plan, lifecycle,
+and history relationships remain Session `decide` and `evolve` invariants,
+protected by the command's OCC classification instead of being pushed into a
+generic codec. A malformed batch is rejected before any member reaches durable
+storage; malformed replay fails closed before state changes.
+Decode, local validation, and stream-identity failures are typed, observable,
+and non-retryable until the input or addressed stream changes, preventing a
+poison message from cycling without new evidence.
+
+This ADR adds an observable decode-failure metric for session events -- the
+decider crate emits no such metric today and its append/replay decode-error
+paths are currently silent -- following
+[ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md)'s principle that boundary decode failures must be
 measured, not dropped. Unlike the prior art, no `InvalidEventRejected` event is
 persisted: rejection happens before the write, so there is nothing to record.
 Schema evolution is additive (new optional fields, reserved retired numbers),
@@ -382,17 +406,76 @@ is not exactly-once execution. Every command is gated before `decide` by the
 proposed `CommandPrincipal`/`CommandAuthorizer` of draft
 [ADR#0026](./0026-command-authorization-principal.md), once those land.
 
-**Checkpoint provenance.** The domain `Checkpoint` embedded in
-`CheckpointProduced` and in `ExecutionAttemptStarted.restored_checkpoint` gains
+**Four records with separate authority.** These records solve different
+failures:
+
+1. The typed event log is authoritative. It is the only record from which the
+   Session aggregate and read models are rebuilt.
+2. An aggregate [snapshot](../glossary/snapshot) is an advisory cached fold of
+   that log. Corruption or incompatibility falls back to earlier replay.
+3. A harness recovery checkpoint is an opaque artifact used only when the
+   platform continues process state from an in-flight harness loop. It cannot
+   replace event replay or satisfy an aggregate snapshot.
+4. A read-side [checkpoint](../glossary/checkpoint) is only a consumer's
+   processed stream position.
+
+The protobuf `Checkpoint` keeps its existing wire name, but ADR prose uses
+harness recovery checkpoint for it so these concepts do not collapse into one
+another.
+
+**Harness recovery checkpoint admission.** The `Checkpoint` embedded in
+`CheckpointProduced` and in `ExecutionAttemptStarted.restored_checkpoint` has
 its own `checkpoint_id`, `producing_execution_attempt_id`, `covers_through` (a
 `SessionOrdinal`, facet 2), and `session_execution_plan_digest`, alongside its
-existing `reference`, `checkpoint_type`, `digest`, and `implementation_version`.
-`CheckpointProduced` itself slims to `{session_id, checkpoint}`.
-`ExecutionAttemptStarted.restored_checkpoint` stays an embedded `Checkpoint`
-deliberately -- it is attempt evidence of exactly what was restored,
-digest-verified, and now unambiguously joined to its producing event via
-`checkpoint_id`; the validator requires the restored plan digest to match the
-session's plan.
+`reference`, `checkpoint_type`, `digest`, and `implementation_version`.
+`CheckpointProduced` stays `{session_id, checkpoint}` and
+`ExecutionAttemptStarted.restored_checkpoint` stays embedded because the latter
+is evidence of exactly what the new attempt restored.
+
+The Session-owned command boundary applies the full harness recovery
+checkpoint admission contract from
+[ADR#0031](./0031-agent-implementation-and-session-plan.md) before append. The
+standalone payload validator enforces local shape, including equality between a
+restored checkpoint's plan digest and the plan digest on its containing
+`ExecutionAttemptStarted`. The Session decider separately enforces attempt,
+stored-plan, and ordinal relationships against folded state. Artifact
+verification enforces sealing, digest, and compatibility with the harness
+implementation version committed by the plan.
+
+`CheckpointProduced` records evidence about a cut that is already settled. The
+evidence remains historically valid when later Session events append, although
+a rewind may make it ineligible for restoration. Production therefore uses
+`Any`. The command boundary verifies that the producing attempt exists, its plan
+digest matches the Session, and `covers_through` names settled in-session
+history.
+
+Restoration is the head-dependent choice. At the current head selected by
+`StartExecutionAttempt`, `decide` requires all of the following:
+
+- `checkpoint_id` resolves to the first admitted `CheckpointProduced` evidence
+  selected by the fold;
+- the complete embedded `Checkpoint` value exactly equals that first evidence,
+  not only its plan digest;
+- `covers_through` remains in effective Session history after every rewind
+  folded through the selected head; and
+- the producing attempt and stored Session plan still satisfy the recovery
+  contract.
+
+`ExecutionAttemptStarted` therefore remains `At(current_position)`. After it is
+appended, the supervisor verifies and restores the artifact, then replays the
+exact effective tail after `covers_through` through the head selected by the
+start command. Ready and new work wait until that replay completes, as specified
+by [ADR#0031](./0031-agent-implementation-and-session-plan.md).
+
+`Checkpoint.covers_through` is the core Session replay cut. Internal harness
+coordinates remain inside the opaque, versioned artifact, not core event fields
+or `SessionOrdinal` values. A partial, mutable, digest-mismatched, ambiguously
+correlated, or incompatible artifact is not admissible. Missing or invalid
+checkpoint evidence falls back to authoritative event replay and a fresh
+ExecutionAttempt. Future
+Claude, Codex, or other product integrations translate at the edge and cannot
+add their session identities, transcript layouts, or resume coordinates to the
+core Session schema.
 
 **Tool-fact ownership.** `ToolCallRequested` and the provider-visible
 `ToolUseBlock`/`ToolResultBlock` embedded in message events are not the same
@@ -505,13 +588,11 @@ and `ExternalArtifact.fetched_at`, whose comments are clarified to occurrence
 time, not append time. Everything else relies on append order, not clocks. This
 is a narrow, named exception, not a general license to add timestamps.
 
-**Validation obligations at the append boundary.** `LEGACY_REQUIRED` stays
-exactly as this facet requires: it enforces presence, not semantic validity, so
-a named validator at the append boundary plus `decide`-time state checks carry
-the rest. At minimum the validator rejects:
+**Validation ownership at the append boundary.** `LEGACY_REQUIRED` enforces
+presence, not semantic validity. `validate_session_event` therefore owns only
+checks answerable from one decoded event. At minimum it rejects:
 
-- Non-empty, correctly shaped identifiers that match the addressed stream where
-  applicable.
+- Empty or malformed identifiers within the event.
 - Nonzero, supported enum values wherever a field is a required enum, including
   `CascadePolicy` (persisted values only `1` or `2`; the command layer applies
   the safe default before append, per the [cascade policy](../glossary/cascade-policy)
@@ -522,18 +603,18 @@ the rest. At minimum the validator rejects:
   `ResourceObservation.outcome`.
 - Role agreement: `UserMessageRecorded.message.role` is `USER`;
   `AssistantMessageCompleted.message.role` is `ASSISTANT`.
-- Started-and-completed assistant message id and model agreement.
-- Tool lifecycle id joins across phases.
 - `FILE_CHANGE_KIND_RENAMED` requires `previous_path`; non-renames must omit
   it.
-- Ordered, in-session compaction ranges (inclusive `covers_from`/`covers_through`).
+- Locally ordered compaction bounds (`covers_from <= covers_through`).
 - `matched_stop_sequence` present if and only if `FINISH_REASON_STOP_SEQUENCE`.
-- Positive, monotonic attempt numbers and valid previous-attempt lineage.
+- Positive attempt numbers and the within-event coupling between attempt number
+  and presence of `previous_attempt_id`.
+- A restored checkpoint plan digest equal to its containing
+  `ExecutionAttemptStarted` plan digest.
 - Supported digest algorithms with length checks matching the algorithm
   (claim-check digests are sha256 in `v1alpha1`; `Digest.algorithm` is the
   additive escape hatch for a later one).
-- Valid `input_json`, with the operation digest computed over the exact
-  persisted bytes.
+- Well-formed `input_json`.
 - Valid ISO 4217 currency codes.
 - Valid timestamps, and non-negative durations with sub-second nanos.
 - Unique todo ids with valid statuses.
@@ -549,8 +630,21 @@ the rest. At minimum the validator rejects:
   `range.length` when a range is given, and no `range` when the outcome is
   absent.
 
-Every unset oneof, unspecified enum, and malformed shape above is rejected
-before append, never persisted and reconciled later.
+The Session-owned append and replay boundary, outside
+`validate_session_event`, verifies that the decoded type belongs to Session and
+that its payload `session_id` matches the addressed stream. The Session command
+boundary also computes request digests over the exact bytes it will persist.
+`decide` and `evolve` own every history-dependent relationship: assistant
+start/completion id and model joins, tool lifecycle joins, in-session ordinal
+existence and compaction ordering, exact attempt lineage, first-wins checkpoint
+evidence selection, complete restored-checkpoint equality with that evidence,
+continued effectiveness of `covers_through` after rewind, and equality with the
+stored Session plan.
+This split prevents a local payload validator from claiming facts that only
+the command context or folded history can prove.
+
+Every unset oneof, unspecified enum, and malformed same-event shape above is
+rejected before append, never persisted and reconciled later.
 
 ### 4. Compaction is a self-sufficient in-stream marker the store only records
 
@@ -814,9 +908,10 @@ supersession explicitly rather than leaving the two decisions in tension.
 
 Storage is otherwise managed without ever removing a fact:
 
-- **Snapshots bound replay, not storage.** The runtime resumes from the newest
-  snapshot and replays only the tail after it (facet 8), so a long session costs
-  O(tail) to load even though its log grows forever.
+- **Aggregate snapshots bound replay, not storage.** The runtime resumes the
+  Session aggregate from the newest snapshot and replays only the tail after it
+  (facet 8), so a long session costs O(tail) to load even though its log grows
+  forever. This does not restore process-local harness state.
 - **Cold-storage tiering is an optional, reversible, non-semantic relocation.** If a
   deployment must bound the hot JetStream stream, already-immutable old events may be
   copied to the JetStream Object Store, evicted from the hot stream, and restored on
@@ -849,7 +944,13 @@ Resume rebuilds a session's state the way the runtime rebuilds any decider
 aggregate: load the newest snapshot for the session, then replay only the tail
 after it -- a fork resumes purely from its own child-stream snapshot, since it
 never folded source events into its aggregate state to begin with (facet 5) --
-so resume cost tracks snapshot cadence, not transcript length.
+so aggregate resume cost tracks snapshot cadence, not transcript length. If the
+platform harness supports restoring process-local in-flight state, that
+continuation uses an admitted harness recovery checkpoint under facet 3. A
+missing or invalid checkpoint never changes what the event log says happened;
+the platform replays authoritative history and starts a fresh attempt. Only
+incomplete authoritative history or an indeterminate side effect that requires
+reconciliation can block recovery.
 
 ### Command-by-command matrix
 
@@ -874,8 +975,8 @@ decision.
 | `HideSession` | head | `At` | `[SessionHidden]` | none beyond head match | hide-request id |
 | `RewindSession` | head | `At` | `[SessionRewound]` | `keep_through` within current log | rewind-request id |
 | `CompactSession` | head | `At` | `[Compacted]` | `covers_from <= covers_through`, ordered, in-session | compaction-request id |
-| `StartExecutionAttempt` | head, active-attempt state | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number | attempt id |
-| `MarkExecutionAttemptReady` | head, attempt state | `At` | `[ExecutionAttemptReady]` | Ready only after Started | attempt id |
+| `StartExecutionAttempt` | head, active-attempt state, effective history, checkpoint evidence | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number; restored checkpoint exactly equals first admitted evidence; `covers_through` remains effective; restore and tail replay through the selected head precede Ready | attempt id |
+| `MarkExecutionAttemptReady` | head, attempt state | `At` | `[ExecutionAttemptReady]` | Ready only after Started and, for restore, verified artifact recovery plus effective-tail replay through the start head | attempt id |
 | `EndExecutionAttempt` | head, attempt state | `At` | `[ExecutionAttemptEnded]` | one outcome per attempt | attempt id |
 | `ApproveToolCall` | head, tool-call state | `At` | `[ToolCallApproved]` | mutually exclusive with deny | `tool_call_id` |
 | `DenyToolCall` | head, tool-call state | `At` | `[ToolCallDenied]` | mutually exclusive with approve; blocks start/complete | `tool_call_id` |
@@ -899,7 +1000,7 @@ decision.
 | `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` | `tool_execution_id` |
 | `RecordArtifact` | none | `Any` | `[ArtifactRecorded]` | source oneof set; MIME fallback rule | `artifact_id` |
 | `RecordFileChange` | none | `Any` | `[FileChanged]` | `RENAMED` requires `previous_path`; others omit it | change id |
-| `ProduceCheckpoint` | none | `Any` | `[CheckpointProduced]` | `checkpoint_id` unique; plan digest matches session | `checkpoint_id` |
+| `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible; attempt and plan match; `covers_through` settled; first evidence wins per `checkpoint_id` | `checkpoint_id` + artifact digest |
 | `RecordSystemNotice` | none | `Any` | `[SystemNoticeRecorded]` | none | notice id |
 | `UpdateTodo` | none | `Any` | `[TodoUpdated]` | `revision` monotonic from single logical writer; highest-revision-wins fold | `session_id` + `revision` |
 | `RenameSession` | none | `Any` | `[SessionRenamed]` | none | rename-request id |
@@ -1023,8 +1124,8 @@ hot path without inheriting its weak lifecycle guarantees.
   envelope, and the idempotency-key representation are now decided in the
   `v1alpha1` proto package (facets 1-7 above); what remains implementation-level
   follow-up is commands, aggregate `initial_state`/`evolve`/`decide`,
-  projections, snapshots, and the substrate obligations facet 2 lists as
-  prerequisites.
+  projections, aggregate snapshots, harness recovery checkpoint
+  admission, and the substrate obligations facet 2 lists as prerequisites.
 
 ## Consequences
 
@@ -1042,6 +1143,11 @@ hot path without inheriting its weak lifecycle guarantees.
   translation layer (facet 2); [ADR#0013](./0013-origin-stream-sequence-header.md)'s
   origin-sequence header remains purely a provenance concern for these
   payloads, never a domain reference.
+- The event log remains authoritative when an aggregate snapshot or harness
+  recovery artifact is missing. A bad aggregate snapshot falls back to replay;
+  a bad harness recovery checkpoint falls back to replay and a fresh attempt.
+  Only incomplete authoritative history or an indeterminate side effect can
+  prevent that recovery path.
 - Because commuting facts append without a head guard, two conflicting outcomes
   for the same entity can both land on the log (a `ToolCallCompleted` and a
   `ToolCallFailed` for the same `tool_execution_id`, say). The fold resolves

@@ -132,6 +132,9 @@ pub enum SessionEventValidationError {
     #[error("{field}.value must be exactly 32 bytes for algorithm sha256, got {actual}")]
     Sha256DigestWrongLength { field: &'static str, actual: usize },
 
+    #[error("restored checkpoint plan digest must match the execution attempt plan digest")]
+    RestoredCheckpointPlanDigestMismatch,
+
     #[error("{field} must be well-formed JSON")]
     InvalidJson { field: &'static str },
 
@@ -746,6 +749,9 @@ fn validate_execution_attempt_started(
     }
     if let Some(checkpoint) = event.restored_checkpoint.as_option() {
         validate_checkpoint(checkpoint)?;
+        if checkpoint.session_execution_plan_digest.as_option() != event.session_execution_plan_digest.as_option() {
+            return Err(SessionEventValidationError::RestoredCheckpointPlanDigestMismatch);
+        }
     }
     require_set_timestamp(&event.started_at, "started_at")
 }

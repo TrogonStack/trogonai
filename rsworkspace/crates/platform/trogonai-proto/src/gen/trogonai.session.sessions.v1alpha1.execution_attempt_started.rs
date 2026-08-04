@@ -66,13 +66,6 @@ pub struct ExecutionAttemptStarted {
         Checkpoint,
         ::buffa::Inline<Checkpoint>,
     >,
-    /// Field 7: `resume_cursor`
-    #[serde(
-        rename = "resumeCursor",
-        alias = "resume_cursor",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub resume_cursor: ::core::option::Option<::buffa::alloc::string::String>,
     /// Field 8: `host_artifact_ref`
     #[serde(
         rename = "hostArtifactRef",
@@ -118,7 +111,6 @@ impl ::core::fmt::Debug for ExecutionAttemptStarted {
             .field("attempt_number", &self.attempt_number)
             .field("previous_attempt_id", &self.previous_attempt_id)
             .field("restored_checkpoint", &self.restored_checkpoint)
-            .field("resume_cursor", &self.resume_cursor)
             .field("host_artifact_ref", &self.host_artifact_ref)
             .field("host_artifact_digest", &self.host_artifact_digest)
             .field("authenticated_remote_subject", &self.authenticated_remote_subject)
@@ -143,16 +135,6 @@ impl ExecutionAttemptStarted {
         value: impl Into<::buffa::alloc::string::String>,
     ) -> Self {
         self.previous_attempt_id = Some(value.into());
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::resume_cursor`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_resume_cursor(
-        mut self,
-        value: impl Into<::buffa::alloc::string::String>,
-    ) -> Self {
-        self.resume_cursor = Some(value.into());
         self
     }
     #[must_use = "with_* setters return `self` by value; assign or chain the result"]
@@ -220,9 +202,6 @@ impl ::buffa::Message for ExecutionAttemptStarted {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
-        if let Some(ref v) = self.resume_cursor {
-            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
-        }
         size
             += 1u64 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u64;
         if self.host_artifact_digest.is_set() {
@@ -277,9 +256,6 @@ impl ::buffa::Message for ExecutionAttemptStarted {
                 buf,
             );
             self.restored_checkpoint.write_to(__cache, buf);
-        }
-        if let Some(ref v) = self.resume_cursor {
-            ::buffa::types::put_string_field(7u32, v, buf);
         }
         ::buffa::types::put_string_field(8u32, &self.host_artifact_ref, buf);
         if self.host_artifact_digest.is_set() {
@@ -371,18 +347,6 @@ impl ::buffa::Message for ExecutionAttemptStarted {
                     ctx,
                 )?;
             }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(
-                    self
-                        .resume_cursor
-                        .get_or_insert_with(::buffa::alloc::string::String::new),
-                    buf,
-                )?;
-            }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -449,7 +413,6 @@ impl ::buffa::Message for ExecutionAttemptStarted {
         self.attempt_number = 0u64;
         self.previous_attempt_id = ::core::option::Option::None;
         self.restored_checkpoint = ::buffa::MessageField::none();
-        self.resume_cursor = ::core::option::Option::None;
         self.host_artifact_ref.clear();
         self.host_artifact_digest = ::buffa::MessageField::none();
         self.authenticated_remote_subject = ::core::option::Option::None;

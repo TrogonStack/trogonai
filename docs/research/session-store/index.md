@@ -24,6 +24,8 @@ not yet folded into it.
 ## Product dossiers
 
 - [Claude Agent SDK and Claude Code](./products/claude-agent-sdk.md)
+  - [Claude Agent SDK 0.3.220 session type snapshot and platform
+    comparison](./products/claude-agent-sdk-session-types.md)
 - [Codex CLI (OpenAI)](./products/codex-cli.md)
 - [fx (Vercel)](./products/fx.md)
   - [fx session detail JSON reference](./products/fx-session-detail-json-reference.md)

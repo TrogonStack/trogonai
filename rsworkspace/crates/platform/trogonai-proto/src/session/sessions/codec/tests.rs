@@ -294,7 +294,6 @@ fn execution_attempt_started() -> v1alpha1::ExecutionAttemptStarted {
         attempt_number: 1,
         previous_attempt_id: None,
         restored_checkpoint: MessageField::none(),
-        resume_cursor: None,
         host_artifact_ref: "host-ref".to_string(),
         host_artifact_digest: MessageField::some(digest()),
         authenticated_remote_subject: None,

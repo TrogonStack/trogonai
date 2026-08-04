@@ -7,8 +7,9 @@
 /// restored via ExecutionAttemptStarted.restored_checkpoint, where it is
 /// deliberately embedded rather than referenced: it is attempt evidence of
 /// exactly what was restored, digest-verified, and now joined unambiguously to
-/// its producing event via checkpoint_id. The validator requires
-/// session_execution_plan_digest to match the session's own plan digest.
+/// its producing event via checkpoint_id. Per-event validation requires a
+/// restored checkpoint's plan digest to match its ExecutionAttemptStarted plan
+/// digest; the aggregate binds that digest to the session's stored plan.
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointView<'a> {
     /// Locator for the checkpoint artifact stored out of line.

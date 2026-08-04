@@ -668,7 +668,6 @@ fn validate_execution_attempt_started_rejects_zero_attempt_number() {
                 attempt_number: 0,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -696,7 +695,6 @@ fn validate_execution_attempt_started_accepts_positive_attempt_number() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2102,7 +2100,6 @@ fn validate_execution_attempt_started_accepts_valid_restored_checkpoint() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::some(checkpoint()),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2127,7 +2124,6 @@ fn validate_execution_attempt_started_rejects_first_attempt_with_previous_attemp
                 attempt_number: 1,
                 previous_attempt_id: Some("attempt-0".to_string()),
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2155,7 +2151,6 @@ fn validate_execution_attempt_started_rejects_restart_without_previous_attempt_i
                 attempt_number: 2,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2183,7 +2178,6 @@ fn validate_execution_attempt_started_accepts_restart_with_previous_attempt_id()
                 attempt_number: 2,
                 previous_attempt_id: Some("attempt-1".to_string()),
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2211,7 +2205,6 @@ fn validate_execution_attempt_started_rejects_invalid_restored_checkpoint() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::some(broken_checkpoint),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2286,7 +2279,6 @@ fn validate_execution_attempt_started_rejects_checkpoint_with_empty_producing_ex
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::some(broken_checkpoint),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2322,7 +2314,6 @@ fn validate_execution_attempt_started_rejects_checkpoint_with_invalid_session_ex
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::some(broken_checkpoint),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -2338,6 +2329,39 @@ fn validate_execution_attempt_started_rejects_checkpoint_with_invalid_session_ex
         Err(SessionEventValidationError::EmptyDigestAlgorithm {
             field: "checkpoint.session_execution_plan_digest"
         })
+    );
+}
+
+#[test]
+fn validate_execution_attempt_started_rejects_checkpoint_for_a_different_session_execution_plan() {
+    let mut restored_checkpoint = checkpoint();
+    restored_checkpoint.session_execution_plan_digest = MessageField::some(v1alpha1::Digest {
+        algorithm: "sha256".to_string(),
+        value: vec![1u8; 32],
+    });
+
+    let event = v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ExecutionAttemptStarted {
+                session_id: "session-1".to_string(),
+                execution_attempt_id: "attempt-2".to_string(),
+                session_execution_plan_digest: MessageField::some(digest()),
+                attempt_number: 2,
+                previous_attempt_id: Some("attempt-1".to_string()),
+                restored_checkpoint: MessageField::some(restored_checkpoint),
+                host_artifact_ref: "host-ref".to_string(),
+                host_artifact_digest: MessageField::some(digest()),
+                authenticated_remote_subject: None,
+                isolation_placement: None,
+                started_at: MessageField::some(valid_timestamp()),
+            }
+            .into(),
+        ),
+    };
+
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::RestoredCheckpointPlanDigestMismatch)
     );
 }
 
@@ -3331,7 +3355,6 @@ fn validate_execution_attempt_started_accepts_valid_started_at() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -3356,7 +3379,6 @@ fn validate_execution_attempt_started_rejects_invalid_started_at() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,
@@ -3384,7 +3406,6 @@ fn validate_execution_attempt_started_rejects_missing_started_at() {
                 attempt_number: 1,
                 previous_attempt_id: None,
                 restored_checkpoint: MessageField::none(),
-                resume_cursor: None,
                 host_artifact_ref: "host-ref".to_string(),
                 host_artifact_digest: MessageField::some(digest()),
                 authenticated_remote_subject: None,

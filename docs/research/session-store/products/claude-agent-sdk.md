@@ -5,6 +5,14 @@ Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
 Evidence snapshot retrieved 2026-07-23. Version-sensitive claims were checked
 against these authoritative anchors:
 
+For a later immutable inspection of the complete TypeScript session surface,
+see the [Claude Agent SDK 0.3.220 session type snapshot and platform
+comparison](./claude-agent-sdk-session-types.md).
+That pinned inspection narrows one inference below: `SessionStore` is
+stream-shaped, but its local-first, best-effort mirror may drop batches. It
+cannot be the authoritative platform Session log; any equation below is a
+structural analogy only.
+
 - Claude Agent SDK documentation,
   [Persist sessions to external storage](https://code.claude.com/docs/en/agent-sdk/session-storage)
   (the `SessionStore` contract, dual-write behavior, delivery semantics, fork,
@@ -175,7 +183,7 @@ class SessionStore(Protocol):
     async def append(self, key: SessionKey, entries: list[SessionStoreEntry]) -> None: ...
     async def load(self, key: SessionKey) -> list[SessionStoreEntry] | None: ...
 
-    # Optional — omit or raise NotImplementedError
+    # Optional: omit or raise NotImplementedError
     async def list_sessions(self, project_key: str) -> list[SessionStoreListEntry]: ...
     async def list_session_summaries(self, project_key: str) -> list[SessionSummaryEntry]: ...
     async def delete(self, key: SessionKey) -> None: ...
@@ -379,9 +387,9 @@ occasionally `custom-title` / `frame-link`.
   the 100 most recent checkpoints in a session. Discarding an older checkpoint
   deletes the snapshot files that no remaining checkpoint references, except
   each file's first snapshot." On disk this is a `file-history-snapshot` log
-  entry — `{messageId, snapshot: {messageId, timestamp, trackedFileBackups},
+  entry: `{messageId, snapshot: {messageId, timestamp, trackedFileBackups},
   isSnapshotUpdate}` where `trackedFileBackups` maps each tracked path to
-  `{backupFileName, version, backupTime}` — plus content blobs at
+  `{backupFileName, version, backupTime}`, plus content blobs at
   `~/.claude/file-history/<sessionId>/<contentHash>@v<n>`. "Checkpoints are
   saved with the conversation, so a resumed session can still `/rewind` to
   them." These blobs "are written directly to local disk and are not mirrored
@@ -482,12 +490,13 @@ Both surfaces converge on the same shape: **a stored session is an append-only,
 per-key log of opaque JSON entries plus derived projections (a summary/read
 model, a message-chain view, a file-content checkpoint store, and a liveness
 registry) rebuilt from that log.** That is within one small step of an
-event-sourced Session Store, and the SDK interface is already stream-shaped:
+event-sourced Session Store structurally, but the SDK interface is only
+stream-shaped and does not provide authoritative delivery:
 
 - `append(key, entries)` is an ordered append to one logical stream per
   `SessionKey`; `load(key)` is a full ordered read. The contract never asks for
-  random access, mutation, or in-place rewrite. This is our event stream and
-  full-replay read.
+  random access, mutation, or in-place rewrite. This resembles our event stream
+  and full-replay read, but is not its authoritative write path.
 - Entries are opaque to the store by design (the host owns durability,
   ordering, listing, retention; the SDK owns message semantics). That matches an
   event envelope whose payload the store never inspects, with `uuid` as the
@@ -501,9 +510,10 @@ event-sourced Session Store, and the SDK interface is already stream-shaped:
   destroying it: compaction appends a summary marker (`isCompactSummary`),
   rewind moves a view pointer, fork rewrites identity into a new stream. An
   event-sourced backing models these as markers/new streams, not destructive
-  edits — exactly our design goal.
-- Delivery is at-least-once with client-generated `uuid`, so our backing needs
-  idempotent append rather than exactly-once transport.
+  edits, exactly our design goal.
+- Delivery may duplicate UUID-bearing entries, but final mirror failure can
+  drop a batch. Our backing needs idempotent append and independent proof of
+  completeness, not reliance on this transport.
 
 **Gaps we must close that this product leaves open.** There is no expected-
 position precondition on `append` (no optimistic-concurrency surface), and
