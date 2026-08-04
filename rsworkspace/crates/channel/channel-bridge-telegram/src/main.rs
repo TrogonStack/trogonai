@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to create inbound consumer")?;
     let messages = consumer.messages().await.context("failed to open inbound messages")?;
 
-    let bot = Bot::new(config.bot_token.clone());
+    let bot = Bot::new(config.bot_token.as_str());
 
     let local = tokio::task::LocalSet::new();
     let result = local
