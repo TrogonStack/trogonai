@@ -11,10 +11,13 @@ use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
     AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
 };
-use trogon_nats::jetstream::{
-    ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
-};
+use trogon_nats::jetstream::{DEFAULT_CLAIM_BUCKET, MockObjectStore};
 use trogon_std::UuidV7Generator;
+
+// The claim-check scenarios below need the real object store and publisher, which
+// the coverage build leaves out; the scenarios that carry no claim do not.
+#[cfg(not(coverage))]
+use trogon_nats::jetstream::{ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore};
 
 struct NatsServer {
     _container: ContainerAsync<Nats>,
@@ -201,9 +204,17 @@ async fn settled_consumer_info(
     stream.consumer_info(consumer).await.expect("consumer info")
 }
 
+/// A resolver for scenarios whose updates carry no claim headers, so nothing is
+/// ever redeemed through it. Mock-backed rather than bucket-backed to keep those
+/// scenarios off the object store.
+fn unclaimed_resolver() -> ClaimResolver<MockObjectStore> {
+    ClaimResolver::new(MockObjectStore::new(), DEFAULT_CLAIM_BUCKET)
+}
+
 /// The bucket the gateway offloads oversized bodies into, opened the way the
 /// bridge opens it. Provisioned here because in a deployment the gateway has
 /// already done so.
+#[cfg(not(coverage))]
 async fn claim_resolver(js: &async_nats::jetstream::Context) -> ClaimResolver<NatsObjectStore> {
     let store = NatsObjectStore::provision_claim_bucket(js, DEFAULT_CLAIM_BUCKET, ClaimRetention::EventSourced)
         .await
@@ -269,7 +280,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
-    let claims = claim_resolver(&js).await;
+    let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
         port: &port,
@@ -350,6 +361,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
 /// that deserializes the payload sees zero bytes. Published here through the
 /// same publisher the gateway uses, with the threshold driven to zero so every
 /// body takes that path.
+#[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_redeems_a_claim_checked_update() {
     let server = NatsServer::start().await;
@@ -439,6 +451,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
 /// A claim that cannot be redeemed is left for redelivery instead of acked.
 /// Dropping it would be permanent, and the payload alone carries no sign that
 /// anything was lost.
+#[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_leaves_an_unredeemable_claim_unacked() {
     let server = NatsServer::start().await;
@@ -580,7 +593,7 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
-    let claims = claim_resolver(&js).await;
+    let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
         port: &port,

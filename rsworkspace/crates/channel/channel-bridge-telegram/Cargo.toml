@@ -27,4 +27,5 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 testcontainers-modules = { version = "0.15", features = ["nats"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

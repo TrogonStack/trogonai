@@ -1,17 +1,32 @@
-use acp_nats::AgentHandler;
+#[cfg(test)]
+#[path = "acp_port_tests.rs"]
+mod acp_port_tests;
+
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, ContentBlock, InitializeResponse, NewSessionRequest, PromptRequest,
-    StopReason, TextContent,
-};
-use std::path::PathBuf;
-use std::sync::Arc;
-use tracing::{info, warn};
-use trogon_channel::{
-    AgentPort, AgentPortError, AgentSessionId, ConversationRecord, InboundEvent, PromptOutcome, ReleaseReason,
-    ReleaseStep, SessionRelease,
+use agent_client_protocol::schema::v1::InitializeResponse;
+use trogon_channel::AgentPortError;
+
+// `NatsJetStreamClient` is left out of the coverage build, so the bridge built on
+// it and everything that speaks to that bridge is left out with it. What remains
+// is the part with no transport in it: the capability reading and the error
+// classification.
+#[cfg(not(coverage))]
+use {
+    acp_nats::AgentHandler,
+    agent_client_protocol::schema::v1::{
+        CancelNotification, CloseSessionRequest, ContentBlock, NewSessionRequest, PromptRequest, StopReason,
+        TextContent,
+    },
+    std::path::PathBuf,
+    std::sync::Arc,
+    tracing::{info, warn},
+    trogon_channel::{
+        AgentPort, AgentSessionId, ConversationRecord, InboundEvent, PromptOutcome, ReleaseReason, ReleaseStep,
+        SessionRelease,
+    },
 };
 
+#[cfg(not(coverage))]
 pub type AcpBridge =
     acp_nats::Bridge<async_nats::Client, trogon_std::time::SystemClock, trogon_nats::jetstream::NatsJetStreamClient>;
 
@@ -142,12 +157,14 @@ impl std::fmt::Display for SessionMethods {
 /// through the acp-nats Bridge. Streamed agent output does not come back
 /// through this port; it arrives at the bridge's ACP client half
 /// (`TelegramRenderClient`) as session notifications.
+#[cfg(not(coverage))]
 pub struct AcpPort {
     bridge: Arc<AcpBridge>,
     agent_cwd: PathBuf,
     methods: SessionMethods,
 }
 
+#[cfg(not(coverage))]
 impl AcpPort {
     pub fn new(bridge: Arc<AcpBridge>, agent_cwd: PathBuf, methods: SessionMethods) -> Self {
         Self {
@@ -161,6 +178,7 @@ impl AcpPort {
 /// Human-readable context prefix: the only part of the conversational
 /// metadata a non-participating agent is guaranteed to see, since only prompt
 /// text reaches the model.
+#[cfg(not(coverage))]
 fn prompt_text(event: &InboundEvent) -> String {
     let body = event.text.as_deref().unwrap_or_default();
     format!("[telegram message from {}]\n{}", event.sender.display_name, body)
@@ -168,6 +186,7 @@ fn prompt_text(event: &InboundEvent) -> String {
 
 /// Structured twin of the context prefix, for agents that opt into reading
 /// `_meta` (see the architecture doc's `_meta` convention).
+#[cfg(not(coverage))]
 fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta {
     let mut meta = serde_json::Map::new();
     meta.insert(
@@ -186,6 +205,7 @@ fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta 
     meta
 }
 
+#[cfg(not(coverage))]
 impl AgentPort for AcpPort {
     type Error = AcpPortError;
 

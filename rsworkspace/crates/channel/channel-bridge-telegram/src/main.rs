@@ -8,37 +8,54 @@
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
+#[cfg_attr(coverage, allow(dead_code))]
 mod acp_port;
+#[cfg_attr(coverage, allow(dead_code))]
 mod config;
+#[cfg_attr(coverage, allow(dead_code))]
 mod constants;
+#[cfg_attr(coverage, allow(dead_code))]
 mod outbound;
+#[cfg_attr(coverage, allow(dead_code))]
 mod parse;
+#[cfg_attr(coverage, allow(dead_code))]
 mod pipeline;
+#[cfg_attr(coverage, allow(dead_code))]
 mod render;
 
-use acp_nats::{AgentHandler, ClientHandler};
-use acp_port::{AcpBridge, AcpPort, SessionMethods};
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::InitializeRequest;
-use anyhow::Context as _;
-use async_nats::jetstream::consumer::DeliverPolicy;
-use config::BridgeConfig;
-use futures::StreamExt;
-use outbound::TelegramOutbound;
-use pipeline::Pipeline;
-use render::TelegramRenderClient;
-use std::sync::Arc;
-use teloxide::Bot;
-use tracing::{error, info, warn};
-use trogon_channel::store::PrincipalRecord;
-use trogon_channel::{ChannelStore, Endpoint, PrincipalId};
-use trogon_nats::jetstream::{ClaimResolver, NatsObjectStore};
-use trogon_std::UuidV7Generator;
-use trogon_std::env::SystemEnv;
-use trogon_std::fs::SystemFs;
-use trogon_std::signal::shutdown_signal;
-use trogon_telemetry::ServiceName;
+// The wiring below is nothing but transport: it builds the real NATS clients,
+// which the coverage build leaves out. The logic it wires together stays in the
+// coverage build and is exercised by the module tests.
+#[cfg(not(coverage))]
+use {
+    acp_nats::{AgentHandler, ClientHandler},
+    acp_port::{AcpBridge, AcpPort, SessionMethods},
+    agent_client_protocol::schema::ProtocolVersion,
+    agent_client_protocol::schema::v1::InitializeRequest,
+    anyhow::Context as _,
+    async_nats::jetstream::consumer::DeliverPolicy,
+    config::BridgeConfig,
+    futures::StreamExt,
+    outbound::TelegramOutbound,
+    pipeline::Pipeline,
+    render::TelegramRenderClient,
+    std::sync::Arc,
+    teloxide::Bot,
+    tracing::{error, info, warn},
+    trogon_channel::store::PrincipalRecord,
+    trogon_channel::{ChannelStore, Endpoint, PrincipalId},
+    trogon_nats::jetstream::{ClaimResolver, NatsObjectStore},
+    trogon_std::UuidV7Generator,
+    trogon_std::env::SystemEnv,
+    trogon_std::fs::SystemFs,
+    trogon_std::signal::shutdown_signal,
+    trogon_telemetry::ServiceName,
+};
 
+#[cfg(coverage)]
+fn main() {}
+
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = BridgeConfig::from_env(&SystemEnv)?;
@@ -108,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+#[cfg(not(coverage))]
 async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow::Result<()> {
     for user in &config.seed_users {
         let principal = PrincipalId::new(format!("telegram-{user}"))?;
@@ -120,6 +138,7 @@ async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow:
     Ok(())
 }
 
+#[cfg(not(coverage))]
 async fn run(
     nats_client: async_nats::Client,
     store: ChannelStore,
