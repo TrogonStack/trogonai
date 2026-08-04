@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Google ADK](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 All ADK `path:line` citations below are repo-root-relative to the pinned clone
 the dossier used (commit `cbedafd9e4c18d462dc571e1bb079177a496ef51`), exactly
@@ -57,7 +57,7 @@ column/attribute as-is. The dossier's own conclusion: `state` is
 model" section), so nothing stops it from silently drifting from what
 replaying `events` would produce.
 
-This is the exact question ADR#0035 decision 8 answers the other way: "No
+This is the exact question [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 answers the other way: "No
 read model is authoritative. A `Projector::catch_up` folds the stream into a
 `SessionProjection`..." and "the aggregate snapshot is an advisory cached fold
 of that log. Corruption or incompatibility falls back to earlier replay"
@@ -77,25 +77,25 @@ mutable source of truth rather than a value that is always re-derivable from
 
 | ADK | Ours | Verdict |
 | --- | --- | --- |
-| `Session{id, app_name, user_id}` compound primary key (`src/google/adk/sessions/session.py:39-49`, `schemas/v1.py:75-85`) | Opaque `SessionId` addressing one subject `session.sessions.events.<session_id>` (ADR#0035 decision 1) | Semantic mismatch: ADK bakes tenant/app/user scoping directly into the primary key; we keep identity opaque and defer multi-tenant scoping to draft [ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md) |
-| `Session.state` (mutable folded document, directly overwritten or `json_patch`'d) | No equivalent as an authoritative record; the closest concept is the aggregate snapshot, always an "advisory cached fold," never independently written (ADR#0035 decision 8) | Ours, decisively -- see structural difference above |
-| `Session.events: list[Event]` | Session event stream on `session.sessions.events.<session_id>` | Equivalent shape, different typing discipline: `Event` has `extra='ignore'` and no schema validation at the storage boundary; every one of our events is schema-validated protobuf at append (ADR#0035 decision 3) |
+| `Session{id, app_name, user_id}` compound primary key (`src/google/adk/sessions/session.py:39-49`, `schemas/v1.py:75-85`) | Opaque `SessionId` addressing one subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Semantic mismatch: ADK bakes tenant/app/user scoping directly into the primary key; we keep identity opaque and defer multi-tenant scoping to draft [ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md) |
+| `Session.state` (mutable folded document, directly overwritten or `json_patch`'d) | No equivalent as an authoritative record; the closest concept is the aggregate snapshot, always an "advisory cached fold," never independently written ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively -- see structural difference above |
+| `Session.events: list[Event]` | Session event stream on `session.sessions.events.<session_id>` | Equivalent shape, different typing discipline: `Event` has `extra='ignore'` and no schema validation at the storage boundary; every one of our events is schema-validated protobuf at append ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) |
 | `EventActions.state_delta` (patched into `state` at every append) | No equivalent field; a change to session-scoped data is the fact itself (`TodoUpdated`, `FileChanged`, etc.), never a patch applied to a folded document | Ours, deliberately -- there is no document to patch, so there is nothing for a delta field to reconcile against |
 | `EventActions.rewind_before_invocation_id` plus a computed reversing `state_delta` (`_compute_state_delta_for_rewind`, `src/google/adk/runners.py:1380-1405`, walks forward and diffs against current state to compute what to null out) | `SessionRewound{session_id, keep_through: SessionOrdinal, reason: RewindReason}` (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto`) | Ours, decisively -- no reversal payload to compute or persist; `keep_through` alone is sufficient because state is never a folded document that needs "reversing" in the first place |
-| `_apply_rewinds` (`src/google/adk/events/_rewind_events.py:22-55`), a shared pure function every reader must remember to call | Model-visible context "compiled deterministically from the event log bounded by the latest `Compacted` marker" (ADR#0035 decision 8) | Ours, structurally, but not yet stated as the *sole* mandatory entry point for a rewind-aware read -- see recommendation 1 |
-| `Event.branch` / `_BranchPath` (in-session subagent scoping by a dot-separated path string, `src/google/adk/events/_branch_path.py:20-151`) | No equivalent; every delegation gets its own logical stream (`DelegationDispatched`, `ParentLinked`, ADR#0035 decision 6) | Trade-off, not a gap -- see below |
-| `EventActions.agent_state` ("checkpoint and resume... should only be set by ADK workflow," in-band on an ordinary event) | `Checkpoint` embedded in `CheckpointProduced` / `ExecutionAttemptStarted.restored_checkpoint`, a distinct, digest-verified, out-of-line artifact with its own admission contract (`proto/trogonai/session/sessions/v1alpha1/checkpoint.proto`, `checkpoint_produced.proto`; ADR#0035 decision 3) | Semantic mismatch: ADK's "checkpoint" is workflow state riding on the ordinary transcript; ours is a separately-authorized record with its own `covers_through`, `checkpoint_id`, and plan-digest equality checks |
-| `GetSessionConfig.num_recent_events` / `after_timestamp`, a query-time `LIMIT`/timestamp filter with no cursor pagination (`src/google/adk/sessions/base_session_service.py:29-43`) | Resume from the newest aggregate snapshot, replay only the tail after it (ADR#0035 decision 8) | Ours, decisively -- bounded by snapshot cadence, not an ad hoc query-time limit the caller must remember to pass |
-| `_storage_update_marker` + SQLAlchemy staleness check, present only in `DatabaseSessionService`, cruder in `SqliteSessionService`, absent in `InMemorySessionService`/`VertexAiSessionService` | `WRITE_PRECONDITION = At(current_position)` enforced server-side by JetStream for every invariant-bearing command by default (ADR#0035 decision 2) | Ours, decisively -- see recommendation 5 |
-| `adk_internal_metadata` schema-version row + `_schema_check_utils` detect-then-branch, two live parallel model-class generations (pickle v0, JSON v1) | No per-event schema-version field; evolution is additive only, "never a per-event version branch" (ADR#0035 decision 3) | Trade-off -- see below |
+| `_apply_rewinds` (`src/google/adk/events/_rewind_events.py:22-55`), a shared pure function every reader must remember to call | Model-visible context "compiled deterministically from the event log bounded by the latest `Compacted` marker" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, structurally, but not yet stated as the *sole* mandatory entry point for a rewind-aware read -- see recommendation 1 |
+| `Event.branch` / `_BranchPath` (in-session subagent scoping by a dot-separated path string, `src/google/adk/events/_branch_path.py:20-151`) | No equivalent; every delegation gets its own logical stream (`DelegationDispatched`, `ParentLinked`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Trade-off, not a gap -- see below |
+| `EventActions.agent_state` ("checkpoint and resume... should only be set by ADK workflow," in-band on an ordinary event) | `Checkpoint` embedded in `CheckpointProduced` / `ExecutionAttemptStarted.restored_checkpoint`, a distinct, digest-verified, out-of-line artifact with its own admission contract (`proto/trogonai/session/sessions/v1alpha1/checkpoint.proto`, `checkpoint_produced.proto`; [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Semantic mismatch: ADK's "checkpoint" is workflow state riding on the ordinary transcript; ours is a separately-authorized record with its own `covers_through`, `checkpoint_id`, and plan-digest equality checks |
+| `GetSessionConfig.num_recent_events` / `after_timestamp`, a query-time `LIMIT`/timestamp filter with no cursor pagination (`src/google/adk/sessions/base_session_service.py:29-43`) | Resume from the newest aggregate snapshot, replay only the tail after it ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively -- bounded by snapshot cadence, not an ad hoc query-time limit the caller must remember to pass |
+| `_storage_update_marker` + SQLAlchemy staleness check, present only in `DatabaseSessionService`, cruder in `SqliteSessionService`, absent in `InMemorySessionService`/`VertexAiSessionService` | `WRITE_PRECONDITION = At(current_position)` enforced server-side by JetStream for every invariant-bearing command by default ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively -- see recommendation 5 |
+| `adk_internal_metadata` schema-version row + `_schema_check_utils` detect-then-branch, two live parallel model-class generations (pickle v0, JSON v1) | No per-event schema-version field; evolution is additive only, "never a per-event version branch" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Trade-off -- see below |
 | `migration_runner.upgrade`, one-way dump-and-reload with a restricted unpickler and a written 2+-release back-compat policy | No migration event or tooling in the catalog today | Gap, already tracked in the [fx comparison](../fx/vs-session-events.md#9-migrations-are-not-journaled), item 9; ADK is corroborating evidence -- see recommendation 4 |
 | `app_states` / `user_states` tables, `app:`/`user:`-prefixed keys, never touched by `delete_session` | No equivalent scope; all state is fold-derived per-session, nothing shared cross-session in `v1alpha1` | Ours, by absence of the feature -- but see the retention section and open question 6 |
-| `DatabaseSessionService.delete_session` (real SQL `DELETE`, `ON DELETE CASCADE` to `events`, `schemas/v1.py:208-213`) | `SessionHidden`, a visibility tombstone; no bytes are ever deleted (ADR#0035 decision 7) | Semantic mismatch: ADK's "delete" removes bytes in the DB backends; ours never does -- the closest ADK concept to our keep-forever contract is that `app_states`/`user_states` also survive `delete_session`, but as an unintentional orphan, not a deliberate design |
-| `VertexAiSessionService` `ttl` / `expire_time` passthrough to the remote API | No TTL concept; retention is keep-forever plus explicit `SessionHidden`/`RedactionApplied`/`ArtifactErased` facts (ADR#0035 decision 7) | Trade-off -- ADK delegates retention entirely to one vendor-hosted backend rather than deciding it at the store layer |
-| Three subagent storage shapes: in-session branch scoping, in-session `isolation_scope`-filtered Task-API delegates, and a fully separate throwaway `InMemorySessionService` per `AgentTool` call | One model: every delegation is `DelegationDispatched` + `ParentLinked` into a genuinely separate, durable child stream (ADR#0035 decision 6) | Ours, decisively for the throwaway case; trade-off for the two in-session cases -- see the subagent cascade section |
-| `Event.timestamp` (client-generated `float`) with `id` (UUID4) as an arbitrary-but-stable tiebreak for read ordering (`database_session_service.py:697-699`) | `SessionOrdinal`, fold-derived, never a physical sequence or client clock (ADR#0035 decision 2) | Ours, decisively -- no clock-skew reordering risk for any durable cross-reference |
-| `Event.id`, self-assigned client-side UUID4, deduplicating only by accidental primary-key collision on retry | `Event.id`, deterministically derived UUIDv5 over `(subject, command type, idempotency key, batch index)` (ADR#0035 decision 2) | Ours, decisively -- a designed idempotency contract, not an accidental one |
-| `ListSessionsResponse` docstring claims "states not set," contradicted by three of four backends actually setting `state` (`in_memory_session_service.py:274-283`, `database_session_service.py:784-794`, `sqlite_session_service.py:357-371`) | `SessionProjection`, one documented read-model contract per aggregate -- the projection value type *is* the read contract (ADR#0035 decision 8) | Ours, decisively -- no doc/implementation drift is possible when there is exactly one authoritative contract instead of a docstring three of four backends silently violate |
+| `DatabaseSessionService.delete_session` (real SQL `DELETE`, `ON DELETE CASCADE` to `events`, `schemas/v1.py:208-213`) | `SessionHidden`, a visibility tombstone; no bytes are ever deleted ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Semantic mismatch: ADK's "delete" removes bytes in the DB backends; ours never does -- the closest ADK concept to our keep-forever contract is that `app_states`/`user_states` also survive `delete_session`, but as an unintentional orphan, not a deliberate design |
+| `VertexAiSessionService` `ttl` / `expire_time` passthrough to the remote API | No TTL concept; retention is keep-forever plus explicit `SessionHidden`/`RedactionApplied`/`ArtifactErased` facts ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Trade-off -- ADK delegates retention entirely to one vendor-hosted backend rather than deciding it at the store layer |
+| Three subagent storage shapes: in-session branch scoping, in-session `isolation_scope`-filtered Task-API delegates, and a fully separate throwaway `InMemorySessionService` per `AgentTool` call | One model: every delegation is `DelegationDispatched` + `ParentLinked` into a genuinely separate, durable child stream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours, decisively for the throwaway case; trade-off for the two in-session cases -- see the subagent cascade section |
+| `Event.timestamp` (client-generated `float`) with `id` (UUID4) as an arbitrary-but-stable tiebreak for read ordering (`database_session_service.py:697-699`) | `SessionOrdinal`, fold-derived, never a physical sequence or client clock ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively -- no clock-skew reordering risk for any durable cross-reference |
+| `Event.id`, self-assigned client-side UUID4, deduplicating only by accidental primary-key collision on retry | `Event.id`, deterministically derived UUIDv5 over `(subject, command type, idempotency key, batch index)` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively -- a designed idempotency contract, not an accidental one |
+| `ListSessionsResponse` docstring claims "states not set," contradicted by three of four backends actually setting `state` (`in_memory_session_service.py:274-283`, `database_session_service.py:784-794`, `sqlite_session_service.py:357-371`) | `SessionProjection`, one documented read-model contract per aggregate -- the projection value type *is* the read contract ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively -- no doc/implementation drift is possible when there is exactly one authoritative contract instead of a docstring three of four backends silently violate |
 
 ## What we should consider changing
 
@@ -103,7 +103,7 @@ Ordered by how much is at stake, not by implementation cost.
 
 ### 1. Name the model-visible-context compiler as the sole mandatory fold point for every rewind- and compaction-aware read
 
-**The change.** ADR#0035 decision 8 says the model-visible context is
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 says the model-visible context is
 "compiled deterministically from the event log bounded by the latest
 `Compacted` marker," which already centralizes compaction-aware folding in
 one place. The decision text does not equally name `SessionRewound.keep_through`
@@ -140,7 +140,7 @@ ad hoc liveness check.
 
 ### 2. State explicitly that a derived read model must never gain an independent write path
 
-**The change.** ADR#0035 decision 8 calls the aggregate snapshot "an advisory
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 calls the aggregate snapshot "an advisory
 cached fold of that log," and decision 3 calls it one of "four records with
 separate authority," but neither passage explicitly forecloses a future
 implementer adding a direct-write fast path to a snapshot or projection under
@@ -251,11 +251,11 @@ apart that survives longer than institutional memory.
 
 ### 5. State who must satisfy the `NoStream`/`At`/`Any` guarantee if a non-JetStream backend or tenant binding is ever introduced
 
-**The change.** ADR#0035 decision 2's per-command precondition classification
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's per-command precondition classification
 is a substrate-level guarantee today: "the runtime resolves the append guard
 to `At(current_position))`... unless an aggregate opts out." Nothing in the
 ADR states who is responsible for re-verifying that guarantee if draft
-[ADR#0027](../../../../adr/0027-decider-multi-tenancity-primitive.md)'s
+[ADR#0027](../../../../adr/0027-decider-multi-tenancy-primitive.md)'s
 `TenantBinding::Dedicated` or a future storage tier is ever backed by
 something other than NATS JetStream.
 
@@ -290,7 +290,7 @@ change.
 ## What our design already does better
 
 - **Real, substrate-level optimistic concurrency by default, not a
-  per-backend afterthought.** ADR#0035 decision 2: "When a command declares no
+  per-backend afterthought.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2: "When a command declares no
   `WRITE_PRECONDITION`, the runtime resolves the append guard to
   `At(current_position)`... this is already satisfied on this substrate for
   free, unless an aggregate opts out." ADK's equivalent exists in exactly one
@@ -307,7 +307,7 @@ change.
   is a client-assigned UUID4 whose only protection against a retried append is
   an incidental primary-key collision (dossier, "Write and append path"). Our
   `Event.id` is deterministically derived from `(subject, command type,
-  idempotency key, batch index)` (ADR#0035 decision 2) -- retries are safe by
+  idempotency key, batch index)` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) -- retries are safe by
   construction, not by accident.
 - **Fold-derived ordinals, immune to clock skew.** ADK orders events by
   client-generated `Event.timestamp` with a UUID tiebreak on ties, which the
@@ -316,24 +316,24 @@ change.
   (`src/google/adk/sessions/database_session_service.py:693-696`) -- a real
   admission that client clocks can reorder a replayed conversation. Our
   `SessionOrdinal` is fold-derived and never a physical or client-supplied
-  value (ADR#0035 decision 2).
+  value ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2).
 - **Delegation always buys a genuinely durable, resumable, auditable child.**
   ADK's discouraged `AgentTool` path can lose an entire subagent run to a
   crash with no trace at all -- "indistinguishable from a normal tool-call
   failure from the parent session's point of view" (dossier, "Subagents and
   nested sessions"). Every one of our delegations is `DelegationDispatched`
-  before child creation, with crash-safe reconciler repair (ADR#0035 decision
+  before child creation, with crash-safe reconciler repair ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
   6): there is no path in our design where a dispatched child can vanish
   without a trace.
 - **One documented read-model contract, not a docstring three of four
   backends contradict.** ADK's `ListSessionsResponse` docstring claims "states
   are not set," which `InMemorySessionService`, `DatabaseSessionService`, and
   `SqliteSessionService` all violate (dossier, "The store interface"). Our
-  `SessionProjection` (ADR#0035 decision 8) *is* the documented read contract;
+  `SessionProjection` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) *is* the documented read contract;
   there is no separate prose description of behavior for an implementation to
   drift away from.
 - **Redaction and erasure are named, typed facts.** `RedactionApplied` and
-  `ArtifactErased` (ADR#0035 decision 7) have no analogue anywhere in the ADK
+  `ArtifactErased` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) have no analogue anywhere in the ADK
   dossier -- no redaction, masking, or byte-erasure concept was found in
   `src/google/adk/sessions/` at all.
 - **Cascade policy is a recorded, typed fact per child, not an emergent
@@ -349,7 +349,7 @@ change.
   ADK's branch model (`Event.branch`, a dot-separated ancestor path filtering
   one shared event list) costs nothing extra per subagent invocation: no new
   stream, no dispatch saga, no cascade reconciliation. Ours always pays for a
-  full `DelegationDispatched`/`ParentLinked` saga (ADR#0035 decision 6), even
+  full `DelegationDispatched`/`ParentLinked` saga ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6), even
   for a subagent call that never needs independent resumability. ADK's
   approach buys cheapness at the cost of no independent identity -- a sibling
   agent's history must be manually hidden by string-prefix filtering, and
@@ -364,7 +364,7 @@ change.
   genuinely breaking payload change (Python pickle to JSON) without minting a
   new event type, at the cost of maintaining two full parallel schema
   generations in the codebase for "at least 2" releases
-  (`src/google/adk/sessions/migration/README.md:123-129`). ADR#0035 decision 3
+  (`src/google/adk/sessions/migration/README.md:123-129`). [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3
   is additive-only, "never a per-event version branch" -- we cannot express
   that kind of breaking change without a new event type, but we never carry
   two live schema generations of the same event type at once.
@@ -374,14 +374,14 @@ change.
   -- cheap, because it is a merge over a handful of already-mutable buckets,
   never a fold over history. Our model-visible context is compiled from the
   event log bounded by the latest snapshot/`Compacted` marker on every read
-  too (ADR#0035 decision 8) -- potentially more expensive per read, but it is
+  too ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) -- potentially more expensive per read, but it is
   the only way to guarantee the result cannot silently disagree with the log,
   which is exactly the guarantee ADK's `state` column does not have.
 
 ## What not to copy
 
 - **`Session.state` as a directly-mutated document with no fold-check against
-  `events`.** The direct antithesis of ADR#0035 decision 8. Nothing in ADK's
+  `events`.** The direct antithesis of [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8. Nothing in ADK's
   four backends ever compares `state` against what replaying `events` would
   produce, so the two can silently disagree with no detection mechanism at
   all.
@@ -413,7 +413,7 @@ change.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a child session is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a child session is its own
 logical stream, linked by facts on each side (`DelegationDispatched`,
 `ParentLinked`), dispatch is parent-first with crash-safe reconciler repair,
 rewind invalidation is distinct from terminal cascade, and terminal cascade is
@@ -464,7 +464,7 @@ silent on. Separately, ADK's *discouraged* throwaway model is the clearest
 possible validation of why decision 6 insists a child gets durable identity
 *before* it starts running: `DelegationDispatched` lands on the parent's
 stream before child creation, and a reconciler repairs a missing child from
-that fact alone if a crash happens in between (ADR#0035 decision 6). ADK's
+that fact alone if a crash happens in between ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6). ADK's
 throwaway path has no equivalent durable dispatch fact at all -- the entire
 delegation is invisible to the store until the tool call returns
 successfully, which is precisely the failure decision 6's parent-first
@@ -473,7 +473,7 @@ discourage the pattern in their own docstring without removing it.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 aggregate snapshots bounding replay cost rather than storage size. The

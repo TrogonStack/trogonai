@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Mastra](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 11/12**: evolution scars 3/3 (`OM_MIGRATION_COLUMNS`, a
 15-entry backward-compatibility column list carried forward on every init,
@@ -103,17 +103,17 @@ models, and no mechanism in the interface itself communicates which
 guarantee a caller is actually getting for a given deployment.
 
 We do not have this problem, by construction rather than by discipline.
-ADR#0035 decision 1 makes append-only mutation through `append_stream` the
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1 makes append-only mutation through `append_stream` the
 only write path, and decision 2's `WRITE_PRECONDITION` classification
 (`NoStream`/`At`/`Any`) is enforced once, at the substrate level, for every
 command, not re-implemented per backend. Every multi-event fact our design
 ever needs atomically is expressed as a single batch append under one
 precondition on one stream: fork is `[SessionStarted, SessionForked]` under
-`NoStream` (decision 5, ADR#0035 lines 672-674), child creation is
-`[SessionStarted, ParentLinked]` under `NoStream` (decision 6, ADR#0035 lines
+`NoStream` (decision 5, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 672-674), child creation is
+`[SessionStarted, ParentLinked]` under `NoStream` (decision 6, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines
 733-734), and terminal or rewind cascade are `[ParentTerminated,
 SessionCancelled]` and `[ParentHistoryInvalidated, SessionCancelled]`, each
-under `At` on the child's own stream (decision 6, ADR#0035 lines 766-787).
+under `At` on the child's own stream (decision 6, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 766-787).
 There is exactly one substrate (NATS JetStream) and exactly one atomicity
 guarantee (single-stream, single-writer, OCC-guarded append), so the
 question "which atomicity do I actually get here" never has more than one
@@ -145,23 +145,23 @@ would silently misread both:
   `packages/core/src/storage/types.ts:215-252`). Our `SessionForked`
   (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`) never copies an event: it appends a
   `context_prefix_boundary` (`SessionOrdinal`) that the model-visible-context
-  projection resolves by reference into the source stream (ADR#0035 decision
+  projection resolves by reference into the source stream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
   5, lines 683-696). Mastra's word for the same English verb names the
   opposite mechanism.
 
 | Mastra | Ours | Verdict |
 | --- | --- | --- |
 | `StorageThreadType` (`packages/core/src/memory/types.ts:35-50`) | `SessionStarted` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:1-25`) plus lifecycle events | Semantic mismatch, see above; Mastra's thread has no plan binding and no terminal state |
-| `mastra.generateId()` falling back to `randomUUID()` (`packages/core/src/mastra/index.ts:1128-1143`) | `SessionId` opaque identity (ADR#0035 decision 2, lines 140-141) | Equivalent principle: identity is an opaque key, not a derived or structured value |
+| `mastra.generateId()` falling back to `randomUUID()` (`packages/core/src/mastra/index.ts:1128-1143`) | `SessionId` opaque identity ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2, lines 140-141) | Equivalent principle: identity is an opaque key, not a derived or structured value |
 | `Message.id`, ordered by `createdAt` with per-query, sometimes inconsistent tiebreaks, see below | `CanonicalMessage.message_id` (`proto/trogonai/session/sessions/v1alpha1/message.proto:1-40`); order is `SessionOrdinal`, fold-derived, never a stored or queried column (`proto/trogonai/session/sessions/v1alpha1/session_ordinal.proto:1-16`) | Ours, decisively: see recommendation 3 |
-| `cloneThread` physical copy (`stores/pg/src/storage/domains/memory/index.ts:1745-1790`) | `SessionForked{source_session_id, context_prefix_boundary}` (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`), inherited by reference (ADR#0035 decision 5) | Semantic mismatch, see above; trade-off, see below |
+| `cloneThread` physical copy (`stores/pg/src/storage/domains/memory/index.ts:1745-1790`) | `SessionForked{source_session_id, context_prefix_boundary}` (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`), inherited by reference ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 5) | Semantic mismatch, see above; trade-off, see below |
 | Cosmetic thread-ID string concatenation for agent-to-agent delegation, `` `${threadId}-${randomUUID()}` `` (`packages/core/src/agent/agent.ts:4716-4725`), no consumer reconstructs hierarchy from it | `DelegationDispatched`/`ParentLinked` (`proto/trogonai/session/sessions/v1alpha1/delegation_dispatched.proto:1-26`, `proto/trogonai/session/sessions/v1alpha1/parent_linked.proto:1-28`), a typed, fold-consumed fact pair | Ours, decisively: see "What our design already does better" |
 | `forkedSubagent`/`parentThreadId` opaque metadata tags on a cloned thread (`packages/core/src/agent-controller/agent-controller.ts:1845-1861`), read back only by `listThreads`'s default filter (`packages/core/src/agent-controller/agent-controller.ts:1005-1013`) | Same as above; `CascadePolicy` (`proto/trogonai/session/sessions/v1alpha1/cascade_policy.proto:1-17`) governs whether a link matters for cascade at all | Ours, decisively: see below |
 | `SessionRecord.parentSessionId`/`subagentDepth`, real migrated nullable schema columns (`packages/core/src/storage/constants.ts:447-448`, `packages/core/src/storage/domains/harness/types.ts:26-27`) with zero producers or consumers found anywhere in `packages/core/src` outside their own declarations | Same as above | Ours, decisively: a third, mutually-unaware mechanism is exactly the failure mode our single typed fact pair avoids |
-| `HarnessStorage` has no `deleteSession` at all; deletion is `updateSession(id, {deletedAt: new Date()})`, a soft-delete-by-convention not enforced by any schema rule (`packages/core/src/storage/domains/harness/base.ts:1-91`) | `SessionHidden` (`proto/trogonai/session/sessions/v1alpha1/session_hidden.proto:1-26`), a typed, named terminal visibility tombstone with a `SessionHiddenReason` (ADR#0035 decision 7) | Ours, decisively: see below |
-| `MessageHistory` processor: bounded eager reload, `perPage: this.lastMessages` (default 10), `orderBy: {field: 'createdAt', direction: 'DESC'}` (`packages/core/src/processors/memory/message-history.ts:113-119`, default at `packages/core/src/memory/memory.ts:82-83`) | Aggregate resume folds from the newest snapshot plus tail (ADR#0035 decision 8, lines 943-953); model-visible context compiles from the log bounded by the latest `Compacted` marker (decision 8) | Trade-off, see below |
-| `RetentionConfig`/`TableRetentionPolicy`/`PruneOptions`, age-based, table-granular, caller-scheduled, never auto-run (`packages/core/src/storage/retention.ts:19-97`); `prune()` "never reclaims disk" (`packages/core/src/storage/retention.ts:48-51`) | `SessionHidden`/`RedactionApplied`/`ArtifactErased`, a three-tier privacy contract over a keep-forever log (ADR#0035 decision 7) | Different problem, see "The two gaps" below |
-| No compaction primitive at the storage layer at all, per the dossier's [Compaction and history management](./index.md#compaction-and-history-management) section | `Compacted` (`proto/trogonai/session/sessions/v1alpha1/compacted.proto:1-50`), a self-sufficient in-stream marker the store only records (ADR#0035 decision 4) | Gap in Mastra, by the dossier's own account |
+| `HarnessStorage` has no `deleteSession` at all; deletion is `updateSession(id, {deletedAt: new Date()})`, a soft-delete-by-convention not enforced by any schema rule (`packages/core/src/storage/domains/harness/base.ts:1-91`) | `SessionHidden` (`proto/trogonai/session/sessions/v1alpha1/session_hidden.proto:1-26`), a typed, named terminal visibility tombstone with a `SessionHiddenReason` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, decisively: see below |
+| `MessageHistory` processor: bounded eager reload, `perPage: this.lastMessages` (default 10), `orderBy: {field: 'createdAt', direction: 'DESC'}` (`packages/core/src/processors/memory/message-history.ts:113-119`, default at `packages/core/src/memory/memory.ts:82-83`) | Aggregate resume folds from the newest snapshot plus tail ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8, lines 943-953); model-visible context compiles from the log bounded by the latest `Compacted` marker (decision 8) | Trade-off, see below |
+| `RetentionConfig`/`TableRetentionPolicy`/`PruneOptions`, age-based, table-granular, caller-scheduled, never auto-run (`packages/core/src/storage/retention.ts:19-97`); `prune()` "never reclaims disk" (`packages/core/src/storage/retention.ts:48-51`) | `SessionHidden`/`RedactionApplied`/`ArtifactErased`, a three-tier privacy contract over a keep-forever log ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Different problem, see "The two gaps" below |
+| No compaction primitive at the storage layer at all, per the dossier's [Compaction and history management](./index.md#compaction-and-history-management) section | `Compacted` (`proto/trogonai/session/sessions/v1alpha1/compacted.proto:1-50`), a self-sufficient in-stream marker the store only records ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 4) | Gap in Mastra, by the dossier's own account |
 | `HarnessPendingItemRecord`/pending-item array on `SessionRecord` (`packages/core/src/storage/domains/harness/types.ts:7-19`) | `ToolCallApproved`/`ToolCallDenied` (facet 2, command matrix) | Roughly equivalent, different granularity: Mastra's is a mutable array field, ours is an append-only fact per call |
 
 ## What we should consider changing
@@ -192,7 +192,7 @@ tie and in which direction.
 
 **Blast radius.** Additive. This does not touch a proto file or an ADR
 decision; it is a new automated check against existing behavior we already
-intend (ADR#0035 decision 2, lines 140-154: `SessionOrdinal` is "derived by
+intend ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2, lines 140-154: `SessionOrdinal` is "derived by
 counting at fold time, never read from JetStream message metadata").
 
 **Why.** Our fold-derived `SessionOrdinal` already makes this class of bug
@@ -212,7 +212,7 @@ schema or behavior change to reject.
 
 ### 2. Confirm that our multi-event atomic batches (fork, child creation, cascade) remain single-stream, single-append operations as the command surface grows, and do not acquire a Mastra-style "compensating rollback across independent writes" shape
 
-**The change.** No change to ADR#0035 today. This is a standing constraint
+**The change.** No change to [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) today. This is a standing constraint
 to preserve: every future command that needs to make more than one fact
 true atomically must express that as a single batch append under one
 `WRITE_PRECONDITION` on one stream (as fork, child creation, and cascade
@@ -231,11 +231,11 @@ best-effort undo that itself can silently fail.
 
 **Blast radius.** Additive as a standing principle; it names no specific
 schema change today. It becomes breaking-the-decision only if a future
-proposal tries to relax it, in which case ADR#0035 decisions 5 and 6 (the
+proposal tries to relax it, in which case [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decisions 5 and 6 (the
 `[SessionStarted, SessionForked]` and `[SessionStarted, ParentLinked]`
 atomic batches) are the decisions being contradicted.
 
-**Why.** Every multi-fact atomic operation ADR#0035 currently defines stays
+**Why.** Every multi-fact atomic operation [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) currently defines stays
 inside one JetStream subject specifically because "JetStream offers no
 atomic write across subjects" (Alternatives Considered: "Subagent cascade
 via a cross-stream transaction or atomic multi-stream delete... rejected
@@ -246,7 +246,7 @@ a well-intentioned implementer reaches for "write both, and roll back the
 first if the second fails" instead of restructuring the operation as
 two separately-guarded local facts joined by an operation id, the pattern
 decision 6 already uses for detach (`DelegationDetached`/`ParentDetached`,
-ADR#0035 lines 793-808). DynamoDB's rollback-that-can-itself-fail is the
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 793-808). DynamoDB's rollback-that-can-itself-fail is the
 concrete shape of what happens when that discipline lapses.
 
 **What it costs us.** Nothing today; this recommendation exists to make the
@@ -283,7 +283,7 @@ writes either of the others.
 
 **Blast radius.** Additive as a standing principle; no schema change is
 proposed. It would become breaking-the-decision only if adopted, since
-ADR#0035 decision 6 already names `DelegationDispatched`/`ParentLinked` as
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already names `DelegationDispatched`/`ParentLinked` as
 the sole parent-child linking mechanism, and a second field would
 contradict that by construction.
 
@@ -295,7 +295,7 @@ one of which (the harness schema columns) is populated nowhere and reads as
 "aspirational" rather than dead, per the dossier's own [Subagents and nested
 sessions](./index.md#subagents-and-nested-sessions) section, which treats
 this explicitly as an open question rather than a resolved dead-code
-finding. `ParentLinked`/`DelegationDispatched` (ADR#0035 decision 6) is
+finding. `ParentLinked`/`DelegationDispatched` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) is
 already the single mechanism; this recommendation's value is naming, ahead
 of time, why a second one should not get added later for a narrower
 purpose (a debugger view, a fast-path query) the way Mastra's third
@@ -308,7 +308,7 @@ were not stated now.
 
 ### 4. Consider allowing a bounded, cheap read path for the common "just the recent tail" resume case, distinct from full aggregate replay
 
-**The change.** ADR#0035 decision 8 already resumes efficiently by loading
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 already resumes efficiently by loading
 "the newest snapshot for the session, then replay only the tail after it."
 Consider whether a caller-facing read API should also expose a
 lighter-weight, explicitly-bounded "last N messages" query, analogous to
@@ -326,7 +326,7 @@ fixed page size, unrelated to snapshot cadence or fold correctness.
 
 **Blast radius.** Additive. This would be a new, explicitly non-authoritative
 read-side query against the same log, not a change to how aggregate resume
-works (ADR#0035 decision 8's snapshot-plus-tail path stays exactly as
+works ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8's snapshot-plus-tail path stays exactly as
 specified).
 
 **Why it is a good idea, or why it is not.** This is recorded as a
@@ -354,7 +354,7 @@ asserting it must be filled.
 - **A single typed fact pair for parent-child linking, not three
   independent, unreconciled mechanisms.** `DelegationDispatched`/`ParentLinked`
   (`proto/trogonai/session/sessions/v1alpha1/delegation_dispatched.proto:1-26`, `proto/trogonai/session/sessions/v1alpha1/parent_linked.proto:1-28`) are the
-  only way a child-session relationship is ever recorded (ADR#0035 decision
+  only way a child-session relationship is ever recorded ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
   6). Mastra's three coexisting mechanisms (cosmetic ID concatenation,
   opaque clone metadata, unused harness schema columns) mean answering
   "does this thread have a parent" depends on which of three places you
@@ -369,7 +369,7 @@ asserting it must be filled.
   [Subagents and nested sessions](./index.md#subagents-and-nested-sessions).
   Our `CascadePolicy` (`proto/trogonai/session/sessions/v1alpha1/cascade_policy.proto:1-17`) and the reconciler-driven
   `[ParentTerminated, SessionCancelled]`/`[ParentHistoryInvalidated,
-  SessionCancelled]` batches (ADR#0035 decision 6, lines 773-791, 758-771)
+  SessionCancelled]` batches ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6, lines 773-791, 758-771)
   make what happens on parent termination or rewind an explicit, typed,
   reconciled outcome, never a link that simply stops resolving.
 - **Fork is atomic and by-reference; nothing to keep consistent, nothing to
@@ -377,7 +377,7 @@ asserting it must be filled.
   physical copy of message rows (`stores/pg/src/storage/domains/memory/index.ts:1745-1790`),
   which means a large source thread makes forking an O(history) operation.
   `SessionForked{source_session_id, context_prefix_boundary}`
-  (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`, ADR#0035 decision 5) makes fork O(1) at
+  (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 5) makes fork O(1) at
   write time and resolves inheritance by reference into a keep-forever log,
   so no fork ever needs a copy to be kept in sync with anything.
 - **Deletion is a named, typed vocabulary, not one soft-delete convention
@@ -390,7 +390,7 @@ asserting it must be filled.
   section). `SessionHidden` (`proto/trogonai/session/sessions/v1alpha1/session_hidden.proto:1-26`), `RedactionApplied`
   (`proto/trogonai/session/sessions/v1alpha1/redaction_applied.proto:1-20`), and `ArtifactErased`
   (`proto/trogonai/session/sessions/v1alpha1/artifact_erased.proto:1-18`) are three distinct, typed, `At`-guarded
-  events, each meaning exactly one thing (ADR#0035 decision 7), so "what
+  events, each meaning exactly one thing ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7), so "what
   happens when you delete something" is never left to a convention a
   particular backend may or may not enforce.
 - **Ordering is a single fold-derived fact, never a per-query choice.**
@@ -398,7 +398,7 @@ asserting it must be filled.
   each other about tiebreak field and direction
   (`stores/mongodb/src/storage/domains/memory/index.ts:289,298,322,1322`).
   Our `SessionOrdinal` (`proto/trogonai/session/sessions/v1alpha1/session_ordinal.proto:1-16`) is derived once, at
-  fold time, from a canonical order (ADR#0035 decision 2), so there is
+  fold time, from a canonical order ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), so there is
   never more than one answer to "which of these two events came first."
 
 ## Trade-offs, not gaps
@@ -420,7 +420,7 @@ asserting it must be filled.
   default resume (`MessageHistory`, `lastMessages: 10`,
   `packages/core/src/memory/memory.ts:82-83`) is cheap and simple: one
   query, fixed page size, no snapshot management. Our resume replays a
-  snapshot plus tail to reconstruct correct aggregate state (ADR#0035
+  snapshot plus tail to reconstruct correct aggregate state ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
   decision 8). Mastra's approach is cheaper for the common "just show
   recent messages" case and needs no snapshot infrastructure at all; ours
   is more expensive to build and maintain but gives a caller a
@@ -434,7 +434,7 @@ asserting it must be filled.
   source thread's later mutation, redaction, or deletion can affect the
   clone, because the clone owns its own copies. `SessionForked`
   (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:1-39`) is cheaper at fork time and automatically
-  inherits any later redaction of the source prefix, per ADR#0035 decision
+  inherits any later redaction of the source prefix, per [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
   7's point that "redacting a source stream also automatically masks every
   fork's inherited context" (lines 879-882), but that same property means a
   fork is never fully independent of its source's continued existence and
@@ -472,7 +472,7 @@ asserting it must be filled.
   only logs when the rollback itself fails, rather than surfacing that
   failure to the caller. Any future compensating-action path in our system
   (a reconciler repair, a saga step) must propagate its own failure rather
-  than swallowing it, exactly the discipline ADR#0035 decision 6's crash
+  than swallowing it, exactly the discipline [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6's crash
   repair already follows (a duplicate creation attempt no-ops on
   `WrongExpectedVersion`, rather than silently continuing).
 - **Silent atomicity degradation based on runtime topology, with no signal
@@ -490,7 +490,7 @@ asserting it must be filled.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a child session is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a child session is its own
 logical stream, linked by two typed facts recorded on each side
 (`DelegationDispatched` on the parent, `ParentLinked` on the child);
 terminal cascade and rewind invalidation are separate, distinct reconciled
@@ -533,7 +533,7 @@ any particular cascade mechanism; it is evidence of what happens when no
 cascade mechanism exists at all: permanent, silent orphaning, confirmed by
 absence of code rather than inferred from a comment. This sharpens the
 case for decision 6's reconciler-driven, transitive cascade
-(`[ParentTerminated, SessionCancelled]`, ADR#0035 lines 773-791) as
+(`[ParentTerminated, SessionCancelled]`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 773-791) as
 something the industry has not converged on even at the level of "detect
 the orphaning," let alone "guard it before it happens." Mastra is silent on
 rewind invalidation specifically (it has no rewind primitive to compare
@@ -543,7 +543,7 @@ advisory (a system-prompt instruction) rather than structural.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 aggregate snapshots that bound replay cost, not storage size. The question
@@ -589,7 +589,7 @@ tiers add relative to the industry default: a middle ground between
 "everything, unmasked, forever" and "gone." Mastra also validates the
 "pruning must be cooperative and resumable, never a single unbounded
 sweep" principle decision 7's cold-tiering language shares in spirit (the
-`Object Store` restore path, ADR#0035 lines 915-921), independently
+`Object Store` restore path, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 915-921), independently
 arriving at `maxBatches`/`pauseMs`/`AbortSignal` for the same reason we
 would need equivalent bounds on any batched, resumable operation over a
 large log.
@@ -610,7 +610,7 @@ to configure.
 
 ## Open questions for the ADR
 
-1. Should ADR#0035 or a follow-up name, explicitly, a repo-level check that
+1. Should [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) or a follow-up name, explicitly, a repo-level check that
    every read path sorting events for a session must use `SessionOrdinal`
    with no independently-chosen tiebreak, given Mastra's four internally
    inconsistent sort call sites in one backend file? (Recommendation 1.)
@@ -636,7 +636,7 @@ to configure.
    pruning job and no masking tier. Decision 7 already avoids the
    "forgot to schedule the job" exposure by making keep-forever the
    unconditional default; does the ADR need to say anything more about how
-   a future cold-tiering job (ADR#0035 lines 915-921) should behave if a
+   a future cold-tiering job ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) lines 915-921) should behave if a
    deployment never enables it, to preserve that same "correct even if
    nobody configures anything" property?
 6. Mastra's cascade evidence is entirely an absence (no backend's

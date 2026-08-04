@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [SWE-agent](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 3/12**, evolution scars 0/3 (the dossier finds exactly one
 named schema break in the whole system: `query` replaced an older `message`
@@ -64,16 +64,16 @@ equivalents where none exist.
 | `trajectory: list[TrajectoryStep]`, a post-hoc per-step summary (`sweagent/types.py:44-52`) | `ToolCallRequested`/`Started`/`Completed`/`Failed` as separate durable facts (`tool_call_requested.proto`, `tool_call_completed.proto`, `tool_call_failed.proto`) | Ours, decisively; SWE-agent's step summary exists only inside a document that is rebuilt every write; ours is durable the instant it is appended |
 | `history: list[HistoryItem]`, the literal LM conversation, "all messages that were shown to the LM" (`docs/usage/trajectories.md:22`) | `CanonicalMessage` on `UserMessageRecorded`/`AssistantMessageCompleted` (`proto/trogonai/session/sessions/v1alpha1/message.proto:14-28`) | Equivalent in intent (both are the provider-visible transcript form); ours is append-only per message, theirs is one array inside a rewritten whole document |
 | `info: AgentInfo` (exit status, submission, cost stats, `swe_agent_hash`/`swe_agent_version`; `sweagent/types.py:94-95`) | `SessionClosed`/`SessionFailed`/`SessionCancelled` + `TokenUsage`/`Cost` spread across message events (`session_closed.proto`, `token_usage.proto`) | Ours, decisively; no single denormalized rollup object that the whole write path recomputes and re-serializes on every step |
-| Instance id: content-derived sha256[:6] of the problem text for most problem-statement types, `uuid.uuid4()` only for the no-problem-statement case (`sweagent/agent/problem_statement.py:84-86,117-119,144-147,58`) | Opaque `SessionId`, one logical stream per session (ADR#0035 decision 1) | Semantic mismatch; see below |
-| `output_dir`/file path as the true identity for collision purposes; no id field inside the JSON itself (`sweagent/agent/agents.py:589`, per the dossier's Keying section) | `SessionId` addresses a JetStream subject `session.sessions.events.<session_id>`, independent of any storage path (ADR#0035 decision 1) | Ours, decisively; identity survives relocation; SWE-agent's does not, by the dossier's own account ("move the file and... that trajectory no longer exists at its old identity") |
+| Instance id: content-derived sha256[:6] of the problem text for most problem-statement types, `uuid.uuid4()` only for the no-problem-statement case (`sweagent/agent/problem_statement.py:84-86,117-119,144-147,58`) | Opaque `SessionId`, one logical stream per session ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Semantic mismatch; see below |
+| `output_dir`/file path as the true identity for collision purposes; no id field inside the JSON itself (`sweagent/agent/agents.py:589`, per the dossier's Keying section) | `SessionId` addresses a JetStream subject `session.sessions.events.<session_id>`, independent of any storage path ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Ours, decisively; identity survives relocation; SWE-agent's does not, by the dossier's own account ("move the file and... that trajectory no longer exists at its old identity") |
 | `RunBatch.should_skip`: skip a complete run, delete-and-rerun an incomplete one (`sweagent/run/run_batch.py:376-409`) | No equivalent concept; dedup-on-completion is not a primitive our catalog needs, because we never delete-and-redo a session | Deliberate divergence, see "Skip is not resume" below |
 | `RetryAgent` attempts, each a full independent `DefaultAgent` with its own `.traj` at `output_dir / f"attempt_{i}"`, folded whole into the parent's `{"attempts": [...]}` (`sweagent/agent/agents.py:257-440, 358-388`) | `DelegationDispatched`/`ParentLinked` linking two independently durable streams, never a copy of one inside the other (`delegation_dispatched.proto`, `parent_linked.proto`) | Ours, decisively; see the subagent-cascade section below |
 | No rewind/undo/branch operation exists at all (per dossier, "Rewind, checkpoints, and fork") | `SessionRewound.keep_through`, `SessionForked` (`session_rewound.proto`, `session_forked.proto`) | Ours; SWE-agent's `while not step_output.done` loop only ever moves forward |
 | `state.diff` (`diff_state` tool bundle): a full, non-deduplicated `git diff --cached` recomputed every step, used only as a crash-recovery autosubmission fallback (`attempt_autosubmission_after_error`, `sweagent/agent/agents.py:823-851`) | `FileChanged.before_ref`/`after_ref` (`ArtifactRef`, content-addressed, deduplicated) plus `DiffSummary` (`file_changed.proto`, `diff_summary.proto`) | Ours, decisively; see below |
 | No compaction/history-summarization concept found; `history_processors` only ever produce a model-visible view (`sweagent/agent/agents.py:539-551`) | `Compacted{covers_from, covers_through, summary_content}` (`compacted.proto`) | Ours; no equivalent exists on their side to compare against; not a gap, since a benchmark run's transcript never needs to be shortened for context-window reasons across resumption |
-| No retention/TTL policy; the only cleanup is `remove_unfinished`, a manual, opt-in, `dry_run=True`-by-default offline CLI tool (`sweagent/run/remove_unfinished.py:14-41`) | `SessionHidden`, `RedactionApplied`, `ArtifactErased` (`session_hidden.proto`, `redaction_applied.proto`, `artifact_erased.proto`); keep-forever with a typed masking contract (ADR#0035 decision 7) | Ours, decisively; see the retention section below |
-| No index; every consumer globs `*.traj`/`**/*.traj` (`sweagent/run/remove_unfinished.py:20`, `sweagent/inspector/server.py:274`) | `SessionProjection`, a rebuildable read model checkpointing `last_applied_stream_position` (ADR#0035 decision 8) | Ours, decisively |
-| No search subsystem of any kind over trajectory content (per dossier) | Out of scope for the core catalog too; "any full-text or vector search subsystem is a separate, independently bootstrapped projection off the same log" (ADR#0035 decision 8) | Trade-off/parity; neither side builds this into the store proper |
+| No retention/TTL policy; the only cleanup is `remove_unfinished`, a manual, opt-in, `dry_run=True`-by-default offline CLI tool (`sweagent/run/remove_unfinished.py:14-41`) | `SessionHidden`, `RedactionApplied`, `ArtifactErased` (`session_hidden.proto`, `redaction_applied.proto`, `artifact_erased.proto`); keep-forever with a typed masking contract ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, decisively; see the retention section below |
+| No index; every consumer globs `*.traj`/`**/*.traj` (`sweagent/run/remove_unfinished.py:20`, `sweagent/inspector/server.py:274`) | `SessionProjection`, a rebuildable read model checkpointing `last_applied_stream_position` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively |
+| No search subsystem of any kind over trajectory content (per dossier) | Out of scope for the core catalog too; "any full-text or vector search subsystem is a separate, independently bootstrapped projection off the same log" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Trade-off/parity; neither side builds this into the store proper |
 
 ## What we should consider changing
 
@@ -122,7 +122,7 @@ the file path itself; per the dossier, "move the file and, from the program's
 point of view, that trajectory no longer exists at its old identity," because
 neither `info` nor `trajectory`/`history` carries an `instance_id` field of
 its own. Our `SessionId` addresses a JetStream subject
-(`session.sessions.events.<session_id>`, ADR#0035 decision 1) independent of
+(`session.sessions.events.<session_id>`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) independent of
 any physical storage location, so relocation, cold-tiering, or backup/restore
 never breaks identity.
 
@@ -172,7 +172,7 @@ session is a record of something that happened rather than a cached answer to
 a reproducible question, "delete the torn file and start over" stops being a
 recovery strategy and becomes a bill for a user's genuinely irrecoverable
 work. This is the sharpest available argument, in this whole corpus, for why
-ADR#0035 decision 2's append-only mutation with a server-enforced
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's append-only mutation with a server-enforced
 `WRITE_PRECONDITION` matters: our design never has a "whole document" to tear
 in the first place, because "append one small fact, guarded where it needs
 guarding" replaces "rewrite everything and hope the write finishes" as the
@@ -189,7 +189,7 @@ neither incremental nor state-preserving: nothing in that path ever loads
 platform keeps these concepts sharply separate by construction: `NoStream` on
 `CreateSession` makes creation idempotent-by-rejection (a second create simply
 fails), while resumption is `StartExecutionAttempt` replaying the effective
-tail after the newest admitted checkpoint (ADR#0035 decision 8, facet 3). The
+tail after the newest admitted checkpoint ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8, facet 3). The
 value of SWE-agent's evidence here is not that it proposes a change to our
 schema, it proposes nothing because it has no resume path to compare, but
 that it is the cleanest available demonstration of a category error a future
@@ -203,7 +203,7 @@ versus checkpoint-verified replay).
 - **Whole-file rewrite with no temp-file-and-rename and no fsync.**
   `save_trajectory`'s single `write_text` call, invoked after every agent step
   (`sweagent/agent/agents.py:779-787,1284-1286`), is the exact failure mode our
-  append-only log with server-enforced write preconditions (ADR#0035 decision
+  append-only log with server-enforced write preconditions ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
   2) exists to rule out. Even setting aside resumption, this is a pattern to
   reject on durability grounds alone: a crash mid-write can silently corrupt
   the entire record, not just the in-flight step.
@@ -229,7 +229,7 @@ versus checkpoint-verified replay).
   is still a concrete instance of a model-view-only mechanism eroding the
   boundary between "what the model sees" and "what the durable record
   contains," inside a codebase whose other four processors got that boundary
-  right. This is exactly the boundary ADR#0035 facet 8 keeps explicit by
+  right. This is exactly the boundary [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8 keeps explicit by
   construction: the model-visible context is *compiled* deterministically
   from the event log, never mutated back into it, and `ProviderBlock`/
   `ThinkingBlock.signature` are the two places we deliberately let
@@ -239,7 +239,7 @@ versus checkpoint-verified replay).
   view/record split is only as good as its least-audited implementation, and
   a single mutating branch is enough to erode it invisibly." Our own design
   has no equivalent mutation path today (compaction and redaction are both
-  new appended events, never edits, per ADR#0035 decision 2), and this
+  new appended events, never edits, per [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), and this
   comparison is the reason to keep it that way rather than to introduce a
   "cheap" in-place metadata patch later.
 - **An identity that lives only in a file path, with no id inside the
@@ -254,7 +254,7 @@ versus checkpoint-verified replay).
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a child session is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a child session is its own
 logical stream, linked by facts recorded on each side
 (`DelegationDispatched`/`ParentLinked`), acyclic by construction (a fresh
 `child_session_id` every dispatch, `ParentLinked` valid only inside a
@@ -309,8 +309,8 @@ problem than SWE-agent ever has to solve.
 
 One thing worth naming as a genuine, if minor, point of comparison: `RetryAgent`
 duplicating the full child transcript inside the parent's own file
-(`"attempts": [...]`) is the pattern ADR#0035's record-once rule
-(ADR#0024, cited throughout ADR#0035 facet 6) explicitly forecloses for us:
+(`"attempts": [...]`) is the pattern [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s record-once rule
+([ADR#0024](../../../../adr/0024-agent-platform-stream-topology.md), cited throughout [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6) explicitly forecloses for us:
 our parent never carries a copy of a child's events; it carries only the
 linking facts (`DelegationDispatched`, and later the delegation's own
 `OperationOutcomeRecorded`). SWE-agent's duplication is affordable because a
@@ -321,7 +321,7 @@ operate at.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 aggregate snapshots bounding replay cost rather than storage. The question
@@ -383,7 +383,7 @@ benchmark harness would misrepresent how much weight its evidence can bear.
 The one item worth flagging is not a question for the ADR owner so much as a
 note for whoever writes the ADR's prose on idempotency: SWE-agent's
 `should_skip` is a good citable example, in ADR text or an implementation
-note, of the specific "skip-vs-resume" conflation ADR#0035's `NoStream`
+note, of the specific "skip-vs-resume" conflation [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s `NoStream`
 (idempotent-by-rejection creation) versus `StartExecutionAttempt`
 (checkpoint-verified replay) split already prevents by construction; worth
 keeping in mind as a concrete illustration if that distinction ever needs

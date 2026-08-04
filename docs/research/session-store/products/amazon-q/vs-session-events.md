@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Amazon Q Developer CLI](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 8/12**: evolution scars 2/3 (a real eight-step SQL migration
 ratchet across three tables, `crates/chat-cli/src/database/mod.rs:67-76`, one
@@ -60,8 +60,8 @@ We commit at **fact granularity** on an **opaque, addressable identity**:
 `UserMessageRecorded`, `AssistantMessageStarted`/`Completed`,
 `ToolCallRequested`/`Started`/`Completed`/`Failed` are separate, durable events
 on a session's own logical stream, addressed by an opaque `SessionId`
-(`proto/trogonai/session/sessions/v1alpha1/events.proto`, ADR#0035 decision 1),
-and no command ever purges or trims that stream (ADR#0035 decision 2, decision
+(`proto/trogonai/session/sessions/v1alpha1/events.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1),
+and no command ever purges or trims that stream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2, decision
 7). Two orthogonal choices compound into Amazon Q's design, and both cut the
 opposite way from ours:
 
@@ -87,32 +87,32 @@ cascade) is a consequence of one or the other.
 
 | Amazon Q | Ours | Verdict |
 | --- | --- | --- |
-| `conversations (key TEXT PRIMARY KEY, value TEXT)` SQLite row, `INSERT OR REPLACE`d whole (`database/mod.rs:399-411`) | Per-session logical stream on subject `session.sessions.events.<session_id>` (ADR#0035 decision 1), append-only (decision 2) | Central structural difference |
-| Absolute cwd path string as primary key (`get_conversation_by_path`/`set_conversation_by_path`, `database/mod.rs:385-411`) | Opaque `SessionId` (ADR#0035 decision 1) | Ours, decisively: avoids collapsing location into identity |
+| `conversations (key TEXT PRIMARY KEY, value TEXT)` SQLite row, `INSERT OR REPLACE`d whole (`database/mod.rs:399-411`) | Per-session logical stream on subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1), append-only (decision 2) | Central structural difference |
+| Absolute cwd path string as primary key (`get_conversation_by_path`/`set_conversation_by_path`, `database/mod.rs:385-411`) | Opaque `SessionId` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Ours, decisively: avoids collapsing location into identity |
 | `ConversationState.conversation_id` (UUIDv4, internal, no addressing role, `conversation.rs:109`) | `SessionId` (opaque, the actual addressing key) | Semantic mismatch: Amazon Q's "id" is not the key; ours is the key |
-| 10,000-entry soft cap, drained in place before every save (`enforce_conversation_invariants`, `conversation.rs:1121-1217`) | No cap; keep-forever (ADR#0035 decision 7), snapshot-bounded replay (facet 8) | Ours, decisively |
-| `/compact` → `replace_history_with_summary`, drains all but `messages_to_exclude` (default `0`) entries, stores AI summary in `latest_summary` (`conversation.rs:732-741`) | `Compacted{covers_from, covers_through, summary_content}` (`compacted.proto`), an in-stream marker; covered events stay on the log (ADR#0035 decision 4, decision 7) | Ours, decisively |
+| 10,000-entry soft cap, drained in place before every save (`enforce_conversation_invariants`, `conversation.rs:1121-1217`) | No cap; keep-forever ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7), snapshot-bounded replay (facet 8) | Ours, decisively |
+| `/compact` → `replace_history_with_summary`, drains all but `messages_to_exclude` (default `0`) entries, stores AI summary in `latest_summary` (`conversation.rs:732-741`) | `Compacted{covers_from, covers_through, summary_content}` (`compacted.proto`), an in-stream marker; covered events stay on the log ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 4, decision 7) | Ours, decisively |
 | `transcript: VecDeque<String>`, a denormalized prose log capped independently at the same 10,000 entries, not sent to the backend (`conversation.rs:120`, `append_transcript`, `:903-908`) | No parallel denormalized log; `CanonicalMessage` is the single source (`message.proto`) | Ours, deliberately: nothing to drift out of sync |
-| `CheckpointManager`, a shadow **bare git repo** at `~/.aws/amazonq/cli-checkouts/<conversation_id>`; each `Checkpoint` additionally embeds a **full clone of conversation history** (`history_snapshot: VecDeque<HistoryEntry>`, `crates/chat-cli/src/cli/chat/checkpoint.rs:74-82`) | `Checkpoint{reference, checkpoint_type, digest, checkpoint_id, covers_through, session_execution_plan_digest}` (`checkpoint.proto`), a claim-check reference, never inline history | Semantic mismatch: Amazon Q's "checkpoint" duplicates the entire transcript per cut; ours references, never inlines (ADR#0035 facet 3, "four records with separate authority") |
+| `CheckpointManager`, a shadow **bare git repo** at `~/.aws/amazonq/cli-checkouts/<conversation_id>`; each `Checkpoint` additionally embeds a **full clone of conversation history** (`history_snapshot: VecDeque<HistoryEntry>`, `crates/chat-cli/src/cli/chat/checkpoint.rs:74-82`) | `Checkpoint{reference, checkpoint_type, digest, checkpoint_id, covers_through, session_execution_plan_digest}` (`checkpoint.proto`), a claim-check reference, never inline history | Semantic mismatch: Amazon Q's "checkpoint" duplicates the entire transcript per cut; ours references, never inlines ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3, "four records with separate authority") |
 | Tangent mode: `ConversationCheckpoint` snapshot/restore of `history`/`transcript`/`latest_summary`, persisted inline in `tangent_state` (`conversation.rs:154-167,263-303`) | No equivalent | Gap: see recommendation 3 |
-| Delegate tool: a wholly separate OS process (`tokio::process::Command::new("q")`, `delegate.rs:341-346`), bookkept in one JSON file per agent name under `<cwd>/.amazonq/.subagents/` | `DelegationDispatched`/`ParentLinked`, a first-class linked session on its own stream (ADR#0035 decision 6) | Ours, decisively |
-| No cascade/orphan/reconcile behavior for Delegate on parent delete, rewind, or crash, a dead process is detected only by `kill -0` on a recorded `pid`, opportunistically | `ParentTerminated`/`SessionCancelled`, `ParentHistoryInvalidated`, a reconciler reacting to terminal markers on `session.sessions.events.>` (ADR#0035 decision 6) | Ours, decisively: see Subagent cascade below |
-| No enumeration over `conversations` anywhere in the crate (`Table::Conversations` appears in exactly 3 grep hits, all in `database/mod.rs` itself) | `list_sessions`/`get_session`, a rebuildable KV projection (ADR#0035 decision 8) | Ours, decisively |
-| No delete/TTL/retention policy for conversations; `delete_entry` is never called with `Table::Conversations` anywhere in the crate | `SessionHidden` (visibility tombstone) + `RedactionApplied` (read-time mask) + `ArtifactErased` (out-of-band artifact-byte destruction) (ADR#0035 decision 7) | Ours, decisively |
-| `resume: bool` CLI flag tied to the current directory; no `--session <id>` flag, no picker (`ChatArgs`, `crates/chat-cli/src/cli/chat/mod.rs:227-253`) | Opaque `SessionId` addressing + `list_sessions` projection (ADR#0035 decision 8) | Ours, decisively |
-| Additive `#[serde(default)]`/`skip_serializing_if` JSON payload fields, no version tag, version-pinned back-compat comments (`conversation.rs:133-134`) | Additive-only protobuf evolution, "never a per-event version branch" (ADR#0035 decision 3) | Equivalent strategy, independently arrived at |
-| SQL `MIGRATIONS` ratchet for table *shape*, 8 steps, one requiring a rename-recreate-copy-drop workaround (`database/mod.rs:67-76`, `006_make_state_blob.sql`) | No SQL table shape exists; the protobuf wire schema is the only "shape," ratcheted `v1alpha1` → `v1` by a later decision (ADR#0035 §1) | Trade-off: see below |
-| `ToolUseResult{tool_use_id, content, status}`, opaque to the store, deduped by `tool_use_id` string matching in `enforce_conversation_invariants` (`conversation.rs:1121-1266`) | `ToolCallCompleted`/`ToolCallFailed`, keyed by `tool_execution_id`, first-terminal-outcome-wins fold (ADR#0035 decision 2, decision 4) | Ours, decisively |
-| No application-level optimistic concurrency of any kind; concurrent writers race under ordinary SQLite file locking with (inferred, unverified) `busy_timeout=0` | Per-command `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`), server-enforced by JetStream (ADR#0035 decision 2) | Ours, decisively |
-| No redaction or erasure concept anywhere in the dossier | `RedactionApplied`/`ArtifactErased` (ADR#0035 decision 7) | Ours, decisively |
-| Save's `Result` discarded with `.ok()` (`conversation.rs:421`); a failed persist is silent and the turn is never rolled back | Typed append failures (`WrongExpectedVersion` and friends) that a command boundary must surface, not swallow (ADR#0035 decision 2) | Ours in principle: see recommendation 1 for why this needs to be said explicitly, not just implied |
-| Non-UTF-8 path returns `Ok(None)`/`Ok(0)` silently from the accessor pair (`database/mod.rs:390-393,405-408`) | `SessionId` is an opaque string with its own validation at the append boundary (`validate_session_event`, ADR#0035 facet 3) | Ours, decisively: identity is never a filesystem artifact that can silently fail to encode |
+| Delegate tool: a wholly separate OS process (`tokio::process::Command::new("q")`, `delegate.rs:341-346`), bookkept in one JSON file per agent name under `<cwd>/.amazonq/.subagents/` | `DelegationDispatched`/`ParentLinked`, a first-class linked session on its own stream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours, decisively |
+| No cascade/orphan/reconcile behavior for Delegate on parent delete, rewind, or crash, a dead process is detected only by `kill -0` on a recorded `pid`, opportunistically | `ParentTerminated`/`SessionCancelled`, `ParentHistoryInvalidated`, a reconciler reacting to terminal markers on `session.sessions.events.>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours, decisively: see Subagent cascade below |
+| No enumeration over `conversations` anywhere in the crate (`Table::Conversations` appears in exactly 3 grep hits, all in `database/mod.rs` itself) | `list_sessions`/`get_session`, a rebuildable KV projection ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively |
+| No delete/TTL/retention policy for conversations; `delete_entry` is never called with `Table::Conversations` anywhere in the crate | `SessionHidden` (visibility tombstone) + `RedactionApplied` (read-time mask) + `ArtifactErased` (out-of-band artifact-byte destruction) ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, decisively |
+| `resume: bool` CLI flag tied to the current directory; no `--session <id>` flag, no picker (`ChatArgs`, `crates/chat-cli/src/cli/chat/mod.rs:227-253`) | Opaque `SessionId` addressing + `list_sessions` projection ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively |
+| Additive `#[serde(default)]`/`skip_serializing_if` JSON payload fields, no version tag, version-pinned back-compat comments (`conversation.rs:133-134`) | Additive-only protobuf evolution, "never a per-event version branch" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Equivalent strategy, independently arrived at |
+| SQL `MIGRATIONS` ratchet for table *shape*, 8 steps, one requiring a rename-recreate-copy-drop workaround (`database/mod.rs:67-76`, `006_make_state_blob.sql`) | No SQL table shape exists; the protobuf wire schema is the only "shape," ratcheted `v1alpha1` → `v1` by a later decision ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) §1) | Trade-off: see below |
+| `ToolUseResult{tool_use_id, content, status}`, opaque to the store, deduped by `tool_use_id` string matching in `enforce_conversation_invariants` (`conversation.rs:1121-1266`) | `ToolCallCompleted`/`ToolCallFailed`, keyed by `tool_execution_id`, first-terminal-outcome-wins fold ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2, decision 4) | Ours, decisively |
+| No application-level optimistic concurrency of any kind; concurrent writers race under ordinary SQLite file locking with (inferred, unverified) `busy_timeout=0` | Per-command `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`), server-enforced by JetStream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively |
+| No redaction or erasure concept anywhere in the dossier | `RedactionApplied`/`ArtifactErased` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, decisively |
+| Save's `Result` discarded with `.ok()` (`conversation.rs:421`); a failed persist is silent and the turn is never rolled back | Typed append failures (`WrongExpectedVersion` and friends) that a command boundary must surface, not swallow ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours in principle: see recommendation 1 for why this needs to be said explicitly, not just implied |
+| Non-UTF-8 path returns `Ok(None)`/`Ok(0)` silently from the accessor pair (`database/mod.rs:390-393,405-408`) | `SessionId` is an opaque string with its own validation at the append boundary (`validate_session_event`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3) | Ours, decisively: identity is never a filesystem artifact that can silently fail to encode |
 
 ## What we should consider changing
 
-### 1. State explicitly, as an ADR#0035 obligation, that a command boundary must never discard an append failure
+### 1. State explicitly, as an [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) obligation, that a command boundary must never discard an append failure
 
-**The change.** ADR#0035 facet 2 defines a typed `WrongExpectedVersion` on
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2 defines a typed `WrongExpectedVersion` on
 guard conflict and treats `append_stream` as the one write path, but nowhere
 does the ADR say, in so many words, that a command handler's caller must
 propagate that result as command failure rather than logging-and-continuing.
@@ -127,7 +127,7 @@ and the user is never told persistence failed; the next process start simply
 resumes from whatever was last actually written, silently dropping every turn
 after the last successful save.
 
-**Blast radius.** Additive: a clarifying obligation in ADR#0035 facet 2 or
+**Blast radius.** Additive: a clarifying obligation in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2 or
 the Consequences section, not a schema change.
 
 **Why.** This is not a store-shape problem, it is a discipline problem the
@@ -152,7 +152,7 @@ written the `.ok()`-shaped code this is meant to forbid.
 plan's working directory is immutable for the life of the session... changing
 it requires a new session or a fork," but this lives only as a proto-file
 comment, not as a decision the ADR's Non-Goals section names, unlike, for
-example, mid-session model switching, which ADR#0035's Non-Goals explicitly
+example, mid-session model switching, which [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s Non-Goals explicitly
 defers.
 
 **Evidence anchor.** Amazon Q, store maturity 8/12: because the store's key
@@ -195,7 +195,7 @@ having weighed it against fork/new-session first).
 serialized into the durable blob, and `exit_tangent_mode`/
 `exit_tangent_mode_with_tail` (`:278-303`) restore it, is a real, shipped
 answer to "let me explore a side-question and come back," distinct from both
-our `SessionForked` (a new, independent session identity, ADR#0035 decision
+our `SessionForked` (a new, independent session identity, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision
 5) and `SessionRewound` (an ordinal boundary that invalidates nothing until a
 new attempt starts, decision 2). Nothing in our 41-arm catalog names "this
 stretch of the stream was an aside, resume the prior context after it."
@@ -205,7 +205,7 @@ stretch of the stream was an aside, resume the prior context after it."
 
 **Blast radius.** Additive if scoped to new event types (for example
 `TangentEntered`/`TangentExited`, correlated by `turn_id`) that the
-model-visible-context projection (ADR#0035 decision 8) folds around; no
+model-visible-context projection ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) folds around; no
 existing event shape changes.
 
 **Why this is worth naming, and what to solve that Amazon Q did not.** The
@@ -231,7 +231,7 @@ obviously is.
 
 - **Opaque identity instead of a location-derived key.** `SessionId` is
   never the working directory, the workspace, or any other environmental
-  value (ADR#0035 decision 1). Amazon Q's literal-path key collapses
+  value ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1). Amazon Q's literal-path key collapses
   *location* and *conversation identity* into one, which is the direct cause
   of its parent/delegate collision risk (see Subagent cascade below) and of
   its silent relocate-and-lose-history behavior (see recommendation 2).
@@ -243,7 +243,7 @@ obviously is.
   (the dossier's [Rewind, checkpoints, and fork](./index.md#rewind-checkpoints-and-fork) section), the opposite of our `Checkpoint`, which is a
   reference plus a digest (`checkpoint.proto`), never inline history.
 - **Real, server-enforced optimistic concurrency on invariant-bearing
-  transitions.** `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`, ADR#0035
+  transitions.** `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
   decision 2) is enforced by JetStream. Amazon Q has **no application-level
   concurrency control of any kind** for conversation writes: "no
   application-level optimistic-concurrency check... gated only by SQLite's
@@ -252,27 +252,27 @@ obviously is.
   ([Cline comparison](../cline/vs-session-events.md), item 1).
 - **Subagents are first-class sessions, not a side file.** `DelegationDispatched`/
   `ParentLinked` make a delegated child a real, linked stream with its own
-  lifecycle (ADR#0035 decision 6). Amazon Q's Delegate tool is a wholly
+  lifecycle ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6). Amazon Q's Delegate tool is a wholly
   separate OS process whose bookkeeping (`AgentExecution`) lives in one
   plain-JSON file per agent name, entirely outside `data.sqlite3`, with zero
   connection to the parent's conversation store beyond an accidentally
   shared working-directory key.
 - **Redaction and erasure are named, typed facts.** `RedactionApplied`/
-  `ArtifactErased` (ADR#0035 decision 7) have no analogue anywhere in the
+  `ArtifactErased` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) have no analogue anywhere in the
   Amazon Q dossier; there is no privacy or masking concept of any kind.
 - **Listing is a real, rebuildable capability.** `list_sessions`/
-  `get_session` (ADR#0035 decision 8) exist because we chose to build them.
+  `get_session` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) exist because we chose to build them.
   Amazon Q shows, concretely, how little a shipping product can get away
   with instead: zero enumeration surface, substituting "the directory you
   are standing in" for a picker entirely.
 - **Turn identity is a stamped fact, not positional inference.** `turn_id`
-  (ADR#0035 decision 3) is carried on every conversational and tool event.
+  ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) is carried on every conversational and tool event.
   Amazon Q's ordering is "purely positional (`VecDeque` index)"
   (the dossier's [Entry/message structure and versioning](./index.md#entrymessage-structure-and-versioning) section), with round-trip identity recovered only by
   `tool_use_id` string matching inside `enforce_conversation_invariants`.
 - **Typed tool-outcome resolution instead of destructive history replace.**
   `ToolCallCompleted` vs. `ToolCallFailed` under first-terminal-outcome-wins
-  (ADR#0035 decision 4) never touches prior events. Amazon Q's
+  ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 4) never touches prior events. Amazon Q's
   `CheckpointManager::restore` does `self.history =
   checkpoint.history_snapshot.clone()`, "a full, destructive replace of the
   live history, not an append or a marker" (the dossier's [Rewind, checkpoints, and fork](./index.md#rewind-checkpoints-and-fork) section), for the one
@@ -286,7 +286,7 @@ no projection, no ordinal scheme. The cost is that every size-bounding
 operation is unrecoverable by construction; there is no way, even in
 principle, to "keep forever" inside this design without changing it into
 something else. Our append-only model pays in fold complexity and per-fact
-write volume (mitigated by the `Any`-precondition commuting-fact path, ADR#0035
+write volume (mitigated by the `Any`-precondition commuting-fact path, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
 decision 2) to buy the opposite: nothing is ever destructively unrecoverable.
 Neither is free; Amazon Q chose to spend its budget on simplicity, we chose
 to spend ours on recoverability.
@@ -305,7 +305,7 @@ payload evolution are two independent mechanisms for two independent
 concerns (table shape vs. document shape) that happen to converge on "be
 additive wherever possible." We have only one mechanism: protobuf wire
 evolution, additive within `v1alpha1` and a deliberate breaking ratchet to
-`v1` later (ADR#0035 §1), because we have no SQL table shape to separately
+`v1` later ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) §1), because we have no SQL table shape to separately
 version at all. This is not a gap on either side, just a consequence of one
 store having two physical substrates (SQLite table plus JSON blob) and the
 other having one (the event log itself).
@@ -323,7 +323,7 @@ other having one (the event log itself).
   `messages_to_exclude: 0` both mutate the one durable row in place; "the
   dropped turns are gone from `data.sqlite3` as well as from the model-visible
   window, not just from the model-visible window" (the dossier's [Compaction and history management](./index.md#compaction-and-history-management) section). This
-  is exactly the truncation strategy ADR#0035's own Alternatives section
+  is exactly the truncation strategy [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s own Alternatives section
   already rejects ("Truncating the session log (purge-only, or
   archive-then-purge)... is a logical deletion... forecloses audit and
   rewind past the truncation point"); Amazon Q is that rejected alternative,
@@ -348,7 +348,7 @@ other having one (the event log itself).
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a child session is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a child session is its own
 logical stream, linked by facts on each side (`DelegationDispatched`/
 `ParentLinked`), acyclic by construction, with terminal cascade driven by a
 reconciler reacting to Session-level terminal markers, transitively, in
@@ -396,7 +396,7 @@ begin with. Decision 6 discovers children "through the parent-to-children
 lineage projection folded from `DelegationDispatched`" and links them by
 `ParentLinked`/`operation_id`; none of that machinery has anything to say
 about a parent and child that share *the same storage key*, because
-ADR#0035 decision 1 (each session, each subagent, and each fork is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1 (each session, each subagent, and each fork is its own
 logical stream, its own subject, addressed by an opaque `SessionId`) rules
 that scenario out by construction before decision 6 ever runs. Amazon Q's
 same-directory collision is what happens when a system mints a real identity
@@ -411,7 +411,7 @@ existed as a feature.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 snapshot-bounded replay so resume cost is O(tail) even as the log grows
@@ -435,7 +435,7 @@ is not a state this design can be in.
 **Does this validate, challenge, or refine decision 7?** It validates
 decision 7's Alternatives-section rejection of truncation-as-retention,
 concretely, in a shipped vendor product, rather than only in the abstract.
-ADR#0035 already rejects "any design that removes an event from the log...
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) already rejects "any design that removes an event from the log...
 [because it] forecloses audit and rewind past the truncation point"; Amazon
 Q is exactly that rejected alternative, not a hypothetical: past the 10,000-
 entry boundary or a `/compact` call, a dropped turn is gone from
@@ -460,7 +460,7 @@ weakest of its four maturity axes.
 
 ## Open questions for the ADR
 
-1. Should ADR#0035 state explicitly, as a facet 2 obligation or a
+1. Should [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) state explicitly, as a facet 2 obligation or a
    Consequences note, that a command boundary must never discard an append
    failure, following recommendation 1 above, and Amazon Q's `.ok()`
    anti-pattern as the concrete cost of leaving it unsaid?

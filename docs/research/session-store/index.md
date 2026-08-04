@@ -15,7 +15,7 @@ evidence rules behind every artifact remain reproducible.
 - [Stage one](./RESEARCH_PROMPT.md) produces a standalone dossier describing
   how a product persists, resumes, lists, and retires sessions.
 - [Stage two](./RESEARCH_PROMPT_COMPARISON.md) consumes that dossier and
-  produces a comparison against our event catalog and ADR#0035, weighting
+  produces a comparison against our event catalog and [ADR#0035](../../adr/0035-session-store-decider-aggregate.md), weighting
   each product's evidence by how proven its store is rather than how popular
   the product is.
 

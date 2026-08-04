@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Cline](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 10/12** -- evolution scars 2/3 (a real generational cut-over,
 classic per-task flat files to the SDK's row-plus-document store, with
@@ -44,7 +44,7 @@ difference of commit granularity the way fx's one-event-per-turn model is
 (fx still appends, just coarsely); Cline's store has no granularity concept
 at all, because "persist" always means "replace the whole document."
 
-ADR#0035 makes append-only mutation the only primitive session state ever
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) makes append-only mutation the only primitive session state ever
 undergoes (decision 2: "rewind, revert, compaction, and hide are all new
 appended events, never edits or deletes to old ones"), and ties every write to
 a server-enforced `WRITE_PRECONDITION` (`NoStream` / `At(current_position)` /
@@ -66,31 +66,31 @@ all consequences of a store built around "rewrite the document," not
 
 | Cline | Ours | Verdict |
 | --- | --- | --- |
-| `SessionRow.session_id` (SQLite `sessions` table / `sessions.index.json`; `taskId == sessionId`) | Opaque `SessionId`; one logical stream per session on subject `session.sessions.events.<session_id>` (ADR#0035 decision 1) | Equivalent identity concept |
-| `SessionRow.status` + `status_lock` (28-column row, client-issued CAS, `session-service.ts:194-208`) | Lifecycle folded from `SessionStarted`/`SessionClosed`/`SessionCancelled`/`SessionFailed`/`SessionHidden`, guarded by JetStream `At(current_position)` (`Nats-Expected-Last-Subject-Sequence`, ADR#0035 decision 2) | Ours, decisively -- no denormalized status-plus-version column that can drift from the log; the guard is enforced by the broker, not a client-issued `UPDATE ... WHERE` |
-| `SessionRow.parentSessionId` / `parentAgentId` / `agentId` / `isSubagent` (`sdk/packages/core/src/session/models/session-row.ts:6-34`) | `DelegationDispatched{child_session_id, operation_id}` (`proto/trogonai/session/sessions/v1alpha1/delegation_dispatched.proto`) on the parent's stream, `ParentLinked{parent_session_id, operation_id, parent_dispatched_at}` (`parent_linked.proto`) on the child's | Ours -- one fact recorded once on each side (ADR#0035 decision 6) vs. four plain columns on a mutable row that can be edited independently of any event |
+| `SessionRow.session_id` (SQLite `sessions` table / `sessions.index.json`; `taskId == sessionId`) | Opaque `SessionId`; one logical stream per session on subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Equivalent identity concept |
+| `SessionRow.status` + `status_lock` (28-column row, client-issued CAS, `session-service.ts:194-208`) | Lifecycle folded from `SessionStarted`/`SessionClosed`/`SessionCancelled`/`SessionFailed`/`SessionHidden`, guarded by JetStream `At(current_position)` (`Nats-Expected-Last-Subject-Sequence`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively -- no denormalized status-plus-version column that can drift from the log; the guard is enforced by the broker, not a client-issued `UPDATE ... WHERE` |
+| `SessionRow.parentSessionId` / `parentAgentId` / `agentId` / `isSubagent` (`sdk/packages/core/src/session/models/session-row.ts:6-34`) | `DelegationDispatched{child_session_id, operation_id}` (`proto/trogonai/session/sessions/v1alpha1/delegation_dispatched.proto`) on the parent's stream, `ParentLinked{parent_session_id, operation_id, parent_dispatched_at}` (`parent_linked.proto`) on the child's | Ours -- one fact recorded once on each side ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) vs. four plain columns on a mutable row that can be edited independently of any event |
 | `SessionRow.cwd` / `workspace_root` | `SessionStarted.workspace`, a required `WorkspaceRef{workspace_id, uri, revision}` (`session_started.proto`, `workspace.proto`) | Ours, decisively -- see below |
-| Deterministic subagent id `makeSubSessionId(rootSessionId, agentId)`; re-spawning a named subagent reuses its row (`session-graph.ts:9-17`, `TeamChildSessionManager.upsertSubagentSession`, `team-child-session-manager.ts:132-160`) | No deterministic child-id scheme in the catalog; `DispatchDelegation` always mints a fresh `child_session_id` (ADR#0035 decision 6) | Deliberate divergence -- see recommendation 2 |
+| Deterministic subagent id `makeSubSessionId(rootSessionId, agentId)`; re-spawning a named subagent reuses its row (`session-graph.ts:9-17`, `TeamChildSessionManager.upsertSubagentSession`, `team-child-session-manager.ts:132-160`) | No deterministic child-id scheme in the catalog; `DispatchDelegation` always mints a fresh `child_session_id` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Deliberate divergence -- see recommendation 2 |
 | `SessionCompactionStateSchema` sidecar: `{source_message_count, source_prefix_hash, source_last_message_key, messages[]}` (`session-compaction.ts:25-34`) | `Compacted{covers_from, covers_through, summary_content, tokens_before, tokens_after}`, a single in-stream marker (`compacted.proto`) | Ours, decisively -- no second file whose hash can silently drift from the transcript it summarizes; see below |
 | `CheckpointEntry{ref, createdAt, runCount, kind}` / `CheckpointMetadata{latest, history}` stored in manifest metadata; `ref` is a private git ref `refs/cline/checkpoints/{sessionId}/{runCount}` (`sdk/packages/core/src/types/sessions.ts:33-44`) | `Checkpoint{reference, checkpoint_type, digest, checkpoint_id, producing_execution_attempt_id, covers_through, session_execution_plan_digest}` inside `CheckpointProduced` / `ExecutionAttemptStarted.restored_checkpoint` (`checkpoint.proto`, `checkpoint_produced.proto`) | Semantic mismatch, not a plain equivalence -- see below |
-| `runCount`, an integer keying checkpoint refs, surviving compaction (`getUserRunSpan`) | `turn_id`, stamped (not inferred) on `UserMessageRecorded`, all three `AssistantMessage*` events, and `ToolCallRequested/Started/Completed/Failed` (ADR#0035 decision 3) | Ours -- same underlying concept (a turn survives compaction and re-identifies related facts), generalized past checkpoint-keying to every conversational and tool event |
+| `runCount`, an integer keying checkpoint refs, surviving compaction (`getUserRunSpan`) | `turn_id`, stamped (not inferred) on `UserMessageRecorded`, all three `AssistantMessage*` events, and `ToolCallRequested/Started/Completed/Failed` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Ours -- same underlying concept (a turn survives compaction and re-identifies related facts), generalized past checkpoint-keying to every conversational and tool event |
 | `MessageWithMetadata{role, content, modelInfo{id,provider,family?}, metrics{inputTokens,outputTokens,cacheReadTokens,cacheWriteTokens,cost?}, ts}` (`sdk/packages/shared/src/llms/messages.ts:131-156`) | `CanonicalMessage{message_id, role, content, model, usage, created_at}` (`message.proto`) | Equivalent |
-| `ContentBlock` union: `TextContent, FileContent, ImageContent, ToolUseContent, ToolResultContent, ThinkingContent, RedactedThinkingContent` | `ContentBlock` oneof: `text, artifact_ref, ThinkingBlock, ToolUseBlock, ToolResultBlock, bytes redacted_thinking, ProviderBlock` (`message.proto`) | Equivalent; ours additionally keeps an unmodelled-provider-block escape hatch (`ProviderBlock`, ADR#0035 decision 3) Cline has no analogue for |
+| `ContentBlock` union: `TextContent, FileContent, ImageContent, ToolUseContent, ToolResultContent, ThinkingContent, RedactedThinkingContent` | `ContentBlock` oneof: `text, artifact_ref, ThinkingBlock, ToolUseBlock, ToolResultBlock, bytes redacted_thinking, ProviderBlock` (`message.proto`) | Equivalent; ours additionally keeps an unmodelled-provider-block escape hatch (`ProviderBlock`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) Cline has no analogue for |
 | `metrics{inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cost}` with no finality marker | `TokenUsage{input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost, completeness}` where `completeness` is `UsageCompleteness{FINAL, PARTIAL}` (`token_usage.proto`) | Ours, decisively -- Cline has no field distinguishing a mid-stream token reading from a final one; this is the same gap fx's stage-two comparison flagged (its item 6) and it now recurs independently in a second, unrelated product, which is corroborating evidence the distinction is worth having |
 | Legacy `FileContextTracker.addFileToFileContextTracker()` appends to `metadata.files_in_context` on every file-read/edit/mention with no cap, rewriting all of `task_metadata.json` each time (`FileContextTracker.ts`) | `ResourceObservation` on `ToolCallCompleted.observed` (`repeated ResourceObservation`, `tool_call_completed.proto`, `resource_observation.proto`) | Ours, decisively -- the same information (what did this call put in context) is attached to the completing call itself rather than accreted forever in a separately-rewritten unbounded array; see the retention gap below for the one place this pattern can still bite us |
 | `SessionRow.transcript_path` / `messages_path` / `hook_path` | No equivalent -- storage location is an implementation detail of a store adapter, not a domain fact | Ours, by design (nothing to record) |
 | Spawn queue: `enqueueSpawnRequest`/`claimSpawnRequest` against `subagent_spawn_queue` (SQL) or `subagent-spawn-queue.json`, at-least-once, `consumed_at` marks completion | `OperationReserved{operation_id, request_digest, operation_kind}` / `OperationOutcomeRecorded{oneof succeeded, failed, cancelled, unknown}` (`operation_reserved.proto`, `operation_outcome_recorded.proto`), `OPERATION_KIND_CHILD_SESSION_DELEGATION` | Ours -- a typed outcome oneof including a non-terminal `unknown` state, vs. Cline's binary consumed/unconsumed marker with no modelled failure outcome |
-| `reconcileDeadSessions()` / `isPidAlive()`, run as a side effect of `listSessions()`, transitions dead-PID rows to `status: "failed"` with `metadata{terminal_marker, terminal_marker_source: "stale_session_reconciler"}` (`persistence-service.ts:424-508`) | `SessionFailed{reason, detail}` (`session_failed.proto`), triggered per ADR#0035 decision 6 by "a liveness watchdog that concludes no further attempt will run" | Ours, mostly -- same concept (dead-process detection becomes a terminal fact), but Cline's version is opportunistic (runs only when something happens to list sessions); see recommendation 3 |
-| `applyStatusToRunningChildSessions(sessionId, "cancelled")`: a direct, synchronous status push into the children's rows on parent terminal transition (`persistence-service.ts:205-211`) | A reconciler process manager reacting to `session.sessions.events.>`, appending an atomic `[ParentTerminated, SessionCancelled]` batch per child (ADR#0035 decision 6) | Trade-off, not a plain win -- see the subagent cascade gap below |
-| Official docs describe checkpoints as a "shadow Git repository" (`docs/core-workflows/checkpoints.mdx`); the source implements private refs inside the user's own repo instead | ADR#0035 decision 3 explicitly keeps "harness recovery checkpoint," "aggregate snapshot," and "read-side checkpoint" as four records with separate authority precisely to avoid this kind of concept collapse | Not a store feature to compare -- a methodology point: our naming discipline exists to prevent exactly the doc/code drift Cline shipped |
+| `reconcileDeadSessions()` / `isPidAlive()`, run as a side effect of `listSessions()`, transitions dead-PID rows to `status: "failed"` with `metadata{terminal_marker, terminal_marker_source: "stale_session_reconciler"}` (`persistence-service.ts:424-508`) | `SessionFailed{reason, detail}` (`session_failed.proto`), triggered per [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 by "a liveness watchdog that concludes no further attempt will run" | Ours, mostly -- same concept (dead-process detection becomes a terminal fact), but Cline's version is opportunistic (runs only when something happens to list sessions); see recommendation 3 |
+| `applyStatusToRunningChildSessions(sessionId, "cancelled")`: a direct, synchronous status push into the children's rows on parent terminal transition (`persistence-service.ts:205-211`) | A reconciler process manager reacting to `session.sessions.events.>`, appending an atomic `[ParentTerminated, SessionCancelled]` batch per child ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Trade-off, not a plain win -- see the subagent cascade gap below |
+| Official docs describe checkpoints as a "shadow Git repository" (`docs/core-workflows/checkpoints.mdx`); the source implements private refs inside the user's own repo instead | [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3 explicitly keeps "harness recovery checkpoint," "aggregate snapshot," and "read-side checkpoint" as four records with separate authority precisely to avoid this kind of concept collapse | Not a store feature to compare -- a methodology point: our naming discipline exists to prevent exactly the doc/code drift Cline shipped |
 | No redaction or byte-erasure concept found anywhere in the dossier | `RedactionApplied{redacted_event_ids, reason}` (`redaction_applied.proto`), `ArtifactErased{artifact_id, reason}` (`artifact_erased.proto`) | Ours, decisively |
-| No retention/TTL policy found; deletion is manual only (`deleteSession()`) | `SessionHidden{reason}` (`session_hidden.proto`), a visibility tombstone, plus deferred crypto-shredding (ADR#0035 decision 7) | Ours, partially -- neither side deletes bytes, but we at least have a typed tombstone and a masking story; genuine erasure is an open, named gap on both sides |
+| No retention/TTL policy found; deletion is manual only (`deleteSession()`) | `SessionHidden{reason}` (`session_hidden.proto`), a visibility tombstone, plus deferred crypto-shredding ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, partially -- neither side deletes bytes, but we at least have a typed tombstone and a masking story; genuine erasure is an open, named gap on both sides |
 
 ## What we should consider changing
 
 ### 1. Bound fanout in the parent-to-children lineage projection the reconciler dispatches against
 
-**The change.** ADR#0035 decision 6 has the terminal-cascade reconciler
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 has the terminal-cascade reconciler
 discover children through "a parent-to-children lineage projection folded
 from `DelegationDispatched`," with no stated bound on how many children that
 projection returns for one parent, or on what happens once dispatch to all of
@@ -138,7 +138,7 @@ minting a new one (`session-graph.ts:9-17`,
 
 **Evidence anchor.** Cline, store maturity 10/12, same citations above.
 
-**Blast radius.** Breaking the decision -- ADR#0035 decision 6: "Acyclicity is
+**Blast radius.** Breaking the decision -- [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6: "Acyclicity is
 enforced by construction... `DispatchDelegation` always mints a fresh
 `child_session_id`... A cycle would require an edge into a pre-existing
 session, which this makes impossible." Making a child id a deterministic
@@ -161,7 +161,7 @@ or similar), not a schema or identity change.
 
 ### 3. Make the liveness watchdog an explicit standing process, not a side effect of a read path
 
-**The change.** ADR#0035 decision 6 says "a liveness watchdog that concludes
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 says "a liveness watchdog that concludes
 no further attempt will run records a Session-level `SessionFailed`," but
 does not say when or how often that watchdog runs.
 
@@ -171,7 +171,7 @@ being called (`persistence-service.ts:424-508, 510-535`) -- there is no
 independent daemon; a crashed session with no active reader can sit in
 `running` status indefinitely.
 
-**Blast radius.** Additive -- a clarifying note in ADR#0035 (Consequences
+**Blast radius.** Additive -- a clarifying note in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) (Consequences
 already names "new standing services" including reconciler/watchdog
 processes; this makes explicit that the watchdog must be one of them, not an
 incidental side effect of a query).
@@ -190,7 +190,7 @@ that it must not be query-triggered, which costs nothing to write down.
 
 ### 4. State whether the aggregate snapshot's own write needs an atomicity guarantee, and why or why not
 
-**The change.** ADR#0035 decision 8 / facet 3 describes the aggregate
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 / facet 3 describes the aggregate
 snapshot as "an advisory cached fold of that log. Corruption or
 incompatibility falls back to earlier replay" but does not state whether the
 snapshot's own write path needs any atomicity contract (temp-write-then-
@@ -309,7 +309,7 @@ means product-side; a soft warning costs only a metric.
   reconciler cascade.** Cline's `applyStatusToRunningChildSessions` pushes a
   parent's terminal status into every currently-running child row directly,
   in the same code path, no round trip. Ours is deliberately eventually
-  consistent (ADR#0035 decision 6, Consequences: "a deep collaboration chain
+  consistent ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6, Consequences: "a deep collaboration chain
   cascades in O(depth) reconciler round-trips; callers expecting synchronous
   cascade are surprised"). Cline's approach is simpler and faster for a flat,
   shallow graph; ours is correct at unbounded depth and survives a crash
@@ -358,7 +358,7 @@ means product-side; a soft warning costs only a metric.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position here: a child session is its
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position here: a child session is its
 own logical stream, linked by facts on each side
 (`DelegationDispatched`/`ParentLinked`); terminal cascade is driven by a
 reconciler reacting to terminal markers on `session.sessions.events.>`, and
@@ -415,7 +415,7 @@ not a borrowed norm.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position here: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position here: keep-forever, with
 `SessionHidden` as a visibility tombstone (no bytes deleted), `RedactionApplied`
 for read-time masking, `ArtifactErased` for out-of-band artifact-byte
 destruction, and "aggregate snapshots bound replay, not storage" so that
@@ -459,7 +459,7 @@ That said, two costs the ADR does not explicitly bound are worth naming
 rather than assuming away, because they are the parts of our read path that
 still scale with something:
 
-- **Model-visible context compilation.** ADR#0035 decision 8 says the
+- **Model-visible context compilation.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 says the
   model-visible context is "compiled deterministically from the event log,
   bounded by the latest `Compacted` marker." That bound is on how far *back*
   the compilation reads, not on how much content sits between the last

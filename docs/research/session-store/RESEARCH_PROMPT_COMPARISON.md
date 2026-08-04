@@ -37,7 +37,7 @@ Read all of these before writing anything:
 
 ## Break-change latitude
 
-The catalog is `v1alpha1` and ADR#0035 is a draft. **Breaking changes are on
+The catalog is `v1alpha1` and [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) is a draft. **Breaking changes are on
 the table.** A recommendation must not be watered down into an additive
 half-measure merely to preserve wire compatibility.
 
@@ -50,7 +50,7 @@ recommendation must state its blast radius explicitly:
 - **Breaking, expensive** -- changes the meaning of already-persisted events,
   requires a replay/rewrite, or splits or merges an existing event type.
 - **Breaking the decision, not the schema** -- contradicts a numbered decision
-  in ADR#0035. Name the decision by number. These are the most valuable
+  in [ADR#0035](../../adr/0035-session-store-decider-aggregate.md). Name the decision by number. These are the most valuable
   findings and the most expensive to act on.
 
 Prefer the honest expensive recommendation over the dishonest cheap one.
@@ -113,7 +113,7 @@ Each recommendation is a numbered subsection, ordered most-consequential
 first, and must carry all of:
 
 - **The change**, stated concretely against a named `.proto` file, event
-  type, or ADR#0035 decision number.
+  type, or [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decision number.
 - **The evidence anchor**: the product, its store maturity score, and the
   `path:line` or quote that supports it. No anchor, no recommendation.
 - **Blast radius**, using the four categories above.
@@ -141,7 +141,7 @@ session store everywhere, and that the two things nobody in the corpus has
 closed are **subagent cascade semantics** and **retention on an unbounded
 log**.
 
-These are gaps in *the industry*, not in our design. ADR#0035 decisions 6 and
+These are gaps in *the industry*, not in our design. [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decisions 6 and
 7 already take detailed positions on both, so the job here is to **test those
 decisions against this product's evidence**, not to describe them as missing.
 Name the decision, say whether the evidence validates, refines, or challenges
@@ -160,7 +160,7 @@ both explicitly, even if the answer is "this product has no position on it":
 
 1. Every claim about the product traces to the stage-one dossier or to a
    pinned `path:line`. Every claim about our design traces to a `.proto` file
-   or an ADR#0035 decision number. Assertions with neither do not ship.
+   or an [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decision number. Assertions with neither do not ship.
 2. Record the retrieval date with `date +%F`; never guess it.
 3. Quote our own proto fields exactly. The catalog moves; a paraphrase from
    memory will silently go stale.
@@ -177,7 +177,7 @@ both explicitly, even if the answer is "this product has no position on it":
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [{PRODUCT}](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on YYYY-MM-DD.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) on YYYY-MM-DD.
 
 **Store maturity: N/12** -- evolution scars N/3 ({evidence}), operational age
 N/3 ({evidence}), exposure N/3 ({evidence}), design independence N/3 ({evidence}).

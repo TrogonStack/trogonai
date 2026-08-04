@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [AWS Strands Agents](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 6/12** -- evolution scars 0/3 (no `schema_version` field, no
 migration function, no legacy-format sniffing anywhere in `session/` or
@@ -108,7 +108,7 @@ is presented as an industry norm; each stands on Strands' own evidence alone.
 
 ### 1. Name explicitly why the durable event catalog carries no `schema_version` field, and what happens the day a change cannot be additive
 
-**The change.** ADR#0035 facet 3 states "Schema evolution is additive (new
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3 states "Schema evolution is additive (new
 optional fields, reserved retired numbers), never a per-event version branch"
 (`docs/adr/0035-session-store-decider-aggregate.md:378-379`), but does not say
 what the mechanism is the day an existing event's shape genuinely cannot
@@ -152,7 +152,7 @@ invented on the spot instead of decided in advance.
 
 ### 2. When the deferred erasure-grade-deletion follow-up ADR is written, model it as N atomic per-item facts, never a bulk destroy
 
-**The change.** ADR#0035 facet 7 defers "legal or user-requested erasure
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 7 defers "legal or user-requested erasure
 beyond masking -- per-session encryption and key destruction... to a named
 follow-up ADR"
 (`docs/adr/0035-session-store-decider-aggregate.md:896-900`). This
@@ -192,7 +192,7 @@ resumable, auditable partial-failure state.
 
 ### 3. State explicitly whether cold-tier relocation to the JetStream Object Store needs any write precondition of its own
 
-**The change.** ADR#0035 facet 7 permits, as an optional deployment choice,
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 7 permits, as an optional deployment choice,
 copying "already-immutable old events... to the JetStream Object Store,
 evicted from the hot stream, and restored on demand"
 (`docs/adr/0035-session-store-decider-aggregate.md:915-921`), but does not
@@ -368,7 +368,7 @@ gap in the tiering job's design.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position here: a child session is its
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position here: a child session is its
 own logical stream, linked by facts on each side
 (`DelegationDispatched`/`ParentLinked`), cascade policy is explicit and
 recorded (`CascadePolicy`), rewind-invalidation is distinct from terminal
@@ -437,7 +437,7 @@ Strands' does.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position here: keep-forever,
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position here: keep-forever,
 `SessionHidden` as a visibility tombstone (no bytes deleted),
 `RedactionApplied` for read-time masking, `ArtifactErased` for out-of-band
 artifact-byte destruction, aggregate snapshots that "bound replay, not

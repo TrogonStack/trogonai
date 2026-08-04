@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [OpenHands](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 9/12** -- evolution scars 2/3 (a real back-compat read path,
 `_effective_parent_id`, for pre-tree events, and a widened `EVENT_NAME_RE`
@@ -35,7 +35,7 @@ config, secrets, and tags "have no event representation" at all, and that
 `events/` cannot be reconstructed from `base_state.json`, because it holds
 only the current HEAD, not history.
 
-ADR#0035 rejects this shape twice over: decision 1 makes the event log the
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) rejects this shape twice over: decision 1 makes the event log the
 only place a session's state is committed, and decision 8 states "no read
 model is authoritative" -- every projection, snapshot, or checkpoint is
 disposable and rebuildable by replay. OpenHands' `base_state.json` is not a
@@ -125,7 +125,7 @@ the log itself does not carry -- i.e., contradicting ADR decision 1
 section above, specifically that agent config, secrets, and tags "have no
 event representation" and cannot be rebuilt from `events/` alone.
 
-**Blast radius**: Breaking the decision (ADR#0035 decisions 1 and 8).
+**Blast radius**: Breaking the decision ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decisions 1 and 8).
 
 **Why not**: walking through OpenHands' own four categories shows the split
 buys them very little that a well-designed event log can't already do more
@@ -136,7 +136,7 @@ protected, backed up, and kept in sync with restore/migration tooling. The
 only thing their split earns that ours structurally can't is movable HEAD
 navigation, which is a different trade-off (see below), not a reason to
 duplicate authority. A second authoritative store also reintroduces exactly
-the "which one wins" ambiguity ADR#0035 was written to remove -- the dossier's
+the "which one wins" ambiguity [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) was written to remove -- the dossier's
 own account of `_resolve_active_leaf()` falling back to a best-effort scan
 when the HEAD pointer is unset or stale is a symptom of that ambiguity, not a
 feature of it.

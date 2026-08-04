@@ -171,7 +171,7 @@ A second prompt defect surfaced during the stage-two calibration batch (Cline,
 OpenHands, Zed) and was fixed before the remaining comparisons were
 commissioned. The comparison skeleton titled a section "The two open gaps",
 which reads as though subagent cascade and retention are unresolved in *our*
-design. They are unresolved in the industry; ADR#0035 decisions 6 and 7 take
+design. They are unresolved in the industry; [ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decisions 6 and 7 take
 detailed positions on both. All three calibration documents got the substance
 right and tested the decisions properly, so the defect was latent rather than
 realized, but the heading would have propagated to twelve more documents and

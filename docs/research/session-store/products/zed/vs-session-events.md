@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Zed](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 11/12** -- evolution scars 3/3 (`sqlez::Connection::migrate`
 stores each migration's formatted SQL text and hard-fails on drift,
@@ -58,7 +58,7 @@ error-swallowing `ALTER TABLE`. That asymmetry *is* the evidence, not a
 disqualifying inconsistency -- it is the strongest real-world precedent in
 this corpus for treating a session's envelope/ordering schema and its
 payload schema as two different reliability problems, which is exactly what
-ADR#0035 decision 3 already does (`LEGACY_REQUIRED` presence plus `reserved`
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3 already does (`LEGACY_REQUIRED` presence plus `reserved`
 retired field numbers on the envelope and event registration, versus purely
 additive optional payload fields with no per-event version branch). See
 [recommendation 2](#2-add-an-automated-drift-ratchet-for-the-sessionevent-envelope-and-oneof-registration)
@@ -80,7 +80,7 @@ precondition anywhere in the write path (the dossier's [Write and append path](.
 catalog commits at **fact granularity**: `UserMessageRecorded`,
 `ToolCallRequested`, `ToolCallCompleted`, and 38 further arms are separate
 append-only events, each durable the instant it lands, each classified under
-one of `NoStream`/`At`/`Any` (ADR#0035 facet 2).
+one of `NoStream`/`At`/`Any` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2).
 
 This single fact is the root of every other divergence in this document, not
 a coincidence alongside them:
@@ -94,7 +94,7 @@ a coincidence alongside them:
   never overwrite the document, which is not how this store works. Our
   `SessionRewound.keep_through` (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto:18`)
   is a fact appended *alongside* the untouched history, because history is
-  never overwritten in the first place (ADR#0035 facet 2/6).
+  never overwritten in the first place ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2/6).
 - **Compaction survives only because its marker happens to live inside the
   same document that gets overwritten, not because it is durable by design.**
   `Message::Compaction(CompactionInfo::Summary(...))` is inserted into
@@ -112,7 +112,7 @@ a coincidence alongside them:
   concurrency question -- "did I have the latest version when I overwrote?" --
   and Zed answers it with SQLite's WAL mode plus a 500ms busy-timeout
   (`crates/db/src/db.rs:130-131`), not a compare-and-swap. Our per-command
-  `WRITE_PRECONDITION` classification (`NoStream`/`At`/`Any`, ADR#0035 facet 2)
+  `WRITE_PRECONDITION` classification (`NoStream`/`At`/`Any`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2)
   exists precisely because our unit of write is a single fact that can
   conflict with another single fact, a problem a whole-document store does
   not have in the same shape.
@@ -120,7 +120,7 @@ a coincidence alongside them:
   `ThreadsDatabase::load_thread` (`crates/agent/src/db.rs:607`) is a single-row `SELECT`,
   zstd-decompress, then a full deserialize of the entire message vector in one
   shot (the dossier's [Read and resume path](./index.md#read-and-resume-path)). Our aggregate resumes from the newest
-  snapshot and replays only the tail after it (ADR#0035 facet 8) because the
+  snapshot and replays only the tail after it ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8) because the
   underlying representation is a sequence of facts with a position, not one
   blob.
 
@@ -138,22 +138,22 @@ one once per *any* observable mutation of the whole thread.
 | `ThreadMetadataDb`/`sidebar_threads` (title, timestamps, project paths, remote scoping, archival flag) | Fold of `SessionStarted`/`SessionRenamed`/`SessionArchived`/`SessionUnarchived`/`SessionHidden` into `SessionProjection` (ADR facet 8) | Ours (a rebuildable projection, not a separately-maintained row that can drift from the log) |
 | `ThreadsDatabase`/`threads` (one full JSON+zstd blob per thread) | The `SessionEvent` stream itself, fact-per-event | Ours, decisively (see structural difference above) |
 | `ThreadId` (newtype `uuid::Uuid`) + `ThreadMetadata.session_id: Option<acp::SessionId>` + in-memory reverse index `threads_by_session` | `SessionId`, opaque, minted atomically at `CreateSession`'s `NoStream` batch; no pre-session identity exists | Semantic mismatch -- see below |
-| `acp::SessionId` as storage key for `ThreadsDatabase` | `SessionId`, mapped to subject `session.sessions.events.<session_id>` by a `StreamSubjectResolver` (ADR#0035 facet 1) | Semantic mismatch -- see below |
+| `acp::SessionId` as storage key for `ThreadsDatabase` | `SessionId`, mapped to subject `session.sessions.events.<session_id>` by a `StreamSubjectResolver` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 1) | Semantic mismatch -- see below |
 | `DbThread.messages: Vec<Arc<DbMessage>>` with `Message::{User,Agent,Resume,Compaction}` | `UserMessageRecorded`, `AssistantMessage{Started,Completed,Failed}`, `ToolCall{Requested,Started,Completed,Failed}` as separate append-only facts | Ours (fact granularity) |
-| `Message::Compaction(CompactionInfo::Summary)`, retained in-vector, request view derived by `latest_compaction_message_ix_before` scan | `Compacted{summary_content, covers_from, covers_through: SessionOrdinal, trigger, usage}` | Equivalent design; validates ADR#0035 decision 4 |
+| `Message::Compaction(CompactionInfo::Summary)`, retained in-vector, request view derived by `latest_compaction_message_ix_before` scan | `Compacted{summary_content, covers_from, covers_through: SessionOrdinal, trigger, usage}` | Equivalent design; validates [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 4 |
 | `Thread::truncate` → `self.messages.drain(position..)`, destructive | `SessionRewound{keep_through: SessionOrdinal}` (inclusive), non-destructive | Ours, decisively |
-| `SubagentContext{parent_thread_id, depth: u8}`, `MAX_SUBAGENT_DEPTH = 1`, sibling row, hidden by `parent_session_id.is_some()` filter | `ParentLinked{parent_session_id, parent_dispatched_at: SessionOrdinal, cascade_policy, operation_id}` + `DelegationDispatched` on the parent, list-time projection filter (ADR#0035 facet 6) | Ours, decisively for crash-safety and audit; trade-off on depth bound -- see [recommendation 3](#3-do-not-add-a-max_subagent_depth-analog-to-the-proto-schema) |
-| `ThreadsDatabase::delete_thread`, stack-based transitive walk over `parent_id`, one mutex, no explicit `BEGIN`/`COMMIT` found | `[ParentTerminated, SessionCancelled]` atomic per-child batch via reconciler, transitive because `SessionCancelled` is itself a terminal marker (ADR#0035 facet 6) | Ours, decisively -- see [the two gaps the industry has not closed](#the-two-gaps-the-industry-has-not-closed) |
+| `SubagentContext{parent_thread_id, depth: u8}`, `MAX_SUBAGENT_DEPTH = 1`, sibling row, hidden by `parent_session_id.is_some()` filter | `ParentLinked{parent_session_id, parent_dispatched_at: SessionOrdinal, cascade_policy, operation_id}` + `DelegationDispatched` on the parent, list-time projection filter ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6) | Ours, decisively for crash-safety and audit; trade-off on depth bound -- see [recommendation 3](#3-do-not-add-a-max_subagent_depth-analog-to-the-proto-schema) |
+| `ThreadsDatabase::delete_thread`, stack-based transitive walk over `parent_id`, one mutex, no explicit `BEGIN`/`COMMIT` found | `[ParentTerminated, SessionCancelled]` atomic per-child batch via reconciler, transitive because `SessionCancelled` is itself a terminal marker ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6) | Ours, decisively -- see [the two gaps the industry has not closed](#the-two-gaps-the-industry-has-not-closed) |
 | Copy-to-clipboard "fork" (`copy_thread_to_clipboard`/`load_thread_from_clipboard`), `to_db_thread` resets `subagent_context: None`, no lineage field anywhere | `SessionForked{source_session_id, context_prefix_boundary: SessionOrdinal, reason}`, atomic `[SessionStarted, SessionForked]` batch | Ours, decisively |
 | `acp_thread::UserMessage.checkpoint: Option<Checkpoint>` wrapping a `GitStoreCheckpoint` (git commit sha), client-side rendering type only, not persisted to either database | `Checkpoint{reference, checkpoint_type, digest, implementation_version, checkpoint_id, producing_execution_attempt_id, covers_through: SessionOrdinal, session_execution_plan_digest}`, embedded in `CheckpointProduced`/`ExecutionAttemptStarted.restored_checkpoint`, digest-verified and durable | Ours, decisively -- different "checkpoint" concepts, see [Semantic mismatches](#semantic-mismatches) |
 | `sqlez::Domain` migration ratchet on `ThreadMetadataDb` (stored SQL text, hard-fail on drift) | `LEGACY_REQUIRED` field presence + `reserved` retired field numbers on the envelope/event registration (e.g. `execution_attempt_started.proto:29-30`, `reserved 7; reserved resume_cursor;`) | Trade-off, currently a convention on our side, not an enforced ratchet -- see [recommendation 2](#2-add-an-automated-drift-ratchet-for-the-sessionevent-envelope-and-oneof-registration) |
-| `ThreadsDatabase`'s swallowed-error `ALTER TABLE ADD COLUMN`, `#[serde(default)]` fields, `DbThread::VERSION` sniffing plus `upgrade_from_agent_1` legacy bridge | Additive optional fields, no per-event version branch (ADR#0035 facet 3) | Ours is stricter at the boundary (validated, typed, rejected on malformed shape) but has not yet proven it tolerates an *old reader* against a *newer* log the way this axis implicitly tests -- see [recommendation 4](#4-add-forward-compatibility-regression-tests-for-additive-only-replay) |
+| `ThreadsDatabase`'s swallowed-error `ALTER TABLE ADD COLUMN`, `#[serde(default)]` fields, `DbThread::VERSION` sniffing plus `upgrade_from_agent_1` legacy bridge | Additive optional fields, no per-event version branch ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3) | Ours is stricter at the boundary (validated, typed, rejected on malformed shape) but has not yet proven it tolerates an *old reader* against a *newer* log the way this axis implicitly tests -- see [recommendation 4](#4-add-forward-compatibility-regression-tests-for-additive-only-replay) |
 | `PathList`, set-based path identity (`path_list.rs:27-39`), live-only relocation reconciliation (`sidebar.rs:992-1012`, `agent_panel.rs:4113`), admitted no offline-reconciliation path found | `WorkspaceRef{workspace_id, uri, revision}` on `SessionStarted.workspace`; `workspace_id` is "assigned by the platform and independent of location" (`workspace.proto:14`), binding immutable for session life | Ours, decisively -- identity is decoupled from location structurally, not reconciled after the fact; see [Open questions](#open-questions-for-the-adr) for the residual question this still leaves |
 | `RemoteConnectionIdentity`, normalized SSH/WSL/Docker host/user/port matching, scopes which local threads a remote project shows | No equivalent; multi-host/multi-writer correctness is a substrate property (any JetStream replica may append) rather than a client-side scoping filter | Trade-off -- different problems, not comparable; see [Trade-offs](#trade-offs-not-gaps) |
 | `ArchivedGitWorktree{worktree_path, main_repo_path, staged_commit_hash, unstaged_commit_hash, original_commit_hash}` | No equivalent; `SessionArchived`/`SessionUnarchived` are pure reversible listing-visibility facts | Gap, deliberate -- git-worktree space reclamation is a workspace-lifecycle concern, not a session-log concern; see [Open questions](#open-questions-for-the-adr) |
 | Release-channel isolation (`{db_dir}/0-{scope_name}/db.sqlite`), `ZED_STATELESS` in-memory fallback | No equivalent concept | N/A -- a per-deployment/local-install concern, not a per-session one |
 | `channels_with_threads`/`import_threads_from_other_channels`, cross-release-channel self-import | No equivalent | N/A -- Zed's answer to having four separate on-disk copies of its own store, a problem our single-deployment topology does not have |
-| `fuzzy_match_positions` title-only in-memory search over the resident `ThreadMetadata` cache; no FTS/vector index found | "Any full-text or vector search subsystem is a separate, independently bootstrapped projection off the same log, out of scope here" (ADR#0035 facet 8) | Convergent gap -- neither side has built this yet |
+| `fuzzy_match_positions` title-only in-memory search over the resident `ThreadMetadata` cache; no FTS/vector index found | "Any full-text or vector search subsystem is a separate, independently bootstrapped projection off the same log, out of scope here" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8) | Convergent gap -- neither side has built this yet |
 | `DbThread.cumulative_token_usage`, `request_token_usage: HashMap<ClientUserMessageId, TokenUsage>` | `TokenUsage` on `CanonicalMessage.usage` and `Compacted.usage`, folded per read model | Ours -- no denormalized cumulative counter stored in the row to drift from the log |
 | `DbThread.model`, `profile`, `speed`, `thinking_enabled`, `thinking_effort` as mutable per-thread fields, no change event found | `ModelSettings{max_output_tokens, temperature, top_p, thinking_budget_tokens, stop_sequences, raw_settings}` on `AssistantMessageStarted.settings`, per-completion | Ours -- a mid-session settings change is two adjacent facts, not a field overwrite the next document save silently carries |
 | `DbThread.draft_prompt: Option<Vec<acp::ContentBlock>>` (unsent draft text) | No equivalent | Gap, deliberate -- an unsent draft is not a "happened" fact; recording client-local unsent input in the durable log would leak view state into the aggregate |
@@ -181,7 +181,7 @@ corpus already documents `agent-client-protocol-schema` mid-migration to a
 while message content shape is comparatively more stable.
 
 Our `SessionId` is opaque and minted by us, independent of any wire protocol we
-also happen to speak (ADR#0035 facet 1/2: "a `StreamSubjectResolver` maps the
+also happen to speak ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 1/2: "a `StreamSubjectResolver` maps the
 opaque `SessionId` to the subject... `SessionId` is opaque and time-sortable by
 construction... but its sort order is never load-bearing"). What opaque
 identity buys that Zed's ACP-as-primary-key choice gives up: an ACP schema
@@ -211,10 +211,10 @@ type"). Our `Checkpoint`
 recovery checkpoint: a digest-verified, out-of-line artifact reference with its
 own `checkpoint_id`, `producing_execution_attempt_id`, and
 `session_execution_plan_digest`, embedded durably in `CheckpointProduced` and
-`ExecutionAttemptStarted.restored_checkpoint` (ADR#0035 facet 3). These are not
+`ExecutionAttemptStarted.restored_checkpoint` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3). These are not
 approximately the same thing wearing different names -- Zed's checkpoint
 restores workspace files for a UI undo action and vanishes on restart; ours
-restores harness process state and is the one artifact ADR#0035's "Four
+restores harness process state and is the one artifact [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s "Four
 records with separate authority" section goes out of its way to distinguish
 from the event log, the aggregate snapshot, and a read-side checkpoint. A
 reader who assumes "Zed has checkpoints too" implies durability would be
@@ -229,9 +229,9 @@ Ordered by how consequential it is to get wrong, not by implementation cost.
 
 **The change (rejected):** do not add a metadata row, a "pending session," or
 any identity that can exist before `SessionStarted` is appended. Keep
-`SessionId` as the sole key from creation, per ADR#0035 decision 2 ("opaque
+`SessionId` as the sole key from creation, per [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2 ("opaque
 addressing key") and the `CreateSession` command's `NoStream` precondition
-(command matrix, ADR#0035 §"Command-by-command matrix": `CreateSession` reads
+(command matrix, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) §"Command-by-command matrix": `CreateSession` reads
 no state and requires the stream not exist).
 
 **Evidence anchor:** Zed (store maturity 11/12).
@@ -273,7 +273,7 @@ event-file `reserved` range, or envelope field (`Event.id`, timestamps,
 correlation/causation headers) changes incompatibly -- mirroring `sqlez`'s
 approach of storing each migration's exact text and diffing it on every boot,
 but applied to our proto registration rather than SQL. This is additive
-tooling around ADR#0035 decision 3's existing rule ("Schema evolution is
+tooling around [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3's existing rule ("Schema evolution is
 additive... never a per-event version branch") and the `reserved` numbers
 already present, e.g. `proto/trogonai/session/sessions/v1alpha1/execution_attempt_started.proto:29-30`
 (`reserved 7; reserved resume_cursor;`).
@@ -311,7 +311,7 @@ storage-boundary validator.
 ### 3. Do not add a `MAX_SUBAGENT_DEPTH` analog to the proto schema
 
 **The change (rejected):** do not add a depth counter or a hard nesting limit
-to `DelegationDispatched`, `ParentLinked`, or `CascadePolicy`. ADR#0035
+to `DelegationDispatched`, `ParentLinked`, or `CascadePolicy`. [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
 decision 6 already gives acyclicity by construction (a fresh
 `child_session_id` every dispatch, `NoStream` rejects re-parenting an
 existing stream) without needing to bound depth to get it.
@@ -322,7 +322,7 @@ existing stream) without needing to bound depth to get it.
 further spawn.
 
 **Blast radius:** additive, if ever pursued -- but the recommendation is to
-pursue this only as a command-authorization policy check (draft ADR#0026's
+pursue this only as a command-authorization policy check (draft [ADR#0026](../../../../adr/0026-command-authorization-principal.md)'s
 `CommandPrincipal`/`CommandAuthorizer`), never as a proto field, so there is no
 schema blast radius at all for the rejected option.
 
@@ -348,7 +348,7 @@ assumed away.
 (one built against an earlier accepted set of optional fields) correctly
 ignores unknown/newer optional fields on replay rather than failing closed,
 for every event type under `validate_session_event` and the Session-owned
-replay boundary (ADR#0035 facet 3).
+replay boundary ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3).
 
 **Evidence anchor:** Zed (store maturity 11/12, this specific finding drawn
 from its own unresolved Open Question, so it is thin evidence for the
@@ -390,7 +390,7 @@ modulo the missing explicit `BEGIN`/`COMMIT` (see
 perspective. Our reconciler cascades via a `[ParentTerminated, SessionCancelled]`
 atomic batch **per child**, discovered through a parent-to-children lineage
 projection, taking "D sequential reconciler round-trips" for a chain of depth
-D (ADR#0035 facet 6 Consequences). Zed buys immediacy and a single lock scope
+D ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6 Consequences). Zed buys immediacy and a single lock scope
 at the cost of a single-process, single-database assumption that cannot
 survive a cross-stream write (which does not exist on JetStream, and which
 our own Alternatives Considered rejects for exactly that reason). We buy
@@ -437,7 +437,7 @@ our side and permanently destructive on theirs.
 `SessionForked{source_session_id, context_prefix_boundary, reason}`
 (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:17`) is the
 second event in an atomic `[SessionStarted, SessionForked]` batch under
-`NoStream` (ADR#0035 facet 5). Zed's only fork-like feature is
+`NoStream` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 5). Zed's only fork-like feature is
 `copy_thread_to_clipboard`/`load_thread_from_clipboard`
 (`crates/agent_ui/src/agent_panel.rs:3717,3777`), whose `to_db_thread`
 conversion explicitly resets `subagent_context: None` and every other
@@ -451,7 +451,7 @@ checkpoint does not survive a restart.** Our `Checkpoint`
 (`proto/trogonai/session/sessions/v1alpha1/checkpoint.proto:17`) is embedded in
 `CheckpointProduced`/`ExecutionAttemptStarted.restored_checkpoint`, carries its
 own `checkpoint_id`, `covers_through`, and `session_execution_plan_digest`, and
-is admitted only after full digest/plan/attempt verification (ADR#0035 facet
+is admitted only after full digest/plan/attempt verification ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet
 3). Zed's `acp_thread::UserMessage.checkpoint: Option<Checkpoint>`
 (`crates/acp_thread/src/acp_thread.rs:294-307`) wraps a git commit sha and lives
 only on an ephemeral client-rendering type never persisted to either database
@@ -464,7 +464,7 @@ admitted inconsistency window.** `DelegationDetached`/`ParentDetached`
 (`proto/trogonai/session/sessions/v1alpha1/delegation_detached.proto`,
 `parent_detached.proto`) are joined by one durable `detach_operation_id`, each
 its own invariant-bearing local fact, with idempotent reconciler repair on
-either side (ADR#0035 facet 6). Zed's `ThreadMetadataStore::delete` and
+either side ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6). Zed's `ThreadMetadataStore::delete` and
 `ThreadsDatabase::delete_thread` are "two separate delete calls against two
 separate databases -- we found no single transactional operation spanning both
 `db.sqlite` and `threads.db`, so a crash between the two delete calls could
@@ -534,7 +534,7 @@ recommend porting it (see the identity-decoupling point above -- our
   independent calls against two independent SQLite files with no
   cross-database transaction (the dossier's [Retention, deletion, and multi-host](./index.md#retention-deletion-and-multi-host)). If we ever have a
   legitimate reason to split a session's data across two independently-owned
-  stores, the answer is ADR#0035 facet 6's two-fact saga pattern
+  stores, the answer is [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6's two-fact saga pattern
   (`DelegationDetached`/`ParentDetached` joined by `detach_operation_id`), not
   an unguarded double-delete with an admitted inconsistency window.
 - **Clipboard-copy "fork" with identity reset and zero lineage.**
@@ -548,7 +548,7 @@ recommend porting it (see the identity-decoupling point above -- our
 
 ### Subagent cascade
 
-Our position is already decided: ADR#0035 decision 6 -- parent-first dispatch
+Our position is already decided: [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 -- parent-first dispatch
 with crash-safe repair, acyclicity by construction, rewind invalidation kept
 distinct from terminal cascade, transitive cascade via a reconciler process
 manager, and a two-fact detach saga joined by `detach_operation_id`. Zed's
@@ -616,7 +616,7 @@ decision 6.
 
 ### Retention on an unbounded log
 
-Our position is already decided: ADR#0035 decision 7 -- keep-forever,
+Our position is already decided: [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 -- keep-forever,
 `SessionHidden` replacing `SessionDeleted` as an honest visibility tombstone,
 `RedactionApplied` for read-time masking of specific event ids, `ArtifactErased`
 for out-of-band artifact-byte destruction independent of event-log retention,
@@ -656,7 +656,7 @@ decision 7's boundary.
 
 ## Open questions for the ADR
 
-- Should draft ADR#0026's `CommandAuthorizer` carry a configurable
+- Should draft [ADR#0026](../../../../adr/0026-command-authorization-principal.md)'s `CommandAuthorizer` carry a configurable
   maximum-delegation-depth policy check, layered above decision 6's
   acyclicity-by-construction, given Zed's `MAX_SUBAGENT_DEPTH = 1` is real
   shipped evidence that *some* products want a hard bound even though decision
@@ -678,7 +678,7 @@ decision 7's boundary.
 - Does decision 7's `ArtifactErased` or the optional cold-tiering job ever need
   to reach into workspace-adjacent storage reclamation -- the problem Zed's
   `ArchivedGitWorktree` solves at the workspace layer -- or is that
-  unambiguously a different aggregate's concern, out of ADR#0035's scope
+  unambiguously a different aggregate's concern, out of [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s scope
   entirely?
 
 ## Things this document could not verify

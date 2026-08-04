@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Void](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 1/12**: evolution scars 0/3 (the storage key was renamed
 twice, `void.chatThreadStorage` → `...StorageI` → `...StorageII`
@@ -46,7 +46,7 @@ called at `:942`, `:1289`, `:1646`, `:1659`, `:1675`, `:1696`). There is no appe
 schema-version field: versioning is done by renaming the key itself
 (`src/vs/workbench/contrib/void/common/storageKeys.ts:14-19`).
 
-ADR#0035 decision 2 makes append the only mutation primitive: "rewind,
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2 makes append the only mutation primitive: "rewind,
 revert, compaction, and hide are all new appended events, never edits or
 deletes to old ones." Void sits at the pole this decision was written to
 avoid: not "append-only with looser discipline" like the JSONL products in
@@ -65,7 +65,7 @@ full `entireFileCode` snapshot inline in the transcript itself
 `src/vs/workbench/contrib/void/common/editCodeServiceTypes.ts:115-118`): it is an undo point living in the same mutable blob as the
 conversation. Our `Checkpoint` (`proto/trogonai/session/sessions/v1alpha1/checkpoint.proto:17-38`)
 is an opaque, out-of-line, digest-verified artifact reference used only for
-harness process-state recovery, one of four records ADR#0035 decision 3
+harness process-state recovery, one of four records [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3
 deliberately keeps separate authority for ("harness recovery checkpoint,"
 "aggregate snapshot," "read-side checkpoint," and the typed event log
 itself). A reader mapping the two terms naively would assume equivalence;
@@ -73,29 +73,29 @@ they solve different problems and share almost nothing but the English word.
 
 | Void | Ours | Verdict |
 | --- | --- | --- |
-| Single `ChatThreads` map under one `StorageScope.APPLICATION` key, all threads for the installation (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:415-423`) | One logical stream per session, subject `session.sessions.events.<session_id>` (ADR#0035 decision 1) | Ours, decisively: no shared blob whose size is every thread ever created |
-| Thread id: client-generated `generateUuid()`, plain UUID, no ordering semantics (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:211`) | Opaque `SessionId`, time-sortable by construction but sort order never load-bearing (ADR#0035 decision 1) | Equivalent identity concept, addressed differently |
+| Single `ChatThreads` map under one `StorageScope.APPLICATION` key, all threads for the installation (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:415-423`) | One logical stream per session, subject `session.sessions.events.<session_id>` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Ours, decisively: no shared blob whose size is every thread ever created |
+| Thread id: client-generated `generateUuid()`, plain UUID, no ordering semantics (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:211`) | Opaque `SessionId`, time-sortable by construction but sort order never load-bearing ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Equivalent identity concept, addressed differently |
 | `createdAt`/`lastModified` ISO strings on `ThreadType`, sidebar sorts on `lastModified` (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:114-144`, `src/vs/workbench/contrib/void/browser/react/src/sidebar-tsx/SidebarThreadSelector.tsx:37-38`) | No mutable "last modified" field; order is fold-derived `SessionOrdinal` (`proto/trogonai/session/sessions/v1alpha1/session_ordinal.proto`) | Ours, since there is nothing to keep in sync with the log it summarizes |
-| `_storeAllThreads()`: full rewrite of the whole map on every mutation (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:415-423`) | Append is the only mutation primitive (ADR#0035 decision 2) | Ours, decisively |
-| No positional dedup key, no expected-version precondition, "last `_setState` call simply wins" (see the dossier's [Write and append path (ordering, durability, concurrency, delivery)](./index.md#write-and-append-path-ordering-durability-concurrency-delivery) section) | Per-command `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`), server-enforced (ADR#0035 decision 2) | Ours, decisively |
+| `_storeAllThreads()`: full rewrite of the whole map on every mutation (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:415-423`) | Append is the only mutation primitive ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively |
+| No positional dedup key, no expected-version precondition, "last `_setState` call simply wins" (see the dossier's [Write and append path (ordering, durability, concurrency, delivery)](./index.md#write-and-append-path-ordering-durability-concurrency-delivery) section) | Per-command `WRITE_PRECONDITION` (`NoStream`/`At`/`Any`), server-enforced ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively |
 | `ToolMessage<T>` mutates a `type` field in place through a lifecycle (`invalid_params → tool_request → running_now → tool_error/success/rejected`), one object overwritten (`src/vs/workbench/contrib/void/common/chatThreadServiceTypes.ts:11-28`) | Separate immutable facts: `ToolCallRequested`/`Started`/`Completed`/`Failed` (`proto/trogonai/session/sessions/v1alpha1/tool_call_requested.proto`, `tool_call_completed.proto`) | Ours, decisively: no single mutable record whose history is only its current value |
 | `CheckpointEntry.entireFileCode`: full file content inlined per touched file, no dedup (`src/vs/workbench/contrib/void/common/chatThreadServiceTypes.ts:38-46`, `src/vs/workbench/contrib/void/common/editCodeServiceTypes.ts:115-118`) | `FileChanged.before_ref`/`after_ref`, content-addressed `ArtifactRef` claim-checks (`proto/trogonai/session/sessions/v1alpha1/file_changed.proto:30-36`, `artifact.proto:14-34`) | Ours, decisively |
 | `duplicateThread(threadId)`: deep clone, fresh id, no lineage field on either copy (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:1663-1677`) | `SessionForked{source_session_id, context_prefix_boundary}` (`proto/trogonai/session/sessions/v1alpha1/session_forked.proto:17-27`) | Ours, decisively: typed, durable lineage vs. two independent records with no link back |
-| Rewind: `jumpToCheckpointBeforeMessageIdx` moves a pointer only; the *next* user message calls `thread.messages.slice(0, checkpointIdx + 1)` and persists the truncated array (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:1080`, `:1272-1290`) | `SessionRewound{keep_through}`, a pure marker (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto:16-22`); nothing is ever sliced or deleted (ADR#0035 decision 2) | Ours, decisively: this is the calibration point below |
-| Versioning: rename `THREAD_STORAGE_KEY`, no migration code, old data under the old key becomes inaccessible (`src/vs/workbench/contrib/void/common/storageKeys.ts:14-19`; see the dossier's [Entry/message structure and versioning](./index.md#entrymessage-structure-and-versioning) section for the migration-code absence) | Schema evolution is additive only: new optional fields, reserved retired numbers, never a per-event version branch (ADR#0035 decision 3) | Ours, decisively: this is the other calibration point below |
+| Rewind: `jumpToCheckpointBeforeMessageIdx` moves a pointer only; the *next* user message calls `thread.messages.slice(0, checkpointIdx + 1)` and persists the truncated array (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:1080`, `:1272-1290`) | `SessionRewound{keep_through}`, a pure marker (`proto/trogonai/session/sessions/v1alpha1/session_rewound.proto:16-22`); nothing is ever sliced or deleted ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively: this is the calibration point below |
+| Versioning: rename `THREAD_STORAGE_KEY`, no migration code, old data under the old key becomes inaccessible (`src/vs/workbench/contrib/void/common/storageKeys.ts:14-19`; see the dossier's [Entry/message structure and versioning](./index.md#entrymessage-structure-and-versioning) section for the migration-code absence) | Schema evolution is additive only: new optional fields, reserved retired numbers, never a per-event version branch ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3) | Ours, decisively: this is the other calibration point below |
 | `currentThreadId` explicitly not persisted; no "resume where you left off" (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:308`, `:1628-1648`) | No equivalent: which session a client last had open is a client/UI concern, not a store fact | Neither, out of scope for both, noted for completeness |
 | Listing is global across every workspace ever opened, `StorageScope.APPLICATION` (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:406`, `:420`, `src/vs/platform/storage/common/storage.ts:225-228`) | `SessionStarted.workspace`, a required `WorkspaceRef` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto:19-23`, `workspace.proto`) | Trade-off, not a plain gap: see below |
-| No subagent/child-session concept anywhere; tool calls are ordinary entries in the same thread (see the dossier's [Subagents and nested sessions](./index.md#subagents-and-nested-sessions) section) | `DelegationDispatched`/`ParentLinked`/`CascadePolicy` (ADR#0035 decision 6) | Ours; see "Subagent cascade" below, this is not evidence either way, it is absence |
-| No retention, no TTL, no growth bound; every thread and message accumulates forever, re-serialized whole on every mutation (see the dossier's [Retention, deletion, and multi-host](./index.md#retention-deletion-and-multi-host) section) | Keep-forever log with snapshot-bounded replay, `SessionHidden`/`RedactionApplied`/`ArtifactErased` (ADR#0035 decision 7) | Ours; see "Retention" below |
+| No subagent/child-session concept anywhere; tool calls are ordinary entries in the same thread (see the dossier's [Subagents and nested sessions](./index.md#subagents-and-nested-sessions) section) | `DelegationDispatched`/`ParentLinked`/`CascadePolicy` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours; see "Subagent cascade" below, this is not evidence either way, it is absence |
+| No retention, no TTL, no growth bound; every thread and message accumulates forever, re-serialized whole on every mutation (see the dossier's [Retention, deletion, and multi-host](./index.md#retention-deletion-and-multi-host) section) | Keep-forever log with snapshot-bounded replay, `SessionHidden`/`RedactionApplied`/`ArtifactErased` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours; see "Retention" below |
 
 ## What we should consider changing
 
 Given the store maturity score, this section is short by design. Void
 supports one clarification, not a schema change.
 
-### 1. State explicitly, in ADR#0035 facet 2, that "non-destructive rewind" is a property of the write path following it, not of the rewind event alone
+### 1. State explicitly, in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2, that "non-destructive rewind" is a property of the write path following it, not of the rewind event alone
 
-**The change.** Add one sentence to ADR#0035 decision 2's `SessionRewound`
+**The change.** Add one sentence to [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's `SessionRewound`
 discussion (or to `proto/trogonai/session/sessions/v1alpha1/session_rewound.proto`'s
 comment) naming the exact failure this store is designed to avoid: a rewind
 marker by itself guarantees nothing if a *later* command is allowed to
@@ -146,7 +146,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   `ChatThreads` map and rewrites the entire thing
   (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:415-423`). Our append
   is O(1) in total session size regardless of how large the log has grown
-  (ADR#0035 decision 2); a session's history is never re-read and
+  ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2); a session's history is never re-read and
   re-written in full to record one more fact.
 - **Content-addressed artifacts vs. inlined full-file checkpoints.** Void's
   `CheckpointEntry` embeds `entireFileCode`, the whole file, per touched
@@ -165,7 +165,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   compare-and-swap of any kind; concurrent writers simply overwrite each
   other (see the dossier's [Write and append path (ordering, durability, concurrency, delivery)](./index.md#write-and-append-path-ordering-durability-concurrency-delivery) section). Our
   guarded commands use a server-enforced `WRITE_PRECONDITION`
-  (ADR#0035 decision 2).
+  ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2).
 - **Workspace binding as a recorded fact vs. no binding at all.** Void's
   threads carry no path/cwd component and are listed globally regardless of
   which folder is open (`src/vs/workbench/contrib/void/browser/chatThreadService.ts:406`, `:420`,
@@ -182,7 +182,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   a deliberate product choice, "see every chat you've ever had, regardless
   of which repo you have open," not an oversight; the dossier does not
   establish intent either way. Our design requires every session to carry a
-  `WorkspaceRef` (ADR#0035 decision 1), which buys workspace-scoped audit and
+  `WorkspaceRef` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1), which buys workspace-scoped audit and
   a queryable binding at the cost of making "all my chats across every
   project" a cross-workspace query rather than one map iteration. Neither
   side is wrong; they are answering different questions about what a
@@ -191,7 +191,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   Void's "last `_setState` call simply wins" concurrency model
   (see the dossier's [Write and append path (ordering, durability, concurrency, delivery)](./index.md#write-and-append-path-ordering-durability-concurrency-delivery) section) is
   adequate and cheap for a single-user, single-process desktop editor. Our
-  server-enforced OCC (ADR#0035 decision 2) exists to survive multi-writer
+  server-enforced OCC ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) exists to survive multi-writer
   and multi-host correctness (decision 8's forced answer), which Void's
   problem domain never has to solve.
 
@@ -234,7 +234,7 @@ does better (below) or as a pattern to explicitly reject (also below).
   every prior thread. Void demonstrates the two ends of the same axis in one
   corpus: fail loud and refuse to proceed (Zed), or rename the key and quietly
   orphan the old data (Void). Our own schema evolution is additive-only in
-  `v1alpha1` (ADR#0035 decision 3), which sidesteps the choice entirely for
+  `v1alpha1` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3), which sidesteps the choice entirely for
   now; it does not yet say what happens the day an additive change is not
   enough (see Open questions).
 
@@ -242,7 +242,7 @@ does better (below) or as a pattern to explicitly reject (also below).
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position here: a child session is its
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position here: a child session is its
 own logical stream, linked by `DelegationDispatched`/`ParentLinked`, with an
 explicit `CascadePolicy` (`CASCADE_ON_PARENT_TERMINAL` or `INDEPENDENT`) and
 a reconciler that cascades terminal state and rewind-invalidation as
@@ -265,7 +265,7 @@ moves decision 6 in any direction.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 "aggregate snapshots bound replay, not storage" so an append stays O(1)
@@ -301,7 +301,7 @@ blob size, no issue report documenting it was found in this pass.
 
 ## Open questions for the ADR
 
-- ADR#0035 decision 3 makes `v1alpha1` schema evolution additive-only
+- [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3 makes `v1alpha1` schema evolution additive-only
   (new optional fields, reserved retired numbers, never a version branch).
   Void's storage-key-rename pattern is a concrete example of what happens
   when a product needs a genuinely breaking change and has no migration

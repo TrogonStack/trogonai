@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Letta](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 11/12** -- evolution scars 3/3 (167 Alembic migration files with a
 real cutover in progress: `alembic/versions/e991d2e3b428_add_monotonically_increasing_ids_to_.py:1-40`
@@ -58,7 +58,7 @@ two concurrent turns racing to update the same agent's context pointer can
 silently clobber each other's view of "what's in context," even though the
 underlying `messages` rows are never lost.
 
-We have no analogue of this pointer, anywhere. ADR#0035 decision 8 states
+We have no analogue of this pointer, anywhere. [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 states
 that "the model-visible context is compiled deterministically from the event
 log bounded by the latest `Compacted` marker" -- it is a fold, recomputed on
 demand, never a separately-mutated column that a writer can race against or
@@ -70,7 +70,7 @@ dossier's own grep of every file under `letta/orm/` for `version_id_col`,
 which returns only that one hit), we need none, because there is no second
 piece of authoritative state to protect. The fold *is* the pointer, derived
 each time from facts already governed by our own `WRITE_PRECONDITION`
-classification (ADR#0035 decision 2). Letta is unusually strong evidence for
+classification ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2). Letta is unusually strong evidence for
 this design choice specifically because it is a funded, shipped product whose
 own maintainers flagged the risk in a code comment and are mid-migration away
 from it -- not a hypothetical failure mode, a self-documented one.
@@ -99,7 +99,7 @@ mapping (per the Method's warning on semantic mismatches):
   repository becomes authoritative -- `sync_blocks_from_git`'s docstring says
   so directly: "rebuild the PostgreSQL cache from git source of truth"
   (`letta/services/block_manager_git.py:571`). Our `Checkpoint`
-  (`checkpoint.proto`) is never a second source of truth: ADR#0035 decision 3
+  (`checkpoint.proto`) is never a second source of truth: [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3
   is explicit that the typed event log is always authoritative and a harness
   recovery checkpoint is "an opaque artifact used only when the platform
   continues process state from an in-flight harness loop," discarded on
@@ -115,18 +115,18 @@ mapping (per the Method's warning on semantic mismatches):
 | `Conversation.id` (secondary, concurrent-messaging scope within one agent, `letta/orm/conversation.py`) | No equivalent -- a Session has exactly one linear turn sequence | Gap, by design: our Non-Goals defer a symmetric multi-party `Conversation` aggregate |
 | `Run.id` (execution-attempt record per processing turn, optional `conversation_id` FK, `letta/orm/run.py:22-57`, docstring at `letta/orm/run.py:23-25`) | `ExecutionAttemptStarted`/`Ready`/`Ended` (`execution_attempt_started.proto`) | Equivalent -- both are "one attempt" units distinct from the parent identity |
 | `Message.id` / `sequence_id` (`BigInteger`, unique, monotonic order key, `letta/orm/message.py`) | `CanonicalMessage.message_id` (`message.proto`); order is `SessionOrdinal`, fold-derived, never a stored counter (`session_ordinal.proto`) | Trade-off -- see below |
-| `Agent.message_ids` JSON array / `ConversationMessage.in_context` (mutable, unguarded pointer) | No equivalent; model-visible context folds from the newest `Compacted` marker (ADR#0035 decision 8) | Ours, decisively -- the structural difference above |
-| `otid` ("offline threading ID," a schema field on the message payload itself, `letta/schemas/message.py`, the documented dedup key for retried sends) | The command idempotency key (ADR#0035 decision 2), which "lives on the command, not the event" (decision 3) | Ours, decisively -- Letta conflates dedup identity with domain data; we deliberately never let a domain payload carry its own dedup key |
-| `Block.version_id_col` (optimistic concurrency, the *only* model with it, `letta/orm/block.py:61`) | `WRITE_PRECONDITION` classified per fact (`NoStream`/`At`/`Any`, ADR#0035 decision 2), applied to every invariant-bearing transition, not just one entity | Ours, decisively -- see "What not to copy" |
-| `BlockHistory` (always-on undo/redo snapshot table, full-value copy per change, cascade-deleted with its `Block`, `letta/orm/block_history.py:12-49`) | No equivalent entity to snapshot; the event log itself is the undo/redo trail, kept forever (ADR#0035 decision 7) | Ours -- no second table can drift from the log it is supposed to mirror, because there is nothing but the log |
+| `Agent.message_ids` JSON array / `ConversationMessage.in_context` (mutable, unguarded pointer) | No equivalent; model-visible context folds from the newest `Compacted` marker ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively -- the structural difference above |
+| `otid` ("offline threading ID," a schema field on the message payload itself, `letta/schemas/message.py`, the documented dedup key for retried sends) | The command idempotency key ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), which "lives on the command, not the event" (decision 3) | Ours, decisively -- Letta conflates dedup identity with domain data; we deliberately never let a domain payload carry its own dedup key |
+| `Block.version_id_col` (optimistic concurrency, the *only* model with it, `letta/orm/block.py:61`) | `WRITE_PRECONDITION` classified per fact (`NoStream`/`At`/`Any`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), applied to every invariant-bearing transition, not just one entity | Ours, decisively -- see "What not to copy" |
+| `BlockHistory` (always-on undo/redo snapshot table, full-value copy per change, cascade-deleted with its `Block`, `letta/orm/block_history.py:12-49`) | No equivalent entity to snapshot; the event log itself is the undo/redo trail, kept forever ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours -- no second table can drift from the log it is supposed to mirror, because there is nothing but the log |
 | Git-backed memory-block checkpoints, opt-in, Postgres becomes a cache (`letta/services/block_manager_git.py`, `letta/services/memory_repo/git_operations.py`) | `Checkpoint`/`CheckpointProduced` (`checkpoint.proto`, `checkpoint_produced.proto`), always disposable, log always authoritative (decision 3) | Semantic mismatch -- see above |
-| `ConversationManager.fork_conversation`: genuine shared-prefix fork, links the *same* `Message` rows into a new `Conversation` via new junction rows, not a copy (`letta/services/conversation_manager.py:105-174`) | `SessionForked{source_session_id, context_prefix_boundary}` (`session_forked.proto`); inherited by reference through a context projection keyed by `(source_session_id, context_prefix_boundary)`, never a physical copy (ADR#0035 decision 5) | Ours, validated independently -- two unrelated designs converged on "fork is a reference, not a copy" |
+| `ConversationManager.fork_conversation`: genuine shared-prefix fork, links the *same* `Message` rows into a new `Conversation` via new junction rows, not a copy (`letta/services/conversation_manager.py:105-174`) | `SessionForked{source_session_id, context_prefix_boundary}` (`session_forked.proto`); inherited by reference through a context projection keyed by `(source_session_id, context_prefix_boundary)`, never a physical copy ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 5) | Ours, validated independently -- two unrelated designs converged on "fork is a reference, not a copy" |
 | `delete_conversation`'s reference-counted soft-delete: only removes a `Message` row if no other live conversation still references it via an explicit `NOT IN` subquery against `conversation_messages` (`letta/services/conversation_manager.py:582-597`) | No equivalent bookkeeping needed -- a fork never takes ownership of a source event, it only references it, so there is no reference count to maintain when a fork is retired | Ours, decisively -- the reference-counting problem does not arise because facet 5 never lets an event be co-owned in the first place |
-| `Group`/`groups_agents`, `Group.manager_agent_id` FK `ondelete="RESTRICT"` (`letta/orm/group.py:1-43,24`); sleeptime agents are sibling `Agent` rows, not entries nested in a parent transcript | `DelegationDispatched`/`ParentLinked` (`delegation_dispatched.proto`, `parent_linked.proto`); a child session is its own logical stream (ADR#0035 decision 6) | Similar shape (sibling stream, not nested), different lifecycle -- see "Subagent cascade" below |
+| `Group`/`groups_agents`, `Group.manager_agent_id` FK `ondelete="RESTRICT"` (`letta/orm/group.py:1-43,24`); sleeptime agents are sibling `Agent` rows, not entries nested in a parent transcript | `DelegationDispatched`/`ParentLinked` (`delegation_dispatched.proto`, `parent_linked.proto`); a child session is its own logical stream ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Similar shape (sibling stream, not nested), different lifecycle -- see "Subagent cascade" below |
 | `archives_agents` junction, `ondelete="CASCADE"` on both directions but only removes the *attachment* row (`letta/orm/archives_agents.py:23-24`); no code path calls the archive's own hard delete from agent deletion | `ArtifactErased` (`artifact_erased.proto`) is a deliberate, separately-invoked event; nothing is ever *implicitly* orphaned because artifacts are never implicitly multi-owned the way an archive can be | Ours, decisively -- see "What not to copy" |
-| No scheduled retention/TTL job found (`letta/jobs/scheduler.py` grepped for `TTL`/`expire`/`retention`/`cleanup`, only an unrelated log line at `scheduler.py:228`) | `SessionHidden` (visibility tombstone), `RedactionApplied` (read-time mask), `ArtifactErased` (byte destruction) -- an explicit three-tier privacy contract (ADR#0035 decision 7) | Ours, decisively -- Letta has no policy at all, ours has a stated one even though both keep bytes |
-| Turbopuffer vector index: fire-and-forget background embedding, no backfill/reindex code path found anywhere (`letta/helpers/tpuf_client.py`, `letta/services/archive_manager.py`, `letta/services/message_manager.py` all grepped) | No full-text/vector-search subsystem defined yet; ADR#0035 decision 8 explicitly scopes any future one as "a separate, independently bootstrapped projection off the same log, out of scope here" | Open risk on our side too -- see recommendation 3 |
-| `list_messages`, cursor-paginated on `sequence_id` with `after`/`before` semantics, not offset (`letta/services/message_manager.py:1001-1024`) | `list_sessions`/`get_session` over a fold-derived KV projection, checkpointed by `last_applied_stream_position` (ADR#0035 decision 8) | Equivalent design principle: resume/list cost tracks a cursor, not table size |
+| No scheduled retention/TTL job found (`letta/jobs/scheduler.py` grepped for `TTL`/`expire`/`retention`/`cleanup`, only an unrelated log line at `scheduler.py:228`) | `SessionHidden` (visibility tombstone), `RedactionApplied` (read-time mask), `ArtifactErased` (byte destruction) -- an explicit three-tier privacy contract ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Ours, decisively -- Letta has no policy at all, ours has a stated one even though both keep bytes |
+| Turbopuffer vector index: fire-and-forget background embedding, no backfill/reindex code path found anywhere (`letta/helpers/tpuf_client.py`, `letta/services/archive_manager.py`, `letta/services/message_manager.py` all grepped) | No full-text/vector-search subsystem defined yet; [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 explicitly scopes any future one as "a separate, independently bootstrapped projection off the same log, out of scope here" | Open risk on our side too -- see recommendation 3 |
+| `list_messages`, cursor-paginated on `sequence_id` with `after`/`before` semantics, not offset (`letta/services/message_manager.py:1001-1024`) | `list_sessions`/`get_session` over a fold-derived KV projection, checkpointed by `last_applied_stream_position` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Equivalent design principle: resume/list cost tracks a cursor, not table size |
 
 ## What we should consider changing
 
@@ -135,7 +135,7 @@ implementation cost.
 
 ### 1. Decide explicitly whether a persistent, cross-Session "agent identity" belongs in the ADR chain, or whether fork is meant to be the only continuity mechanism
 
-**The change.** Add an explicit answer -- in ADR#0031 or ADR#0035 -- to
+**The change.** Add an explicit answer -- in [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md) or [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) -- to
 whether our platform needs a stable identity that spans many bounded
 Sessions the way Letta's `Agent.id` spans arbitrarily many `Conversation`s
 and `Run`s, or whether "fork a new Session from the last one"
@@ -161,8 +161,8 @@ it. It would not change `session_id`, `SessionForked.source_session_id`, or
 the fork-by-reference mechanism itself.
 
 **Why it is a good idea, or why it is not.** This is recorded as an open
-question, not a firm recommendation, because ADR#0031 already scopes a
-Session to "one execution of a pinned agent revision" and ADR#0035's
+question, not a firm recommendation, because [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md) already scopes a
+Session to "one execution of a pinned agent revision" and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s
 Non-Goals explicitly defer "mid-session model or runner switching" -- which
 reads as a deliberate choice that a *revision change* forces a new Session
 identity, with continuity expressed only through forking. That may already
@@ -180,7 +180,7 @@ Letta's example alone.
 
 ### 2. State explicitly, as a standing rule, that no future field on the model-visible-context projection may become an authoritative, unguarded, last-write-wins pointer
 
-**The change.** Add a sentence to ADR#0035 decision 8 (or a Non-Goal)
+**The change.** Add a sentence to [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 (or a Non-Goal)
 stating that the model-visible-context compilation must remain a pure fold
 of the event log, and that no future optimization (for example, caching
 "the current in-context message set" as a denormalized, directly-writable
@@ -212,7 +212,7 @@ only if a future implementer would otherwise have shipped the pattern.
 
 ### 3. Require a stated backfill/reindex contract before any full-text or vector-search projection ships
 
-**The change.** ADR#0035 decision 8 currently scopes any future full-text or
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 currently scopes any future full-text or
 vector-search subsystem as "a separate, independently bootstrapped
 projection off the same log, out of scope here." Before such a projection
 ships, it should carry an explicit answer to "what happens to history that
@@ -263,7 +263,7 @@ per-turn hot pointer, `Agent.message_ids`, has no guard at all
 likely to matter under real concurrent load and left the tier most likely to
 matter completely exposed.
 
-**Blast radius.** Breaking the decision -- ADR#0035 decision 2's
+**Blast radius.** Breaking the decision -- [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's
 `WRITE_PRECONDITION` classification table names exactly which facts need
 `At` because `decide` genuinely branches on the current head for them
 (one active attempt, mutually exclusive approve/deny, one terminal outcome
@@ -291,7 +291,7 @@ guards against is the one a future relaxation would introduce.
 - **No mutable, unguarded pointer stands between the log and the model's
   view.** Letta's `Agent.message_ids` is a self-documented anti-pattern in a
   shipped, funded product; our model-visible context is a pure fold bounded
-  by the newest `Compacted` marker (ADR#0035 decision 8), so there is no
+  by the newest `Compacted` marker ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8), so there is no
   second piece of state that can drift from the log or race against a
   concurrent writer.
 - **Optimistic concurrency is applied by classification, not by accident.**
@@ -303,14 +303,14 @@ guards against is the one a future relaxation would introduce.
   the hard way.
 - **Dedup identity never lives on domain data.** Letta's `otid` is a field
   on the message payload itself (`letta/schemas/message.py`); our
-  idempotency key lives strictly on the command (ADR#0035 decision 2), never
+  idempotency key lives strictly on the command ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), never
   on the event, so a payload never has to carry its own retry-identity
   concern mixed in with its business meaning.
 - **Fork-by-reference was independently validated.** Letta's
   `fork_conversation` links the *same* `Message` rows into a new
   `Conversation` via new junction rows rather than copying them
   (`letta/services/conversation_manager.py:105-174`) -- precisely the
-  reference-not-copy principle ADR#0035 decision 5 chose and defended in
+  reference-not-copy principle [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 5 chose and defended in
   Alternatives against a physical O(history) copy. Two structurally
   unrelated designs converging on the same answer is stronger evidence for
   that choice than either alone.
@@ -326,7 +326,7 @@ guards against is the one a future relaxation would introduce.
   scheduled retention/TTL job and no redaction concept anywhere in the
   dossier -- deletion is either a real cascading hard delete
   (`ondelete="CASCADE"` on `AgentMixin.agent_id`, `letta/orm/mixins.py:40`)
-  or nothing. ADR#0035 decision 7 gives three distinct, named operations --
+  or nothing. [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 gives three distinct, named operations --
   `SessionHidden` (visibility only), `RedactionApplied` (read-time mask),
   `ArtifactErased` (byte destruction) -- none of which is a euphemism for the
   others, and all of which keep the log itself intact.
@@ -349,7 +349,7 @@ guards against is the one a future relaxation would introduce.
   sleeptime participant it owns inside one database transaction
   (`letta/services/agent_manager.py:1379-1394`), rolling back together on
   failure -- genuinely atomic, because everything lives in one Postgres
-  instance. Our terminal cascade (ADR#0035 decision 6) is deliberately
+  instance. Our terminal cascade ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) is deliberately
   eventually consistent, because JetStream offers no atomic write across
   subjects (Alternatives Considered: "Subagent cascade via a cross-stream
   transaction or atomic multi-stream delete... rejected because it is
@@ -361,7 +361,7 @@ guards against is the one a future relaxation would introduce.
   Letta agent really deletes its messages and conversations
   (`ondelete="CASCADE"` on `AgentMixin.agent_id`, `letta/orm/mixins.py:40`);
   there is no intermediate option between "keep everything, unmasked,
-  forever" and "destroy it all." ADR#0035 decision 7 buys a middle ground --
+  forever" and "destroy it all." [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 buys a middle ground --
   masked-but-present, or byte-erased-but-provenance-kept -- at the cost of a
   more complex privacy model with three distinct operations to reason about
   instead of one.
@@ -394,7 +394,7 @@ guards against is the one a future relaxation would introduce.
   primary store also holds, without naming which one wins.** Once
   git-memory is enabled, `Block.value` in Postgres is explicitly a cache
   and git is authoritative (`letta/services/block_manager_git.py:571`).
-  ADR#0035 decision 3's four-records-with-separate-authority discipline
+  [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 3's four-records-with-separate-authority discipline
   exists precisely to prevent this kind of ambiguity from arising in our own
   design; it should stay that way rather than being loosened for a future
   feature that wants a similar external source of truth.
@@ -403,7 +403,7 @@ guards against is the one a future relaxation would introduce.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a child session is its own
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a child session is its own
 logical stream, linked by facts recorded on each side
 (`DelegationDispatched`/`ParentLinked`); terminal cascade is driven by a
 reconciler reacting to Session-level terminal markers, appending a distinct
@@ -470,7 +470,7 @@ that decision 6 already assumed.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with
 `SessionHidden` as a visibility tombstone, `RedactionApplied` for read-time
 masking, `ArtifactErased` for out-of-band artifact-byte destruction, and
 aggregate snapshots that "bound replay, not storage." The question is
@@ -539,7 +539,7 @@ as "it is bounded."
    is fork-from-the-last-Session (`SessionForked.source_session_id`,
    decision 5) intended to be the only continuity mechanism a caller ever
    needs? (Recommendation 1.)
-2. Should ADR#0035 decision 8 state explicitly that no future
+2. Should [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 state explicitly that no future
    model-visible-context optimization may introduce a stored, directly-
    writable "current window" field, given that Letta's own team apparently
    introduced exactly that field with good intentions and no concurrency

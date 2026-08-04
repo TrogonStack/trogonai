@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [OpenAI Agents SDK](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 5/12.** Evolution scars 0/3: no schema-version field was found
 "anywhere in `src/agents/memory/` or `src/agents/run_internal/session_persistence.py`"
@@ -85,11 +85,11 @@ every caller of every backend has to trust separately.
 **A semantic trap worth naming explicitly**, because it is the kind of nominal
 match RESEARCH_PROMPT_COMPARISON.md's method warns is more dangerous than a gap:
 our own design also keeps identity out of the domain payload, "no domain payload
-gains a separate identity field of its own" (ADR#0035 decision 2). Read quickly,
+gains a separate identity field of its own" ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2). Read quickly,
 that sounds like the same idea. It is not. Our runtime derives the envelope
 `Event.id` deterministically, "UUIDv5 over (resolved stream subject, command
 type, command idempotency key, index of the event within the decision's batch)"
-(ADR#0035 decision 2), which is a function of a **caller-supplied idempotency
+([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2), which is a function of a **caller-supplied idempotency
 key**, stable across redelivery, never a function of the payload's content. The
 SDK's fingerprint is a function of the **content itself**, which is exactly why
 it had to grow field-stripping logic (dropping `id`, dropping "internal
@@ -114,27 +114,27 @@ contract, and it is invisible until a shape change breaks it in production.
 
 | OpenAI Agents SDK | Ours | Verdict |
 | --- | --- | --- |
-| `Session.session_id: str`, caller-supplied, no minting scheme (`src/agents/memory/session.py:21`) | Opaque `SessionId`; one logical stream per session on a subject the runtime assigns (ADR#0035 decision 1) | Equivalent identity concept, opposite minting discipline: caller-chosen string vs. runtime-scoped subject |
-| `Session.get_items` / `add_items` / `pop_item` / `clear_session`, four required async methods, no write precondition of any kind (`src/agents/memory/session.py:13-54`) | `decide`/`evolve`/`append_stream`, gated by a three-way `WRITE_PRECONDITION` (`NoStream`/`At(current_position)`/`Any`) per command (ADR#0035 decision 2) | Ours, decisively: every one of the SDK's four verbs is unguarded; ours classifies each command's precondition explicitly |
-| `fingerprint_input_item`/`digest_input_item`: `json.dumps(payload, sort_keys=True, default=str)` plus a SHA-256 of that string, computed by the Runner, not the store (`src/agents/run_internal/items.py:334-391`) | Envelope `Event.id`, "UUIDv5 over (resolved stream subject, command type, command idempotency key, index of the event within the decision's batch)," derived by the runtime from a caller-supplied idempotency key (ADR#0035 decision 2) | Semantic mismatch, not a plain equivalence: both keep identity out of the payload, but one hashes content, the other hashes a caller-asserted key; see structural difference above |
-| No listing/enumeration method anywhere in `Session`/`SessionABC`; "listing, if needed, is entirely up to the chosen backend's native tooling" (dossier, Keying and identity) | `SessionProjection` folded by `Projector::catch_up`, queried by `verb + noun` functions (`get_session`, `list_sessions`) over one rebuildable read model (ADR#0035 decision 8) | Ours, decisively: see the recommendation below |
-| `pop_item()`: `DELETE FROM messages_table WHERE id = (SELECT ... ORDER BY id DESC LIMIT 1) RETURNING message_data` (`src/agents/memory/sqlite_session.py:315-326`), used for rewind | `SessionRewound{session_id, keep_through, reason}`, an appended marker; events `[1..keep_through]` remain valid, nothing is deleted (`session_rewound.proto`, ADR#0035 decision 2 and 6) | Ours, decisively: see "What not to copy" |
-| `run_compaction`: `clear_session()` then `add_items()` with the compacted set, a destructive full replace (`src/agents/memory/openai_responses_compaction_session.py`) | `Compacted{session_id, summary_id, summary_content, covers_from, covers_through, trigger, ...}`, a self-sufficient in-stream marker; covered events stay on the stream (`compacted.proto`, ADR#0035 decision 4) | Ours, decisively: see "What not to copy" |
+| `Session.session_id: str`, caller-supplied, no minting scheme (`src/agents/memory/session.py:21`) | Opaque `SessionId`; one logical stream per session on a subject the runtime assigns ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 1) | Equivalent identity concept, opposite minting discipline: caller-chosen string vs. runtime-scoped subject |
+| `Session.get_items` / `add_items` / `pop_item` / `clear_session`, four required async methods, no write precondition of any kind (`src/agents/memory/session.py:13-54`) | `decide`/`evolve`/`append_stream`, gated by a three-way `WRITE_PRECONDITION` (`NoStream`/`At(current_position)`/`Any`) per command ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively: every one of the SDK's four verbs is unguarded; ours classifies each command's precondition explicitly |
+| `fingerprint_input_item`/`digest_input_item`: `json.dumps(payload, sort_keys=True, default=str)` plus a SHA-256 of that string, computed by the Runner, not the store (`src/agents/run_internal/items.py:334-391`) | Envelope `Event.id`, "UUIDv5 over (resolved stream subject, command type, command idempotency key, index of the event within the decision's batch)," derived by the runtime from a caller-supplied idempotency key ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Semantic mismatch, not a plain equivalence: both keep identity out of the payload, but one hashes content, the other hashes a caller-asserted key; see structural difference above |
+| No listing/enumeration method anywhere in `Session`/`SessionABC`; "listing, if needed, is entirely up to the chosen backend's native tooling" (dossier, Keying and identity) | `SessionProjection` folded by `Projector::catch_up`, queried by `verb + noun` functions (`get_session`, `list_sessions`) over one rebuildable read model ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Ours, decisively: see the recommendation below |
+| `pop_item()`: `DELETE FROM messages_table WHERE id = (SELECT ... ORDER BY id DESC LIMIT 1) RETURNING message_data` (`src/agents/memory/sqlite_session.py:315-326`), used for rewind | `SessionRewound{session_id, keep_through, reason}`, an appended marker; events `[1..keep_through]` remain valid, nothing is deleted (`session_rewound.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2 and 6) | Ours, decisively: see "What not to copy" |
+| `run_compaction`: `clear_session()` then `add_items()` with the compacted set, a destructive full replace (`src/agents/memory/openai_responses_compaction_session.py`) | `Compacted{session_id, summary_id, summary_content, covers_from, covers_through, trigger, ...}`, a self-sufficient in-stream marker; covered events stay on the stream (`compacted.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 4) | Ours, decisively: see "What not to copy" |
 | `RunState.to_json()`/`from_json()`, an application-managed, out-of-band serialized run-state object for human-in-the-loop resume, round-tripped through the caller's own storage, never through `Session` (`src/agents/run_state.py`, dossier) | `Checkpoint{reference, checkpoint_type, digest, checkpoint_id, producing_execution_attempt_id, covers_through, session_execution_plan_digest}` inside `CheckpointProduced`, restored via `ExecutionAttemptStarted.restored_checkpoint`, digest-verified and joined by `checkpoint_id` (`checkpoint.proto`, `checkpoint_produced.proto`) | Semantic mismatch: both are called "resuming a paused run," but `RunState` is caller-owned bytes with no store relationship at all, while ours is a self-describing, store-recorded, digest-verified reference the aggregate itself validates before restore |
-| `AdvancedSQLiteSession` branching: `create_branch_from_turn`, a shared-row-by-reference fork where `message_structure` indirects into shared `agent_messages` rows (`src/agents/extensions/memory/advanced_sqlite_session.py`, 808-1283 range) | `SessionForked{session_id, source_session_id, context_prefix_boundary, reason}`, an atomic `[SessionStarted, SessionForked]` batch; inheritance is by reference through the context projection, never a fold of source events into child state (`session_forked.proto`, ADR#0035 decision 5) | Ours, decisively: only one of nine backends has any fork concept at all, and it is scoped to one database, not a first-class session-store operation |
-| Two subagent mechanisms, opposite durability: Handoffs share the *same* session/stream; Agents-as-tools (`Agent.as_tool`) spawns a nested `Runner.run(session: Session \| None = None)`, defaulting to no durable session at all (`src/agents/agent.py:575-597,941-953`) | `DelegationDispatched{child_session_id, operation_id, cascade_policy}` on the parent, `ParentLinked{parent_session_id, parent_dispatched_at, cascade_policy, operation_id}` on the child, always a persisted sibling stream (`delegation_dispatched.proto`, `parent_linked.proto`, ADR#0035 decision 6) | Deliberate divergence, tested against decision 6 below |
-| Experimental Codex-CLI subprocess wrapper: tracks Codex's opaque `thread_id` string as an ordinary tool-output item, "the only thing that crosses from Codex's world into the Agents SDK's session," no shared format (`src/agents/extensions/experimental/codex/`, dossier) | `ExternalDelegationDispatched{operation_id, delegate_reference, authenticated_remote_subject, authorization_reference, request_digest, correlation_id}` on the dispatching session's own stream (`external_delegation_dispatched.proto`, ADR#0035 decision 6) | Ours, decisively: the SDK's own cautionary example is an unaudited opaque string; ours records exactly the evidence ADR#0031 requires for the same kind of cross-store delegation |
+| `AdvancedSQLiteSession` branching: `create_branch_from_turn`, a shared-row-by-reference fork where `message_structure` indirects into shared `agent_messages` rows (`src/agents/extensions/memory/advanced_sqlite_session.py`, 808-1283 range) | `SessionForked{session_id, source_session_id, context_prefix_boundary, reason}`, an atomic `[SessionStarted, SessionForked]` batch; inheritance is by reference through the context projection, never a fold of source events into child state (`session_forked.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 5) | Ours, decisively: only one of nine backends has any fork concept at all, and it is scoped to one database, not a first-class session-store operation |
+| Two subagent mechanisms, opposite durability: Handoffs share the *same* session/stream; Agents-as-tools (`Agent.as_tool`) spawns a nested `Runner.run(session: Session \| None = None)`, defaulting to no durable session at all (`src/agents/agent.py:575-597,941-953`) | `DelegationDispatched{child_session_id, operation_id, cascade_policy}` on the parent, `ParentLinked{parent_session_id, parent_dispatched_at, cascade_policy, operation_id}` on the child, always a persisted sibling stream (`delegation_dispatched.proto`, `parent_linked.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Deliberate divergence, tested against decision 6 below |
+| Experimental Codex-CLI subprocess wrapper: tracks Codex's opaque `thread_id` string as an ordinary tool-output item, "the only thing that crosses from Codex's world into the Agents SDK's session," no shared format (`src/agents/extensions/experimental/codex/`, dossier) | `ExternalDelegationDispatched{operation_id, delegate_reference, authenticated_remote_subject, authorization_reference, request_digest, correlation_id}` on the dispatching session's own stream (`external_delegation_dispatched.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6) | Ours, decisively: the SDK's own cautionary example is an unaudited opaque string; ours records exactly the evidence [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md) requires for the same kind of cross-store delegation |
 | `TResponseInputItem = ResponseInputItemParam`, a type alias onto the OpenAI Python SDK's own wire type, no Agents-SDK-level envelope, no schema-version field anywhere (`src/agents/items.py:76`, dossier) | `CanonicalMessage{message_id, role, content, model, usage, created_at}` with a typed `ContentBlock` oneof (`text`, `artifact_ref`, `ThinkingBlock`, `ToolUseBlock`, `ToolResultBlock`, `bytes redacted_thinking`, `ProviderBlock`) (`message.proto`) | Ours, decisively: a normalized, model-agnostic shape with an explicit unmodelled-provider escape hatch (`ProviderBlock`), versus a bare alias onto a third party's wire type with no version field of our own |
-| `SQLiteSession` corrupt-row handling: silently `continue`s past undecodable rows on read, then doubles the read window and retries until `limit` valid items are returned (`src/agents/memory/sqlite_session.py:218-263`) | A decode-failure metric is a stated substrate obligation (ADR#0035 decision 2, Substrate obligations) | Ours, decisively: a malformed event is observable, not silently absorbed by a widened read window |
-| `MongoDBSession` message `seq`, "an atomic sequence counter" attached per document, needed because Mongo has no auto-increment primary key (`docs/sessions/index.md:209,453`) | `SessionOrdinal`, the 1-indexed fold-derived position of an already-appended event, "never read from JetStream message metadata... stable across restore, backfill, migration, and cold-tier relocation" (`session_ordinal.proto`, ADR#0035 decision 2) | Ours, decisively: a fold-derived logical position survives storage relocation; a stored counter value is only as consistent as the increment operation that assigned it |
-| `SessionSettings.limit` / `RunConfig.session_input_callback`, explicitly decoupling what the model sees this turn from what the store holds (`src/agents/memory/session_settings.py`, `src/agents/memory/util.py:8-11`) | Model-visible context "compiled deterministically from the event log bounded by the latest `Compacted` marker," a read-side projection over the full log (ADR#0035 decision 8) | Equivalent in spirit: both treat "what the model reads" as a bounded view derived from an unbounded durable record, computed independently of each other |
-| `DaprSession(ttl=...)`, the one backend with native TTL; `EncryptedSession`'s own `ttl` layered on any backend, expired entries silently skipped on decrypt, not purged (`docs/sessions/index.md:418`, `src/agents/extensions/memory/encrypt_session.py`) | `SessionHidden{reason}` (visibility tombstone, no bytes deleted), `RedactionApplied{redacted_event_ids, reason}` (read-time masking), `ArtifactErased{artifact_id, reason}` (out-of-band byte destruction) (ADR#0035 decision 7) | Trade-off, not a plain win: see the retention gap below, the SDK's `SQLiteSession.clear_session()` also does something ours deliberately does not, real physical deletion |
+| `SQLiteSession` corrupt-row handling: silently `continue`s past undecodable rows on read, then doubles the read window and retries until `limit` valid items are returned (`src/agents/memory/sqlite_session.py:218-263`) | A decode-failure metric is a stated substrate obligation ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2, Substrate obligations) | Ours, decisively: a malformed event is observable, not silently absorbed by a widened read window |
+| `MongoDBSession` message `seq`, "an atomic sequence counter" attached per document, needed because Mongo has no auto-increment primary key (`docs/sessions/index.md:209,453`) | `SessionOrdinal`, the 1-indexed fold-derived position of an already-appended event, "never read from JetStream message metadata... stable across restore, backfill, migration, and cold-tier relocation" (`session_ordinal.proto`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) | Ours, decisively: a fold-derived logical position survives storage relocation; a stored counter value is only as consistent as the increment operation that assigned it |
+| `SessionSettings.limit` / `RunConfig.session_input_callback`, explicitly decoupling what the model sees this turn from what the store holds (`src/agents/memory/session_settings.py`, `src/agents/memory/util.py:8-11`) | Model-visible context "compiled deterministically from the event log bounded by the latest `Compacted` marker," a read-side projection over the full log ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8) | Equivalent in spirit: both treat "what the model reads" as a bounded view derived from an unbounded durable record, computed independently of each other |
+| `DaprSession(ttl=...)`, the one backend with native TTL; `EncryptedSession`'s own `ttl` layered on any backend, expired entries silently skipped on decrypt, not purged (`docs/sessions/index.md:418`, `src/agents/extensions/memory/encrypt_session.py`) | `SessionHidden{reason}` (visibility tombstone, no bytes deleted), `RedactionApplied{redacted_event_ids, reason}` (read-time masking), `ArtifactErased{artifact_id, reason}` (out-of-band byte destruction) ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7) | Trade-off, not a plain win: see the retention gap below, the SDK's `SQLiteSession.clear_session()` also does something ours deliberately does not, real physical deletion |
 
 ## What we should consider changing
 
 ### 1. Name, in the ADR or in `checkpoint_produced.proto`'s comment, exactly which bytes the checkpoint evidence digest covers
 
-**The change.** ADR#0035 decision 2's fold rule for `CheckpointProduced` states
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's fold rule for `CheckpointProduced` states
 "the command idempotency key includes the artifact digest, so conflicting
 evidence remains visible while byte-identical redelivery collapses through the
 event identity contract." Neither `checkpoint.proto` nor the decision text pins
@@ -179,7 +179,7 @@ new checkpoints going forward, a serializer-level change, not a proto change.
 
 ### 2. State explicitly whether a delegated child session may skip persistence entirely for short-lived, tool-like nested invocations
 
-**The change.** ADR#0035 decision 6 models every delegated child as a persisted
+**The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 models every delegated child as a persisted
 sibling stream: `DispatchDelegation` always mints a fresh `child_session_id` and
 always creates a real `[SessionStarted, ParentLinked]` batch. Nothing in the
 decision says whether a lightweight, tool-like nested agent invocation is
@@ -228,7 +228,7 @@ not a schema change on its own.
 
 ### 3. Do not let a future listing/search projection fragment into per-backend query surfaces
 
-**The change under consideration, and why to reject it.** Nothing in ADR#0035
+**The change under consideration, and why to reject it.** Nothing in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
 proposes this today; this recommendation exists to record why it should stay
 rejected. A tempting shortcut for a future feature (project-scoped listing, a
 picker UI) is to let each storage backend or deployment expose its own native
@@ -246,7 +246,7 @@ listing code they had built.
 **Blast radius.** N/A, this recommends holding the line on an existing decision,
 not changing anything.
 
-**Why not to do this.** ADR#0035 decision 8 already answers this correctly:
+**Why not to do this.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 8 already answers this correctly:
 listing is a rebuildable `SessionProjection`, queried by `get_session`/
 `list_sessions`, never the backend's native storage medium. The SDK is the
 clearest cautionary counterexample available in this corpus for why: a store
@@ -267,7 +267,7 @@ product actually shipped.
   the backend, and the base `SQLiteSession` backend has "no `PRAGMA
   busy_timeout` set anywhere" and no cross-process defense against
   `SQLITE_BUSY` at all (dossier, Write and append path). Our `WRITE_PRECONDITION`
-  classification (`NoStream`/`At`/`Any`, ADR#0035 decision 2) is enforced by the
+  classification (`NoStream`/`At`/`Any`, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2) is enforced by the
   broker for every invariant-bearing transition, not assumed away by whichever
   backend a caller happened to configure.
 - **Identity that survives a payload's content changing.** As detailed above,
@@ -279,7 +279,7 @@ product actually shipped.
   `SQLiteSession.get_items(limit=N)` skips corrupt rows during decode and
   doubles its read window until it finds `N` valid items
   (`src/agents/memory/sqlite_session.py:218-263`), with no signal to the caller
-  that anything was skipped. Our decode-failure metric (ADR#0035 decision 2,
+  that anything was skipped. Our decode-failure metric ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2,
   Substrate obligations) makes a malformed event observable instead of quietly
   compensated for.
 - **Rewind and compaction as appended facts, not destructive operations.**
@@ -340,7 +340,7 @@ product actually shipped.
 ## What not to copy
 
 - **`pop_item`'s destructive `DELETE ... RETURNING` as a rewind primitive.**
-  This directly contradicts ADR#0035 decision 2's forced position that "every
+  This directly contradicts [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's forced position that "every
   retroactive operation, rewind, revert, compaction, hide, is a new appended
   event interpreted at replay, never an edit or a delete of stored messages."
   It also has a demonstrated correctness cost inside the SDK itself: rewind is
@@ -379,7 +379,7 @@ product actually shipped.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a position: a delegated child is always its
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a position: a delegated child is always its
 own logical stream, linked by `DelegationDispatched`/`ParentLinked` on each
 side, with a `CascadePolicy` (`CASCADE_ON_PARENT_TERMINAL` or `INDEPENDENT`)
 governing what happens on parent termination, and `ParentHistoryInvalidated`
@@ -435,7 +435,7 @@ own ADR speaks to it directly.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a position: keep-forever, with `SessionHidden`
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a position: keep-forever, with `SessionHidden`
 as a visibility tombstone that "does not promise erasure the log does not
 perform," `RedactionApplied` for read-time masking that "the fold and every
 projection" apply while "original bytes remain on the keep-forever log," and
@@ -500,7 +500,7 @@ offers a cruder version of exactly the capability decision 7 defers.
 2. Is a "different agent configuration continues the same conversation, no
    session boundary at all" pattern (this SDK's Handoffs) in scope for the
    Session Store, or is it purely an agent-loop concern the store never needs
-   to represent? Nothing in ADR#0035 or this dossier answers this directly.
+   to represent? Nothing in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) or this dossier answers this directly.
 3. What bytes does the artifact digest feeding a `CheckpointProduced` command's
    idempotency key actually cover, and are any of them volatile (a
    producing-side timestamp, a non-canonical serialization) in a way that could

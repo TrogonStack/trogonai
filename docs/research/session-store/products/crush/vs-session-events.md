@@ -3,7 +3,7 @@
 Part of Session Store Research.
 Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISON.md).
 Stage-one dossier: [Crush](./index.md).
-Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on 2026-08-04.
+Compared against `proto/trogonai/session/sessions/v1alpha1/` and [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) on 2026-08-04.
 
 **Store maturity: 9/12**: evolution scars 2/3 (7 goose migrations add columns
 across time and carry existing rows forward via plain `ALTER TABLE ... ADD
@@ -44,7 +44,7 @@ We persist facts and derive state by folding them. `UserMessageRecorded`,
 `SessionEvent` oneof are immutable once appended; the session's current title,
 cost, summary boundary, and cascade state are never stored anywhere as a
 mutable field, they are the output of folding the stream at read time
-(ADR#0035 facet 2, facet 8).
+([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2, facet 8).
 
 This is a different, more fundamental axis than the one the
 [fx comparison](../fx/vs-session-events.md) leads with. fx's structural
@@ -84,7 +84,7 @@ choice, not an independent difference:
 | Crush | Ours | Verdict |
 | --- | --- | --- |
 | `sessions` row (title, `message_count`, `prompt_tokens`, `completion_tokens`, `cost`, `summary_message_id`, `todos`), mutated via full-row `UPDATE` | Fold of `SessionStarted` + `TokenUsage`-bearing events + `SessionRenamed` + `TodoUpdated` + `Compacted` over the session stream | Ours |
-| `uuid.New().String()` session id (`internal/session/session.go:98`) | Opaque `session_id` (ADR#0035 does not mandate a UUID version) | Equivalent |
+| `uuid.New().String()` session id (`internal/session/session.go:98`) | Opaque `session_id` ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) does not mandate a UUID version) | Equivalent |
 | `parent_session_id TEXT`, no FK, no application-level cascade (`internal/db/migrations/20250424200609_initial.sql:6`) | `DelegationDispatched` + `ParentLinked` + `CascadePolicy`, reconciler-enforced | Ours, decisively (see gap section) |
 | Tool-call-ID reused as subagent session id (`CreateTaskSession`, `internal/session/session.go:110-122`) | `child_session_id` is always a freshly minted id in a distinct namespace from `tool_call_id` (`DelegationDispatched.child_session_id`) | Ours (see What not to copy) |
 | `"title-" + parentSessionID` deterministic composite session id (`internal/session/session.go:124-136`) | No equivalent; nothing in our catalog derives one entity's id from another's | Ours (see What not to copy) |
@@ -97,10 +97,10 @@ choice, not an independent difference:
 | `sessions.summary_message_id` + `messages.is_summary_message`, truncation applied only inside `getSessionMessages` (`internal/agent/agent.go:1692-1711`) | `Compacted{summary_id, summary_content, covers_from, covers_through, trigger, guidance, tokens_before, tokens_after, model, usage}` | Ours, decisively stronger (see already-does-better) |
 | No session-level rewind/checkpoint/fork of any kind (confirmed by a targeted grep for `rewind`, `checkpoint`, `fork`/`Fork`) | `SessionRewound{keep_through}`, `Checkpoint`/`CheckpointProduced`, `SessionForked` | Gap in Crush, not in us |
 | Per-file version rows tied to tool calls, write-only in this codebase (no "restore to version N" caller found) | `Checkpoint.covers_through` restored via `ExecutionAttemptStarted.restored_checkpoint`, digest-verified | Ours |
-| `crush stats`: read-only, filesystem-crawled, cross-project aggregation (`internal/cmd/stats.go:243-388`) | Not modeled; listing/search/analytics are rebuildable projections outside the event catalog (ADR#0035 facet 8) | Neutral, out of scope on both sides |
+| `crush stats`: read-only, filesystem-crawled, cross-project aggregation (`internal/cmd/stats.go:243-388`) | Not modeled; listing/search/analytics are rebuildable projections outside the event catalog ([ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8) | Neutral, out of scope on both sides |
 | No FTS/search subsystem found | Not modeled in the catalog either (facet 8) | Neutral |
 | `sessions.updated_at`/`created_at`, Unix-epoch wall-clock integers, no monotonic sequence | `SessionOrdinal`, fold-derived logical position | Ours, decisively |
-| No optimistic-concurrency/expected-version precondition anywhere (confirmed by explicit grep in the dossier) | `WRITE_PRECONDITION` (`NoStream` / `At` / `Any` classification, ADR#0035 facet 2) | Ours, decisively |
+| No optimistic-concurrency/expected-version precondition anywhere (confirmed by explicit grep in the dossier) | `WRITE_PRECONDITION` (`NoStream` / `At` / `Any` classification, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 2) | Ours, decisively |
 | `SetMaxOpenConns(1)` plus an opt-in, same-host advisory `flock` (`internal/db/datadirlock.go:51-80`, enabled only on the server-bootstrap path) | Per-subject expected-sequence enforcement, server-side, unconditional | Ours |
 | No client-supplied idempotency key anywhere; every write mints a fresh server-side UUID | `OperationReserved.request_digest`, deterministic event ids (facet 2, facet 3) | Ours, decisively |
 | `session.service.Delete`: real transactional SQL `DELETE` of the session's own `messages`/`files`, no walk of children (`internal/session/session.go:138-169`) | `SessionHidden` (visibility tombstone only) + `RedactionApplied` + `ArtifactErased`; the log itself is never truncated | Semantic mismatch, not a strict ranking either way (see Retention gap section) |
@@ -115,7 +115,7 @@ Ordered most-consequential first.
 
 ### 1. Add an explicit invariant: no session id may ever be derived from another entity's id
 
-**The change.** State, as a testable rule in ADR#0035 (a natural home is
+**The change.** State, as a testable rule in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) (a natural home is
 alongside facet 2's identity/dedup contract, or facet 6's "always mints a
 fresh `child_session_id`"), that a `session_id` must never be generated
 deterministically from, or reused directly as, any other entity's id
@@ -131,7 +131,7 @@ dossier's own Open Questions noting that a second call for the same parent
 was "not traced into `CreateSession`'s SQL," leaving the collision behavior
 unverified even by the people who wrote it.
 
-**Blast radius.** Additive. ADR#0035 facet 6 already mints a fresh
+**Blast radius.** Additive. [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 6 already mints a fresh
 `child_session_id` for every real delegation in practice (`DispatchDelegation`
 always mints one); this makes that practice an explicit, documented, and
 validated invariant rather than an implicit consequence of how the one
@@ -196,7 +196,7 @@ dossier flags this as a possible race left unverified, relying entirely on
 **Why not to do this.** Any write-side rollup of a child's cost onto the
 parent invites exactly Crush's race, two concurrent children completing under
 commuting, `Any`-classified facts with no compare-and-swap, and duplicates
-data ADR#0035 facet 8 already assigns to rebuildable projections. A stored
+data [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 8 already assigns to rebuildable projections. A stored
 rollup is a second source of truth for a number a fold can always recompute
 correctly.
 
@@ -211,7 +211,7 @@ model is later wanted.
 ### 4. Name the compaction fold as a shared, testable obligation, not an implementation detail of one call site
 
 **The change.** Make explicit, as a documented (and ideally test-enforced)
-rule under ADR#0035 facet 4/facet 8, that every projection reconstructing
+rule under [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 4/facet 8, that every projection reconstructing
 model-visible context must derive it from the same shared "fold from the
 newest `Compacted` marker forward" function, rather than each reader
 re-implementing the covers_from/covers_through walk independently.
@@ -247,7 +247,7 @@ history to compact it. `sessions.summary_message_id` plus
 `messages.is_summary_message` (`internal/db/migrations/20250515105448_add_summary_message_id.sql`,
 `internal/db/migrations/20250810000000_add_is_summary_message.sql`) is
 structurally the same "in-stream marker, read-time truncation" idea as our
-`Compacted` event, which is exactly the pattern ADR#0035 facet 4 says
+`Compacted` event, which is exactly the pattern [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 4 says
 "corrects the platform compactor crate, which overwrote the stored message
 list wholesale." Where ours is stronger: `covers_from`/`covers_through` are
 `SessionOrdinal`-typed *ranges*, stable across restore and migration, versus
@@ -322,7 +322,7 @@ session's own messages, files, and row: for a targeted session with no
 children, that is genuine byte-level erasure, today. Our `SessionHidden` is
 explicitly only a visibility tombstone; `ArtifactErased` only removes
 out-of-line artifact bytes; erasure-grade deletion (crypto-shredding) is
-named in ADR#0035 facet 7 as deferred to a follow-up ADR. Crush buys true,
+named in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 7 as deferred to a follow-up ADR. Crush buys true,
 immediate erasure for the single-session case at the cost of zero audit or
 rewind history and, as the cascade section below shows, badly broken erasure
 semantics the moment children exist. We buy full audit and rewind history and
@@ -387,7 +387,7 @@ not merely the more elegant one.
 
 ### Subagent cascade
 
-ADR#0035 decision 6 already takes a detailed position: dispatch is
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 6 already takes a detailed position: dispatch is
 parent-first with crash-safe reconciler repair (`DelegationDispatched` on the
 parent, then an atomic `[SessionStarted, ParentLinked]` batch on the child
 under `NoStream`); the graph is acyclic by construction, not by a runtime
@@ -442,7 +442,7 @@ Where Crush's answer is worse: total invisibility. An orphan in Crush is
 silently unreachable through every normal surface and persists forever with
 no sweep; our design's default `CASCADE_POLICY_CASCADE_ON_PARENT_TERMINAL`
 actively terminates a child rather than merely making it theoretically
-discoverable. One open point this evidence sharpens: ADR#0035's own
+discoverable. One open point this evidence sharpens: [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s own
 Consequences section lists "a scheduled orphan-closure sweep" as a "new
 standing service" still to be built. Crush is a concrete demonstration that a
 *designed* answer with no operational sweep yet running and tested produces
@@ -451,7 +451,7 @@ verified against this exact case, not merely documented as planned.
 
 ### Retention on an unbounded log
 
-ADR#0035 decision 7 already takes a detailed position: the log is never
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 7 already takes a detailed position: the log is never
 truncated or purged, full stop; `SessionHidden` replaces the old
 `SessionDeleted` as a visibility tombstone with a typed reason
 (`SESSION_HIDDEN_REASON_USER_REQUESTED`, `SESSION_HIDDEN_REASON_RETENTION_POLICY`)
@@ -463,7 +463,7 @@ id automatically covers duplicates and every fork's inherited context;
 `ArtifactErased` separates out-of-band artifact-byte destruction from
 event-log retention; erasure-grade deletion (crypto-shredding) is explicitly
 named as deferred to a follow-up ADR, not silently dropped; this explicitly
-supersedes ADR#0029's purge for session streams; and optional, reversible
+supersedes [ADR#0029](../../../../adr/0029-decider-retention-and-truncation-watermark.md)'s purge for session streams; and optional, reversible
 cold-storage tiering is available if a deployment needs to bound the hot
 stream.
 
@@ -503,7 +503,7 @@ must honor a "delete my data" request today, and cannot wait for that
 follow-up ADR to ship, would find Crush's simpler answer closer to what it
 needs for the no-children case, even though Crush's answer collapses
 entirely the moment a child session exists (the cascade gap above). The
-recommendation this evidence supports is not to abandon keep-forever, ADR#0035
+recommendation this evidence supports is not to abandon keep-forever, [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)
 already gives good reasons in the Alternatives Considered section for
 rejecting truncation, but to keep treating the deferred erasure-grade
 follow-up ADR as a named, prioritized gap rather than letting "we chose
@@ -536,7 +536,7 @@ artifact id.
   model-requested tool call) need its own representation in our catalog, or
   is it always modeled as an ordinary tool call attributed to a human actor
   rather than the model?
-- Should the orphan-closure sweep named in ADR#0035's Consequences section
+- Should the orphan-closure sweep named in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md)'s Consequences section
   carry an explicit test derived directly from Crush's failure mode (an
   orphan invisible to listing yet permanently persisted), given that
   "designed" and "implemented and verified against this exact case" are
