@@ -38,7 +38,7 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
     let js = server.jetstream().await;
 
     let short = tracking(3600);
-    NatsObjectStore::provision_claim_bucket(&js, &claim_bucket(), short)
+    NatsObjectStore::provision_claim_bucket(&js, claim_bucket(), short)
         .await
         .expect("first provision");
     assert_eq!(backing_stream_max_age(&js).await, short.bucket_max_age());
@@ -47,7 +47,7 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
     // effect, not silently keep the old TTL.
     let long = tracking(3 * 3600);
     assert_ne!(long.bucket_max_age(), short.bucket_max_age());
-    NatsObjectStore::provision_claim_bucket(&js, &claim_bucket(), long)
+    NatsObjectStore::provision_claim_bucket(&js, claim_bucket(), long)
         .await
         .expect("re-provision wider");
     assert_eq!(backing_stream_max_age(&js).await, long.bucket_max_age());
@@ -55,7 +55,7 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
     // Re-provisioning with a shorter retention must NOT shrink the bucket:
     // older, still-deliverable messages could reference claims that would
     // otherwise expire early.
-    NatsObjectStore::provision_claim_bucket(&js, &claim_bucket(), short)
+    NatsObjectStore::provision_claim_bucket(&js, claim_bucket(), short)
         .await
         .expect("re-provision narrower");
     assert_eq!(backing_stream_max_age(&js).await, long.bucket_max_age());
@@ -69,7 +69,7 @@ async fn provisioning_an_existing_bucket_reconciles_its_retention() {
 async fn a_resolver_reads_the_bucket_its_binding_opened() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
-    NatsObjectStore::provision_claim_bucket(&js, &claim_bucket(), tracking(3600))
+    NatsObjectStore::provision_claim_bucket(&js, claim_bucket(), tracking(3600))
         .await
         .expect("provision claim bucket");
 

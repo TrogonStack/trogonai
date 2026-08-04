@@ -42,8 +42,7 @@ async fn small_payload_publishes_directly() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -69,8 +68,7 @@ async fn large_payload_stores_in_object_store_and_publishes_claim() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -111,8 +109,7 @@ async fn payload_at_exact_threshold_publishes_directly() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -135,12 +132,7 @@ async fn publish_uses_current_max_payload_limit() {
     let publisher = MockJetStreamPublisher::new();
     let store = MockObjectStore::new();
     let max_payload = DynamicMaxPayload::new(1024 + PROTOCOL_OVERHEAD);
-    let cc = ClaimCheckPublisher::new(
-        publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
-        max_payload.clone(),
-    );
+    let cc = ClaimCheckPublisher::new(publisher.clone(), test_binding(store.clone()), max_payload.clone());
 
     let direct = cc
         .publish_event(
@@ -177,8 +169,7 @@ async fn object_store_failure_returns_store_failed() {
     store.fail_next_put();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store,
-        "test-bucket".to_string(),
+        test_binding(store),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -201,8 +192,7 @@ async fn large_payload_preserves_original_headers() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store,
-        "test-bucket".to_string(),
+        test_binding(store),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -265,8 +255,7 @@ async fn small_payload_strips_claim_headers() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
 
@@ -392,8 +381,7 @@ async fn published_claim_round_trips_through_a_resolver() {
     let store = MockObjectStore::new();
     let cc = ClaimCheckPublisher::new(
         publisher.clone(),
-        store.clone(),
-        "test-bucket".to_string(),
+        test_binding(store.clone()),
         MaxPayload::from_server_limit(1024 + PROTOCOL_OVERHEAD),
     );
     let body = Bytes::from(vec![7u8; 4096]);

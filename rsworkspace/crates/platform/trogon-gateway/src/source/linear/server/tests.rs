@@ -6,6 +6,7 @@ use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
@@ -15,8 +16,7 @@ type HmacSha256 = Hmac<Sha256>;
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }

@@ -98,8 +98,8 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         .max_stream_max_age()
         .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
         .unwrap_or(ClaimRetention::EventSourced);
-    let claim_bucket = ClaimBucket::default();
-    let object_store = NatsObjectStore::provision_claim_bucket(&js_context, &claim_bucket, claim_retention).await?;
+    let claim_binding =
+        NatsObjectStore::provision_claim_bucket(&js_context, ClaimBucket::default(), claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
@@ -138,12 +138,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     let port = resolved.http_server.port;
     let mut join_set: JoinSet<SourceResult> = JoinSet::new();
 
-    let publisher = ClaimCheckPublisher::new(
-        client.clone(),
-        object_store.clone(),
-        claim_bucket.as_str().to_string(),
-        nats.clone(),
-    );
+    let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
 
     {
         if let Some(ref cfg) = resolved.discord {

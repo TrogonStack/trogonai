@@ -319,7 +319,7 @@ fn unclaimed_resolver() -> ClaimResolver<MockObjectStore> {
 /// already done so.
 #[cfg(not(coverage))]
 async fn claim_resolver(js: &async_nats::jetstream::Context) -> ClaimResolver<NatsObjectStore> {
-    NatsObjectStore::provision_claim_bucket(js, &ClaimBucket::default(), ClaimRetention::EventSourced)
+    NatsObjectStore::provision_claim_bucket(js, ClaimBucket::default(), ClaimRetention::EventSourced)
         .await
         .expect("provision claim bucket");
     ClaimResolver::new(
@@ -499,9 +499,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
         NatsJetStreamClient::new(js.clone()),
         NatsObjectStore::bind_claim_bucket(&js, ClaimBucket::default())
             .await
-            .expect("bind claim bucket")
-            .into_store(),
-        DEFAULT_CLAIM_BUCKET.to_string(),
+            .expect("bind claim bucket"),
         MaxPayload::from_server_limit(0),
     );
     let outcome = gateway
@@ -583,9 +581,7 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         NatsJetStreamClient::new(js.clone()),
         NatsObjectStore::bind_claim_bucket(&js, ClaimBucket::default())
             .await
-            .expect("bind claim bucket")
-            .into_store(),
-        DEFAULT_CLAIM_BUCKET.to_string(),
+            .expect("bind claim bucket"),
         MaxPayload::from_server_limit(0),
     );
     let outcome = gateway

@@ -142,11 +142,18 @@ pub enum ClaimResolveError<E> {
     ReadFailed(#[from] std::io::Error),
 }
 
+/// The producing half of a claim check: a store to offload oversized bodies
+/// into, and the bucket name every claim it publishes carries.
+///
+/// The two arrive as a [`ClaimBucketBinding`] for the same reason the consumer
+/// takes one. Here the name is not checked but asserted, so a store and a name
+/// passed separately could put the body in one bucket and send consumers to
+/// another, which no test of either half on its own would catch.
 #[derive(Clone)]
 pub struct ClaimCheckPublisher<P, S> {
     publisher: P,
     store: S,
-    bucket_name: String,
+    bucket: ClaimBucket,
     max_payload: Arc<dyn MaxPayloadLimit>,
 }
 
@@ -155,19 +162,24 @@ impl<P: fmt::Debug, S: fmt::Debug> fmt::Debug for ClaimCheckPublisher<P, S> {
         f.debug_struct("ClaimCheckPublisher")
             .field("publisher", &self.publisher)
             .field("store", &self.store)
-            .field("bucket_name", &self.bucket_name)
+            .field("bucket", &self.bucket)
             .finish_non_exhaustive()
     }
 }
 
 impl<P, S> ClaimCheckPublisher<P, S> {
-    pub fn new<M: MaxPayloadLimit>(publisher: P, store: S, bucket_name: String, max_payload: M) -> Self {
+    pub fn new<M: MaxPayloadLimit>(publisher: P, binding: ClaimBucketBinding<S>, max_payload: M) -> Self {
+        let (store, bucket) = binding.into_parts();
         Self {
             publisher,
             store,
-            bucket_name,
+            bucket,
             max_payload: Arc::new(max_payload),
         }
+    }
+
+    pub fn bucket(&self) -> &ClaimBucket {
+        &self.bucket
     }
 }
 
@@ -248,7 +260,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
 
         let mut claim_headers = headers;
         claim_headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
-        claim_headers.insert(HEADER_CLAIM_BUCKET, self.bucket_name.as_str());
+        claim_headers.insert(HEADER_CLAIM_BUCKET, self.bucket.as_str());
         claim_headers.insert(HEADER_CLAIM_KEY, key.as_str());
 
         super::publish::publish_event(&self.publisher, subject, claim_headers, Bytes::new(), ack_timeout).await

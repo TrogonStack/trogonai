@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
@@ -18,8 +19,7 @@ const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }
@@ -430,8 +430,7 @@ async fn ack_failure_returns_500() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         signing_token: signing_token(),
@@ -458,8 +457,7 @@ async fn ack_timeout_returns_500() {
     let state = AppState {
         publisher: ClaimCheckPublisher::new(
             publisher,
-            MockObjectStore::new(),
-            "test-bucket".to_string(),
+            ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
             MaxPayload::from_server_limit(usize::MAX),
         ),
         signing_token: signing_token(),

@@ -36,15 +36,15 @@ fn no_expiry_to_no_expiry_is_a_no_op() {
 }
 
 /// A consumer validates the claim's `Nats-Claim-Bucket` header against
-/// `bucket()` while reading through the handle, and a publisher that only writes
-/// that header takes `into_store()` and drops the name. Both halves have to come
-/// back out as the halves that went in, or the validation passes on one bucket
-/// while the handle reads another.
+/// `bucket()` while reading through the handle, and a publisher stamps that same
+/// header on what it writes through it. Both halves have to come back out as the
+/// halves that went in, or the header names one bucket while the handle reads
+/// another.
 #[test]
 fn a_binding_hands_each_half_back_as_the_half_it_was_given() {
     let bucket = ClaimBucket::new("claims").expect("valid bucket name");
     let binding = ClaimBucketBinding::for_test("a-store-handle", bucket.clone());
 
     assert_eq!(binding.bucket(), &bucket);
-    assert_eq!(binding.into_store(), "a-store-handle");
+    assert_eq!(binding.into_parts(), ("a-store-handle", bucket));
 }

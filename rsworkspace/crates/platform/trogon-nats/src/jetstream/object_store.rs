@@ -55,12 +55,6 @@ impl<S> ClaimBucketBinding<S> {
         (self.store, self.bucket)
     }
 
-    /// Drop the bucket and keep the handle, for a publisher that names its
-    /// bucket in the claim headers it writes rather than checking one it reads.
-    pub fn into_store(self) -> S {
-        self.store
-    }
-
     /// Pair a store with a bucket name directly, for tests that redeem claims
     /// from a fake store and so have no bucket to open.
     #[cfg(any(test, feature = "test-support"))]
@@ -160,11 +154,14 @@ impl NatsObjectStore {
     /// shrinks the bucket: source streams do not shrink their own retention, so
     /// a lowered config must not expire claims that older, still-deliverable
     /// messages reference.
+    ///
+    /// The bucket comes back bound to the handle, so a publisher stamps claims
+    /// with the bucket it actually wrote them to.
     pub async fn provision_claim_bucket(
         js: &async_nats::jetstream::Context,
-        bucket: &ClaimBucket,
+        bucket: ClaimBucket,
         retention: super::claim_retention::ClaimRetention,
-    ) -> Result<Self, ProvisionObjectStoreError> {
+    ) -> Result<ClaimBucketBinding<Self>, ProvisionObjectStoreError> {
         let max_age = retention.bucket_max_age();
         let store = Self::provision(
             js,
@@ -176,7 +173,7 @@ impl NatsObjectStore {
         )
         .await?;
         reconcile_bucket_max_age(js, bucket.as_str(), max_age).await?;
-        Ok(store)
+        Ok(ClaimBucketBinding { store, bucket })
     }
 }
 
