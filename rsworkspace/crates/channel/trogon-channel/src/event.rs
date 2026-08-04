@@ -144,13 +144,19 @@ pub enum MediaTypeError {
     EmptyType,
     #[error("a media type's subtype may not be empty")]
     EmptySubtype,
+    #[error("a media type has one subtype, so its subtype may not contain '/'")]
+    SubtypeIsNotOne,
     #[error("a media type may not contain whitespace")]
     InteriorWhitespace,
 }
 
-/// An IANA media type, normalized to lower case because the standard defines
-/// type and subtype as case-insensitive and a caller comparing them as bytes
-/// would otherwise be wrong for `IMAGE/PNG`. Parameters are kept as given.
+/// An IANA media type, whose type and subtype are normalized to lower case
+/// because the standard defines those two as case-insensitive and a caller
+/// comparing them as bytes would otherwise be wrong for `IMAGE/PNG`.
+///
+/// Parameters are kept byte for byte, because case-insensitivity stops at the
+/// subtype: a `multipart` boundary and a `filename` are values a sender chose
+/// and folding them changes what they refer to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct MimeType(String);
@@ -159,18 +165,29 @@ impl MimeType {
     pub fn new(raw: impl Into<String>) -> Result<Self, EventFieldError> {
         let raw = raw.into();
         let trimmed = raw.trim();
-        let (kind, subtype) = trimmed.split_once('/').ok_or(MediaTypeError::MissingSeparator)?;
-        let subtype_only = subtype.split(';').next().unwrap_or_default().trim();
+        let (essence, parameters) = match trimmed.split_once(';') {
+            Some((essence, parameters)) => (essence, Some(parameters)),
+            None => (trimmed, None),
+        };
+        let (kind, subtype) = essence.split_once('/').ok_or(MediaTypeError::MissingSeparator)?;
         if kind.is_empty() {
             return Err(MediaTypeError::EmptyType.into());
         }
-        if subtype_only.is_empty() {
+        if subtype.is_empty() {
             return Err(MediaTypeError::EmptySubtype.into());
+        }
+        if subtype.contains('/') {
+            return Err(MediaTypeError::SubtypeIsNotOne.into());
         }
         if trimmed.chars().any(char::is_whitespace) {
             return Err(MediaTypeError::InteriorWhitespace.into());
         }
-        Ok(Self(trimmed.to_ascii_lowercase()))
+        let mut normalized = format!("{}/{}", kind.to_ascii_lowercase(), subtype.to_ascii_lowercase());
+        if let Some(parameters) = parameters {
+            normalized.push(';');
+            normalized.push_str(parameters);
+        }
+        Ok(Self(normalized))
     }
 
     pub fn as_str(&self) -> &str {

@@ -68,7 +68,9 @@ fn a_media_type_needs_a_type_and_a_subtype() {
         ("image", MediaTypeError::MissingSeparator),
         ("", MediaTypeError::MissingSeparator),
         ("image/", MediaTypeError::EmptySubtype),
+        ("image/;charset=utf-8", MediaTypeError::EmptySubtype),
         ("/png", MediaTypeError::EmptyType),
+        ("image/png/extra", MediaTypeError::SubtypeIsNotOne),
         ("image / png", MediaTypeError::InteriorWhitespace),
     ] {
         assert_eq!(
@@ -84,6 +86,17 @@ fn a_media_type_keeps_parameters() {
     assert_eq!(
         MimeType::new("text/plain;charset=utf-8").expect("valid").as_str(),
         "text/plain;charset=utf-8"
+    );
+}
+
+/// Case-insensitivity is defined for the type and the subtype only. A
+/// `multipart` boundary is a delimiter the sender picked and has to survive as
+/// typed, or the body it delimits stops being parseable.
+#[test]
+fn a_media_type_normalizes_the_subtype_without_touching_its_parameters() {
+    assert_eq!(
+        MimeType::new("MULTIPART/Mixed;boundary=AbCd").expect("valid").as_str(),
+        "multipart/mixed;boundary=AbCd"
     );
 }
 
