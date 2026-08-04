@@ -491,7 +491,8 @@ by default remains the corpus outlier, in our favor.
 
 **Cascade-on-terminal is validated, and the rewind split is not merely
 unvalidated but unattempted.** Zed is the only studied product with genuinely
-transitive cascade, and it chose the same behavior ADR#0035 decision 6 does,
+transitive cascade, and it chose the same behavior
+[ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decision 6 does,
 independently. Cline's stops one level deep and only from a root. Codex CLI,
 Goose, OpenCode, and T3 Code orphan. Roo Code, queued as a presumed restatement
 of Cline, recurses the full child-task tree and is the second real cascade in the
