@@ -13,6 +13,12 @@ pub enum CommandTriggerError {
 
 /// One normalized trigger matched against the first token of a message.
 /// Guarantees a non-empty, single-token, lowercased value at construction.
+///
+/// Lowercasing is Unicode-aware rather than ASCII-only, because a trigger is
+/// chat text a person types and nothing restricts it to ASCII. Matching folds
+/// the incoming token the same way (see [`crate::CommandTriggers::parse`]); an
+/// ASCII-only fold would leave `/Nuevo` matching but `/AÑADIR` not, which is a
+/// distinction no operator would predict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandTrigger(String);
 
@@ -26,7 +32,7 @@ impl TryFrom<CommandTriggerInput> for CommandTrigger {
     type Error = CommandTriggerError;
 
     fn try_from(input: CommandTriggerInput) -> Result<Self, Self::Error> {
-        let trigger = input.as_str().trim().to_ascii_lowercase();
+        let trigger = input.as_str().trim().to_lowercase();
         if trigger.is_empty() {
             return Err(CommandTriggerError::Empty);
         }

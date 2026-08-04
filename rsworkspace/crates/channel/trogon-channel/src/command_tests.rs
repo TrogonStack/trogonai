@@ -60,6 +60,22 @@ fn triggers_are_configurable() {
     assert_eq!(triggers.parse("/new", "mybot").command, None);
 }
 
+/// A trigger is chat text, so a deployment may configure one outside ASCII. The
+/// factory and `parse` have to fold case the same way for that trigger to be
+/// reachable at all: with an ASCII-only fold, `/AÑADIR` would be stored as
+/// `/aÑadir` and no plausible typing of it would ever match.
+#[test]
+fn a_non_ascii_trigger_matches_whatever_case_it_is_typed_in() {
+    let triggers = CommandTriggers::new(["/AÑADIR"]).expect("valid triggers");
+    for typed in ["/añadir", "/AÑADIR", "/Añadir"] {
+        assert_eq!(
+            triggers.parse(typed, "mybot").command,
+            Some(Command::NewSession),
+            "{typed:?} must reach the trigger"
+        );
+    }
+}
+
 #[test]
 fn blank_and_multi_token_triggers_are_rejected() {
     assert!(matches!(CommandTriggers::new(["  "]), Err(CommandTriggerError::Empty)));

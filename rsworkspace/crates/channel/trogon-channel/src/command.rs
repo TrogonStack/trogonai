@@ -75,7 +75,9 @@ impl CommandTriggers {
             Some((token, account)) => (token, Some(account)),
             None => (head, None),
         };
-        let token = token.to_ascii_lowercase();
+        // The same fold `CommandTrigger` applied at construction, or a
+        // configured trigger outside ASCII would never match what was typed.
+        let token = token.to_lowercase();
         let addressed_to_us = match addressed_to {
             None => true,
             Some(account) => account.eq_ignore_ascii_case(recipient_account),
