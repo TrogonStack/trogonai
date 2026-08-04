@@ -190,21 +190,48 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
             // agent, so routing policy never re-runs. Every other failure is
             // left to redelivery, because rotating on a timeout or a transport
             // blip would throw away a conversation that was merely unreachable.
+            //
+            // Whether the session is really gone is a guess (see
+            // `AgentPortError::is_session_lost`), so nothing is committed until
+            // the fresh session has answered. A wrong guess then costs one unused
+            // session instead of the conversation's history, which is the whole
+            // reason the pointer is not moved first.
             Err(first_error) if first_error.is_session_lost() => {
-                warn!(error = %first_error, session = %active_session, "Agent no longer has the session; retrying with a fresh one");
+                warn!(error = %first_error, session = %active_session, "Agent may no longer have the session; trying a fresh one");
                 let fresh = self
                     .port
                     .create_session(&record)
                     .await
                     .map_err(|e| anyhow::anyhow!("create_session failed: {e}"))?;
-                record.current_session = Some(fresh.clone());
-                self.store.update_conversation(&conversation_id, &record).await?;
-                self.renderer.discard(active_session.as_str());
-                active_session = fresh;
-                self.port
-                    .prompt(&active_session, &event)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("prompt retry failed: {e}"))?
+
+                match self.port.prompt(&fresh, &event).await {
+                    Ok(outcome) => {
+                        record.current_session = Some(fresh.clone());
+                        self.store.update_conversation(&conversation_id, &record).await?;
+                        self.renderer.discard(active_session.as_str());
+                        active_session = fresh;
+                        outcome
+                    }
+                    // A fresh session failed the same way, so the session was
+                    // never the problem: the prompt itself is being rejected.
+                    // Hand back the session nobody used and leave the
+                    // conversation where it was, so redelivery retries the
+                    // prompt rather than compounding the rotation.
+                    Err(retry_error) => {
+                        let release = self.port.release_session(&fresh, ReleaseReason::RepairFailed).await;
+                        self.renderer.discard(fresh.as_str());
+                        info!(
+                            conversation = %conversation_id,
+                            session = %fresh,
+                            cancelled = ?release.cancelled,
+                            closed = ?release.closed,
+                            "Released the session opened to repair a suspected loss"
+                        );
+                        return Err(anyhow::anyhow!(
+                            "prompt failed on session {active_session} and again on a fresh session, so the session was not the cause: {first_error} (retry: {retry_error})"
+                        ));
+                    }
+                }
             }
             Err(error) => return Err(anyhow::anyhow!("prompt failed: {error}")),
         };

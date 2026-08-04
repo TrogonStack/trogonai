@@ -23,10 +23,18 @@ pub enum AcpPortError {
 
 impl AgentPortError for AcpPortError {
     fn is_session_lost(&self) -> bool {
-        // The acp-nats bridge maps every transport failure and timeout to
-        // `InternalError` and passes agent-returned errors through untouched,
-        // so only the codes an agent uses to reject an unknown session id mean
-        // the session is actually gone.
+        // ACP has no session-not-found code. The acp-nats bridge maps every
+        // transport failure and timeout to `InternalError` and passes
+        // agent-returned errors through untouched, which narrows it to the codes
+        // an agent plausibly uses to reject an unknown session id: the session
+        // id is a parameter, so `InvalidParams` is the likeliest, and it is also
+        // how an agent rejects a prompt it dislikes for any other reason.
+        //
+        // Kept deliberately broad. The caller treats this as a hint and keeps a
+        // fresh session only once it has answered, so a false positive costs one
+        // unused session, whereas a false negative would leave the conversation
+        // pinned to a session the agent has forgotten, failing every future
+        // message rather than just this one.
         match self {
             Self::Rpc(error) => matches!(error.code, ErrorCode::InvalidParams | ErrorCode::ResourceNotFound),
         }

@@ -40,10 +40,16 @@ pub enum PromptOutcome {
 /// port classifies its own protocol's failures; nothing above this trait
 /// inspects error codes.
 pub trait AgentPortError: std::error::Error + 'static {
-    /// True only when the agent no longer has the session, which a fresh
+    /// True when the agent may no longer have the session, which a fresh
     /// session repairs. Transport failures, timeouts, and agent-internal
     /// errors are false: rotating on those would discard a live conversation
     /// that was merely unreachable for a moment.
+    ///
+    /// A hint, not a verdict. A protocol need not carry a distinct "no such
+    /// session" code, so whatever code rejects an unknown session id may also
+    /// reject a prompt the agent simply dislikes. A caller must therefore never
+    /// destroy conversation state on this alone: it may open a fresh session
+    /// and keep it only once that session has actually answered.
     fn is_session_lost(&self) -> bool;
 }
 
@@ -53,6 +59,9 @@ pub trait AgentPortError: std::error::Error + 'static {
 pub enum ReleaseReason {
     /// The user asked for a fresh conversation.
     NewSession,
+    /// A session opened to repair a suspected lost session failed the same way,
+    /// so the bridge is handing back one it never got to use.
+    RepairFailed,
 }
 
 /// How one step of the release ladder ended.
@@ -65,9 +74,10 @@ pub enum ReleaseStep {
     Failed,
 }
 
-/// Report of a best-effort release. The conversation has already dropped its
-/// pointer to the session by the time this runs, so no step here can fail the
-/// reset; the report exists so an operator can see what the agent did with it.
+/// Report of a best-effort release. The conversation does not point at the
+/// session by the time this runs, whether it dropped the pointer or never took
+/// one, so no step here can fail anything; the report exists so an operator can
+/// see what the agent did with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionRelease {
     pub cancelled: ReleaseStep,

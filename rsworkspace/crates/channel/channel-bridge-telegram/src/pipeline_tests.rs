@@ -39,12 +39,14 @@ impl NatsServer {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("fake agent failure")]
-struct FakeError;
+#[error("fake agent failure (session_lost={session_lost})")]
+struct FakeError {
+    session_lost: bool,
+}
 
 impl AgentPortError for FakeError {
     fn is_session_lost(&self) -> bool {
-        false
+        self.session_lost
     }
 }
 
@@ -56,6 +58,29 @@ struct FakePort {
     sessions_created: RefCell<u32>,
     prompted: RefCell<Vec<(String, String)>>,
     released: RefCell<Vec<String>>,
+    /// How many upcoming prompts fail with an error classified as a lost
+    /// session. One models a session the agent really did forget, so the fresh
+    /// session succeeds; two makes the fresh session fail the same way, which is
+    /// the misclassification, where the prompt itself is being rejected and no
+    /// fresh session helps.
+    rejections: RefCell<u32>,
+}
+
+impl FakePort {
+    fn new(renderer: Rc<TelegramRenderClient>, reply: &str) -> Self {
+        Self {
+            renderer,
+            reply: reply.to_string(),
+            sessions_created: RefCell::new(0),
+            prompted: RefCell::new(Vec::new()),
+            released: RefCell::new(Vec::new()),
+            rejections: RefCell::new(0),
+        }
+    }
+
+    fn reject_next_prompts(&self, count: u32) {
+        *self.rejections.borrow_mut() = count;
+    }
 }
 
 impl trogon_channel::AgentPort for FakePort {
@@ -73,6 +98,17 @@ impl trogon_channel::AgentPort for FakePort {
         self.prompted
             .borrow_mut()
             .push((session.as_str().to_string(), event.text.clone().unwrap_or_default()));
+
+        let reject = {
+            let mut left = self.rejections.borrow_mut();
+            let reject = *left > 0;
+            *left = left.saturating_sub(1);
+            reject
+        };
+        if reject {
+            return Err(FakeError { session_lost: true });
+        }
+
         let notification = SessionNotification::new(
             session.as_str().to_string(),
             SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
@@ -137,14 +173,17 @@ fn raw_update(update_id: u64, chat_id: i64, user_id: u64, text: &str) -> Vec<u8>
 
 /// Consumer state once its acks have landed. `msg.ack()` does not wait for the
 /// server, so a snapshot taken the instant the pipeline returns can still show
-/// the last message pending.
+/// the last message pending. `ack_pending` is what the caller expects to remain
+/// outstanding: zero when everything was acked, and one per message the pipeline
+/// deliberately left for redelivery.
 async fn settled_consumer_info(
     stream: &async_nats::jetstream::stream::Stream,
     consumer: &str,
+    ack_pending: u64,
 ) -> async_nats::jetstream::consumer::Info {
     for _ in 0..40 {
         let info = stream.consumer_info(consumer).await.expect("consumer info");
-        if info.num_ack_pending == 0 && info.num_pending == 0 {
+        if info.num_ack_pending as u64 == ack_pending && info.num_pending == 0 {
             return info;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -217,13 +256,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     let mut messages = consumer.messages().await.expect("messages");
 
     let renderer = Rc::new(TelegramRenderClient::new());
-    let port = FakePort {
-        renderer: renderer.clone(),
-        reply: "hi there".to_string(),
-        sessions_created: RefCell::new(0),
-        prompted: RefCell::new(Vec::new()),
-        released: RefCell::new(Vec::new()),
-    };
+    let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
     let claims = claim_resolver(&js).await;
@@ -296,7 +329,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     );
 
     // Everything acked: nothing left pending for redelivery.
-    let info = settled_consumer_info(&stream, "bridge-test").await;
+    let info = settled_consumer_info(&stream, "bridge-test", 0).await;
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 0);
 }
@@ -362,13 +395,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
     let mut messages = consumer.messages().await.expect("messages");
 
     let renderer = Rc::new(TelegramRenderClient::new());
-    let port = FakePort {
-        renderer: renderer.clone(),
-        reply: "hi there".to_string(),
-        sessions_created: RefCell::new(0),
-        prompted: RefCell::new(Vec::new()),
-        released: RefCell::new(Vec::new()),
-    };
+    let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
     let pipeline = Pipeline {
@@ -394,7 +421,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
     );
     assert_eq!(*outbound.sent.borrow(), vec![(42, "hi there".to_string())]);
 
-    let info = settled_consumer_info(&stream, "bridge-test").await;
+    let info = settled_consumer_info(&stream, "bridge-test", 0).await;
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 0);
 }
@@ -462,13 +489,7 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
     let mut messages = consumer.messages().await.expect("messages");
 
     let renderer = Rc::new(TelegramRenderClient::new());
-    let port = FakePort {
-        renderer: renderer.clone(),
-        reply: "hi there".to_string(),
-        sessions_created: RefCell::new(0),
-        prompted: RefCell::new(Vec::new()),
-        released: RefCell::new(Vec::new()),
-    };
+    let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
     let pipeline = Pipeline {
@@ -492,4 +513,160 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
 
     let info = stream.consumer_info("bridge-test").await.expect("consumer info");
     assert_eq!(info.num_ack_pending, 1);
+}
+
+/// A suspected lost session is repaired without betting the conversation on the
+/// suspicion. "Session lost" is a guess drawn from an error code that also
+/// covers ordinary rejections, so the fresh session has to answer before the
+/// conversation points at it: a prompt the agent simply refuses must leave the
+/// conversation on the session it already had, with its history, rather than
+/// rotating it onto a new one and failing anyway. One container for the whole
+/// scenario.
+#[tokio::test]
+async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
+    let server = NatsServer::start().await;
+    let client = async_nats::connect(&server.url).await.expect("connect");
+    let js = async_nats::jetstream::new(client);
+
+    js.create_stream(async_nats::jetstream::stream::Config {
+        name: "TELEGRAM".to_string(),
+        subjects: vec!["telegram.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("create TELEGRAM stream");
+
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
+    let principal = PrincipalId::new("telegram-42").expect("principal");
+    let endpoint = Endpoint::new("telegram", "mybot", "42").expect("endpoint");
+    store
+        .link_endpoint(&principal, &PrincipalRecord { display_name: None }, &endpoint)
+        .await
+        .expect("seed principal");
+
+    for (update_id, text) in [(1u64, "hello"), (2, "refused"), (3, "after"), (4, "recover")] {
+        js.publish("telegram.message", raw_update(update_id, 42, 42, text).into())
+            .await
+            .expect("publish")
+            .await
+            .expect("ack");
+    }
+
+    let stream = js.get_stream("TELEGRAM").await.expect("get stream");
+    let consumer = stream
+        .get_or_create_consumer(
+            "bridge-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bridge-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("consumer");
+    let mut messages = consumer.messages().await.expect("messages");
+
+    let renderer = Rc::new(TelegramRenderClient::new());
+    let port = FakePort::new(renderer.clone(), "hi there");
+    let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
+    let claims = claim_resolver(&js).await;
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &outbound,
+        claims: &claims,
+        bot_account: "mybot",
+        agent_id: "default",
+        triggers: &triggers,
+        ids: &UuidV7Generator,
+    };
+
+    macro_rules! next_message {
+        () => {
+            messages
+                .next()
+                .await
+                .expect("stream yields")
+                .expect("message received")
+        };
+    }
+
+    pipeline.handle_message(&next_message!()).await.expect("handled");
+    let session_before = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("kv read")
+        .expect("conversation exists")
+        .1
+        .current_session;
+    assert_eq!(session_before.as_ref().map(AgentSessionId::as_str), Some("sess-1"));
+
+    // Both the original session and the fresh one reject this prompt, which is
+    // what an ordinary rejection misread as a lost session looks like.
+    port.reject_next_prompts(2);
+    let error = pipeline
+        .handle_message(&next_message!())
+        .await
+        .expect_err("must not be acked");
+    assert!(
+        error.to_string().contains("the session was not the cause"),
+        "unexpected error: {error}"
+    );
+
+    // The point of the test: the conversation still holds the session it had,
+    // and the session nobody got to use was handed back.
+    let (_, record) = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("kv read")
+        .expect("conversation exists");
+    assert_eq!(record.current_session, session_before);
+    assert_eq!(*port.released.borrow(), vec!["sess-2".to_string()]);
+
+    // So the next message continues on it rather than starting over.
+    pipeline.handle_message(&next_message!()).await.expect("handled");
+
+    // A session the agent really has forgotten is still repaired: the fresh one
+    // answers, so the conversation moves onto it.
+    port.reject_next_prompts(1);
+    pipeline.handle_message(&next_message!()).await.expect("handled");
+
+    assert_eq!(*port.sessions_created.borrow(), 3);
+    assert_eq!(
+        *port.prompted.borrow(),
+        vec![
+            ("sess-1".to_string(), "hello".to_string()),
+            ("sess-1".to_string(), "refused".to_string()),
+            ("sess-2".to_string(), "refused".to_string()),
+            ("sess-1".to_string(), "after".to_string()),
+            ("sess-1".to_string(), "recover".to_string()),
+            ("sess-3".to_string(), "recover".to_string()),
+        ]
+    );
+    let (_, record) = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("kv read")
+        .expect("conversation exists");
+    assert_eq!(
+        record.current_session.as_ref().map(AgentSessionId::as_str),
+        Some("sess-3")
+    );
+
+    assert_eq!(*outbound.typing.borrow(), 4);
+    assert_eq!(
+        *outbound.sent.borrow(),
+        vec![
+            (42, "hi there".to_string()),
+            (42, "hi there".to_string()),
+            (42, "hi there".to_string()),
+        ]
+    );
+
+    // The rejected message is left for redelivery, so the prompt is retried
+    // instead of lost to a rotation that did not help.
+    let info = settled_consumer_info(&stream, "bridge-test", 1).await;
+    assert_eq!(info.num_ack_pending, 1);
+    assert_eq!(info.num_pending, 0);
 }
