@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS orchestration_events (
 ```
 
 This is unambiguously **session-as-log** (event-sourced). There are two
-aggregate kinds — `project` and `thread`
-(`packages/contracts/src/orchestration.ts:899`) — and a "session" in product
+aggregate kinds -- `project` and `thread`
+(`packages/contracts/src/orchestration.ts:899`) -- and a "session" in product
 terms is a **thread** (`OrchestrationThread`,
 `packages/contracts/src/orchestration.ts:347-381`), reconstructed by folding the
 thread-scoped events of one `stream_id`.
@@ -100,7 +100,7 @@ What is authoritative vs. derived:
   (`commandId`, `threadId`, `projectId`, `messageId`) are **client-supplied**;
   the server mints `eventId` as a UUIDv4 via `crypto.randomUUIDv4`
   (`apps/server/src/orchestration/decider.ts:41-50`). No id encodes ordering or
-  location — ordering comes entirely from `sequence` (global) and
+  location -- ordering comes entirely from `sequence` (global) and
   `stream_version` (per aggregate), not from the id.
 - **Listing scope**: global within the DB. Threads are scoped to a project by
   `project_id`; a project is anchored to a `workspaceRoot` filesystem path
@@ -142,12 +142,12 @@ The write side that callers actually use is the **OrchestrationEngine** service
 (`apps/server/src/orchestration/Services/OrchestrationEngine.ts`), whose
 reconstructed contract is:
 
-- `dispatch(command) -> Effect<{ sequence }, OrchestrationDispatchError>` — the
+- `dispatch(command) -> Effect<{ sequence }, OrchestrationDispatchError>` -- the
   single mutation entrypoint. It enqueues onto a single-writer command queue and
   awaits the result (`Layers/OrchestrationEngine.ts:318-327`).
-- `readEvents(fromSequenceExclusive, limit) -> Stream<OrchestrationEvent>` — thin
+- `readEvents(fromSequenceExclusive, limit) -> Stream<OrchestrationEvent>` -- thin
   pass-through to `eventStore.readFromSequence` (`Layers/OrchestrationEngine.ts:315-316`).
-- `streamDomainEvents -> Stream<OrchestrationEvent>` — a fresh PubSub
+- `streamDomainEvents -> Stream<OrchestrationEvent>` -- a fresh PubSub
   subscription per consumer for live fan-out (`Layers/OrchestrationEngine.ts:335-337`).
 
 Supporting durable repositories (each its own `Context.Service`, reconstructed):
@@ -198,7 +198,7 @@ The client-facing RPC surface over WebSocket is
 - **Atomicity**: `OrchestrationEngine.processEnvelope` wraps the whole
   command in `sql.withTransaction`: for each planned event it appends, folds it
   into the in-memory command read model, runs the projection pipeline, then
-  upserts the command receipt — all in one transaction
+  upserts the command receipt -- all in one transaction
   (`Layers/OrchestrationEngine.ts:175-219`). So the log append and the SQLite
   projections commit together (WAL, `Sqlite.ts:36`).
 - **Concurrency**: **single-writer per server**. Every command flows through one
@@ -287,14 +287,14 @@ The client-facing RPC surface over WebSocket is
   command id prefix and metadata (`inferActorKind`,
   `Layers/OrchestrationEventStore.ts:70-90`). Dedup/identity keys: `event_id`
   (UNIQUE) for the event, `command_id` for command idempotency.
-- **Chaining**: `causationEventId` links an event to the event that caused it —
+- **Chaining**: `causationEventId` links an event to the event that caused it --
   e.g. `thread.turn-start-requested` is stamped with the `thread.message-sent`
   event's id as its cause (`decider.ts:557`). `correlationId` is by design the
   originating `commandId` (`orchestration.ts:146-148`). Thread lineage is carried
   in payload fields (`parentThreadId`, `forkedFromThreadId`,
   `forkedUpToMessageId`), not in envelope pointers.
 - **Versioning**: there is **no explicit per-event schema-version field**.
-  Format evolution is handled additively by the schemas themselves —
+  Format evolution is handled additively by the schemas themselves --
   `withDecodingDefault` supplies defaults for fields added later (e.g.
   `runtimeMode`, `interactionMode`, `orchestration.ts:934-937`), and a
   pre-decoding transform absorbs the legacy `{provider}` → `{instanceId}` model
@@ -322,13 +322,13 @@ The client-facing RPC surface over WebSocket is
 
 ## Rewind, checkpoints, and fork
 
-- **Rewind/revert is expressed as appended events, interpreted at fold time —
+- **Rewind/revert is expressed as appended events, interpreted at fold time --
   never a destructive edit.** A `thread.checkpoint.revert` command produces a
   `thread.checkpoint-revert-requested` event (`decider.ts:649-669`); the
   CheckpointReactor restores the working tree and then dispatches
   `thread.revert.complete`, producing `thread.reverted` (`decider.ts:816-835`).
   The projector folds `thread.reverted` by *filtering* the view to entities whose
-  `checkpointTurnCount <= turnCount` — dropping later messages, activities,
+  `checkpointTurnCount <= turnCount` -- dropping later messages, activities,
   proposed plans, and checkpoints from the projection while the underlying events
   remain in the log (`projector.ts:665-714`). This is exactly the
   append-marker-replayed pattern (as opposed to Hermes's in-place flag mutation).
@@ -343,7 +343,7 @@ The client-facing RPC surface over WebSocket is
   is therefore stored/deduped by git (content-addressed refs), not inlined in the
   event log.
 - **Fork** is a two-phase, **copy-plus-lineage** operation into a new stream. A
-  `thread.fork` command must go through `ThreadForkService` — the plain decider
+  `thread.fork` command must go through `ThreadForkService` -- the plain decider
   explicitly rejects it (`decider.ts:264-269`). The service attempts a **native
   provider fork** first (Codex advertises `capabilities.nativeFork: true` and its
   `forkThread` returns a new provider thread id as the resume cursor,
@@ -376,7 +376,7 @@ The client-facing RPC surface over WebSocket is
 - **Parent delete**: `thread.deleted` triggers only that thread's runtime cleanup
   (stop provider session, close terminals with `deleteHistory: true`) via the
   ThreadDeletionReactor (`apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts:44-64`).
-  No cascade to child threads was found in the event/decider path — children keep
+  No cascade to child threads was found in the event/decider path -- children keep
   their `parentThreadId` and would be orphaned rather than cascade-deleted (see
   Open questions).
 
@@ -399,8 +399,8 @@ The client-facing RPC surface over WebSocket is
 - **Multi-host**: not a first-class path. The model assumes a single server
   process holding one local `state.sqlite` (single-writer command queue,
   `Layers/OrchestrationEngine.ts:96`, `309-310`). Remote *access* is a networking
-  concern — the server is exposed over Tailscale/SSH (the `tailscale` and `ssh`
-  packages, `docs/architecture/remote.md`) — but the database is never shared
+  concern -- the server is exposed over Tailscale/SSH (the `tailscale` and `ssh`
+  packages, `docs/architecture/remote.md`) -- but the database is never shared
   across hosts, and there is no distributed coordination or remote writeback.
 
 ## Interop with foreign session stores
@@ -433,7 +433,7 @@ several specific choices:
   transactional append+project step** is a working, coherent pattern
   (`decider.ts`, `projector.ts`, `Layers/OrchestrationEngine.ts:175-219`). It
   gives OCC "for free" via a unique `(aggregate_kind, stream_id, stream_version)`
-  index without a caller-supplied expected version — worth contrasting with an
+  index without a caller-supplied expected version -- worth contrasting with an
   explicit expected-version precondition, which would be needed the moment
   writers are no longer serialized by one process.
 - **Command receipts keyed by client-supplied `commandId`** are a clean,
@@ -448,18 +448,18 @@ several specific choices:
   in-place flag mutation.
 - **Two-tier custody** is the most transferable idea here: T3 owns the
   orchestration *facts* in its event log but does **not** own the model
-  transcript — it stores only an opaque resume handle and delegates to the
+  transcript -- it stores only an opaque resume handle and delegates to the
   provider. This suggests our Session Store can be the authoritative orchestration
   log while the heavy raw transcript lives elsewhere, provided the durable log
   records the resume handle and enough provenance to re-derive views.
-- **Cautions**: (1) **no retention or log-truncation/snapshotting** — the log
+- **Cautions**: (1) **no retention or log-truncation/snapshotting** -- the log
   grows unbounded and projection bootstrap is a full replay from each cursor;
   our design needs an explicit snapshot/retention story that theirs lacks. (2)
   **Fork is physical copy-plus-lineage into a new stream** (`decider.ts:283-320`),
-  not a shared-prefix reference — simple but O(history) per fork; our design
+  not a shared-prefix reference -- simple but O(history) per fork; our design
   could reference a shared event prefix instead. (3) Delete is soft in
   projections but events are retained forever, so "deleted" data is still fully
-  present in the log — a privacy/retention consideration we must decide
+  present in the log -- a privacy/retention consideration we must decide
   deliberately.
 
 ## Open questions

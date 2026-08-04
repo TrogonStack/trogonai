@@ -34,14 +34,14 @@ transcript is *append-dominant but mutable*: messages are almost always added by
 edited in place through three flag columns rather than being a pure immutable
 log:
 
-- `active INTEGER NOT NULL DEFAULT 1` — live vs. soft-deleted
+- `active INTEGER NOT NULL DEFAULT 1` -- live vs. soft-deleted
   (`hermes_state.py:1069`).
-- `compacted INTEGER NOT NULL DEFAULT 0` — summarized-away vs. normal
+- `compacted INTEGER NOT NULL DEFAULT 0` -- summarized-away vs. normal
   (`hermes_state.py:1070`).
 
 The two flags encode three durable states, spelled out in the code:
-`active=1` (live), `active=0, compacted=0` ("the user took it back" — rewind/undo),
-and `active=0, compacted=1` ("summarized away" — compaction-archived)
+`active=1` (live), `active=0, compacted=0` ("the user took it back" -- rewind/undo),
+and `active=0, compacted=1` ("summarized away" -- compaction-archived)
 (`hermes_state.py:5941-5946`, `7151-7156`). Rewind and compaction therefore
 mutate existing rows (`UPDATE ... SET active=0`) rather than appending markers, so
 the on-disk row set is authoritative and the "log" is reconstructed by filtering
@@ -69,7 +69,7 @@ What is authoritative vs. derived:
 - **Store scope**: one SQLite file per Hermes home/profile. Profiles are
   separated by `HERMES_HOME` (`get_hermes_home`, `hermes_constants.py:106-131`);
   there is no cwd- or project-encoded path in the key. All sessions for a profile
-  — CLI, gateway platforms, subagents, branches — live in the same `state.db` and
+  -- CLI, gateway platforms, subagents, branches -- live in the same `state.db` and
   are distinguished by columns, not directories.
 - **Primary key**: `sessions.id TEXT PRIMARY KEY` (`hermes_state.py:1000`).
 - **Id minting**: client-supplied, generated as
@@ -108,49 +108,49 @@ method opens its own cursor; all mutations go through `_execute_write`, which wr
 
 Session lifecycle:
 - `create_session(session_id, source, **kwargs) -> str`
-  (`hermes_state.py:3441`) — INSERT a `sessions` row (via `_insert_session_row`,
+  (`hermes_state.py:3441`) -- INSERT a `sessions` row (via `_insert_session_row`,
   `hermes_state.py:3294`, an UPSERT with `ON CONFLICT` merge).
-- `ensure_session(...)` (`hermes_state.py:4587`) — idempotent
+- `ensure_session(...)` (`hermes_state.py:4587`) -- idempotent
   create-or-touch used before the first append.
 - `end_session(session_id, end_reason)` / `reopen_session(session_id)`
-  (`hermes_state.py:3789`, `3807`) — set/clear `ended_at`, `end_reason`.
-- `promote_to_session_reset(...)` (`hermes_state.py:3816`) — compression-continuation bookkeeping.
+  (`hermes_state.py:3789`, `3807`) -- set/clear `ended_at`, `end_reason`.
+- `promote_to_session_reset(...)` (`hermes_state.py:3816`) -- compression-continuation bookkeeping.
 - `update_session_cwd / _meta / _model / _billing_route / set_session_title /
-  set_session_archived` (`hermes_state.py:3865, 4244, 4272, 4286, 4909, 4937`) —
+  set_session_archived` (`hermes_state.py:3865, 4244, 4272, 4286, 4909, 4937`) --
   in-place metadata mutation.
 
 Message write:
 - `append_message(session_id, role, content, ...) -> int`
-  (`hermes_state.py:5627`) — INSERT one message row, return autoincrement id,
+  (`hermes_state.py:5627`) -- INSERT one message row, return autoincrement id,
   bump session counters. The single normal write path.
 - `replace_messages(session_id, messages, active_only=False)`
-  (`hermes_state.py:5851`) — **destructive** DELETE-then-INSERT of the whole (or
+  (`hermes_state.py:5851`) -- **destructive** DELETE-then-INSERT of the whole (or
   live-only) transcript, one transaction. Used by /retry, /undo, /compress.
 - `archive_and_compact(session_id, compacted_messages) -> int`
-  (`hermes_state.py:5913`) — **non-destructive** soft-archive
+  (`hermes_state.py:5913`) -- **non-destructive** soft-archive
   (`active=0, compacted=1`) of live rows then INSERT the compacted set.
-- `set_latest_user_api_content(...)` (`hermes_state.py:5965`) — backfill the
+- `set_latest_user_api_content(...)` (`hermes_state.py:5965`) -- backfill the
   `api_content` sidecar onto the newest active user row.
 
 Message read:
 - `get_messages(session_id, include_inactive=False, limit, offset)`
-  (`hermes_state.py:5997`) — ordered by autoincrement `id` (insertion order).
+  (`hermes_state.py:5997`) -- ordered by autoincrement `id` (insertion order).
 - `get_messages_as_conversation(session_id, include_ancestors, include_inactive,
-  repair_alternation)` (`hermes_state.py:6334`) — OpenAI role/content format for
+  repair_alternation)` (`hermes_state.py:6334`) -- OpenAI role/content format for
   replay.
-- `resolve_resume_session_id(session_id) -> str` (`hermes_state.py:6245`) —
+- `resolve_resume_session_id(session_id) -> str` (`hermes_state.py:6245`) --
   redirect a resume target forward across the compression-continuation chain.
 - `get_resume_conversations / get_ancestor_display_prefix / get_conversation_root
   / _session_lineage_root_to_tip / get_compression_lineage`
-  (`hermes_state.py:6512, 6561, 6602, 6616, 7942`) — lineage walks.
+  (`hermes_state.py:6512, 6561, 6602, 6616, 7942`) -- lineage walks.
 
 History mutation (retroactive):
 - `rewind_to_message(session_id, target_message_id) -> dict`
-  (`hermes_state.py:6656`) — soft-delete (`active=0`) every row with
+  (`hermes_state.py:6656`) -- soft-delete (`active=0`) every row with
   `id >= target`, bump `rewind_count`.
 - `restore_rewound(session_id, since_message_id) -> int`
-  (`hermes_state.py:6743`) — undo a rewind (flip back to `active=1`).
-- `clear_messages(session_id)` (`hermes_state.py:8424`) — DELETE all rows for a session.
+  (`hermes_state.py:6743`) -- undo a rewind (flip back to `active=1`).
+- `clear_messages(session_id)` (`hermes_state.py:8424`) -- DELETE all rows for a session.
 
 Listing / search / count:
 - `list_sessions_rich(...) -> list` (`hermes_state.py:5171`),
@@ -170,8 +170,8 @@ Deletion / retention:
 
 Import / export:
 - `export_session / export_session_lineage / export_all`
-  (`hermes_state.py:7987, 7995, 8015`) — dict / JSONL shapes.
-- `import_sessions([...]) -> dict` (`hermes_state.py:8097`) — bounded restore
+  (`hermes_state.py:7987, 7995, 8015`) -- dict / JSONL shapes.
+- `import_sessions([...]) -> dict` (`hermes_state.py:8097`) -- bounded restore
   (caps at `hermes_state.py:1545-1549`).
 
 Consistency guarantees for all of the above: single writer connection guarded by a
@@ -187,8 +187,8 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
   (`replace_messages`) and compaction (`archive_and_compact`) are the only
   non-append writes and are single transactions.
 - **Ordering**: positional by `messages.id INTEGER PRIMARY KEY AUTOINCREMENT`
-  (`hermes_state.py:1051`). Reads order by `id`, not `timestamp`, deliberately —
-  "Ordered by AUTOINCREMENT id (true insertion order) rather than timestamp — see
+  (`hermes_state.py:1051`). Reads order by `id`, not `timestamp`, deliberately --
+  "Ordered by AUTOINCREMENT id (true insertion order) rather than timestamp -- see
   c03acca50 for the WSL2 clock-regression rationale" (`hermes_state.py:6011-6012`).
   `timestamp REAL` is stored but advisory.
 - **Durability / atomicity**: WAL journal mode with a DELETE-mode fallback for
@@ -216,12 +216,12 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
   swallows exceptions ("Session DB append_message failed: %s",
   `run_agent.py:2095-2096`). Idempotence/dedup is an **in-memory** intrinsic
   marker `_DB_PERSISTED_MARKER` stamped on each written dict
-  (`run_agent.py:1878-1889, 1970-1976, 2089`), *not* a durable dedup key — there is
+  (`run_agent.py:1878-1889, 1970-1976, 2089`), *not* a durable dedup key -- there is
   no unique constraint on message content, so a re-flush after a process restart
   that lost the marker could duplicate rows. The gateway path adds a bounded
   **in-memory retry queue** per session (`_dirty_transcripts`,
   `_MAX_PENDING_PER_SESSION`; drops oldest on overflow) with retry-on-failure and
-  FTS-rebuild recovery (`gateway/session.py:2600-2687`) — at-least-once with a
+  FTS-rebuild recovery (`gateway/session.py:2600-2687`) -- at-least-once with a
   bounded buffer, not a durable outbox.
 
 ## Read and resume path
@@ -246,7 +246,7 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
 - Pagination/bounds: `get_messages` accepts `limit`/`offset`
   (`hermes_state.py:5997-6002`); import caps bound restore size
   (`hermes_state.py:1545-1549`), but there is no hard cap on live transcript size
-  — growth is managed by compaction, below.
+  -- growth is managed by compaction, below.
 
 ## Listing, summaries, and search
 
@@ -259,7 +259,7 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
   (`hermes_state.py:5196-5213`). `compact_rows=True` omits the `system_prompt`
   blob from the SELECT to avoid copying tens of KB per row
   (`hermes_state.py:5221-5225`). No scale numbers are quoted in-source.
-- **Summary sidecar**: there is no separate summary file — the `sessions` row
+- **Summary sidecar**: there is no separate summary file -- the `sessions` row
   *is* the denormalized read model. It carries `title`, `started_at`, `ended_at`,
   `message_count`, `tool_call_count`, token totals, cost fields, `cwd`,
   `git_branch`, `git_repo_root`, `model`, `profile_name`, `archived`,
@@ -289,18 +289,18 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
 
 ## Entry/message structure and versioning
 
-- **Message row shape** (`hermes_state.py:1050-1072`): envelope-ish flat columns —
+- **Message row shape** (`hermes_state.py:1050-1072`): envelope-ish flat columns --
   `id` (autoincrement, the ordering + identity field), `session_id`, `role`,
   `content` (TEXT; multimodal lists are JSON-encoded via `_encode_content`),
   `tool_call_id`, `tool_calls` (JSON), `tool_name`, `effect_disposition`,
   `timestamp REAL`, `token_count`, `finish_reason`, `reasoning`,
   `reasoning_content`, `reasoning_details` (JSON), `codex_reasoning_items` /
-  `codex_message_items` (JSON — provider-specific reasoning payloads),
-  `platform_message_id` (external platform id, e.g. Telegram update_id — distinct
+  `codex_message_items` (JSON -- provider-specific reasoning payloads),
+  `platform_message_id` (external platform id, e.g. Telegram update_id -- distinct
   from the PK), `observed`, `active`, `compacted`, and `api_content` (the exact
   bytes sent to the API when they differ from `content`, a "byte-fidelity sidecar
   for prompt-cache-stable replay", `hermes_state.py:5660-5666`).
-- **Store interpretation**: the entry is **not opaque** — the store parses and
+- **Store interpretation**: the entry is **not opaque** -- the store parses and
   interprets it. It distinguishes message types by `role`/`tool_*`, JSON-encodes
   structured fields, scrubs lone surrogates sqlite3 cannot bind
   (`_scrub_surrogates`), and strips base64 images to a text summary before
@@ -337,7 +337,7 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
 - **Compaction is an upstream (agent) concern** that calls the store: the
   summary payload (`compacted_messages`) is produced by
   `trajectory_compressor.py` and handed to `archive_and_compact`. The durable
-  artifact it leaves is the flag flip plus the inserted summary rows — an in-place
+  artifact it leaves is the flag flip plus the inserted summary rows -- an in-place
   soft rewrite, not an external snapshot file or an appended marker line.
 - An **older compaction mode still exists**: ending the current session and
   **forking a continuation child** linked by `parent_session_id` with
@@ -348,7 +348,7 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
 - Resume behavior across the boundary: normal resume just loads the `active=1`
   set (post-compaction). Crossing back requires `include_inactive=True`, which
   reads the archived rows. There is no fold-time reconstruction from a raw log,
-  because there is no raw log — the archived rows are the history.
+  because there is no raw log -- the archived rows are the history.
 - `replace_messages` (`hermes_state.py:5851`) is the **destructive** alternative
   used by /retry, /undo, /compress: it DELETEs and reinserts, so it does not
   preserve pre-compaction history and is explicitly warned against for compaction.
@@ -440,7 +440,7 @@ ordering by autoincrement `id`; no expected-version precondition on any operatio
   guard against a known SQLite WAL-reset corruption bug that refuses to enable WAL
   on fresh files on vulnerable builds (`hermes_state.py:496-498, 530-560`).
   Cross-*host* is not a first-class path: no remote writeback, no distributed
-  coordination — remote/serverless deployment (Modal, Daytona, SSH) hibernates a
+  coordination -- remote/serverless deployment (Modal, Daytona, SSH) hibernates a
   single host's filesystem rather than sharing the DB across hosts. A separate
   `hermes_cli/active_sessions.py` tracks open sessions with lease ids and
   atomic-rename temp files (`active_sessions.py:162, 247`) for crash/liveness
@@ -452,7 +452,7 @@ Not applicable. Hermes does not read other agent products' native session stores
 to discover, import, or resume them. The only "Codex" / "Anthropic" references in
 scope are OAuth credential import for provider auth (`hermes_cli/auth_commands.py`),
 and provider-specific reasoning payloads persisted in Hermes's own message columns
-(`codex_reasoning_items`, `codex_message_items`, `hermes_state.py:1065-1066`) — not
+(`codex_reasoning_items`, `codex_message_items`, `hermes_state.py:1065-1066`) -- not
 foreign-store ingestion. Hermes's own import/export
 (`import_sessions`/`export_session`, `hermes_state.py:8097, 7987`) round-trips its
 own JSON/JSONL dump format only.
@@ -472,7 +472,7 @@ design is built on. Implications:
 - **It validates the read-model-as-denormalized-row pattern**: the `sessions` row
   is the listing/summary projection, maintained transactionally with the message
   insert, and search is a cleanly-separate rebuildable FTS index synced by
-  triggers — the same authoritative-vs-derived split our design draws, achieved
+  triggers -- the same authoritative-vs-derived split our design draws, achieved
   without a separate projection store. The FTS layout ratchet
   (`fts_storage_version` tracked independently of the schema version) is a useful
   precedent for versioning a derived index apart from the log.
@@ -485,17 +485,17 @@ design is built on. Implications:
   OCC on expected version and idempotent append by event id closes exactly these
   gaps.
 - **Fork is copy-plus-lineage** (full row copy + `parent_session_id`), not a
-  shared-prefix reference — simple and cache-friendly but O(history) in storage per
+  shared-prefix reference -- simple and cache-friendly but O(history) in storage per
   branch; it argues for our design keeping fork as lineage metadata over a shared
   event prefix rather than physical copy.
 - **Subagents as first-class sibling sessions with a `parent_session_id` link**
   matches ADR 0031's child-Session direction, and the `async_delegations` table is
   a concrete, well-thought-out **durable outbox with at-least-once delivery,
-  claims, and pid-based crash reconciliation** — the one genuinely event-log-shaped
+  claims, and pid-based crash reconciliation** -- the one genuinely event-log-shaped
   component here, and a good reference for how we express delegation-completion
   facts and their delivery lifecycle.
 - **Retention is a blunt product-invoked `prune_sessions(older_than_days=90)`
-  DELETE**, not a data-model-tied lifecycle policy — the same anti-pattern grok's
+  DELETE**, not a data-model-tied lifecycle policy -- the same anti-pattern grok's
   mtime janitor showed; our design should tie retention to the log/projection model
   rather than a periodic bulk DELETE of "ended" rows.
 

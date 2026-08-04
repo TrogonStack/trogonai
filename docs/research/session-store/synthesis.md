@@ -310,8 +310,8 @@ application.
 | --- | --- |
 | session-as-log (append-only, source of truth) | T3 Code, OpenCode (v2) |
 | session-as-log-of-immutable-snapshots (event-sourcing-adjacent, unit is a state chain not a message stream) | LangGraph |
-| session-as-log with looser discipline (append-only JSONL, no formal OCC contract; projector-contract rigor varies — Codex CLI's SQLite projection has an explicit rebuild/read-repair cursor) | Claude Agent SDK / Claude Code, Codex CLI, Gemini CLI, Grok Build |
-| session-as-directory (path/filename encodes identity; scope encoding varies — Codex CLI's path is time-sharded only, with cwd scope applied as a query-time filter, not a path segment) | Claude Agent SDK, Codex CLI, Gemini CLI, Grok Build, OpenCode (legacy) |
+| session-as-log with looser discipline (append-only JSONL, no formal OCC contract; projector-contract rigor varies -- Codex CLI's SQLite projection has an explicit rebuild/read-repair cursor) | Claude Agent SDK / Claude Code, Codex CLI, Gemini CLI, Grok Build |
+| session-as-directory (path/filename encodes identity; scope encoding varies -- Codex CLI's path is time-sharded only, with cwd scope applied as a query-time filter, not a path segment) | Claude Agent SDK, Codex CLI, Gemini CLI, Grok Build, OpenCode (legacy) |
 | session-as-row (mutable, single record + child table) | Goose, Hermes |
 | session-as-mutable-relational-record (flag-mutation instead of events) | Hermes (Goose achieves a similar visibility effect only via a full delete+re-insert rewrite of the message table, not an in-place flag mutation) |
 | session-as-document (whole-file rewrite, last-write-wins per id) | Gemini CLI (legacy `.json`) |
@@ -348,10 +348,10 @@ each with the industry's answer where one exists:
    compaction, and revert are new appended events, never edits or
    deletes.** Industry's answer: T3 Code and OpenCode enforce this
    structurally; every JSONL product does it by convention only; Goose and
-   Hermes are the cautionary counterexamples — Goose via DELETE+re-INSERT
+   Hermes are the cautionary counterexamples -- Goose via DELETE+re-INSERT
    (`replace_conversation`), Hermes via both a destructive DELETE+re-INSERT
    (`replace_messages`, used by /retry, /undo, /compress) and a
-   non-destructive flag-flip (`archive_and_compact`) — both flagged in
+   non-destructive flag-flip (`archive_and_compact`) -- both flagged in
    their own dossiers as crash-risk and history-loss hazards.
 
 2. **Separate identity from order: an opaque event/session id for
@@ -421,7 +421,7 @@ each with the industry's answer where one exists:
 9. **Event payloads should be schema-validated at the storage boundary,
    not treated as opaque bytes.** Industry's answer: split. T3 Code and
    OpenCode validate every event type through a schema library on both
-   append and read — T3 Code via Effect Schema, though without an explicit
+   append and read -- T3 Code via Effect Schema, though without an explicit
    per-event-type version field, handling evolution additively rather than
    by branching on a version number; Claude Agent SDK deliberately keeps
    entries opaque (`{type: string}`) to maximize adapter portability.
@@ -432,10 +432,10 @@ each with the industry's answer where one exists:
 
 The one-line reading of the whole study: the industry has already proven
 the event-sourced session store pattern is implementable and exercised in
-real, evolving codebases at two independent shops (T3 Code, OpenCode) —
+real, evolving codebases at two independent shops (T3 Code, OpenCode) --
 though for OpenCode specifically, the evidence comes from a private fork
 mid-migration where which store (legacy filesystem vs. v2) is authoritative
-in the shipped distribution remains an open question — and approximated it
+in the shipped distribution remains an open question -- and approximated it
 everywhere else with append-only JSONL, which means our job is not to
 invent the pattern but to close the two gaps nobody has closed yet:
 subagent cascade semantics and retention on an unbounded log.

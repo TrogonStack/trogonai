@@ -20,11 +20,11 @@ Authoritative anchors:
 > Scope note. Codex has **two persistence tiers that both ship in the same
 > binary and are kept in sync by design**:
 >
-> 1. **The rollout JSONL log** — the durable source of truth. One append-only
+> 1. **The rollout JSONL log** -- the durable source of truth. One append-only
 >    `.jsonl` file per thread under `~/.codex/sessions/YYYY/MM/DD/`
 >    (`codex-rs/rollout/src/recorder.rs:1536-1555`). This is unambiguously
 >    session-as-log.
-> 2. **A derived SQLite `state` database** — a rebuildable index/projection of
+> 2. **A derived SQLite `state` database** -- a rebuildable index/projection of
 >    the JSONL logs (thread metadata for listing, plus an optional per-item
 >    "thread history" projection). It is backfilled and read-repaired from the
 >    logs; the logs win on any discrepancy
@@ -48,7 +48,7 @@ own doc comment states it plainly (`codex-rs/rollout/src/recorder.rs:75-82`):
 /// $ jq -C . ~/.codex/sessions/rollout-2025-05-07T17-24-21-...-....jsonl
 ```
 
-Each line is a `RolloutLine` — a timestamp, an optional monotonic `ordinal`, and
+Each line is a `RolloutLine` -- a timestamp, an optional monotonic `ordinal`, and
 a flattened, tagged `RolloutItem` payload
 (`codex-rs/protocol/src/protocol.rs:3386-3393`):
 
@@ -146,9 +146,9 @@ There is no *pluggable* store trait exposed to third parties; the store is the
 `codex-rollout` crate's public surface plus the `codex-state` SQLite runtime.
 Reconstructed from the source, the effective contract is:
 
-**Rollout log (authoritative), `RolloutRecorder` — `codex-rs/rollout/src/recorder.rs`:**
+**Rollout log (authoritative), `RolloutRecorder` -- `codex-rs/rollout/src/recorder.rs`:**
 
-- `RolloutRecorder::new(params)` — open a recorder. `params` is either
+- `RolloutRecorder::new(params)` -- open a recorder. `params` is either
   `Create { session_id, conversation_id, forked_from_id, parent_thread_id,
   source, thread_source, originator, base_instructions, dynamic_tools,
   history_mode, subagent_history_start_ordinal, ... }` or `Resume { path }`
@@ -156,37 +156,37 @@ Reconstructed from the source, the effective contract is:
   file creation (writes the `SessionMeta` line lazily on first flush);
   Resume reopens the existing file for append and recovers the ordinal cursor
   (`recorder.rs:856-868`).
-- `record_canonical_items(&[RolloutItem]) -> io::Result<()>` — queue items for
+- `record_canonical_items(&[RolloutItem]) -> io::Result<()>` -- queue items for
   the background writer (append). Non-blocking; sends `RolloutCmd::AddItems`
   (`recorder.rs:909-921`).
-- `persist() -> io::Result<()>` — materialize the file and flush all buffered
+- `persist() -> io::Result<()>` -- materialize the file and flush all buffered
   items; idempotent, retryable (`recorder.rs:927-...`, `RolloutCmd::Persist`).
-- `flush()` — barrier that returns once buffered writes are on disk
+- `flush()` -- barrier that returns once buffered writes are on disk
   (`RolloutCmd::Flush`, `recorder.rs:1616-1621`).
-- `shutdown() -> io::Result<()>` — drain then stop the writer task
+- `shutdown() -> io::Result<()>` -- drain then stop the writer task
   (`recorder.rs:1050-1072`).
-- `get_rollout_history(path) -> InitialHistory` — full ordered read of a file
+- `get_rollout_history(path) -> InitialHistory` -- full ordered read of a file
   into a `Resumed` history (`recorder.rs:1030-1045`).
 - `list_threads(state_db, config, page_size, cursor, sort_key, sort_direction,
   allowed_sources, model_providers, cwd_filters, default_provider, search_term)
-  -> ThreadsPage` — paginated listing (`recorder.rs:295-322`).
-- Free function `append_rollout_item_to_path(path, &RolloutItem)` — append a
+  -> ThreadsPage` -- paginated listing (`recorder.rs:295-322`).
+- Free function `append_rollout_item_to_path(path, &RolloutItem)` -- append a
   single item to an *unloaded* thread's file (metadata updates), recovering the
   ordinal first (`recorder.rs:1819-1827`).
 
-**SQLite state runtime (derived), `StateDbHandle = Arc<codex_state::StateRuntime>` — `codex-rs/rollout/src/state_db.rs`:**
+**SQLite state runtime (derived), `StateDbHandle = Arc<codex_state::StateRuntime>` -- `codex-rs/rollout/src/state_db.rs`:**
 
-- `init(config) -> Option<StateDbHandle>` / `try_init(config)` — open the
+- `init(config) -> Option<StateDbHandle>` / `try_init(config)` -- open the
   SQLite runtime, run migrations, kick off rollout-metadata backfill
   (`state_db.rs:44-74`).
-- `list_threads_db(...)` — list thread ids/metadata straight from SQLite for
+- `list_threads_db(...)` -- list thread ids/metadata straight from SQLite for
   parity checks and fast listing (`state_db.rs:306`, `363`).
-- `reconcile_rollout_items(...)` — "Reconcile rollout items into SQLite,
+- `reconcile_rollout_items(...)` -- "Reconcile rollout items into SQLite,
   falling back to scanning the rollout file" (`state_db.rs:495`).
-- `read_repair_rollout_path(...)` — recompute a thread's metadata from its file
+- `read_repair_rollout_path(...)` -- recompute a thread's metadata from its file
   and upsert if SQLite diverged (fast path = path/cwd/archived fixups; slow path
   = full rebuild from rollout contents) (`state_db.rs:574-620`).
-- `ctx.upsert_thread(&ThreadMetadata)` — write one listing row
+- `ctx.upsert_thread(&ThreadMetadata)` -- write one listing row
   (`state_db.rs:607`).
 
 The reader/lineage side is the `codex-thread-store` crate
@@ -242,14 +242,14 @@ from either tier with the log as the tiebreaker.
   session-meta, compaction markers, turn-context, world-state, and
   inter-agent-communication are always persisted; response items are filtered by
   `should_persist_response_item` (messages, reasoning, tool/function calls and
-  outputs, web-search, image-gen, compaction — yes; `AdditionalTools`,
-  `CompactionTrigger`, `Other` — no) (`policy.rs:39-59`); protocol `EventMsg`s
+  outputs, web-search, image-gen, compaction -- yes; `AdditionalTools`,
+  `CompactionTrigger`, `Other` -- no) (`policy.rs:39-59`); protocol `EventMsg`s
   are filtered by `should_persist_event_msg` (`policy.rs:87-...`).
 - **Delivery semantics** to the store are **best-effort with in-process retry**,
   not at-least-once across crashes: items sit in `pending_items` and are drained
   on flush/persist/shutdown; if the process dies with items still buffered and
   the file unwritten, those items are lost (nothing is journaled outside the file
-  itself). There is no client-side dedup id on the store — dedup, where it
+  itself). There is no client-side dedup id on the store -- dedup, where it
   matters, happens at resume/reconstruction by interpreting the log.
 
 ## Read and resume path
@@ -292,16 +292,16 @@ from either tier with the log as the tiebreaker.
   `list_threads_with_db_fallback` (`recorder.rs:424-...`) serves listings from
   the SQLite `threads` index when it can, and falls back to
   `page_from_filesystem_scan` (`recorder.rs:1139`, scan driver near
-  `recorder.rs:1268-1312`) — a bounded, reverse-chronological walk of the
-  `sessions/YYYY/MM/DD` tree — when the DB is unavailable or a filtered/uncached
+  `recorder.rs:1268-1312`) -- a bounded, reverse-chronological walk of the
+  `sessions/YYYY/MM/DD` tree -- when the DB is unavailable or a filtered/uncached
   listing is requested. The scan is explicitly capped: `scan_page_size =
   page_size * 8` clamped to `[256, 2048]`, and it reports `num_scanned_files` and
   a `reached_scan_cap` flag (`recorder.rs:1268-1312`). This is the stated scale
-  guard — the scan does bounded work and surfaces when it truncated.
+  guard -- the scan does bounded work and surfaces when it truncated.
 - **Repair modes**: listings run either `ScanAndRepair` (scan the files and
   reconcile SQLite) or `StateDbOnly` (trust the DB), chosen per call site
   (`recorder.rs:286-290`, `320`, `352`). Relationship-filtered listings "treat
-  persisted state as authoritative" (`state_db.rs:430`) — i.e. use the DB
+  persisted state as authoritative" (`state_db.rs:430`) -- i.e. use the DB
   without a rescan.
 - **Summary sidecar = the `threads` row.** The SQLite `threads` table is the
   denormalized read model: `rollout_path`, `created_at`, `updated_at`, `source`,
@@ -318,7 +318,7 @@ from either tier with the log as the tiebreaker.
   `search_rollout_paths`, `first_rollout_content_match_snippet`,
   `rollout/src/lib.rs:78-79`) plus a `search_term` listing parameter
   (`recorder.rs:307`). Search is over rollout content/paths (content scan +
-  metadata columns), not a separate FTS/vector engine — no `CREATE VIRTUAL
+  metadata columns), not a separate FTS/vector engine -- no `CREATE VIRTUAL
   TABLE ... fts5` exists in the state migrations.
 
 ## Entry/message structure and versioning
@@ -332,12 +332,12 @@ from either tier with the log as the tiebreaker.
   git: Option<GitInfo> }` (`protocol.rs:3154-3160`), with a custom
   `Deserialize` that backfills `session_id` from `id` for older files
   (`protocol.rs:3162-3189`). `SessionMeta` is a large, additive struct
-  (`protocol.rs:3063-3121`) — most new fields are `#[serde(default,
+  (`protocol.rs:3063-3121`) -- most new fields are `#[serde(default,
   skip_serializing_if = ...)]`, which is the primary evolution mechanism.
 - **Payload shapes**: `ResponseItem` (the model-facing item; message, reasoning,
-  tool/function call + output, web-search, image-gen, compaction variants —
+  tool/function call + output, web-search, image-gen, compaction variants --
   `policy.rs:39-59`), `TurnContextItem` (per-turn cwd, approval/sandbox/permission
-  policy, model, effort, collaboration mode — `protocol.rs:3269-3313`),
+  policy, model, effort, collaboration mode -- `protocol.rs:3269-3313`),
   `CompactedItem` (the compaction marker; see below), `WorldStateItem`
   (`full` snapshot vs `patch`, `protocol.rs:3209-3224`), and `EventMsg`
   (protocol events like `TurnComplete`, `TurnAborted`, `ThreadRolledBack`).
@@ -347,11 +347,11 @@ from either tier with the log as the tiebreaker.
   a store-level entry id; reconstruction interprets the *stream* (compaction
   checkpoints, rollback counters) to derive the surviving history.
 - **Versioning**: two mechanisms. (1) **Additive serde defaults + legacy
-  sniffing** — new fields default and are skipped when absent; the deserializer
+  sniffing** -- new fields default and are skipped when absent; the deserializer
   patches missing `session_id`, strips legacy "ghost snapshot" lines
   (`recorder.rs:1090-1111`), and rejects unknown `history_mode` values
   (`reject_unknown_thread_history_mode`, `recorder.rs:1075-1088`). (2) **A
-  `history_mode` ratchet** — `ThreadHistoryMode::{Legacy, Paginated}` changes
+  `history_mode` ratchet** -- `ThreadHistoryMode::{Legacy, Paginated}` changes
   whether records carry ordinals and whether the paginated SQLite projection
   applies (`ordinal.rs:22-28`). (3) **SQLite schema migrations** are a
   forward-only numbered set (`state/migrations/0001..0043`, plus separate
@@ -373,7 +373,7 @@ from either tier with the log as the tiebreaker.
   `replacement_history` field is the compacted (summarized) history that replaces
   the pre-compaction body for the model. On resume, reconstruction scans backward
   to the newest `Compacted` with a `replacement_history`, uses it as the base,
-  and replays only the tail after it (`rollout_reconstruction.rs:156-186`) — so
+  and replays only the tail after it (`rollout_reconstruction.rs:156-186`) -- so
   crossing a compaction boundary means "start from the summary, then apply
   everything appended since," while the original pre-compaction lines remain in
   the file.
@@ -391,13 +391,13 @@ from either tier with the log as the tiebreaker.
   as an `EventMsg::ThreadRolledBack { num_turns }` line; reconstruction, scanning
   in reverse, turns it into "skip the next N user-turn segments we finalize"
   (`rollout_reconstruction.rs:144-146`, `188-191`). Nothing is deleted from the
-  file — the rolled-back turns remain durable and are simply excluded from the
+  file -- the rolled-back turns remain durable and are simply excluded from the
   replayed model history. This is the append-marker-interpreted-at-replay pattern.
 - **Fork is copy-plus-lineage with a shared-prefix pointer.** A forked thread
   gets its own new `thread_id` and a `SessionMeta.forked_from_id` pointing at the
   source (`protocol.rs:3068`), and resume distinguishes `InitialHistory::Forked`
   from `Resumed` (`protocol.rs:2560`). Physically, forks are stitched via
-  `SessionMeta.history_base: Option<HistoryPosition>` — "Exclusive prefix of
+  `SessionMeta.history_base: Option<HistoryPosition>` -- "Exclusive prefix of
   another paginated rollout inherited by this thread" (`protocol.rs:3107-3109`).
   The `codex-thread-store` `RolloutLineage` follows those `history_base` pointers
   to assemble the ordered physical segments of a logical forked history, guarding
@@ -406,8 +406,8 @@ from either tier with the log as the tiebreaker.
   full copy in the common (paginated) case.
 - **File-state / environment checkpoints**: there is no full working-tree
   snapshot store here. What is checkpointed durably per turn is *policy/context*
-  state — `TurnContextItem` (cwd, approval/sandbox/permission profile, model,
-  effort) and `WorldStateItem` — plus `GitInfo` (commit hash, branch, remote URL)
+  state -- `TurnContextItem` (cwd, approval/sandbox/permission profile, model,
+  effort) and `WorldStateItem` -- plus `GitInfo` (commit hash, branch, remote URL)
   captured into `SessionMeta` at session start (`recorder.rs:1791-1803`). Legacy
   "ghost snapshot" response items existed but are now stripped on load
   (`recorder.rs:1090-1111`).
@@ -425,7 +425,7 @@ from either tier with the log as the tiebreaker.
   `ThreadsPage` (`recorder.rs:1908-1917`) and stored via the
   `thread_spawn_edges` table (`state/migrations/0021_thread_spawn_edges.sql`).
 - **Inherited vs isolated history**: a subagent can *inherit* a bounded prefix of
-  the parent's context via `subagent_history_start_ordinal` — "First rollout
+  the parent's context via `subagent_history_start_ordinal` -- "First rollout
   ordinal that belongs to this subagent's own projected history. Earlier rollout
   records are inherited model context and stay out of child turn/item projection"
   (`protocol.rs:3110-3115`). So the child's own transcript is isolated from that
@@ -484,8 +484,8 @@ optional per-turn/per-item read model with an explicit
 architecturally the same CQRS shape our event-sourced Session Store targets,
 implemented on plain files rather than a database log. Salient lessons:
 
-- **A file log can still be event-sourced.** The pattern — authoritative
-  append-only log + read-repaired SQL projections + a projection cursor — does
+- **A file log can still be event-sourced.** The pattern -- authoritative
+  append-only log + read-repaired SQL projections + a projection cursor -- does
   not require a database as the log. But it *does* require the discipline Codex
   encodes: a dense per-record `ordinal`, byte-offset checkpoints for the
   projector, and a read-repair path that treats the log as the tiebreaker
@@ -502,20 +502,20 @@ implemented on plain files rather than a database log. Salient lessons:
   primitive we should mirror, together with cycle detection.
 - **Subagents as first-class sibling logs with an inherited-prefix ordinal**
   (`subagent_history_start_ordinal`, `parent_thread_id`, `thread_spawn_edges`) is
-  a clean way to isolate a child transcript while sharing inherited context —
+  a clean way to isolate a child transcript while sharing inherited context --
   better than nesting child entries in the parent log.
 - **UUIDv7 client-minted ids** give time-ordered identity without a server
   round-trip, and the filename encodes both timestamp and id for zero-DB
   discovery. Our design can keep server-authoritative ids but should note the
   value of time-ordered ids for listing.
-- **Cautions**: (1) **Durability is best-effort** — items buffered in memory are
+- **Cautions**: (1) **Durability is best-effort** -- items buffered in memory are
   lost on a hard crash before flush; there is no write-ahead journal outside the
   file, and no `fsync` on the hot path. Our store should decide its durability
-  contract explicitly. (2) **No expected-version/OCC on append** — Codex relies
+  contract explicitly. (2) **No expected-version/OCC on append** -- Codex relies
   on single-writer-per-thread, which does not generalize to multi-writer or
   multi-host; our design wants an expected-position precondition. (3) **No
-  retention or log truncation** — logs grow unbounded and projection rebuild is a
-  full file rescan; we need a snapshot/retention story. (4) **Single-host only** —
+  retention or log truncation** -- logs grow unbounded and projection rebuild is a
+  full file rescan; we need a snapshot/retention story. (4) **Single-host only** --
   there is no cross-host coordination; multi-host is out of scope for this store
   and would need to be designed in, not retrofitted.
 
