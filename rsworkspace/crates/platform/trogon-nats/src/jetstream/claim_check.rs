@@ -177,10 +177,6 @@ impl<P, S> ClaimCheckPublisher<P, S> {
             max_payload: Arc::new(max_payload),
         }
     }
-
-    pub fn bucket(&self) -> &ClaimBucket {
-        &self.bucket
-    }
 }
 
 fn strip_claim_headers(headers: HeaderMap) -> HeaderMap {
