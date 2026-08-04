@@ -166,21 +166,38 @@ to the durable session.
    schemas, on-disk layouts, official repos. Secondary sources only to
    triangulate. When the source is a repository, pin the exact commit and cite
    `path:line` for each claim.
-2. Capture each exact quote as a checked-in source excerpt. Record its direct
+2. **Cite repo-root-relative paths, not bare filenames.** Write
+   `crates/agent/src/db.rs:671`, not `db.rs:671`. Large trees hold many files
+   with the same basename (Zed has three `db.rs` and three `migrations.rs`;
+   Pi has ten `types.ts`), and a bare basename cannot be mechanically resolved
+   by a later auditor, which is exactly when the citation matters most. A
+   short form is acceptable only for repeat references within the same section
+   *after* the full path has appeared there, and only when that basename is
+   unique in the tree. Prefer the `:123` bare-line form for repeats within a
+   section that has already named one file.
+3. Capture each exact quote as a checked-in source excerpt. Record its direct
    URL or repo `path:line`, document section or repository symbol, source
    version or commit when available, and retrieval date. Also record an
    archive or snapshot URL when one exists and a content digest when the source
    publishes or permits one. These evidence records must remain auditable if
    the live URL changes.
-3. Record the retrieval date with `date +%F`; never guess it.
-4. Stay on the operational storage model. Ignore pricing, marketing claims,
+4. **Quotation marks mean transcribed, never summarized.** If text sits inside
+   quotes, it must match the source character for character, including its
+   punctuation. Tightening a comment while leaving the quotes on it produces a
+   claim that survives every mechanical check and is still false: a Mastra
+   default-throw message was rendered as "this is likely a bug -- all adapters
+   should implement this" when the source reads "This is likely a bug - all
+   Mastra storage adapters should implement resource support." Paraphrase
+   freely, but then drop the quotes and cite the line.
+5. Record the retrieval date with `date +%F`; never guess it.
+6. Stay on the operational storage model. Ignore pricing, marketing claims,
    and features unrelated to how sessions are persisted, resumed, listed, and
    retired.
-5. Fill the product skeleton sections in the order the product's model makes
+7. Fill the product skeleton sections in the order the product's model makes
    natural; omit a section only when the product genuinely has no such concept,
    and say so. Put anything the sources leave unanswered under **Open
    questions**.
-6. Where a conclusion here would differ from an accepted record in the
+8. Where a conclusion here would differ from an accepted record in the
    [ADR index](../../adr/index.md), the ADR is authoritative; note the
    difference rather than overriding it.
 

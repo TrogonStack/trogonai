@@ -24,7 +24,7 @@ Star counts deliberately do not appear below. They measure product adoption,
 not whether the storage format survived contact with reality. Amazon Q CLI
 has the fewest stars on this list and one of the most-migrated schemas.
 
-## Wave 1 — mature stores that speak to both open gaps
+## Wave 1 -- mature stores that speak to both open gaps
 
 | Product | Repo @ pinned commit | License | Why first |
 | --- | --- | --- | --- |
@@ -34,7 +34,7 @@ has the fewest stars on this list and one of the most-migrated schemas.
 | Zed | `zed-industries/zed` @ `4aad57fd1f00` | Per-crate Apache-2.0 + GPL | Oldest codebase on the list, `sqlez` domain migrations with an explicit backfill-key pattern, and the only store whose schema is ACP-shaped. Cross-reference the ACP corpus |
 | Continue | `continuedev/continue` @ `5522c6f44ca0` | Apache-2.0 | Ships legacy-format filtering in the read path, which is direct evolution evidence, and its per-session-file plus `sessions.json` index is a worked index-drift failure mode |
 
-## Wave 2 — mature stores, narrower lesson
+## Wave 2 -- mature stores, narrower lesson
 
 | Product | Repo @ pinned commit | License | Why |
 | --- | --- | --- | --- |
@@ -43,7 +43,7 @@ has the fewest stars on this list and one of the most-migrated schemas.
 | Letta | `letta-ai/letta` @ `ff19ffeafeb5` | Apache-2.0 | MemGPT lineage, longest-running attempt at separating agent state from the message log, and an archival tier that is a real retention answer rather than an absence of one |
 | Aider | `Aider-AI/aider` @ `5dc9490bb35f` | Apache-2.0 | Mature product, deliberately thin store. Expect a low maturity score despite the product's age; the finding is what a widely used tool chose *not* to persist |
 
-## Wave 3 — younger stores and framework abstractions
+## Wave 3 -- younger stores and framework abstractions
 
 | Product | Repo @ pinned commit | License | Why |
 | --- | --- | --- | --- |
@@ -52,14 +52,14 @@ has the fewest stars on this list and one of the most-migrated schemas.
 | AWS Strands | `strands-agents/harness-sdk` @ `23541039fa1f` | Apache-2.0 | Interface-first `session/` module with file and S3 repositories. Note the repo redirect from `sdk-python`; code lives under `strands-py/src/strands/session/` |
 | Mastra | `mastra-ai/mastra` @ `9e1dad8f7b1c` | Apache-2.0 with `ee/` carve-out | Thread and message shape held constant across seven backends. Evidence about which parts of a session model are backend-independent |
 
-## Wave 4 — thin stores, short entries
+## Wave 4 -- thin stores, short entries
 
 | Product | Repo @ pinned commit | License | Why |
 | --- | --- | --- | --- |
 | SWE-agent | `SWE-agent/SWE-agent` @ `3ea751c087f3` | MIT | `.traj` trajectory files. Benchmark-driven rather than resume-driven, which makes it a clean contrast case for what a session is *for* |
 | Void | `voideditor/void` @ `b3166e7ef2ae` | Apache-2.0 | Persistence layer not yet located; last commit 2026-06-02. Timebox it, and if there is no coherent store, record that as the finding and stop |
 
-## Wave 5 — forks, delta-only
+## Wave 5 -- forks, delta-only
 
 Do not write full dossiers. Answer one question: what diverged from
 upstream's store, with paths. "Nothing diverged" is a complete and useful
@@ -96,6 +96,161 @@ timeboxed before it consumes a full research slot.
 | Void | Needs discovery. Timebox and drop if nothing coherent exists |
 | Roo Code, Kilo Code, Qwen Code | Diff against upstream's paths above |
 
+## Completed
+
+**Wave 1, dossiers written and verified**: Cline, Continue, OpenHands, Pi, Zed.
+
+Verification was mechanical then manual, because the two catch different
+errors. Mechanically, every `path:line` in each dossier's prose was resolved
+against the pinned tree: 434 citations across the five, with no unresolvable
+path in any of them. Manually, each dossier's load-bearing claims were then
+read back against source, because a line number that resolves says nothing
+about whether the line supports the claim attached to it, and that is the
+failure mode a citation checker cannot see.
+
+That manual pass changed three things, which is the argument for doing it:
+
+- Zed's `sqlez` ratchet was described as content-hashed. It stores each
+  migration's full text and compares it after `sqlformat` normalization, with
+  an escape-hatch callback. Corrected, because "hashed" would have implied a
+  cheaper drift check than the one that exists.
+- Zed's subagent cascade was described as breadth-first. The code pops from
+  the back of a `frontier` vector, so it is depth-first. Corrected. The
+  traversal order does not matter for delete-everything semantics, but the
+  claim should still be true.
+- Cline's cascade delete was described as a guarantee against orphaning. It is
+  guarded by `if (!row.isSubagent)` and does not recurse, so it holds only
+  because the graph is in practice one level deep. Added, because the
+  distinction between a cascade that is transitive and one that merely looks
+  transitive on a flat graph is exactly what wave 1 was commissioned to find.
+
+One prompt defect surfaced and was fixed before wave 2 could inherit it:
+dossiers cited bare basenames (`db.rs:671`), which cannot be mechanically
+resolved in trees holding three `db.rs` and three `migrations.rs`, or ten
+`types.ts`. The stage-one prompt now requires repo-root-relative citations.
+
+**Waves 2 through 4, dossiers written and verified**: Aider, Amazon Q
+Developer CLI, AWS Strands, Crush, Google ADK, Letta, OpenAI Agents SDK,
+SWE-agent, Void.
+
+**Wave 5, fork deltas written and verified**: Roo Code, Kilo Code, Qwen Code.
+
+Both verification layers ran on all of these. The mechanical layer found and
+fixed real citation defects rather than merely passing: Amazon Q shipped 18
+unresolvable citations across two different files both named `mod.rs` in a tree
+holding 43 of them, plus four more split between two files named
+`checkpoint.rs`, all now fully qualified; Letta cited an Alembic revision under
+an elided filename and gave a line range 105 lines past the end of
+`summarizer.py`. The bare-basename defect therefore survived the stage-one
+prompt fix in agents working from long context, which is worth knowing: the
+rule needs enforcement, not just statement.
+
+The manual layer again found what the mechanical layer structurally cannot,
+this time in the Kilo Code delta, and the corrections mattered more than wave
+1's:
+
+- Kilo was credited with authoring a recursive cascade delete. The recursion
+  carries no `// kilocode_change` marker, so it arrived with the vendored
+  OpenCode core. Re-attributed, because crediting it to Kilo would have
+  double-counted one upstream's evidence as two independent data points.
+- The same delta asserted Roo Code has "no cascade-delete subsystem of its
+  own". Roo recurses over `childIds` at
+  `src/core/webview/ClineProvider.ts:1747-1762`, which the Roo delta had
+  already established as the corpus's cleanest counter-example on cascade
+  semantics. Corrected, and the two deltas now agree.
+- The delta recommended cross-checking Kilo's engine against an OpenCode
+  dossier "if this corpus later adds" one. The corpus already had one.
+  Corrected to point at it, with the caveat that the two are pinned at
+  different upstream generations, so a diff between them may be version skew
+  rather than a Kilo patch.
+- One flagged open question was resolved rather than carried: `SessionV2` is
+  neither a parallel engine nor an in-progress rewrite, it is a dependency of
+  the engine the report treats as authoritative.
+
+A second prompt defect surfaced during the stage-two calibration batch (Cline,
+OpenHands, Zed) and was fixed before the remaining comparisons were
+commissioned. The comparison skeleton titled a section "The two open gaps",
+which reads as though subagent cascade and retention are unresolved in *our*
+design. They are unresolved in the industry; ADR#0035 decisions 6 and 7 take
+detailed positions on both. All three calibration documents got the substance
+right and tested the decisions properly, so the defect was latent rather than
+realized, but the heading would have propagated to twelve more documents and
+misled anyone skimming. The section is now "The two gaps the industry has not
+closed", and the prompt states outright that writing it as though we have no
+position is the single most likely way to get a comparison wrong.
+
+**Stage-two comparisons written and verified**: Aider, Amazon Q Developer CLI,
+AWS Strands Agents, Continue, Crush, Google ADK, Letta, Mastra, OpenAI Agents
+SDK, Pi, SWE-agent, Void, on top of the fx reference implementation and the
+Cline, OpenHands, and Zed calibration batch. The prompt fix above held: all
+sixteen use the corrected heading and test decisions 6 and 7 rather than
+presenting our design as having a hole.
+
+Mastra scores 11/12, the corpus's joint-highest store maturity alongside Letta,
+and it is the first product whose evidence is a set of backends disagreeing with
+each other: four adapters reach four different atomicity conclusions from one
+shared abstract interface, from a real Postgres transaction down to DynamoDB's
+sequential writes plus a rollback that can itself fail and is logged and
+swallowed. That disagreement is the finding, not a defect in any one adapter.
+
+Both layers ran on every one. Three defect classes recurred often enough to be
+worth naming, and the third is new to stage two:
+
+- The bare-basename defect survived a second prompt statement. Amazon Q's
+  comparison reproduced the exact defect already fixed in its own dossier, two
+  bare `mod.rs` citations in a tree holding 148 candidates, and Pi's comparison
+  shipped four bare `types.ts` and one bare `messages.ts` in a tree holding ten
+  and two respectively. Stating the rule twice is not enforcement; the checker
+  is.
+- Right line number, wrong file. Aider's comparison attributed
+  `self.aider_commit_hashes = set()` to `aider/commands.py:349`, which is an
+  unrelated `/commit` dirty check; the assignment is at
+  `aider/coders/base_coder.py:349`. Pi's comparison attributed a tree-entry
+  envelope to `packages/coding-agent/src/core/types.ts:375-380`, a path that
+  does not exist: `SessionTreeEntryBase` is at
+  `packages/agent/src/harness/types.ts:375-380` and the CLI's own
+  `SessionEntryBase` is in `session-manager.ts`. Both resolve mechanically only
+  if the checker is not told which tree to look in, and neither is visible
+  without opening the file.
+- An absence established against a file that does not exist. Pi's comparison
+  supported a recommendation with "zero matches for `retainedTail` in
+  `packages/coding-agent/src/core/compaction.ts`", but `compaction.ts` is a
+  directory there. The finding survived on stronger evidence once re-derived,
+  zero matches anywhere under `packages/coding-agent/src` against five in that
+  package's own `docs/session-format.md`, which is the sharper claim. A grep
+  that returns nothing because the path is wrong looks exactly like a grep that
+  returns nothing because the code is absent.
+
+Two smaller patterns were corrected across the wave rather than per-document. A
+comparison citing its own dossier by line number, 39 sites in Void and 9 in
+Amazon Q, now cites by section link instead, and only for grep-established
+absences and dossier conclusions; the Void conversion went further and traced 27
+of its 39 back to product source. And several proto citations named a field that
+sat just outside the range they cited, which is why the rule is now to open the
+file and confirm the field is inside the range.
+
+**Per-artifact verification was not enough.** Running the checker once over
+every artifact with a local clone found defects in six files that individual
+waves had already reported clean: seven flattened paths in the Cline comparison
+(each omitting a `stores/`, `services/`, or `models/` segment), ten bare
+`types.ts` and `messages.ts` citations in the Pi dossier, thirteen bare
+`manager.py` and `registry.py` citations in the OpenHands dossier, and, in both
+Zed artifacts, a set of bare `db.rs` citations spanning two different crates,
+one of which attributed `open_fallback_db` to `crates/agent/src/db.rs:215` when
+it lives at `crates/db/src/db.rs:215`. The corpus now stands at 1912 citations
+with everything resolved. The lesson is procedural: a per-artifact check run at
+landing time uses whatever root set was convenient then, and a bare basename
+unique in one root becomes ambiguous the moment a sibling root is added. Only
+the whole-corpus run with the correct root set per artifact is meaningful.
+
+Reading `open_fallback_db` in full to fix its path also closed two of the Zed
+dossier's own open questions, which is worth noting as a side effect of
+verification rather than a separate task: the fallback's trigger conditions are
+now confirmed rather than inferred from its name, and both of Zed's identifier
+mint sites turn out to be `Uuid::new_v4()`, so the identifier scheme the dossier
+listed as undetermined is settled. Fixing a citation means opening the file, and
+opening the file answers questions the original pass had left open.
+
 ## Verification state at queue time
 
 The pinned commits and licenses above are verified. The store descriptions
@@ -131,8 +286,8 @@ cited as an open-source precedent:
 
 ## Excluded, with reason
 
-- `jentic/standard-agent` — its entire persistence surface is
+- `jentic/standard-agent`: its entire persistence surface is
   `agents/memory/dict_memory.py`, an in-memory dict. No durable session, so
   nothing to compare.
 - Closed-source harnesses (Cursor, Amp, Copilot CLI, Windsurf, Factory
-  Droid) — no primary source, and the corpus rule is primary sources first.
+  Droid): no primary source, and the corpus rule is primary sources first.

@@ -44,12 +44,12 @@ half-measure merely to preserve wire compatibility.
 What this does *not* mean is that breaking changes are free. Every
 recommendation must state its blast radius explicitly:
 
-- **Additive** — new field, new event type, new optional value. No migration.
-- **Breaking, cheap** — rename, retype, or field removal with no persisted
+- **Additive** -- new field, new event type, new optional value. No migration.
+- **Breaking, cheap** -- rename, retype, or field removal with no persisted
   data to carry forward, or a mechanical regeneration.
-- **Breaking, expensive** — changes the meaning of already-persisted events,
+- **Breaking, expensive** -- changes the meaning of already-persisted events,
   requires a replay/rewrite, or splits or merges an existing event type.
-- **Breaking the decision, not the schema** — contradicts a numbered decision
+- **Breaking the decision, not the schema** -- contradicts a numbered decision
   in ADR#0035. Name the decision by number. These are the most valuable
   findings and the most expensive to act on.
 
@@ -134,13 +134,21 @@ Then three closing buckets, all required:
   ADR does not currently answer, phrased as a question the ADR owner can
   decide.
 
-### 16. Feed the two open gaps
+### 16. Feed the two gaps the industry has not closed
 
 The synthesis concludes that the industry has approximated the event-sourced
-session store everywhere, and that our remaining work is the two gaps nobody
-has closed: **subagent cascade semantics** and **retention on an unbounded
-log**. Every comparison must answer both explicitly, even if the answer is
-"this product has no position on it":
+session store everywhere, and that the two things nobody in the corpus has
+closed are **subagent cascade semantics** and **retention on an unbounded
+log**.
+
+These are gaps in *the industry*, not in our design. ADR#0035 decisions 6 and
+7 already take detailed positions on both, so the job here is to **test those
+decisions against this product's evidence**, not to describe them as missing.
+Name the decision, say whether the evidence validates, refines, or challenges
+it, and where the product's answer is worse, say that too. Writing this
+section as though we have no position on cascade or retention is the single
+most likely way to get this comparison wrong. Every comparison must answer
+both explicitly, even if the answer is "this product has no position on it":
 
 - What does this product do when a parent session is deleted, rewound, or
   crashes while a child session is live? Quote the code path, not the docs.
@@ -171,7 +179,7 @@ Produced by running [RESEARCH_PROMPT_COMPARISON](../../RESEARCH_PROMPT_COMPARISO
 Stage-one dossier: [{PRODUCT}](./index.md).
 Compared against `proto/trogonai/session/sessions/v1alpha1/` and ADR#0035 on YYYY-MM-DD.
 
-**Store maturity: N/12** — evolution scars N/3 ({evidence}), operational age
+**Store maturity: N/12** -- evolution scars N/3 ({evidence}), operational age
 N/3 ({evidence}), exposure N/3 ({evidence}), design independence N/3 ({evidence}).
 
 ## The one structural difference everything else follows from
@@ -182,7 +190,7 @@ N/3 ({evidence}), exposure N/3 ({evidence}), design independence N/3 ({evidence}
 ## What our design already does better
 ## Trade-offs, not gaps
 ## What not to copy
-## The two open gaps
+## The two gaps the industry has not closed
 ### Subagent cascade
 ### Retention on an unbounded log
 ## Open questions for the ADR
