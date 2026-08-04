@@ -65,8 +65,9 @@ def adr_number_for(path: Path) -> str | None:
 
 
 # Directories that never contain committed docs: dependencies, git internals,
-# and gitignored agent scratch notes (`.trogonai/**/*.internal.trogonai.md`).
-IGNORED_DIRS = {"node_modules", ".git", ".trogonai"}
+# gitignored agent scratch notes (`.trogonai/**/*.internal.trogonai.md`), and
+# Conductor workspace scratch (`.context`, excluded via .git/info/exclude).
+IGNORED_DIRS = {"node_modules", ".git", ".trogonai", ".context"}
 
 
 def iter_markdown() -> list[Path]:
