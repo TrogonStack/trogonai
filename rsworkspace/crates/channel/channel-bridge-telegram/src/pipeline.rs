@@ -205,6 +205,27 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                         record.current_session = Some(fresh.clone());
                         self.store.update_conversation(&conversation_id, &record).await?;
                         self.renderer.discard(active_session.as_str());
+
+                        // The suspicion that got us here is a guess, so the
+                        // agent may well still have the old session. Nothing
+                        // points at it now, and only the agent can free it, so
+                        // release it rather than let a wrong guess orphan a live
+                        // session for the agent's lifetime. Release is
+                        // best-effort by contract: one that really was lost
+                        // simply reports failed steps.
+                        let release = self
+                            .port
+                            .release_session(&active_session, ReleaseReason::Replaced)
+                            .await;
+                        info!(
+                            conversation = %conversation_id,
+                            session = %active_session,
+                            replaced_by = %fresh,
+                            cancelled = ?release.cancelled,
+                            closed = ?release.closed,
+                            "Released the session a fresh one replaced"
+                        );
+
                         active_session = fresh;
                         outcome
                     }

@@ -62,6 +62,10 @@ pub enum ReleaseReason {
     /// A session opened to repair a suspected lost session failed the same way,
     /// so the bridge is handing back one it never got to use.
     RepairFailed,
+    /// A suspected lost session was replaced by a fresh one that answered. The
+    /// suspicion is a guess, so the agent may still hold the old session; it is
+    /// told to let go rather than left holding one nothing points at.
+    Replaced,
 }
 
 /// How one step of the release ladder ended.

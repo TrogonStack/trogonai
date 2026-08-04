@@ -9,7 +9,8 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
-    AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
+    AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseReason, ReleaseStep,
+    SessionRelease,
 };
 use trogon_nats::jetstream::{DEFAULT_CLAIM_BUCKET, MockObjectStore};
 use trogon_std::UuidV7Generator;
@@ -60,7 +61,7 @@ struct FakePort {
     reply: String,
     sessions_created: RefCell<u32>,
     prompted: RefCell<Vec<(String, String)>>,
-    released: RefCell<Vec<String>>,
+    released: RefCell<Vec<(String, ReleaseReason)>>,
     /// How many upcoming prompts fail with an error classified as a lost
     /// session. One models a session the agent really did forget, so the fresh
     /// session succeeds; two makes the fresh session fail the same way, which is
@@ -129,12 +130,8 @@ impl trogon_channel::AgentPort for FakePort {
         Ok(())
     }
 
-    async fn release_session(
-        &self,
-        session: &AgentSessionId,
-        _reason: trogon_channel::ReleaseReason,
-    ) -> SessionRelease {
-        self.released.borrow_mut().push(session.as_str().to_string());
+    async fn release_session(&self, session: &AgentSessionId, reason: ReleaseReason) -> SessionRelease {
+        self.released.borrow_mut().push((session.as_str().to_string(), reason));
         SessionRelease {
             cancelled: ReleaseStep::Done,
             closed: ReleaseStep::Done,
@@ -322,7 +319,10 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     );
     assert_eq!(
         *port.released.borrow(),
-        vec!["sess-1".to_string(), "sess-2".to_string()]
+        vec![
+            ("sess-1".to_string(), ReleaseReason::NewSession),
+            ("sess-2".to_string(), ReleaseReason::NewSession),
+        ]
     );
 
     // The conversation and its principal outlive every session rotation.
@@ -638,7 +638,10 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         .expect("kv read")
         .expect("conversation exists");
     assert_eq!(record.current_session, session_before);
-    assert_eq!(*port.released.borrow(), vec!["sess-2".to_string()]);
+    assert_eq!(
+        *port.released.borrow(),
+        vec![("sess-2".to_string(), ReleaseReason::RepairFailed)]
+    );
 
     // So the next message continues on it rather than starting over.
     pipeline
@@ -674,6 +677,17 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     assert_eq!(
         record.current_session.as_ref().map(AgentSessionId::as_str),
         Some("sess-3")
+    );
+
+    // The replaced session is handed back too. `is_session_lost` is a guess, so
+    // the agent may still have had `sess-1`; without this a wrong guess orphans
+    // a live session that nothing points at any more.
+    assert_eq!(
+        *port.released.borrow(),
+        vec![
+            ("sess-2".to_string(), ReleaseReason::RepairFailed),
+            ("sess-1".to_string(), ReleaseReason::Replaced),
+        ]
     );
 
     assert_eq!(*outbound.typing.borrow(), 4);
