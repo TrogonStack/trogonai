@@ -23,7 +23,9 @@ pub use client::{
     ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,
     PublishError, StreamError,
 };
-pub use create_conflicts::{is_create_key_value_already_exists, is_create_stream_already_exists};
+pub use create_conflicts::{
+    is_create_key_already_exists, is_create_key_value_already_exists, is_create_stream_already_exists,
+};
 pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
 pub use not_found::{is_get_key_value_not_found, is_get_stream_not_found};
 #[cfg(not(coverage))]

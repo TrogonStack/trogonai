@@ -40,4 +40,4 @@ pub use event::{
 };
 pub use render::RenderCommand;
 pub use safe_token::{SafeToken, SafeTokenError};
-pub use store::{ChannelStore, ChannelStoreError};
+pub use store::{ChannelStore, ChannelStoreError, EndpointBinding, ReserveEndpointError};

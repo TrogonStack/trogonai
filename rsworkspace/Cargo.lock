@@ -6905,6 +6905,7 @@ dependencies = [
  "tracing",
  "trogon-nats",
  "trogon-std",
+ "uuid",
 ]
 
 [[package]]

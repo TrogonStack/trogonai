@@ -3,6 +3,7 @@ use crate::agent_port::AgentSessionId;
 use crate::conversation::AgentId;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::UuidV7Generator;
+use uuid::Uuid;
 
 fn endpoint(peer: &str) -> Endpoint {
     Endpoint::new("telegram", "bot", peer).expect("endpoint")
@@ -19,6 +20,33 @@ fn record(principal: &PrincipalId) -> ConversationRecord {
         current_session: None,
         created_at: 1,
         last_activity_at: 1,
+    }
+}
+
+/// Conversation ids handed out in a known order, so a record a call was
+/// supposed to take back can be looked for by name.
+const QUEUED_IDS: [Uuid; 2] = [
+    Uuid::from_u128(0x0195_0000_7000_8000_0000_0000_0000_0001),
+    Uuid::from_u128(0x0195_0000_7000_8000_0000_0000_0000_0002),
+];
+
+#[derive(Default)]
+struct QueuedIds {
+    handed_out: std::cell::Cell<usize>,
+}
+
+impl NowV7 for QueuedIds {
+    fn now_v7(&self) -> Uuid {
+        let index = self.handed_out.get();
+        self.handed_out.set(index + 1);
+        QUEUED_IDS[index]
+    }
+}
+
+fn created(binding: EndpointBinding) -> ConversationId {
+    match binding {
+        EndpointBinding::Created(id) => id,
+        EndpointBinding::AlreadyBound(id, _) => panic!("expected a fresh conversation, the endpoint was bound to {id}"),
     }
 }
 
@@ -105,10 +133,12 @@ async fn a_conversation_round_trips_through_its_buckets() {
     let endpoint = endpoint("222");
     let principal = principal("user-2");
     let mut record = record(&principal);
-    let id = store
-        .create_conversation(&endpoint, &record, &UuidV7Generator)
-        .await
-        .expect("create conversation");
+    let id = created(
+        store
+            .create_conversation(&endpoint, &record, &UuidV7Generator)
+            .await
+            .expect("create conversation"),
+    );
 
     record.current_session = Some(AgentSessionId::new("sess-1").expect("session id"));
     store.update_conversation(&id, &record).await.expect("update");
@@ -154,6 +184,82 @@ async fn a_binding_with_no_conversation_record_reads_as_unbound() {
             .expect("conversation lookup")
             .is_none(),
         "a dangling binding must not be reported as a bound conversation"
+    );
+
+    // Reading as unbound is what sends the next message here, so this is the
+    // only path that can clear the dangling pointer. Refusing the claim because
+    // the key is taken would leave the endpoint unable to ever route again.
+    let record = record(&principal("user-3"));
+    let fresh = created(
+        store
+            .create_conversation(&endpoint, &record, &UuidV7Generator)
+            .await
+            .expect("re-point the dangling binding"),
+    );
+
+    let (bound_id, _) = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("conversation lookup")
+        .expect("the endpoint routes again");
+    assert_eq!(
+        bound_id, fresh,
+        "the endpoint must point at the conversation it can reach"
+    );
+}
+
+/// Two workers can each read an endpoint as unbound and both get here, and only
+/// one of them can own it: whoever binds second must not overwrite the winner's
+/// binding, because nothing else knows the id it would bury and the user's chat
+/// would carry on against a conversation no message ever reaches again.
+#[tokio::test]
+async fn a_second_conversation_on_one_endpoint_yields_to_the_one_already_bound() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let store = ChannelStore::ensure(&js, "contested").await.expect("ensure");
+
+    let ids = QueuedIds::default();
+    let endpoint = endpoint("666");
+    let winner = created(
+        store
+            .create_conversation(&endpoint, &record(&principal("user-6")), &ids)
+            .await
+            .expect("first claim"),
+    );
+
+    // What the loser sees: it read the endpoint as unbound before the winner
+    // wrote, so it arrives with a record of its own already built.
+    let outcome = store
+        .create_conversation(&endpoint, &record(&principal("user-6-again")), &ids)
+        .await
+        .expect("losing the claim is not a failure");
+    let loser = ConversationId::from_string(QUEUED_IDS[1].simple().to_string()).expect("conversation id");
+
+    let EndpointBinding::AlreadyBound(bound_id, bound_record) = outcome else {
+        panic!("the second claim must yield to the binding already there, got {outcome:?}");
+    };
+    assert_eq!(bound_id, winner, "the winner's conversation is the endpoint's");
+    assert_eq!(
+        bound_record.principal,
+        principal("user-6"),
+        "the caller must be handed the record it has to continue on"
+    );
+
+    let (still_bound, _) = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("conversation lookup")
+        .expect("the endpoint is still bound");
+    assert_eq!(still_bound, winner, "the loser must not have moved the binding");
+
+    assert!(
+        store
+            .conversations
+            .get(loser.as_str())
+            .await
+            .expect("read the rolled back record")
+            .is_none(),
+        "the record the loser wrote must not survive as an unreachable one"
     );
 }
 

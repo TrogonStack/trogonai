@@ -9,7 +9,7 @@ use crate::render::{TelegramRenderClient, chunk_text};
 use tracing::{info, warn};
 use trogon_channel::{
     AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelStore, ChannelStoreError, Command, CommandTriggers,
-    ConversationId, ConversationRecord, EndpointError, InboundEvent, ReleaseReason,
+    ConversationId, ConversationRecord, EndpointBinding, EndpointError, InboundEvent, ReleaseReason,
 };
 use trogon_nats::jetstream::{ClaimResolveError, ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
@@ -180,12 +180,25 @@ where
                     created_at: now,
                     last_activity_at: now,
                 };
-                let id = self
+                match self
                     .store
                     .create_conversation(&event.endpoint, &record, self.ids)
-                    .await?;
-                info!(conversation = %id, endpoint = %event.endpoint, agent = %record.agent_id, "Created conversation");
-                (id, record)
+                    .await?
+                {
+                    EndpointBinding::Created(id) => {
+                        info!(conversation = %id, endpoint = %event.endpoint, agent = %record.agent_id, "Created conversation");
+                        (id, record)
+                    }
+                    EndpointBinding::AlreadyBound(id, bound) => {
+                        info!(
+                            conversation = %id,
+                            endpoint = %event.endpoint,
+                            agent = %bound.agent_id,
+                            "Endpoint was bound while this message was being handled; continuing on that conversation"
+                        );
+                        (id, bound)
+                    }
+                }
             }
         };
 

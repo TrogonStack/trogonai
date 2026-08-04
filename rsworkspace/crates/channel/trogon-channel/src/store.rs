@@ -3,7 +3,9 @@ use crate::endpoint::{Endpoint, PrincipalId};
 use async_nats::jetstream;
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use trogon_nats::jetstream::{is_create_key_value_already_exists, is_get_key_value_not_found};
+use trogon_nats::jetstream::{
+    is_create_key_already_exists, is_create_key_value_already_exists, is_get_key_value_not_found,
+};
 use trogon_std::NowV7;
 
 #[cfg(test)]
@@ -37,7 +39,7 @@ pub enum ChannelStoreError {
         endpoint: String,
         conversation: ConversationId,
         #[source]
-        source: async_nats::jetstream::kv::PutError,
+        source: ReserveEndpointError,
     },
     /// Binding failed and so did the rollback, so the conversation record is
     /// still in the bucket with nothing pointing at it. Both failures are kept
@@ -49,10 +51,38 @@ pub enum ChannelStoreError {
     OrphanedConversation {
         endpoint: String,
         conversation: ConversationId,
-        bind_error: async_nats::jetstream::kv::PutError,
+        bind_error: ReserveEndpointError,
         #[source]
         source: async_nats::jetstream::kv::DeleteError,
     },
+}
+
+/// Why an endpoint could not be pointed at a new conversation. Two ways in,
+/// because an unbound endpoint is claimed with a create while one left pointing
+/// at a record that is gone is re-pointed with a compare-and-swap.
+#[derive(Debug, thiserror::Error)]
+pub enum ReserveEndpointError {
+    #[error(transparent)]
+    Claim(#[from] async_nats::jetstream::kv::CreateError),
+    /// The stale binding moved between the read and the swap, so another writer
+    /// re-pointed the endpoint first.
+    #[error(transparent)]
+    Repoint(#[from] async_nats::jetstream::kv::UpdateError),
+}
+
+/// Which conversation an endpoint is bound to once
+/// [`ChannelStore::create_conversation`] returns.
+#[derive(Debug)]
+pub enum EndpointBinding {
+    /// The record handed in is the endpoint's conversation now.
+    Created(ConversationId),
+    /// The endpoint was claimed between the caller's lookup and this
+    /// reservation, so the winner's conversation is the one the endpoint feeds
+    /// and the record this call would have added has been rolled back. The
+    /// caller has to continue with what comes back here: its own record is
+    /// gone, and a second conversation on one endpoint would split the history
+    /// a user sees as one chat.
+    AlreadyBound(ConversationId, ConversationRecord),
 }
 
 /// What we know about a principal beyond its id.
@@ -169,34 +199,94 @@ impl ChannelStore {
     /// record nothing can reach. It is rolled back before the error returns,
     /// because each attempt generates a fresh id, so without the rollback every
     /// redelivery of one message would leave another unreachable record behind.
+    ///
+    /// The binding is claimed rather than overwritten. Callers reach this after
+    /// a lookup found the endpoint unbound, and two workers can hold that answer
+    /// at once; an overwrite would let the loser's binding bury the winner's
+    /// conversation, and the buried record is unreachable forever because
+    /// nothing else knows its id. Losing the claim is therefore not a failure:
+    /// the winner's conversation comes back instead ([`EndpointBinding`]).
+    ///
+    /// A claim also has to cope with a binding that points at a record that is
+    /// no longer there (see `a_binding_with_no_conversation_record_reads_as_unbound`),
+    /// which reads as unbound and so arrives here. That one is re-pointed on the
+    /// revision it was read at, because an endpoint whose claim can only ever be
+    /// refused is an endpoint no message can get through.
     pub async fn create_conversation(
         &self,
         endpoint: &Endpoint,
         record: &ConversationRecord,
         ids: &impl NowV7,
-    ) -> Result<ConversationId, ChannelStoreError> {
+    ) -> Result<EndpointBinding, ChannelStoreError> {
         let id = ConversationId::generate(ids);
         let conversation = serde_json::to_vec(record)?;
         let binding = serde_json::to_vec(&id)?;
 
         self.conversations.put(id.as_str(), conversation.into()).await?;
 
-        let Err(source) = self.bindings.put(endpoint.kv_key(), binding.into()).await else {
-            return Ok(id);
+        let taken = match self.bindings.create(endpoint.kv_key(), binding.clone().into()).await {
+            Ok(_) => return Ok(EndpointBinding::Created(id)),
+            Err(taken) if is_create_key_already_exists(&taken) => taken,
+            Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
         };
 
-        match self.conversations.delete(id.as_str()).await {
-            Ok(()) => Err(ChannelStoreError::BindEndpoint {
+        // Read the claim that won as an entry rather than a value: replacing a
+        // stale one is only safe against the revision it was read at.
+        let Some(bound) = self.bindings.entry(endpoint.kv_key()).await? else {
+            return Err(self.unwind(endpoint, id, taken.into()).await);
+        };
+        let bound_id: ConversationId = serde_json::from_slice(&bound.value)?;
+
+        if let Some(bytes) = self.conversations.get(bound_id.as_str()).await? {
+            let bound_record = serde_json::from_slice(&bytes)?;
+            return match self.conversations.delete(id.as_str()).await {
+                Ok(()) => Ok(EndpointBinding::AlreadyBound(bound_id, bound_record)),
+                Err(cleanup) => Err(ChannelStoreError::OrphanedConversation {
+                    endpoint: endpoint.kv_key(),
+                    conversation: id,
+                    bind_error: taken.into(),
+                    source: cleanup,
+                }),
+            };
+        }
+
+        info!(
+            endpoint = %endpoint,
+            conversation = %bound_id,
+            "Endpoint was bound to a conversation record that is gone; re-pointing it"
+        );
+        match self
+            .bindings
+            .update(endpoint.kv_key(), binding.into(), bound.revision)
+            .await
+        {
+            Ok(_) => Ok(EndpointBinding::Created(id)),
+            Err(source) => Err(self.unwind(endpoint, id, source.into()).await),
+        }
+    }
+
+    /// Take back the record this call wrote, so a reservation that never
+    /// happened leaves nothing behind. `refused` travels into the error because
+    /// a rollback that fails too leaves the record for an operator to sweep, and
+    /// both causes are what makes that actionable.
+    async fn unwind(
+        &self,
+        endpoint: &Endpoint,
+        conversation: ConversationId,
+        refused: ReserveEndpointError,
+    ) -> ChannelStoreError {
+        match self.conversations.delete(conversation.as_str()).await {
+            Ok(()) => ChannelStoreError::BindEndpoint {
                 endpoint: endpoint.kv_key(),
-                conversation: id,
+                conversation,
+                source: refused,
+            },
+            Err(source) => ChannelStoreError::OrphanedConversation {
+                endpoint: endpoint.kv_key(),
+                conversation,
+                bind_error: refused,
                 source,
-            }),
-            Err(cleanup) => Err(ChannelStoreError::OrphanedConversation {
-                endpoint: endpoint.kv_key(),
-                conversation: id,
-                bind_error: source,
-                source: cleanup,
-            }),
+            },
         }
     }
 
