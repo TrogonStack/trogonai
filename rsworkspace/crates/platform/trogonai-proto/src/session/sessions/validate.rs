@@ -132,7 +132,7 @@ pub enum SessionEventValidationError {
     #[error("{field}.value must be exactly 32 bytes for algorithm sha256, got {actual}")]
     Sha256DigestWrongLength { field: &'static str, actual: usize },
 
-    #[error("restored checkpoint plan digest must match the execution attempt plan digest")]
+    #[error("restored_checkpoint.session_execution_plan_digest must match session_execution_plan_digest")]
     RestoredCheckpointPlanDigestMismatch,
 
     #[error("{field} must be well-formed JSON")]
