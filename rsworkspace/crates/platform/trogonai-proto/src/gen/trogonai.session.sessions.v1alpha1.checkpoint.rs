@@ -10,6 +10,9 @@
 /// its producing event via checkpoint_id. Per-event validation requires a
 /// restored checkpoint's plan digest to match its ExecutionAttemptStarted plan
 /// digest; the aggregate binds that digest to the session's stored plan.
+/// Admission additionally verifies the supervisor capture attestation and the
+/// effective-history digest (ADR#0031 §3) before CheckpointProduced is
+/// recorded, and restoration re-verifies the same proof before trusting bytes.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -83,6 +86,34 @@ pub struct Checkpoint {
         Digest,
         ::buffa::Inline<Digest>,
     >,
+    /// Locator for the capture attestation stored out of line: the producing
+    /// attempt's platform-controlled supervisor binds the artifact, attempt,
+    /// plan digest, covers_through, and effective_history_digest under that
+    /// attempt's confirmation key (ADR#0031 §3).
+    ///
+    /// Field 9: `capture_attestation_ref`
+    #[serde(
+        rename = "captureAttestationRef",
+        alias = "capture_attestation_ref",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub capture_attestation_ref: ::buffa::alloc::string::String,
+    /// Digest over the capture attestation bytes, verified at admission and
+    /// re-verified before restore.
+    ///
+    /// Field 10: `capture_attestation_digest`
+    #[serde(rename = "captureAttestationDigest", alias = "capture_attestation_digest")]
+    pub capture_attestation_digest: ::buffa::MessageField<
+        Digest,
+        ::buffa::Inline<Digest>,
+    >,
+    /// Digest over the harness-relevant effective session facts, in fold order,
+    /// through covers_through; admission recomputes it from authoritative
+    /// history and requires equality with the attested value (ADR#0031 §3).
+    ///
+    /// Field 11: `effective_history_digest`
+    #[serde(rename = "effectiveHistoryDigest", alias = "effective_history_digest")]
+    pub effective_history_digest: ::buffa::MessageField<Digest, ::buffa::Inline<Digest>>,
 }
 impl ::core::fmt::Debug for Checkpoint {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -98,6 +129,9 @@ impl ::core::fmt::Debug for Checkpoint {
             )
             .field("covers_through", &self.covers_through)
             .field("session_execution_plan_digest", &self.session_execution_plan_digest)
+            .field("capture_attestation_ref", &self.capture_attestation_ref)
+            .field("capture_attestation_digest", &self.capture_attestation_digest)
+            .field("effective_history_digest", &self.effective_history_digest)
             .finish()
     }
 }
@@ -164,6 +198,26 @@ impl ::buffa::Message for Checkpoint {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        size
+            += 1u64
+                + ::buffa::types::string_encoded_len(&self.capture_attestation_ref)
+                    as u64;
+        if self.capture_attestation_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.capture_attestation_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.effective_history_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.effective_history_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -205,6 +259,23 @@ impl ::buffa::Message for Checkpoint {
                 buf,
             );
             self.session_execution_plan_digest.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(9u32, &self.capture_attestation_ref, buf);
+        if self.capture_attestation_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.capture_attestation_digest.write_to(__cache, buf);
+        }
+        if self.effective_history_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.effective_history_digest.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -289,6 +360,35 @@ impl ::buffa::Message for Checkpoint {
                     ctx,
                 )?;
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.capture_attestation_ref, buf)?;
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.capture_attestation_digest.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.effective_history_digest.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -304,6 +404,9 @@ impl ::buffa::Message for Checkpoint {
         self.producing_execution_attempt_id.clear();
         self.covers_through = ::buffa::MessageField::none();
         self.session_execution_plan_digest = ::buffa::MessageField::none();
+        self.capture_attestation_ref.clear();
+        self.capture_attestation_digest = ::buffa::MessageField::none();
+        self.effective_history_digest = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for Checkpoint {

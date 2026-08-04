@@ -214,8 +214,10 @@ instead:
 - **`CheckpointProduced`: first evidence per checkpoint id wins.** The first
   admitted artifact evidence for a `checkpoint_id` is the value restoration may
   select. A later payload reusing that id is retained for audit but cannot
-  replace the first value. The command idempotency key includes the artifact
-  digest, so conflicting evidence remains visible while byte-identical
+  replace the first value. The command idempotency key includes a canonical
+  digest of the complete checkpoint evidence (the exact `Checkpoint` bytes the
+  command persists), not only the artifact digest, so a later payload that
+  differs in any evidence field remains visible while byte-identical
   redelivery collapses through the event identity contract below.
 - **Post-terminal happened-facts remain audit-only**, generalizing the existing
   rule: a session's first terminal marker is authoritative, and any
@@ -427,7 +429,10 @@ another.
 `CheckpointProduced` and in `ExecutionAttemptStarted.restored_checkpoint` has
 its own `checkpoint_id`, `producing_execution_attempt_id`, `covers_through` (a
 `SessionOrdinal`, facet 2), and `session_execution_plan_digest`, alongside its
-`reference`, `checkpoint_type`, `digest`, and `implementation_version`.
+`reference`, `checkpoint_type`, `digest`, and `implementation_version`, plus
+the capture-attestation reference and digest and the effective-history digest
+that [ADR#0031](./0031-agent-implementation-and-session-plan.md) requires as
+the admission proof of semantic coverage.
 `CheckpointProduced` stays `{session_id, checkpoint}` and
 `ExecutionAttemptStarted.restored_checkpoint` stays embedded because the latter
 is evidence of exactly what the new attempt restored.
@@ -439,12 +444,14 @@ standalone payload validator enforces local shape, including equality between a
 restored checkpoint's plan digest and the plan digest on its containing
 `ExecutionAttemptStarted`. The Session decider separately enforces attempt,
 stored-plan, and ordinal relationships against folded state. Artifact
-verification enforces sealing, digest, and compatibility with the harness
-implementation version committed by the plan.
+verification enforces sealing, digest, the capture attestation and its
+effective-history equality, and compatibility with the harness implementation
+version committed by the plan.
 
 `CheckpointProduced` records evidence about a cut that is already settled. The
 evidence remains historically valid when later Session events append, although
-a rewind may make it ineligible for restoration. Production therefore uses
+a later rewind, redaction, or artifact erasure reaching history at or before
+its cut makes it ineligible for restoration. Production therefore uses
 `Any`. The command boundary verifies that the producing attempt exists, its plan
 digest matches the Session, and `covers_through` names settled in-session
 history.
@@ -457,7 +464,13 @@ Restoration is the head-dependent choice. At the current head selected by
 - the complete embedded `Checkpoint` value exactly equals that first evidence,
   not only its plan digest;
 - `covers_through` remains in effective Session history after every rewind
-  folded through the selected head; and
+  folded through the selected head;
+- no `RedactionApplied` folded through the selected head targets an event at
+  or before `covers_through`, and no `ArtifactErased` erases an artifact
+  recorded at or before it, because tail replay cannot rebuild the sealed
+  prefix a reinterpretation retargets (a `Compacted` marker after the cut does
+  not disqualify: it masks nothing and folds identically in the tail and in a
+  fresh replay); and
 - the producing attempt and stored Session plan still satisfy the recovery
   contract.
 
@@ -879,7 +892,11 @@ duplicate of that event too -- there is no second copy under a different id for
 a masking pass to miss. Redacting a source stream also automatically masks
 every fork's inherited context, because a fork reads source events by
 reference rather than by copy (facet 5): there is exactly one place the bytes
-live, so exactly one redaction covers every view of them.
+live, so exactly one redaction covers every view of them. Redacting an event
+at or before an admitted harness recovery checkpoint's `covers_through` also
+makes that checkpoint ineligible for restoration (facet 3), so sealed harness
+state never resurrects masked content either; restoration falls back to
+authoritative replay, which applies the mask from the first fact.
 
 **`ArtifactErased` separates artifact-byte lifecycle from event-log retention.**
 New event `ArtifactErased{session_id, artifact_id, reason}` (`At`-guarded)
@@ -975,7 +992,7 @@ decision.
 | `HideSession` | head | `At` | `[SessionHidden]` | none beyond head match | hide-request id |
 | `RewindSession` | head | `At` | `[SessionRewound]` | `keep_through` within current log | rewind-request id |
 | `CompactSession` | head | `At` | `[Compacted]` | `covers_from <= covers_through`, ordered, in-session | compaction-request id |
-| `StartExecutionAttempt` | head, active-attempt state, effective history, checkpoint evidence | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number; restored checkpoint exactly equals first admitted evidence; `covers_through` remains effective; restore and tail replay through the selected head precede Ready | attempt id |
+| `StartExecutionAttempt` | head, active-attempt state, effective history, checkpoint evidence | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number; restored checkpoint exactly equals first admitted evidence; `covers_through` remains effective, with no later redaction or artifact erasure reaching at or before it; restore and tail replay through the selected head precede Ready | attempt id |
 | `MarkExecutionAttemptReady` | head, attempt state | `At` | `[ExecutionAttemptReady]` | Ready only after Started and, for restore, verified artifact recovery plus effective-tail replay through the start head | attempt id |
 | `EndExecutionAttempt` | head, attempt state | `At` | `[ExecutionAttemptEnded]` | one outcome per attempt | attempt id |
 | `ApproveToolCall` | head, tool-call state | `At` | `[ToolCallApproved]` | mutually exclusive with deny | `tool_call_id` |
@@ -1000,7 +1017,7 @@ decision.
 | `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` | `tool_execution_id` |
 | `RecordArtifact` | none | `Any` | `[ArtifactRecorded]` | source oneof set; MIME fallback rule | `artifact_id` |
 | `RecordFileChange` | none | `Any` | `[FileChanged]` | `RENAMED` requires `previous_path`; others omit it | change id |
-| `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible; attempt and plan match; `covers_through` settled; first evidence wins per `checkpoint_id` | `checkpoint_id` + artifact digest |
+| `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible; attempt and plan match; `covers_through` settled; first evidence wins per `checkpoint_id` | `checkpoint_id` + canonical digest of the complete checkpoint evidence |
 | `RecordSystemNotice` | none | `Any` | `[SystemNoticeRecorded]` | none | notice id |
 | `UpdateTodo` | none | `Any` | `[TodoUpdated]` | `revision` monotonic from single logical writer; highest-revision-wins fold | `session_id` + `revision` |
 | `RenameSession` | none | `Any` | `[SessionRenamed]` | none | rename-request id |

@@ -61,6 +61,9 @@ fn checkpoint() -> v1alpha1::Checkpoint {
         producing_execution_attempt_id: "attempt-1".to_string(),
         covers_through: MessageField::some(session_ordinal(1)),
         session_execution_plan_digest: MessageField::some(digest()),
+        capture_attestation_ref: "attestation-ref".to_string(),
+        capture_attestation_digest: MessageField::some(digest()),
+        effective_history_digest: MessageField::some(digest()),
     }
 }
 

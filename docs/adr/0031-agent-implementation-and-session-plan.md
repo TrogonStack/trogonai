@@ -225,6 +225,20 @@ ModelSelection. They cannot substitute another model. Attempt-scoped
 [model-access grants](../glossary/modelaccessgrant), secret values, and short-lived provider credentials never
 enter the plan.
 
+The plan's model fields inherit the contested ownership recorded in section 1.
+The shipped AgentConfiguration contract exposes no typed ModelSelection for
+admission to read, so `primary_model_selection`, `auxiliary_model_selections`,
+and their resolved model routes are provisional, together with admission
+steps 4 and 5 and the model-protocol check in step 7 below. Until the
+reconciliation tracked in
+[ADR#0025](./0025-agent-definition-data-ownership.md) lands, the authoritative
+interim source of model selection is the runtime-owned settings inside the
+pinned AgentConfiguration: the selection cannot change within a revision,
+because `configuration_digest` commits to those settings, but the platform
+cannot read it as a typed value, resolve a provider route for it, or enforce
+the no-substitution rule above. Every other plan field and admission step is
+normative now.
+
 Admission proceeds in this order:
 
 1. Load the requested AgentRevision and verify AgentConfiguration bytes and
@@ -319,13 +333,13 @@ The protobuf named `Checkpoint` retains its wire name, but this ADR calls that
 object a harness recovery checkpoint to keep the meanings distinct.
 
 A harness recovery checkpoint is admissible only after capture completes and
-the Session command boundary verifies all of the following before
+the Session command boundary verifies all the following before
 `CheckpointProduced` is recorded:
 
 - the sealed state includes every harness-relevant effective Session fact from
   the beginning of the Session through the declared `covers_through` cut, so
   restoring it produces the same harness state as a fresh replay through that
-  cut;
+  cut, proven by the capture attestation below rather than assumed;
 - the state has been sealed as a durable artifact independently of the process
   memory that produced it;
 - independently fetching the sealed bytes and recomputing their digest
@@ -336,6 +350,25 @@ the Session command boundary verifies all of the following before
   ordinal without guessing; and
 - `checkpoint_type` identifies a format supported by the implementation version
   committed by the plan.
+
+Semantic coverage and replay equivalence cannot be recomputed from opaque
+bytes, so the first verification rests on a capture attestation rather than on
+the harness's word. When capture completes, the platform-controlled supervisor
+of the producing attempt (section 4) computes an effective-history digest over
+the harness-relevant effective Session facts it delivered, in fold order, from
+the beginning of the Session through `covers_through`, and signs, under that
+attempt's confirmation key, a binding of the artifact reference and digest,
+`checkpoint_id`, `checkpoint_type`, producing ExecutionAttempt,
+SessionExecutionPlan digest, `covers_through`, and that effective-history
+digest. Admission verifies the signature against the producing attempt's
+confirmation-key thumbprint, recomputes the effective-history digest from
+authoritative Session history, and requires equality with the attested value.
+The admitted checkpoint evidence retains the attestation reference and digest
+beside the effective-history digest, so restoration re-verifies the same proof
+before trusting any bytes. The attestation proves the binding: the measured
+harness and supervisor boundary verified under section 4 captured the sealed
+state from exactly the attested effective history. A missing, unverifiable, or
+mismatched attestation rejects the checkpoint.
 
 `Checkpoint.covers_through` is the core Session replay cut. Internal harness
 coordinates stay inside the opaque, versioned artifact and never become core
@@ -351,13 +384,27 @@ Restoration is one guarded workflow:
    eligible admitted checkpoint, and appends `ExecutionAttemptStarted` under
    `At(H)` with that exact checkpoint evidence.
 2. The supervisor fetches the sealed artifact again and verifies its digest,
-   format, producing attempt, plan, and effective `covers_through` cut before
-   trusting any bytes.
+   format, capture attestation, producing attempt, plan, and effective
+   `covers_through` cut before trusting any bytes.
 3. The harness restores the sealed state, then replays the exact
    harness-relevant effective tail after `covers_through` through `H`, using the
    same rewind, redaction, and compaction interpretation as a fresh replay.
 4. Only after the tail reaches `H` may the attempt record Ready or receive new
    work. Facts appended after `H` remain queued for normal delivery.
+
+Eligibility in step 1 demands more than an intact artifact: the covered prefix
+must still mean at `H` what it meant when the checkpoint was admitted. Tail
+replay applies interpretation only to facts after `covers_through`; it cannot
+rebuild the sealed prefix. Any fact folded through `H` that reinterprets
+history at or before the cut therefore disqualifies the checkpoint: a rewind
+that makes `covers_through` ineffective, a redaction targeting any event at or
+before it, or an artifact erasure reaching an artifact recorded at or before
+it. Without this rule, a restored attempt would keep content a fresh replay
+masks. A compaction marker after the cut does not disqualify: it is
+self-sufficient, masks no covered fact, and folds identically in the tail and
+in a fresh replay. An ineligible checkpoint falls back to fresh replay from
+authoritative history, which applies the changed interpretation from the
+first fact.
 
 This makes checkpoint restore observationally equivalent to rebuilding the
 harness from authoritative history through the same selected head. A checkpoint
@@ -483,6 +530,8 @@ an append-only sequence of immutable facts:
         checkpoint_id + reference + checkpoint_type + digest
         implementation_version + producing_execution_attempt_id
         covers_through + session_execution_plan_digest
+        capture attestation reference + digest
+        effective history digest
       host artifact or driver reference + digest
       authenticated remote subject?
       isolation and placement facts

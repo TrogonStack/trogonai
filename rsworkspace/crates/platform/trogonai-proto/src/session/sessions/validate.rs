@@ -431,6 +431,18 @@ fn validate_checkpoint(checkpoint: &v1alpha1::Checkpoint) -> Result<(), SessionE
         &checkpoint.session_execution_plan_digest,
         "checkpoint.session_execution_plan_digest",
     )?;
+    require_non_empty(
+        &checkpoint.capture_attestation_ref,
+        "checkpoint.capture_attestation_ref",
+    )?;
+    require_digest(
+        &checkpoint.capture_attestation_digest,
+        "checkpoint.capture_attestation_digest",
+    )?;
+    require_digest(
+        &checkpoint.effective_history_digest,
+        "checkpoint.effective_history_digest",
+    )?;
     Ok(())
 }
 
