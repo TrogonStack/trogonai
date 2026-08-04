@@ -1,7 +1,7 @@
 # Grok Build: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of
 [xai-org/grok-build](https://github.com/xai-org/grok-build) at commit
 `a5727c5960452e7527a154b25cb5bf00cda0545e` (committed 2026-07-22), the public

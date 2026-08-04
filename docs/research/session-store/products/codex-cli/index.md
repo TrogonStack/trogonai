@@ -1,7 +1,7 @@
 # Codex CLI: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local shallow checkout of `openai/codex`
 (`https://github.com/openai/codex.git`) at commit
 `8d34c0667215f9ae4f8a11678e27752d8a4a120f` (committed 2026-07-23). Every

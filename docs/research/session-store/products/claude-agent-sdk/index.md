@@ -1,13 +1,13 @@
 # Claude Agent SDK and Claude Code: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot retrieved 2026-07-23. Version-sensitive claims were checked
 against these authoritative anchors:
 
 For a later immutable inspection of the complete TypeScript session surface,
 see the [Claude Agent SDK 0.3.220 session type snapshot and platform
-comparison](./claude-agent-sdk-session-types.md).
+comparison](./session-types.md).
 That pinned inspection narrows one inference below: `SessionStore` is
 stream-shaped, but its local-first, best-effort mirror may drop batches. It
 cannot be the authoritative platform Session log; any equation below is a

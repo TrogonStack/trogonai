@@ -1,7 +1,7 @@
 # OpenCode: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of the `anomalyco/opencode` fork
 (`git@github.com:anomalyco/opencode.git`) on branch `dev` at commit
 `62e4641235d7847dadc60da37cca8a023dd54fc1` (committed 2026-07-23). Every

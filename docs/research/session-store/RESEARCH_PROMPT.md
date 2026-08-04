@@ -1,7 +1,7 @@
 # Research Prompt: how {PRODUCT} stores and resumes sessions
 
 Reusable prompt for the session-store study. Run once per product. Output
-goes into `docs/research/session-store/products/{slug}.md`, following the
+goes into `docs/research/session-store/products/{slug}/index.md`, following the
 section skeleton below. Add the dossier to `index.md` when done.
 
 ## Task
@@ -190,7 +190,7 @@ to the durable session.
 # {PRODUCT}: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot retrieved YYYY-MM-DD. Version-sensitive claims were checked
 against these authoritative anchors:
 

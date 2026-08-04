@@ -1,6 +1,6 @@
 # Claude Agent SDK 0.3.220 session type snapshot and platform comparison
 
-Part of [Session Store Research](../index.md). This is an immutable inspection
+Part of [Session Store Research](../../index.md). This is an immutable inspection
 snapshot of the published `@anthropic-ai/claude-agent-sdk` npm tarball, not a
 rolling description of the package. A later SDK release should get a new
 snapshot or an explicitly dated addendum.
@@ -35,30 +35,30 @@ Pinned sources: [npm registry metadata](https://registry.npmjs.org/@anthropic-ai
 [`sdk-tools.d.ts`](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.220/sdk-tools.d.ts).
 
 This snapshot complements the broader
-[Claude Agent SDK and Claude Code dossier](./claude-agent-sdk.md), which covers
+[Claude Agent SDK and Claude Code dossier](./index.md), which covers
 documented and observed storage behavior. This page is narrower: it freezes
 the complete session-related TypeScript surface in this one release and tests
 it against the platform Session contract in this checkout.
 
 ## Authority boundary
 
-- [ADR#0024](../../../adr/0024-agent-platform-stream-topology.md) is accepted.
+- [ADR#0024](../../../../adr/0024-agent-platform-stream-topology.md) is accepted.
   It authoritatively requires Sessions to pin the Agent revision they start on
   and gives the placement rule for ordered facts.
-- [ADR#0025](../../../adr/0025-agent-definition-data-ownership.md),
-  [ADR#0031](../../../adr/0031-agent-implementation-and-session-plan.md), and
-  [ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) are drafts.
-  So are [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md)
-  and [ADR#0043](../../../adr/0043-agent-instructions-ownership-and-shape.md).
+- [ADR#0025](../../../../adr/0025-agent-definition-data-ownership.md),
+  [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md), and
+  [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) are drafts.
+  So are [ADR#0032](../../../../adr/0032-model-route-and-credential-binding.md)
+  and [ADR#0043](../../../../adr/0043-agent-instructions-ownership-and-shape.md).
   They express current design directions, not accepted architecture.
-- Draft [ADR#0031](../../../adr/0031-agent-implementation-and-session-plan.md)'s
+- Draft [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md)'s
   platform-readable model fields are contested. Draft
-  [ADR#0032](../../../adr/0032-model-route-and-credential-binding.md) says that
+  [ADR#0032](../../../../adr/0032-model-route-and-credential-binding.md) says that
   ownership precondition is currently unmet. Draft
-  [ADR#0043](../../../adr/0043-agent-instructions-ownership-and-shape.md) keeps
+  [ADR#0043](../../../../adr/0043-agent-instructions-ownership-and-shape.md) keeps
   instruction content and injection shape in runtime-owned settings.
 - The
-  [`v1alpha1` Session event package](../../../../proto/trogonai/session/sessions/v1alpha1/events.proto)
+  [`v1alpha1` Session event package](../../../../../proto/trogonai/session/sessions/v1alpha1/events.proto)
   is real code in this checkout, but its own header says it depends on draft
   ADRs and cannot promote to `v1` until those decisions and prerequisites are
   settled.
@@ -356,7 +356,7 @@ or monitor ownership cannot silently become platform Session semantics.
 
 **Repository fact.** The current code has 57 Session proto files, 72 messages,
 19 enums, and 41 concrete arms in
-[`SessionEvent`](../../../../proto/trogonai/session/sessions/v1alpha1/events.proto).
+[`SessionEvent`](../../../../../proto/trogonai/session/sessions/v1alpha1/events.proto).
 It has generated Rust exports, codecs, and local per-event semantic validation.
 `validate_session_event` checks only facts one event can prove about itself;
 cross-event joins and stream invariants are explicitly out of scope. Current
@@ -365,12 +365,12 @@ The catalog covers lifecycle, fork, rewind, compaction, conversation, tools,
 artifacts, files, execution attempts, delegation, operation ledger, privacy,
 system notices, todo state, and organization metadata.
 
-[`SessionStarted`](../../../../proto/trogonai/session/sessions/v1alpha1/session_started.proto)
+[`SessionStarted`](../../../../../proto/trogonai/session/sessions/v1alpha1/session_started.proto)
 stores one
-[`StoredSessionExecutionPlan`](../../../../proto/trogonai/session/sessions/v1alpha1/execution_plan.proto),
+[`StoredSessionExecutionPlan`](../../../../../proto/trogonai/session/sessions/v1alpha1/execution_plan.proto),
 currently opaque canonical `plan_bytes` plus a digest, and a workspace
 reference. The concrete typed plan described by draft
-[ADR#0031](../../../adr/0031-agent-implementation-and-session-plan.md) is not
+[ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md) is not
 yet a proto contract in this package.
 
 **Repository fact.** No Session-specific commands, decider `initial_state`/
@@ -380,7 +380,7 @@ exists yet. Generic infrastructure does exist: the decider runtime supplies
 write preconditions and snapshots, while its NATS crate supplies a JetStream
 stream store, optimistic concurrency, snapshot storage, and projector
 primitives. Draft
-[ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) leaves their
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) leaves their
 Session-specific composition and its listed substrate corrections as follow-up
 work.
 
@@ -388,7 +388,7 @@ work.
 
 | Axis | SDK 0.3.220 | Platform Session direction | Deferred edge rule |
 | --- | --- | --- | --- |
-| Aggregate | No unified aggregate | One logical event-sourced aggregate per Session in draft [ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) | Adapter must not equate `Query` or JSONL with aggregate state |
+| Aggregate | No unified aggregate | One logical event-sourced aggregate per Session in draft [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) | Adapter must not equate `Query` or JSONL with aggregate state |
 | Identity | cwd-derived project key, native UUID, optional subpath | Opaque Session ID and subject resolution | Keep any product identity binding at the edge, never reuse one ID domain as the other |
 | Revision and plan | Model, tools, settings, plugins, and agents can be selected or mutated | Accepted revision pin; draft immutable execution plan | Freeze admitted native projection and reject unplanned mutation |
 | Authority | Local JSONL first, optional best-effort mirror | Typed authoritative event log | Store native recovery bytes separately |

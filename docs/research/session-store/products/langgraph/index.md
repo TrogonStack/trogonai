@@ -1,7 +1,7 @@
 # LangGraph: how session (thread) state is stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local shallow checkout of `langchain-ai/langgraph`
 (`https://github.com/langchain-ai/langgraph.git`) at commit
 `31f90df3e6b0268fa77fd2d118a917d420b84a68` (committed 2026-07-21). Every

@@ -1,7 +1,7 @@
 # Goose: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of Goose (Block's open-source AI agent,
 originally [block/goose](https://github.com/block/goose)) in the
 `aaif-goose/goose` fork, at commit

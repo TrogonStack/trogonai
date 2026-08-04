@@ -1,7 +1,7 @@
 # T3 Code: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of
 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) (checked out from the
 `TrogonStack/t3code` fork) at commit

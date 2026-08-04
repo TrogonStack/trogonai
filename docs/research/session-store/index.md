@@ -9,34 +9,53 @@ the ADR is authoritative.
 
 ## Method
 
-The [research prompt](./RESEARCH_PROMPT.md) is preserved so the shared scope
-and evidence rules behind each product dossier remain reproducible.
+The study runs in two stages, and both prompts are preserved so the scope and
+evidence rules behind every artifact remain reproducible.
+
+- [Stage one](./RESEARCH_PROMPT.md) produces a standalone dossier describing
+  how a product persists, resumes, lists, and retires sessions.
+- [Stage two](./RESEARCH_PROMPT_COMPARISON.md) consumes that dossier and
+  produces a comparison against our event catalog and ADR#0035, weighting
+  each product's evidence by how proven its store is rather than how popular
+  the product is.
 
 ## Status
 
-Synthesis complete. The product dossiers and the cross-product synthesis
-exist, and the decision record now exists as draft
+Synthesis complete for the first ten products, and the decision record exists
+as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
 The fx artifacts (the dossier, the session detail JSON reference, and the
 comparison against our event catalog) were added after the synthesis and are
 not yet folded into it.
 
+The corpus is being extended to twenty-eight products. The queue, its
+ordering, and the verification state of each candidate are in the
+[backlog](./backlog.md). Only fx has a stage-two comparison so far; it is the
+reference implementation of that prompt.
+
 ## Product dossiers
 
-- [Claude Agent SDK and Claude Code](./products/claude-agent-sdk.md)
+Each product owns a directory under `products/`. The stage-one dossier is that
+directory's `index.md`, the stage-two comparison is `vs-session-events.md`, and
+any further evidence artifacts sit alongside them. The sibling
+[ACP](../acp/index.md) and [agent platform](../agent-platform/index.md) corpora
+keep a flat `products/*.md` because each of their products has a single
+artifact; this corpus nests because every product here has at least two.
+
+- [Claude Agent SDK and Claude Code](./products/claude-agent-sdk/index.md)
   - [Claude Agent SDK 0.3.220 session type snapshot and platform
-    comparison](./products/claude-agent-sdk-session-types.md)
-- [Codex CLI (OpenAI)](./products/codex-cli.md)
-- [fx (Vercel)](./products/fx.md)
-  - [fx session detail JSON reference](./products/fx-session-detail-json-reference.md)
-  - [fx compared to our session event catalog](./products/fx-vs-session-events.md)
-- [Gemini CLI (Google)](./products/gemini-cli.md)
-- [Goose (Block)](./products/goose.md)
-- [Grok Build](./products/grok-build.md)
-- [Hermes (Nous Research)](./products/hermes-agent.md)
-- [LangGraph (LangChain)](./products/langgraph.md)
-- [OpenCode](./products/opencode.md)
-- [T3 Code](./products/t3code.md)
+    comparison](./products/claude-agent-sdk/session-types.md)
+- [Codex CLI (OpenAI)](./products/codex-cli/index.md)
+- [fx (Vercel)](./products/fx/index.md)
+  - [fx session detail JSON reference](./products/fx/session-detail-json-reference.md)
+  - [fx compared to our session event catalog](./products/fx/vs-session-events.md)
+- [Gemini CLI (Google)](./products/gemini-cli/index.md)
+- [Goose (Block)](./products/goose/index.md)
+- [Grok Build](./products/grok-build/index.md)
+- [Hermes (Nous Research)](./products/hermes-agent/index.md)
+- [LangGraph (LangChain)](./products/langgraph/index.md)
+- [OpenCode](./products/opencode/index.md)
+- [T3 Code](./products/t3code/index.md)
 
 ## Synthesis
 

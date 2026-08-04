@@ -1,7 +1,7 @@
 # Hermes (Nous Research): how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of
 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) at
 commit `d9165d7a678d4105f42921a7fc1886df3804531b` (committed 2026-07-23), the

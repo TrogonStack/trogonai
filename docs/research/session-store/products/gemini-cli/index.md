@@ -1,7 +1,7 @@
 # Gemini CLI: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local shallow checkout of `google-gemini/gemini-cli`
 (`https://github.com/google-gemini/gemini-cli.git`) at commit
 `87f785192c34067e4e8f26bda16cf9ce24014d83` (committed 2026-07-23). Every
