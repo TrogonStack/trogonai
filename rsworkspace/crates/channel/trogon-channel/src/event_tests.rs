@@ -64,9 +64,16 @@ fn a_media_type_normalizes_case_so_comparisons_hold() {
 
 #[test]
 fn a_media_type_needs_a_type_and_a_subtype() {
-    for raw in ["image", "image/", "/png", "", "image / png"] {
-        assert!(
-            matches!(MimeType::new(raw), Err(EventFieldError::NotAMediaType(_))),
+    for (raw, reason) in [
+        ("image", MediaTypeError::MissingSeparator),
+        ("", MediaTypeError::MissingSeparator),
+        ("image/", MediaTypeError::EmptySubtype),
+        ("/png", MediaTypeError::EmptyType),
+        ("image / png", MediaTypeError::InteriorWhitespace),
+    ] {
+        assert_eq!(
+            MimeType::new(raw).unwrap_err(),
+            EventFieldError::NotAMediaType(reason),
             "{raw:?} must not be a media type"
         );
     }

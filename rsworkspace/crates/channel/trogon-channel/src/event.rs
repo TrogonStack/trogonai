@@ -11,8 +11,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 pub enum EventFieldError {
     #[error("a message reference may not be blank")]
     BlankMessageRef,
-    #[error("media type {0:?} is not a type/subtype pair")]
-    NotAMediaType(String),
+    #[error(transparent)]
+    NotAMediaType(#[from] MediaTypeError),
 }
 
 /// Who sent a message, in the sending platform's own terms. This is an
@@ -133,6 +133,21 @@ pub enum AttachmentKind {
     Document,
 }
 
+/// Which rule a would-be media type broke. Named reasons rather than a copy of
+/// the input: the rejected text belongs to whatever log records the rejection,
+/// and a caller matching on why can tell a missing subtype from a stray space.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum MediaTypeError {
+    #[error("a media type needs a type and a subtype separated by '/'")]
+    MissingSeparator,
+    #[error("a media type's type may not be empty")]
+    EmptyType,
+    #[error("a media type's subtype may not be empty")]
+    EmptySubtype,
+    #[error("a media type may not contain whitespace")]
+    InteriorWhitespace,
+}
+
 /// An IANA media type, normalized to lower case because the standard defines
 /// type and subtype as case-insensitive and a caller comparing them as bytes
 /// would otherwise be wrong for `IMAGE/PNG`. Parameters are kept as given.
@@ -144,12 +159,16 @@ impl MimeType {
     pub fn new(raw: impl Into<String>) -> Result<Self, EventFieldError> {
         let raw = raw.into();
         let trimmed = raw.trim();
-        let (kind, subtype) = trimmed
-            .split_once('/')
-            .ok_or_else(|| EventFieldError::NotAMediaType(raw.clone()))?;
+        let (kind, subtype) = trimmed.split_once('/').ok_or(MediaTypeError::MissingSeparator)?;
         let subtype_only = subtype.split(';').next().unwrap_or_default().trim();
-        if kind.is_empty() || subtype_only.is_empty() || trimmed.chars().any(char::is_whitespace) {
-            return Err(EventFieldError::NotAMediaType(raw));
+        if kind.is_empty() {
+            return Err(MediaTypeError::EmptyType.into());
+        }
+        if subtype_only.is_empty() {
+            return Err(MediaTypeError::EmptySubtype.into());
+        }
+        if trimmed.chars().any(char::is_whitespace) {
+            return Err(MediaTypeError::InteriorWhitespace.into());
         }
         Ok(Self(trimmed.to_ascii_lowercase()))
     }

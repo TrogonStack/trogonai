@@ -35,8 +35,8 @@ pub use command_trigger_input::CommandTriggerInput;
 pub use conversation::{AgentId, ConversationId, ConversationRecord};
 pub use endpoint::{Endpoint, EndpointError, PrincipalId};
 pub use event::{
-    Attachment, AttachmentKind, EventFieldError, InboundEvent, MessageRef, MimeType, PlatformRef, PlatformUserId,
-    Sender,
+    Attachment, AttachmentKind, EventFieldError, InboundEvent, MediaTypeError, MessageRef, MimeType, PlatformRef,
+    PlatformUserId, Sender,
 };
 pub use render::RenderCommand;
 pub use safe_token::{SafeToken, SafeTokenError};
