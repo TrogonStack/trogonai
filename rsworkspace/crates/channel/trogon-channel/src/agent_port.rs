@@ -76,8 +76,10 @@ pub trait AgentPortError: std::error::Error + 'static {
 pub enum ReleaseReason {
     /// The user asked for a fresh conversation.
     NewSession,
-    /// A session opened to repair a suspected lost session failed the same way,
-    /// so the bridge is handing back one it never got to use.
+    /// A session opened to repair a suspected lost session is being handed back
+    /// unused: either it failed the same way the old one did, or it answered and
+    /// the conversation could not be pointed at it, which leaves its reply
+    /// unreadable either way.
     RepairFailed,
     /// A suspected lost session was replaced by a fresh one that answered. The
     /// suspicion is a guess, so the agent may still hold the old session; it is

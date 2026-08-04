@@ -81,6 +81,11 @@ struct FakePort {
     /// How many upcoming turns end without streaming any text. A real agent
     /// does this when it acts only through tool calls.
     silent_turns: RefCell<u32>,
+    /// A KV bucket to drop once the next prompt has answered. The pipeline reads
+    /// the conversation, prompts, then writes the pointer, so a prompt is the
+    /// only place from which the write can be failed without also failing the
+    /// read that precedes it.
+    bucket_to_drop: RefCell<Option<(async_nats::jetstream::Context, String)>>,
 }
 
 /// Consume one use of a scripted behaviour.
@@ -103,6 +108,7 @@ impl FakePort {
             refusals: RefCell::new(0),
             creation_failures: RefCell::new(0),
             silent_turns: RefCell::new(0),
+            bucket_to_drop: RefCell::new(None),
         }
     }
 
@@ -120,6 +126,10 @@ impl FakePort {
 
     fn stay_silent_for_next_turns(&self, count: u32) {
         *self.silent_turns.borrow_mut() = count;
+    }
+
+    fn drop_bucket_after_next_reply(&self, js: &async_nats::jetstream::Context, bucket: &str) {
+        *self.bucket_to_drop.borrow_mut() = Some((js.clone(), bucket.to_string()));
     }
 
     async fn stream(&self, session: &AgentSessionId, text: &str) {
@@ -170,6 +180,10 @@ impl trogon_channel::AgentPort for FakePort {
         }
 
         self.stream(session, &self.reply).await;
+        let dropped = self.bucket_to_drop.borrow_mut().take();
+        if let Some((js, bucket)) = dropped {
+            js.delete_key_value(&bucket).await.expect("drop the KV bucket");
+        }
         Ok(PromptOutcome::Completed)
     }
 
@@ -805,6 +819,111 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     let info = settled_consumer_info(&stream, "bridge-test", 1).await;
     assert_eq!(info.num_ack_pending, 1);
     assert_eq!(info.num_pending, 0);
+}
+
+/// A fresh session that answered but could not be recorded is handed back rather
+/// than left open. The write is what makes the rotation real, so once it fails
+/// the conversation still names the old session and every later repair mints its
+/// own id: nothing will ever read that reply or release that session. Without
+/// the cleanup each redelivery of one message leaves the agent holding one more.
+#[tokio::test]
+async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
+    let server = NatsServer::start().await;
+    let client = async_nats::connect(&server.url).await.expect("connect");
+    let js = async_nats::jetstream::new(client);
+
+    js.create_stream(async_nats::jetstream::stream::Config {
+        name: "TELEGRAM".to_string(),
+        subjects: vec!["telegram.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("create TELEGRAM stream");
+
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
+    let principal = PrincipalId::new("telegram-42").expect("principal");
+    let endpoint = Endpoint::new("telegram", "mybot", "42").expect("endpoint");
+    store
+        .link_endpoint(&principal, &PrincipalRecord { display_name: None }, &endpoint)
+        .await
+        .expect("seed principal");
+
+    for (update_id, text) in [(1u64, "hello"), (2, "rotate")] {
+        js.publish("telegram.message", raw_update(update_id, 42, 42, text).into())
+            .await
+            .expect("publish")
+            .await
+            .expect("ack");
+    }
+
+    let stream = js.get_stream("TELEGRAM").await.expect("get stream");
+    let consumer = stream
+        .get_or_create_consumer(
+            "bridge-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bridge-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("consumer");
+    let mut messages = consumer.messages().await.expect("messages");
+
+    let renderer = Rc::new(TelegramRenderClient::new());
+    let port = FakePort::new(renderer.clone(), "hi there");
+    let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
+    let claims = unclaimed_resolver();
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &outbound,
+        claims: &claims,
+        bot_account: "mybot",
+        agent_id: "default",
+        triggers: &triggers,
+        ids: &UuidV7Generator,
+    };
+
+    pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect("handled");
+
+    // The old session looks lost, the fresh one answers, and the bucket the
+    // pointer lives in disappears in between.
+    port.reject_next_prompts(1);
+    port.drop_bucket_after_next_reply(&js, "channel_conversations_test");
+    let error = pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect_err("the pointer write must fail");
+    assert!(
+        matches!(error, PipelineError::Store(_)),
+        "the store failure must surface, got {error:?}"
+    );
+
+    assert_eq!(
+        *port.released.borrow(),
+        vec![("sess-2".to_string(), ReleaseReason::RepairFailed)],
+        "a session nothing points at must be handed back"
+    );
+    for session in ["sess-1", "sess-2"] {
+        assert_eq!(
+            renderer.take_buffer(session),
+            None,
+            "{session} kept a reply nothing will ever send"
+        );
+    }
+    assert_eq!(
+        *outbound.sent.borrow(),
+        vec![(42, "hi there".to_string())],
+        "only the turn that was recorded may reach the chat"
+    );
+
+    let info = settled_consumer_info(&stream, "bridge-test", 1).await;
+    assert_eq!(info.num_ack_pending, 1);
 }
 
 /// Everything the bridge cannot act on is acked and dropped rather than left to

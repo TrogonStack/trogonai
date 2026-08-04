@@ -259,7 +259,24 @@ where
                 match self.port.prompt(&fresh, &event).await {
                     Ok(outcome) => {
                         record.current_session = Some(fresh.clone());
-                        self.store.update_conversation(&conversation_id, &record).await?;
+                        if let Err(error) = self.store.update_conversation(&conversation_id, &record).await {
+                            // The stored pointer still names active_session and
+                            // every later repair mints its own id, so nothing
+                            // will ever read this reply or hand this session
+                            // back. Redelivery retries the prompt on the session
+                            // the conversation still has.
+                            let release = self.port.release_session(&fresh, ReleaseReason::RepairFailed).await;
+                            self.renderer.discard(fresh.as_str());
+                            self.renderer.discard(active_session.as_str());
+                            warn!(
+                                conversation = %conversation_id,
+                                session = %fresh,
+                                cancelled = ?release.cancelled,
+                                closed = ?release.closed,
+                                "Could not point the conversation at the fresh session; released it instead"
+                            );
+                            return Err(PipelineError::Store(error));
+                        }
                         self.renderer.discard(active_session.as_str());
 
                         // The suspicion that got us here is a guess, so the
