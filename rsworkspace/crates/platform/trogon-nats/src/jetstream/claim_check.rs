@@ -12,7 +12,8 @@ use crate::constants::{
     PROTOCOL_OVERHEAD,
 };
 
-use super::object_store::{ObjectStoreGet, ObjectStorePut};
+use super::claim_bucket::ClaimBucket;
+use super::object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 use super::publish::PublishOutcome;
 use super::traits::JetStreamPublisher;
 
@@ -78,24 +79,23 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
 ///
 /// [`resolve_claim`] takes an already-bound store and cannot tell whether it is
 /// the right one, so a consumer pointed at the wrong bucket reports every claim
-/// as a missing object. Pairing the store with its bucket name lets the
-/// [`HEADER_CLAIM_BUCKET`] the publisher already sends be checked, which turns
-/// that misconfiguration into its own error.
+/// as a missing object. Checking the [`HEADER_CLAIM_BUCKET`] the publisher
+/// already sends turns that misconfiguration into its own error, which is only
+/// worth anything if the name checked against is the name actually opened:
+/// hence a [`ClaimBucketBinding`] rather than a store and a name.
 #[derive(Debug, Clone)]
 pub struct ClaimResolver<S> {
     store: S,
-    bucket: String,
+    bucket: ClaimBucket,
 }
 
 impl<S: ObjectStoreGet> ClaimResolver<S> {
-    pub fn new(store: S, bucket: impl Into<String>) -> Self {
-        Self {
-            store,
-            bucket: bucket.into(),
-        }
+    pub fn new(binding: ClaimBucketBinding<S>) -> Self {
+        let (store, bucket) = binding.into_parts();
+        Self { store, bucket }
     }
 
-    pub fn bucket(&self) -> &str {
+    pub fn bucket(&self) -> &ClaimBucket {
         &self.bucket
     }
 
@@ -115,7 +115,7 @@ impl<S: ObjectStoreGet> ClaimResolver<S> {
             return Ok(payload);
         }
         if let Some(named) = headers.get(HEADER_CLAIM_BUCKET)
-            && named.as_str() != self.bucket
+            && named.as_str() != self.bucket.as_str()
         {
             return Err(ClaimResolveError::BucketMismatch {
                 expected: self.bucket.clone(),
@@ -130,8 +130,12 @@ impl<S: ObjectStoreGet> ClaimResolver<S> {
 pub enum ClaimResolveError<E> {
     #[error("claim message missing {} header", HEADER_CLAIM_KEY)]
     MissingKey,
-    #[error("claim names bucket {named:?} but this consumer reads {expected:?}")]
-    BucketMismatch { expected: String, named: String },
+    /// `named` stays a string because it is whatever the header carried, which
+    /// in this arm is by definition not the bucket this consumer opened and may
+    /// not be a legal bucket name at all. Narrowing it would discard the one
+    /// value an operator needs to read.
+    #[error("claim names bucket {named:?} but this consumer reads {expected}")]
+    BucketMismatch { expected: ClaimBucket, named: String },
     #[error("failed to resolve claim from object store: {0}")]
     StoreFailed(#[source] E),
     #[error("failed to read claim payload: {0}")]

@@ -17,18 +17,27 @@
 
 pub mod agent_port;
 pub mod command;
+pub mod command_trigger;
+pub mod command_trigger_input;
 pub mod conversation;
 pub mod endpoint;
 pub mod event;
 pub mod render;
+pub mod safe_token;
 pub mod store;
 
 pub use agent_port::{
     AgentPort, AgentPortError, AgentSessionId, PromptOutcome, ReleaseReason, ReleaseStep, SessionRelease,
 };
-pub use command::{Command, CommandTriggerError, CommandTriggers, ParsedText};
+pub use command::{Command, CommandTriggers, ParsedText};
+pub use command_trigger::{CommandTrigger, CommandTriggerError};
+pub use command_trigger_input::CommandTriggerInput;
 pub use conversation::{AgentId, ConversationId, ConversationRecord};
 pub use endpoint::{Endpoint, EndpointError, PrincipalId};
-pub use event::{Attachment, InboundEvent, Sender};
+pub use event::{
+    Attachment, AttachmentKind, EventFieldError, InboundEvent, MessageRef, MimeType, PlatformRef, PlatformUserId,
+    Sender,
+};
 pub use render::RenderCommand;
+pub use safe_token::{SafeToken, SafeTokenError};
 pub use store::{ChannelStore, ChannelStoreError};

@@ -30,6 +30,29 @@ pub enum ChannelStoreError {
     Write(#[from] async_nats::jetstream::kv::PutError),
     #[error("stored record is not valid JSON: {0}")]
     Decode(#[from] serde_json::Error),
+    /// The conversation record was written but binding its endpoint failed. The
+    /// record has been rolled back, so the store is as it was before the call.
+    #[error("failed to bind endpoint {endpoint} to new conversation {conversation}: {source}")]
+    BindEndpoint {
+        endpoint: String,
+        conversation: ConversationId,
+        #[source]
+        source: async_nats::jetstream::kv::PutError,
+    },
+    /// Binding failed and so did the rollback, so the conversation record is
+    /// still in the bucket with nothing pointing at it. Both failures are kept
+    /// typed: the operator needs the key to sweep, and the cause to know why.
+    #[error(
+        "failed to bind endpoint {endpoint} to new conversation {conversation} ({bind_error}), \
+         and removing the now-unreachable conversation record failed too: {source}"
+    )]
+    OrphanedConversation {
+        endpoint: String,
+        conversation: ConversationId,
+        bind_error: async_nats::jetstream::kv::PutError,
+        #[source]
+        source: async_nats::jetstream::kv::DeleteError,
+    },
 }
 
 /// What we know about a principal beyond its id.
@@ -139,6 +162,13 @@ impl ChannelStore {
     /// Create a conversation and bind an endpoint to it. Routing policy runs
     /// before this call (it decided `record.agent_id`); after it, the binding
     /// is sticky.
+    ///
+    /// The record has to be written before the binding, so that no binding is
+    /// ever briefly visible pointing at a record that does not exist. That
+    /// leaves the opposite exposure: a binding write that fails would strand a
+    /// record nothing can reach. It is rolled back before the error returns,
+    /// because each attempt generates a fresh id, so without the rollback every
+    /// redelivery of one message would leave another unreachable record behind.
     pub async fn create_conversation(
         &self,
         endpoint: &Endpoint,
@@ -146,13 +176,28 @@ impl ChannelStore {
         ids: &impl NowV7,
     ) -> Result<ConversationId, ChannelStoreError> {
         let id = ConversationId::generate(ids);
-        self.conversations
-            .put(id.as_str(), serde_json::to_vec(record)?.into())
-            .await?;
-        self.bindings
-            .put(endpoint.kv_key(), serde_json::to_vec(&id)?.into())
-            .await?;
-        Ok(id)
+        let conversation = serde_json::to_vec(record)?;
+        let binding = serde_json::to_vec(&id)?;
+
+        self.conversations.put(id.as_str(), conversation.into()).await?;
+
+        let Err(source) = self.bindings.put(endpoint.kv_key(), binding.into()).await else {
+            return Ok(id);
+        };
+
+        match self.conversations.delete(id.as_str()).await {
+            Ok(()) => Err(ChannelStoreError::BindEndpoint {
+                endpoint: endpoint.kv_key(),
+                conversation: id,
+                source,
+            }),
+            Err(cleanup) => Err(ChannelStoreError::OrphanedConversation {
+                endpoint: endpoint.kv_key(),
+                conversation: id,
+                bind_error: source,
+                source: cleanup,
+            }),
+        }
     }
 
     /// Update a conversation record in place (session replacement, activity).

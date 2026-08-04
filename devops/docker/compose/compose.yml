@@ -73,6 +73,8 @@ services:
       NATS_URL: "nats:4222"
       RUST_LOG: "${RUST_LOG:-info}"
     depends_on:
+      trogon-gateway:
+        condition: service_healthy
       nats:
         condition: service_healthy
     restart: unless-stopped

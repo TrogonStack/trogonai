@@ -6,6 +6,7 @@ use acp_nats::{AcpPrefix, NatsConfig};
 use anyhow::Context;
 use std::path::PathBuf;
 use trogon_channel::CommandTriggers;
+use trogon_nats::jetstream::ClaimBucket;
 use trogon_std::env::ReadEnv;
 
 /// A Telegram Bot API token that cannot be blank.
@@ -67,7 +68,14 @@ pub struct BridgeConfig {
     /// Object-store bucket the gateway offloads oversized bodies to. Reading it
     /// is not optional: an update over the NATS max payload arrives as an empty
     /// body plus claim headers, and the bytes are only in the bucket.
-    pub claim_bucket: String,
+    ///
+    /// Deliberately not configurable. The gateway provisions and publishes to
+    /// [`ClaimBucket::default`] unconditionally and stamps that name into every
+    /// claim's headers, so any other value here can only be wrong: the bucket
+    /// would be missing at boot, or present and rejected as a `BucketMismatch`
+    /// when a real claim arrives. A shared constant is what keeps the publisher
+    /// and the resolver in agreement; an env knob on one side cannot.
+    pub claim_bucket: ClaimBucket,
     pub bot_token: BotToken,
     /// Endpoint account token; identifies which bot account on Telegram.
     pub bot_account: String,
@@ -92,8 +100,6 @@ impl BridgeConfig {
 
         let channel_prefix = var(env, "CHANNEL_PREFIX").unwrap_or_else(|| "prod".to_string());
         let inbound_stream = var(env, "TELEGRAM_INBOUND_STREAM").unwrap_or_else(|| "TELEGRAM".to_string());
-        let claim_bucket =
-            var(env, "TROGON_CLAIM_BUCKET").unwrap_or_else(|| trogon_nats::jetstream::DEFAULT_CLAIM_BUCKET.to_string());
         let bot_account = var(env, "TELEGRAM_BOT_ACCOUNT").unwrap_or_else(|| "bot".to_string());
         let agent_id = var(env, "CHANNEL_AGENT_ID").unwrap_or_else(|| "default".to_string());
         let agent_cwd = var(env, "CHANNEL_AGENT_CWD").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -134,7 +140,7 @@ impl BridgeConfig {
             acp,
             channel_prefix,
             inbound_stream,
-            claim_bucket,
+            claim_bucket: ClaimBucket::default(),
             bot_token,
             bot_account,
             agent_id,

@@ -82,13 +82,14 @@ async fn main() -> anyhow::Result<()> {
     // rather than into an oversized update that arrives one day and cannot be
     // redeemed.
     let claims = ClaimResolver::new(
-        NatsObjectStore::bind(&js, &config.claim_bucket).await.map_err(|e| {
-            anyhow::anyhow!(
-                "claim bucket '{}' not found; the trogon-gateway must provision it: {e}",
-                config.claim_bucket
-            )
-        })?,
-        config.claim_bucket.clone(),
+        NatsObjectStore::bind_claim_bucket(&js, config.claim_bucket.clone())
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "claim bucket '{}' not found; the trogon-gateway must provision it: {e}",
+                    config.claim_bucket
+                )
+            })?,
     );
     let consumer_name = format!("{}-{}", constants::INBOUND_DURABLE, config.channel_prefix);
     let consumer = stream
@@ -160,15 +161,16 @@ async fn run(
     ));
     let renderer = Arc::new(TelegramRenderClient::new());
 
-    let client_task = tokio::task::spawn_local(acp_nats::client::run(
+    let mut client_task = tokio::task::spawn_local(acp_nats::client::run(
         nats_client.clone(),
         renderer.clone(),
         bridge.clone(),
     ));
     let renderer_for_rx = renderer.clone();
-    let notification_task = tokio::task::spawn_local(async move {
+    let mut notification_task = tokio::task::spawn_local(async move {
         while let Some(notification) = notification_rx.recv().await {
-            if renderer_for_rx.session_notification(notification).await.is_err() {
+            if let Err(e) = renderer_for_rx.session_notification(notification).await {
+                error!(error = ?e, "Render client rejected a session notification");
                 break;
             }
         }
@@ -207,6 +209,14 @@ async fn run(
                 info!("Shutting down");
                 break;
             }
+            result = &mut client_task => {
+                error!(?result, "ACP client task ended; agent responses can no longer be rendered");
+                break;
+            }
+            result = &mut notification_task => {
+                error!(?result, "Notification task ended; agent responses can no longer be rendered");
+                break;
+            }
             next = messages.next() => {
                 let Some(next) = next else {
                     warn!("Inbound consumer stream ended");
@@ -230,3 +240,6 @@ async fn run(
     notification_task.abort();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -3,16 +3,15 @@
 mod pipeline_tests;
 
 use crate::constants::{NEW_SESSION_ACKNOWLEDGEMENT, TEXT_CHUNK_LIMIT};
-use crate::outbound::Outbound;
+use crate::outbound::{SendText, SendTyping};
 use crate::parse;
 use crate::render::{TelegramRenderClient, chunk_text};
-use anyhow::Context as _;
 use tracing::{info, warn};
 use trogon_channel::{
-    AgentId, AgentPort, AgentPortError as _, ChannelStore, Command, CommandTriggers, ConversationId,
-    ConversationRecord, InboundEvent, ReleaseReason,
+    AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelStore, ChannelStoreError, Command, CommandTriggers,
+    ConversationId, ConversationRecord, EndpointError, InboundEvent, ReleaseReason,
 };
-use trogon_nats::jetstream::{ClaimResolver, ObjectStoreGet};
+use trogon_nats::jetstream::{ClaimResolveError, ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
 
 pub struct Pipeline<'a, P, O, G, S> {
@@ -27,21 +26,71 @@ pub struct Pipeline<'a, P, O, G, S> {
     pub ids: &'a G,
 }
 
+/// Failures while processing one inbound update. Source errors stay typed so
+/// callers can match or log the causal chain without stringifying at the boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum PipelineError<PE, SE, OE>
+where
+    PE: std::error::Error + 'static,
+    SE: std::error::Error + 'static,
+    OE: std::error::Error + 'static,
+{
+    #[error("failed to acknowledge message")]
+    Ack(#[source] async_nats::Error),
+    #[error("failed to redeem claim-checked update")]
+    Claim(#[source] ClaimResolveError<SE>),
+    #[error(transparent)]
+    Store(#[from] ChannelStoreError),
+    #[error("telegram peer is not an i64 chat id")]
+    PeerNotChatId(#[source] std::num::ParseIntError),
+    #[error(transparent)]
+    AgentId(#[from] EndpointError),
+    #[error("failed to create an agent session")]
+    CreateSession(#[source] PE),
+    #[error("prompt failed on session {session}")]
+    Prompt {
+        session: AgentSessionId,
+        #[source]
+        source: PE,
+    },
+    #[error(
+        "prompt failed on session {session} and again on a fresh session, so the session was not the cause (first: {first}; retry: {retry})"
+    )]
+    PromptRetry {
+        session: AgentSessionId,
+        first: PE,
+        retry: PE,
+    },
+    #[error("failed to send telegram text")]
+    SendText(#[source] OE),
+}
+
 fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
-async fn ack(msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
-    msg.ack().await.map_err(|e| anyhow::anyhow!("ack failed: {e}"))
+async fn ack<PE, SE, OE>(msg: &async_nats::jetstream::Message) -> Result<(), PipelineError<PE, SE, OE>>
+where
+    PE: std::error::Error + 'static,
+    SE: std::error::Error + 'static,
+    OE: std::error::Error + 'static,
+{
+    msg.ack().await.map_err(PipelineError::Ack)
 }
 
-impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, G, S> {
+impl<P, O, G, S> Pipeline<'_, P, O, G, S>
+where
+    P: AgentPort,
+    O: SendTyping + SendText,
+    G: NowV7,
+    S: ObjectStoreGet,
+{
     /// Whether the individual who sent this message is a known principal. The
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
-    async fn sender_is_authorized(&self, event: &InboundEvent) -> anyhow::Result<bool> {
+    async fn sender_is_authorized(&self, event: &InboundEvent) -> Result<bool, ChannelStoreError> {
         let Some(endpoint) = parse::sender_endpoint(self.bot_account, &event.sender) else {
             return Ok(false);
         };
@@ -57,7 +106,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
         &self,
         conversation_id: &ConversationId,
         record: &mut ConversationRecord,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ChannelStoreError> {
         let Some(session) = record.current_session.take() else {
             return Ok(());
         };
@@ -80,7 +129,10 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
     /// (unparseable, unauthorized, kinds the bridge does not carry) are acked and
     /// dropped; processing errors return `Err` with the message unacked so
     /// JetStream redelivers.
-    pub async fn handle_message(&self, msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
+    pub async fn handle_message(
+        &self,
+        msg: &async_nats::jetstream::Message,
+    ) -> Result<(), PipelineError<P::Error, S::Error, <O as SendText>::Error>> {
         // An update over the NATS max payload reaches the stream as an empty
         // body plus claim headers, so the parse below has to run on the redeemed
         // bytes. A failure here returns Err rather than acking: the update is
@@ -90,7 +142,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
             .claims
             .resolve(msg.headers.as_ref(), msg.payload.clone())
             .await
-            .map_err(|e| anyhow::anyhow!("failed to redeem claim-checked update: {e}"))?;
+            .map_err(PipelineError::Claim)?;
 
         let update = match serde_json::from_slice::<teloxide::types::Update>(&body) {
             Ok(update) => update,
@@ -113,7 +165,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
             .endpoint
             .peer()
             .parse::<i64>()
-            .context("telegram peer is not an i64 chat id")?;
+            .map_err(PipelineError::PeerNotChatId)?;
 
         let now = now_unix();
         let (conversation_id, mut record) = match self.store.conversation_for(&event.endpoint).await? {
@@ -123,7 +175,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                 // configured agent. Sticky from here on.
                 let record = ConversationRecord {
                     principal: principal.clone(),
-                    agent_id: AgentId::new(self.agent_id),
+                    agent_id: AgentId::new(self.agent_id)?,
                     current_session: None,
                     created_at: now,
                     last_activity_at: now,
@@ -144,7 +196,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                     self.outbound
                         .send_text(chat_id, NEW_SESSION_ACKNOWLEDGEMENT.to_string())
                         .await
-                        .context("telegram send failed")?;
+                        .map_err(PipelineError::SendText)?;
                     return ack(msg).await;
                 }
             } else {
@@ -170,7 +222,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                     .port
                     .create_session(&record)
                     .await
-                    .map_err(|e| anyhow::anyhow!("create_session failed: {e}"))?;
+                    .map_err(PipelineError::CreateSession)?;
                 record.current_session = Some(session.clone());
                 self.store.update_conversation(&conversation_id, &record).await?;
                 session
@@ -194,11 +246,15 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
             // reason the pointer is not moved first.
             Err(first_error) if first_error.is_session_lost() => {
                 warn!(error = %first_error, session = %active_session, "Agent may no longer have the session; trying a fresh one");
-                let fresh = self
-                    .port
-                    .create_session(&record)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("create_session failed: {e}"))?;
+                let fresh = match self.port.create_session(&record).await {
+                    Ok(fresh) => fresh,
+                    Err(error) => {
+                        // The first prompt may already have streamed into this
+                        // session's buffer; drop it before redelivery retries.
+                        self.renderer.discard(active_session.as_str());
+                        return Err(PipelineError::CreateSession(error));
+                    }
+                };
 
                 match self.port.prompt(&fresh, &event).await {
                     Ok(outcome) => {
@@ -237,6 +293,10 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                     Err(retry_error) => {
                         let release = self.port.release_session(&fresh, ReleaseReason::RepairFailed).await;
                         self.renderer.discard(fresh.as_str());
+                        // The original prompt may have streamed into
+                        // active_session before failing; without this,
+                        // redelivery joins that partial turn to the next.
+                        self.renderer.discard(active_session.as_str());
                         info!(
                             conversation = %conversation_id,
                             session = %fresh,
@@ -244,13 +304,24 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                             closed = ?release.closed,
                             "Released the session opened to repair a suspected loss"
                         );
-                        return Err(anyhow::anyhow!(
-                            "prompt failed on session {active_session} and again on a fresh session, so the session was not the cause: {first_error} (retry: {retry_error})"
-                        ));
+                        return Err(PipelineError::PromptRetry {
+                            session: active_session,
+                            first: first_error,
+                            retry: retry_error,
+                        });
                     }
                 }
             }
-            Err(error) => return Err(anyhow::anyhow!("prompt failed: {error}")),
+            Err(source) => {
+                // Prompt can stream agent chunks into the buffer before failing.
+                // JetStream will redeliver, so leave nothing for the next turn
+                // to take_buffer and join onto a fresh reply.
+                self.renderer.discard(active_session.as_str());
+                return Err(PipelineError::Prompt {
+                    session: active_session,
+                    source,
+                });
+            }
         };
 
         record.last_activity_at = now_unix();
@@ -262,7 +333,7 @@ impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, 
                     self.outbound
                         .send_text(chat_id, chunk)
                         .await
-                        .context("telegram send failed")?;
+                        .map_err(PipelineError::SendText)?;
                 }
             }
             None => warn!(outcome = ?outcome, session = %active_session, "Agent turn produced no text"),

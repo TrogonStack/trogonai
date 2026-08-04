@@ -2,6 +2,9 @@
 #[path = "command_tests.rs"]
 mod command_tests;
 
+use crate::CommandTrigger;
+use crate::CommandTriggerInput;
+pub use crate::command_trigger::CommandTriggerError;
 use serde::{Deserialize, Serialize};
 
 /// A bridge-level instruction recognized in message text. Commands are
@@ -16,26 +19,21 @@ pub enum Command {
     NewSession,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum CommandTriggerError {
-    #[error("command trigger must not be empty")]
-    Empty,
-    #[error("command trigger {0:?} must be a single token")]
-    NotASingleToken(String),
-}
-
 /// The trigger vocabulary a bridge recognizes, matched against the whole first
 /// token of a message. Configurable because the leading marker is a channel
 /// affordance rather than a domain concept.
 #[derive(Debug, Clone)]
 pub struct CommandTriggers {
-    new_session: Vec<String>,
+    new_session: Vec<CommandTrigger>,
 }
 
 impl Default for CommandTriggers {
     fn default() -> Self {
         Self {
-            new_session: vec!["/new".to_string(), "/reset".to_string()],
+            new_session: vec![
+                CommandTrigger::try_from(CommandTriggerInput::new("/new")).expect("/new"),
+                CommandTrigger::try_from(CommandTriggerInput::new("/reset")).expect("/reset"),
+            ],
         }
     }
 }
@@ -50,19 +48,14 @@ pub struct ParsedText {
 }
 
 impl CommandTriggers {
-    pub fn new(new_session: impl IntoIterator<Item = String>) -> Result<Self, CommandTriggerError> {
+    pub fn new<I, T>(new_session: I) -> Result<Self, CommandTriggerError>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<CommandTriggerInput>,
+    {
         let new_session = new_session
             .into_iter()
-            .map(|trigger| {
-                let trigger = trigger.trim().to_ascii_lowercase();
-                if trigger.is_empty() {
-                    return Err(CommandTriggerError::Empty);
-                }
-                if trigger.split_whitespace().count() != 1 {
-                    return Err(CommandTriggerError::NotASingleToken(trigger));
-                }
-                Ok(trigger)
-            })
+            .map(|trigger| CommandTrigger::try_from(trigger.into()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self { new_session })
     }
@@ -70,18 +63,29 @@ impl CommandTriggers {
     /// Split a message into its command (if the first token is a trigger) and
     /// the remaining text, which becomes the first prompt of whatever the
     /// command sets up.
-    pub fn parse(&self, text: &str) -> ParsedText {
+    ///
+    /// `recipient_account` is this bridge's account on the channel. Channels
+    /// let a user address a command to one bot among several by suffixing it
+    /// (`/new@somebot`); only an absent suffix or a suffix that matches this
+    /// account is recognized.
+    pub fn parse(&self, text: &str, recipient_account: &str) -> ParsedText {
         let trimmed = text.trim_start();
         let (head, rest) = match trimmed.find(char::is_whitespace) {
             Some(index) => (&trimmed[..index], trimmed[index..].trim()),
             None => (trimmed, ""),
         };
 
-        // Channels let a user address a command to one bot account among
-        // several by suffixing it (`/new@somebot`). The suffix selects the
-        // recipient and is not part of the trigger.
-        let token = head.split('@').next().unwrap_or(head).to_ascii_lowercase();
-        let command = self.new_session.contains(&token).then_some(Command::NewSession);
+        let (token, addressed_to) = match head.split_once('@') {
+            Some((token, account)) => (token, Some(account)),
+            None => (head, None),
+        };
+        let token = token.to_ascii_lowercase();
+        let addressed_to_us = match addressed_to {
+            None => true,
+            Some(account) => account.eq_ignore_ascii_case(recipient_account),
+        };
+        let command =
+            (addressed_to_us && self.new_session.iter().any(|t| t.as_str() == token)).then_some(Command::NewSession);
 
         let body = match command {
             Some(_) => rest,

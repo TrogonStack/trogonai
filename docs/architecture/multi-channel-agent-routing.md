@@ -20,7 +20,7 @@ exactly one process.
 
 ## The path a message takes
 
-```
+```text
                  SUBJECT / PROTOCOL                      PROCESS
 
 Telegram ─HTTP─▶ webhook validated, published verbatim   trogon-gateway
@@ -58,10 +58,12 @@ because a prompt turn legitimately runs for minutes, and a turn that fails is
 left unacked so JetStream redelivers, bounded by `max_deliver` 5. The bridge
 creates neither of the two resources it reads. The gateway provisions the stream
 and the claim bucket, sizing the bucket's retention against the longest-retained
-stream it serves; the bridge only names the bucket (`TROGON_CLAIM_BUCKET`,
-defaulting to the same `trogon-claims` the gateway writes) and refuses to start if
-either resource is missing, rather than create a wrong one and find out on the
-first oversized update.
+stream it serves; the bridge refuses to start if either resource is missing,
+rather than create a wrong one and find out on the first oversized update. Which
+bucket that is, `trogon-claims`, is a shared compile-time constant and not an
+operator knob on either side: a claim only resolves in the bucket it was written
+to, so any value the two could disagree on is a value one of them is wrong
+about.
 
 **The bridge handles one update at a time.** The inbound loop awaits each turn to
 completion before pulling the next message. What the design requires is
@@ -115,28 +117,44 @@ policy picks the agent once, the conversation is created, and the entry is
 written. The word makes it sound like a subsystem; it is a lookup table with one
 column.
 
+**Absence is judged per endpoint.** An endpoint with no entry starts a new
+conversation even when its principal already holds one, because the lookup is
+keyed by endpoint address and falls back to nothing.
+
 `{prefix}`, which appears in bucket names below, is none of the above. It is the
 deployment namespace (`CHANNEL_PREFIX`, default `prod`) so staging and production
 can share a NATS cluster without sharing state. It never appears inside an
 endpoint.
 
-```
+```text
 endpoint (channel, account, peer)     where messages arrive and leave
-   │  many-to-one
-   ▼
-principal                             the human, across all channels
-   │
-   ▼
-conversation                          the shared context, cross-channel
+   │                    │
+   │ identity           │ binding: endpoint -> conversation id
+   │ many-to-one        │ one entry per endpoint
+   ▼                    │
+principal               │             the human, across all channels
+   │  owns              │
+   ▼                    ▼
+conversation                          the shared context
    ├── agent_id                       sticky: set at creation by routing policy
    └── current_session                ephemeral: belongs to the agent
 ```
 
-- **Conversations are cross-channel.** The same conversation can be picked up
-  from any endpoint that resolves to the same principal. The conversation is the
-  root object and endpoints are pointers into it, never the other way around.
-  Only Telegram implements an endpoint today, so this is a property the model
-  guarantees rather than a path that currently runs.
+Two arrows leave the endpoint because they are two separate lookups. Identity
+answers "may this endpoint speak"; the binding answers "into which conversation".
+A conversation records its principal, but nothing reads a conversation *by*
+principal.
+
+- **Conversations are cross-channel, by explicit link.** The conversation is the
+  root object and endpoints are pointers into it, never the other way around, so
+  several endpoints on different channels can point at one conversation and each
+  will feed it. What the model does not do is infer that pointer: a shared
+  principal is an access grant, not a route, so continuation from a second channel
+  means writing that endpoint's binding to the existing conversation id. Reading
+  the principal's most recent conversation instead would make continuation
+  automatic and is deliberately not implemented, because guessing which
+  conversation a new channel meant to resume is worse than starting a fresh one.
+  Only Telegram implements an endpoint today, so none of this runs yet.
 - **Binding is the session-routing record itself**, not a layer in front of it:
   an incoming message resolves endpoint to conversation and follows it. Routing
   policy (which agent handles a new conversation) is consulted exactly once, at
@@ -218,7 +236,7 @@ shapes are what any future transport between an edge and a router would carry.
 **Inbound event**, what any channel bridge produces after stripping its
 platform's shape:
 
-```
+```text
 {
   endpoint:    { channel, account, peer },
   sender:      { platform_user_id, display_name },
@@ -265,7 +283,7 @@ downloader is designed and not built; today media is dropped.
 
 The bridge reaches agents through one in-process trait:
 
-```
+```text
 AgentPort:
   create_session / resume_session
   prompt(session, content) -> stream of agent events
@@ -416,6 +434,10 @@ them change the topology above.
   admin surface for that.
 - **A group's principal names a room, not a human**, so it cannot take part in
   cross-channel continuation.
+- **Cross-channel continuation needs a binding written by hand**, and there is no
+  admin surface that writes one. The model holds (the conversation is the root and
+  takes pointers from any number of endpoints); what is missing is anything that
+  creates the second pointer.
 - **The bot token lives in two processes**, the gateway for webhook registration
   and the bridge for API calls. A generic gateway sink (NATS to HTTP-out,
   symmetric to its sources) would centralize outbound custody. It does not exist,

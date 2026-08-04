@@ -29,6 +29,13 @@ impl MaxPayloadLimit for DynamicMaxPayload {
     }
 }
 
+/// A fake store has no bucket to open, so these tests assert the pair by hand.
+/// Production code has no such constructor: it gets a binding from opening the
+/// bucket, which is the whole point of the type.
+fn test_binding<S>(store: S) -> ClaimBucketBinding<S> {
+    ClaimBucketBinding::for_test(store, ClaimBucket::new("test-bucket").expect("valid bucket name"))
+}
+
 #[tokio::test]
 async fn small_payload_publishes_directly() {
     let publisher = MockJetStreamPublisher::new();
@@ -289,7 +296,7 @@ async fn small_payload_strips_claim_headers() {
 
 #[tokio::test]
 async fn resolver_returns_payload_when_message_has_no_headers() {
-    let resolver = ClaimResolver::new(MockObjectStore::new(), "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(MockObjectStore::new()));
     let payload = Bytes::from("raw data");
 
     let result = resolver.resolve(None, payload.clone()).await;
@@ -298,7 +305,7 @@ async fn resolver_returns_payload_when_message_has_no_headers() {
 
 #[tokio::test]
 async fn resolver_returns_payload_when_headers_carry_no_claim() {
-    let resolver = ClaimResolver::new(MockObjectStore::new(), "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(MockObjectStore::new()));
     let headers = HeaderMap::new();
     let payload = Bytes::from("raw data");
 
@@ -311,7 +318,7 @@ async fn resolver_redeems_a_claim_from_its_bucket() {
     let store = MockObjectStore::new();
     let expected = Bytes::from("offloaded body");
     store.seed("test.subject/some-id", expected.clone());
-    let resolver = ClaimResolver::new(store, "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(store));
 
     let mut headers = HeaderMap::new();
     headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
@@ -327,7 +334,7 @@ async fn resolver_redeems_a_claim_that_names_no_bucket() {
     let store = MockObjectStore::new();
     let expected = Bytes::from("offloaded body");
     store.seed("test.subject/some-id", expected.clone());
-    let resolver = ClaimResolver::new(store, "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(store));
 
     let mut headers = HeaderMap::new();
     headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
@@ -344,7 +351,7 @@ async fn resolver_redeems_a_claim_that_names_no_bucket() {
 async fn resolver_rejects_a_claim_from_another_bucket() {
     let store = MockObjectStore::new();
     store.seed("test.subject/some-id", Bytes::from("offloaded body"));
-    let resolver = ClaimResolver::new(store, "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(store));
     assert_eq!(resolver.bucket(), "test-bucket");
 
     let mut headers = HeaderMap::new();
@@ -368,7 +375,7 @@ async fn resolver_surfaces_a_store_failure_rather_than_an_empty_body() {
     let store = MockObjectStore::new();
     store.seed("test.subject/some-id", Bytes::from("offloaded body"));
     store.fail_next_get();
-    let resolver = ClaimResolver::new(store, "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(store));
 
     let mut headers = HeaderMap::new();
     headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
@@ -404,7 +411,7 @@ async fn published_claim_round_trips_through_a_resolver() {
     let msg = &publisher.published_messages()[0];
     assert!(msg.payload.is_empty());
 
-    let resolver = ClaimResolver::new(store, "test-bucket");
+    let resolver = ClaimResolver::new(test_binding(store));
     let resolved = resolver
         .resolve(Some(&msg.headers), msg.payload.clone())
         .await

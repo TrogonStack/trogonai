@@ -33,7 +33,7 @@ use tokio::task::JoinSet;
 use tracing::{error, info};
 #[cfg(not(coverage))]
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore,
 };
 #[cfg(not(coverage))]
 use trogon_nats::{connect, wait_for_server_info};
@@ -98,8 +98,8 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         .max_stream_max_age()
         .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
         .unwrap_or(ClaimRetention::EventSourced);
-    let object_store =
-        NatsObjectStore::provision_claim_bucket(&js_context, DEFAULT_CLAIM_BUCKET, claim_retention).await?;
+    let claim_bucket = ClaimBucket::default();
+    let object_store = NatsObjectStore::provision_claim_bucket(&js_context, &claim_bucket, claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
@@ -141,7 +141,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     let publisher = ClaimCheckPublisher::new(
         client.clone(),
         object_store.clone(),
-        DEFAULT_CLAIM_BUCKET.to_string(),
+        claim_bucket.as_str().to_string(),
         nats.clone(),
     );
 

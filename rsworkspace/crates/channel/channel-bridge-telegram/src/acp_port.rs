@@ -34,6 +34,8 @@ pub type AcpBridge =
 pub enum AcpPortError {
     #[error("agent request failed: {0}")]
     Rpc(agent_client_protocol::Error),
+    #[error(transparent)]
+    SessionId(#[from] trogon_channel::EndpointError),
 }
 
 impl AgentPortError for AcpPortError {
@@ -52,6 +54,7 @@ impl AgentPortError for AcpPortError {
         // message rather than just this one.
         match self {
             Self::Rpc(error) => matches!(error.code, ErrorCode::InvalidParams | ErrorCode::ResourceNotFound),
+            Self::SessionId(_) => false,
         }
     }
 }
@@ -215,7 +218,7 @@ impl AgentPort for AcpPort {
             .new_session(NewSessionRequest::new(self.agent_cwd.clone()))
             .await
             .map_err(AcpPortError::Rpc)?;
-        Ok(AgentSessionId::new(response.session_id.to_string()))
+        Ok(AgentSessionId::new(response.session_id.to_string())?)
     }
 
     async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error> {

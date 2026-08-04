@@ -6,15 +6,26 @@ use teloxide::Bot;
 #[cfg(not(coverage))]
 use teloxide::requests::Requester;
 #[cfg(not(coverage))]
-use teloxide::types::{ChatAction, ChatId};
+use teloxide::types::{ChatAction, ChatId, Message, True};
 
-/// The render half's platform seam: what the pipeline needs from Telegram,
-/// narrow enough to fake in tests. Grows with the render vocabulary
-/// (edit-in-place, attachments), never with agent concepts.
+/// Show the typing indicator in a chat. One trait per outbound operation;
+/// never carries agent concepts.
 #[allow(async_fn_in_trait)]
-pub trait Outbound {
-    async fn typing(&self, chat_id: i64) -> anyhow::Result<()>;
-    async fn send_text(&self, chat_id: i64, text: String) -> anyhow::Result<()>;
+pub trait SendTyping {
+    type Error: std::error::Error + 'static;
+    type Output;
+
+    async fn typing(&self, chat_id: i64) -> Result<Self::Output, Self::Error>;
+}
+
+/// Send a text message to a chat. One trait per outbound operation; never
+/// carries agent concepts.
+#[allow(async_fn_in_trait)]
+pub trait SendText {
+    type Error: std::error::Error + 'static;
+    type Message;
+
+    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error>;
 }
 
 #[cfg(not(coverage))]
@@ -30,14 +41,21 @@ impl TelegramOutbound {
 }
 
 #[cfg(not(coverage))]
-impl Outbound for TelegramOutbound {
-    async fn typing(&self, chat_id: i64) -> anyhow::Result<()> {
-        self.bot.send_chat_action(ChatId(chat_id), ChatAction::Typing).await?;
-        Ok(())
-    }
+impl SendTyping for TelegramOutbound {
+    type Error = teloxide::RequestError;
+    type Output = True;
 
-    async fn send_text(&self, chat_id: i64, text: String) -> anyhow::Result<()> {
-        self.bot.send_message(ChatId(chat_id), text).await?;
-        Ok(())
+    async fn typing(&self, chat_id: i64) -> Result<Self::Output, Self::Error> {
+        self.bot.send_chat_action(ChatId(chat_id), ChatAction::Typing).await
+    }
+}
+
+#[cfg(not(coverage))]
+impl SendText for TelegramOutbound {
+    type Error = teloxide::RequestError;
+    type Message = Message;
+
+    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error> {
+        self.bot.send_message(ChatId(chat_id), text).await
     }
 }

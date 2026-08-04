@@ -1,27 +1,44 @@
+#[cfg(test)]
+#[path = "agent_port_tests.rs"]
+mod agent_port_tests;
+
 use crate::conversation::ConversationRecord;
+use crate::endpoint::EndpointError;
 use crate::event::InboundEvent;
-use serde::{Deserialize, Serialize};
+use crate::safe_token::SafeToken;
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// An agent-side session handle. Opaque to everything except the port
 /// implementation that minted it: only meaningful at the agent it belongs to,
 /// which is why a conversation stores it next to (never instead of) the
 /// agent binding.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AgentSessionId(String);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct AgentSessionId(SafeToken);
 
 impl AgentSessionId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+    pub fn new(id: impl Into<String>) -> Result<Self, EndpointError> {
+        Ok(Self(SafeToken::new(id)?))
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
 impl std::fmt::Display for AgentSessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentSessionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
     }
 }
 

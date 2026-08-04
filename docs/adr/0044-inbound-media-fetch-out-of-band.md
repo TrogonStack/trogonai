@@ -97,7 +97,7 @@ not-found, which is indistinguishable from a permanent failure and from a dead
 downloader. Readiness therefore lives in its own JetStream KV bucket, keyed by
 the platform handle:
 
-```
+```text
 channel_media_{prefix}:
   <platform_ref> -> { state: ready | failed, object_ref, mime, size, error }
 ```

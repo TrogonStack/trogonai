@@ -26,6 +26,21 @@ fn a_blank_bot_token_fails_like_an_unset_one() {
     );
 }
 
+/// The bridge resolves claims from exactly the bucket the gateway publishes
+/// them to. The gateway provisions `DEFAULT_CLAIM_BUCKET` unconditionally and
+/// stamps that name into every claim header, so this is not a default the
+/// environment may override: a different value here resolves nothing. Setting
+/// the variable that used to steer it must therefore change nothing.
+#[test]
+fn the_claim_bucket_is_the_gateways_bucket_and_the_environment_cannot_move_it() {
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set("TROGON_CLAIM_BUCKET", "somewhere-the-gateway-never-writes");
+
+    let config = BridgeConfig::from_env(&env).expect("config");
+    assert_eq!(config.claim_bucket, ClaimBucket::default());
+}
+
 /// A token read from a file or a heredoc arrives with a trailing newline, which
 /// Telegram rejects without saying which byte was wrong.
 #[test]
@@ -56,7 +71,6 @@ fn blank_optional_variables_fall_back_to_their_defaults() {
     for key in [
         "CHANNEL_PREFIX",
         "TELEGRAM_INBOUND_STREAM",
-        "TROGON_CLAIM_BUCKET",
         "TELEGRAM_BOT_ACCOUNT",
         "CHANNEL_AGENT_ID",
         "CHANNEL_AGENT_CWD",
@@ -68,7 +82,6 @@ fn blank_optional_variables_fall_back_to_their_defaults() {
     let config = BridgeConfig::from_env(&env).expect("config");
     assert_eq!(config.channel_prefix, "prod");
     assert_eq!(config.inbound_stream, "TELEGRAM");
-    assert_eq!(config.claim_bucket, trogon_nats::jetstream::DEFAULT_CLAIM_BUCKET);
     assert_eq!(config.bot_account, "bot");
     assert_eq!(config.agent_id, "default");
     assert_eq!(config.agent_cwd, std::env::temp_dir());
@@ -84,14 +97,35 @@ fn a_blank_trigger_list_means_no_triggers_rather_than_the_defaults() {
     env.set("TELEGRAM_BOT_TOKEN", "secret-token");
     env.set("CHANNEL_NEW_SESSION_TRIGGERS", "");
     let config = BridgeConfig::from_env(&env).expect("config");
-    assert_eq!(config.command_triggers.parse("/new").command, None);
+    assert_eq!(config.command_triggers.parse("/new", "bot").command, None);
 
     let env = InMemoryEnv::new();
     env.set("TELEGRAM_BOT_TOKEN", "secret-token");
     let config = BridgeConfig::from_env(&env).expect("config");
     assert_eq!(
-        config.command_triggers.parse("/new").command,
+        config.command_triggers.parse("/new", "bot").command,
         Some(trogon_channel::Command::NewSession)
+    );
+}
+
+/// A seeded user id becomes a Telegram chat id, so a typo has to stop the
+/// bridge at boot rather than silently seed a shorter list: the operator who
+/// wrote it would otherwise find out only when that person is refused, and the
+/// message has to name the entry so they know which one.
+#[test]
+fn a_seed_list_with_an_unparseable_id_fails_and_names_it() {
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set("CHANNEL_SEED_TELEGRAM_USERS", "42, not-an-id ,43");
+
+    // Matched rather than `expect_err`ed because a `BridgeConfig` is not
+    // `Debug`: it holds a token.
+    let Err(error) = BridgeConfig::from_env(&env) else {
+        panic!("an unparseable seed id must not configure the bridge");
+    };
+    assert!(
+        format!("{error:#}").contains("not-an-id"),
+        "the failure must name the offending entry: {error:#}"
     );
 }
 
