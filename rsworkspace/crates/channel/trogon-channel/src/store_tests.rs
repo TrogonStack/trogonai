@@ -263,6 +263,101 @@ async fn a_second_conversation_on_one_endpoint_yields_to_the_one_already_bound()
     );
 }
 
+/// Whoever loses the claim has already built a record of its own, and the
+/// caller cannot be handed that one back: nothing routes to it, and it is gone
+/// by the time this returns. Both ways out of a reservation therefore have to
+/// yield the record the endpoint really feeds.
+#[test]
+fn a_binding_hands_back_the_record_the_endpoint_routes_to() {
+    let endpoint = endpoint("777");
+    let mine = record(&principal("user-7"));
+    let winner = record(&principal("user-7-first"));
+    let fresh = ConversationId::from_string("fresh").expect("conversation id");
+    let bound = ConversationId::from_string("bound").expect("conversation id");
+
+    let (claimed, kept) = EndpointBinding::Created(fresh.clone()).into_conversation(&endpoint, mine.clone());
+    assert_eq!(claimed, fresh);
+    assert_eq!(
+        kept.principal, mine.principal,
+        "a won claim carries on with the record the caller built"
+    );
+
+    let (yielded, adopted) =
+        EndpointBinding::AlreadyBound(bound.clone(), winner.clone()).into_conversation(&endpoint, mine);
+    assert_eq!(yielded, bound);
+    assert_eq!(
+        adopted.principal, winner.principal,
+        "a lost claim carries on with the record already bound, not the one just rolled back"
+    );
+}
+
+/// Losing the claim still leaves this call's own record behind, and taking it
+/// back can fail just as the rollback of a failed bind can. The loser then has
+/// to be told, because it is holding the winner's conversation while a record
+/// nothing reaches stays in the bucket. Same forcing as
+/// `a_rollback_that_also_fails_reports_the_record_it_could_not_remove`: a
+/// conversations bucket that accepts one write per subject takes the record and
+/// refuses the delete marker that would remove it.
+#[tokio::test]
+async fn a_lost_claim_whose_rollback_fails_reports_the_record_it_could_not_remove() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+
+    js.create_stream(jetstream::stream::Config {
+        name: "KV_channel_conversations_lost".to_string(),
+        subjects: vec!["$KV.channel_conversations_lost.>".to_string()],
+        max_messages_per_subject: 1,
+        discard: jetstream::stream::DiscardPolicy::New,
+        discard_new_per_subject: true,
+        ..Default::default()
+    })
+    .await
+    .expect("a conversations bucket that refuses a second write to one subject");
+
+    let store = ChannelStore::ensure(&js, "lost").await.expect("ensure");
+
+    let ids = QueuedIds::default();
+    let endpoint = endpoint("777");
+    let winner = created(
+        store
+            .create_conversation(&endpoint, &record(&principal("user-7")), &ids)
+            .await
+            .expect("first claim"),
+    );
+
+    let Err(error) = store
+        .create_conversation(&endpoint, &record(&principal("user-7-again")), &ids)
+        .await
+    else {
+        panic!("losing the claim without being able to roll back must not read as success");
+    };
+
+    let ChannelStoreError::OrphanedConversation { conversation, .. } = error else {
+        panic!("expected the failed rollback to surface as an orphaned record, got {error:?}");
+    };
+    assert_eq!(
+        conversation.as_str(),
+        QUEUED_IDS[1].simple().to_string(),
+        "the error must name the loser's own record, not the winner's"
+    );
+    assert!(
+        store
+            .conversations
+            .get(conversation.as_str())
+            .await
+            .expect("read the record the rollback could not remove")
+            .is_some(),
+        "the error must name a record that really is still there to be swept"
+    );
+
+    let (still_bound, _) = store
+        .conversation_for(&endpoint)
+        .await
+        .expect("conversation lookup")
+        .expect("the endpoint is still bound");
+    assert_eq!(still_bound, winner, "the loser must not have moved the binding");
+}
+
 /// The exposure the write order creates: the record goes in first so no binding
 /// is ever briefly visible pointing at nothing, which leaves a failed binding
 /// able to strand a record instead. Each attempt mints a fresh id, so without
@@ -354,6 +449,79 @@ async fn a_rollback_that_also_fails_reports_the_record_it_could_not_remove() {
             .expect("read the record the rollback could not remove")
             .is_some(),
         "the error must name a record that really is still there to be swept"
+    );
+}
+
+/// Re-pointing a binding whose record is gone is a compare-and-swap, so it can
+/// be refused, and then this call has written a record it never bound: the same
+/// strand the failed claim leaves, reached the other way. A bindings bucket that
+/// accepts one write per subject forces it deterministically: the dangling
+/// binding is the write it accepts, and the swap that would replace it is a
+/// second write to the same subject.
+#[tokio::test]
+async fn a_refused_re_point_takes_the_conversation_record_with_it() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+
+    js.create_stream(jetstream::stream::Config {
+        name: "KV_channel_bindings_repoint".to_string(),
+        subjects: vec!["$KV.channel_bindings_repoint.>".to_string()],
+        max_messages_per_subject: 1,
+        discard: jetstream::stream::DiscardPolicy::New,
+        discard_new_per_subject: true,
+        ..Default::default()
+    })
+    .await
+    .expect("a bindings bucket that refuses a second write to one subject");
+
+    let store = ChannelStore::ensure(&js, "repoint").await.expect("ensure");
+
+    let endpoint = endpoint("888");
+    let gone = ConversationId::from_string("gone").expect("conversation id");
+    store
+        .bindings
+        .put(endpoint.kv_key(), serde_json::to_vec(&gone).expect("encode id").into())
+        .await
+        .expect("write dangling binding");
+
+    let Err(error) = store
+        .create_conversation(&endpoint, &record(&principal("user-8")), &UuidV7Generator)
+        .await
+    else {
+        panic!("create must fail when the dangling binding cannot be replaced");
+    };
+
+    let ChannelStoreError::BindEndpoint {
+        conversation,
+        source: ReserveEndpointError::Repoint(_),
+        ..
+    } = error
+    else {
+        panic!("expected the refused swap to surface as a bind failure, got {error:?}");
+    };
+
+    assert!(
+        store
+            .conversations
+            .get(conversation.as_str())
+            .await
+            .expect("read the rolled back record")
+            .is_none(),
+        "a conversation nothing can reach must not survive the call that failed to bind it"
+    );
+
+    let still_dangling: ConversationId = serde_json::from_slice(
+        &store
+            .bindings
+            .get(endpoint.kv_key())
+            .await
+            .expect("read the binding")
+            .expect("the binding is still there"),
+    )
+    .expect("decode the binding");
+    assert_eq!(
+        still_dangling, gone,
+        "a refused swap must leave the binding as it found it"
     );
 }
 
