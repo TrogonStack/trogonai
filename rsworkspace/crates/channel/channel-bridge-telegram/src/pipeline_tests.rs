@@ -294,7 +294,10 @@ async fn settled_consumer_info(
 /// ever redeemed through it. Mock-backed rather than bucket-backed to keep those
 /// scenarios off the object store.
 fn unclaimed_resolver() -> ClaimResolver<MockObjectStore> {
-    ClaimResolver::new(ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()))
+    ClaimResolver::new(ClaimBucketBinding::for_test(
+        MockObjectStore::new(),
+        ClaimBucket::default(),
+    ))
 }
 
 /// The bucket the gateway offloads oversized bodies into, opened the way the

@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn a_bucket_name_is_what_nats_accepts_as_one() {
-    assert_eq!(ClaimBucket::new("trogon-claims").expect("valid").as_str(), "trogon-claims");
+    assert_eq!(
+        ClaimBucket::new("trogon-claims").expect("valid").as_str(),
+        "trogon-claims"
+    );
     assert_eq!(ClaimBucket::new("claims_2").expect("valid").as_str(), "claims_2");
 }
 

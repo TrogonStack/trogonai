@@ -41,7 +41,7 @@ fn conversation_id_rejects_unsafe_tokens() {
 #[test]
 fn conversation_id_deserialize_rejects_unsafe_tokens() {
     let err = serde_json::from_str::<ConversationId>("\"a.b\"").expect_err("dot is unsafe");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn agent_id_rejects_unsafe_tokens() {
 #[test]
 fn agent_id_deserialize_rejects_unsafe_tokens() {
     let err = serde_json::from_str::<AgentId>("\"sales.agent\"").expect_err("dot is unsafe");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn agent_session_id_rejects_unsafe_tokens() {
 #[test]
 fn agent_session_id_deserialize_rejects_unsafe_tokens() {
     let err = serde_json::from_str::<AgentSessionId>("\"sess.1\"").expect_err("dot is unsafe");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
 #[test]
@@ -94,5 +94,5 @@ fn conversation_record_deserialize_rejects_a_corrupt_agent_id() {
         "last_activity_at": 1,
     }))
     .expect_err("corrupt agent_id");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }

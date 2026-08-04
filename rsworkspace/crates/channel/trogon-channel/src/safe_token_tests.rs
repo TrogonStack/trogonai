@@ -14,10 +14,7 @@ fn a_token_is_the_intersection_of_a_kv_key_and_a_subject_token() {
         SafeTokenError::InvalidCharacter(' ')
     );
     // A subject wildcard would match keys it was never given.
-    assert_eq!(
-        SafeToken::new("a*").unwrap_err(),
-        SafeTokenError::InvalidCharacter('*')
-    );
+    assert_eq!(SafeToken::new("a*").unwrap_err(), SafeTokenError::InvalidCharacter('*'));
 }
 
 /// The seam that lets the value objects take a platform's numeric id without an
@@ -53,5 +50,5 @@ fn deserializing_a_token_validates_it_rather_than_admitting_it() {
     assert_eq!(ok.token.as_str(), "ok-1");
 
     let err = serde_json::from_str::<Holder>(r#"{"token":"not ok"}"#).expect_err("unsafe token must not deserialize");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }

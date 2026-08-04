@@ -25,7 +25,7 @@ fn deserializing_a_sender_rejects_an_id_the_constructor_would_reject() {
 
     let err = serde_json::from_str::<Sender>(r#"{"platform_user_id":"user id","display_name":"Ada"}"#)
         .expect_err("unsafe id must not deserialize");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
 /// A display name is shown, never matched on, so it holds no invariant: names

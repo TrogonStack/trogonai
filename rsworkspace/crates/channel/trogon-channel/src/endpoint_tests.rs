@@ -44,7 +44,7 @@ fn endpoint_deserialize_rejects_an_unsafe_token() {
         "peer": "1",
     }))
     .expect_err("space is unsafe");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
 #[test]
@@ -77,5 +77,5 @@ fn principal_id_display_renders_the_bare_id() {
 #[test]
 fn principal_id_deserialize_rejects_an_unsafe_token() {
     let err = serde_json::from_str::<PrincipalId>("\"abc.def\"").expect_err("dot is unsafe");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }

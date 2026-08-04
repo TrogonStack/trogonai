@@ -28,13 +28,9 @@ pub struct CommandTriggers {
 }
 
 impl Default for CommandTriggers {
+    #[allow(clippy::expect_used)]
     fn default() -> Self {
-        Self {
-            new_session: vec![
-                CommandTrigger::try_from(CommandTriggerInput::new("/new")).expect("/new"),
-                CommandTrigger::try_from(CommandTriggerInput::new("/reset")).expect("/reset"),
-            ],
-        }
+        Self::new(["/new", "/reset"]).expect("the default triggers are single non-empty tokens")
     }
 }
 

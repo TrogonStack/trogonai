@@ -49,7 +49,9 @@ impl ConversationId {
     /// v7 makes the bucket list in creation order. The generator is passed in
     /// for the same reason `ConversationRecord::created_at` is: no ambient
     /// clock in this crate.
+    #[allow(clippy::expect_used)]
     pub fn generate(ids: &impl NowV7) -> Self {
+        // `simple()` strips the hyphens, leaving only hex digits.
         Self(SafeToken::new(ids.now_v7().simple().to_string()).expect("uuid v7 simple form is a safe token"))
     }
 

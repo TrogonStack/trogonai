@@ -28,5 +28,5 @@ fn deserializing_a_session_id_rejects_one_the_constructor_would_reject() {
     assert_eq!(ok.as_str(), "sess-1");
 
     let err = serde_json::from_str::<AgentSessionId>(r#""sess 1""#).expect_err("unsafe id must not deserialize");
-    assert!(err.to_string().contains("invalid character"), "{err}");
+    assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }

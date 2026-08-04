@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use super::widened_max_age;
+use super::{ClaimBucket, ClaimBucketBinding, widened_max_age};
 
 const HOUR: Duration = Duration::from_secs(3600);
 const NO_EXPIRY: Duration = Duration::ZERO;
@@ -33,4 +33,18 @@ fn never_shrinks_from_no_expiry_to_finite() {
 #[test]
 fn no_expiry_to_no_expiry_is_a_no_op() {
     assert_eq!(widened_max_age(NO_EXPIRY, NO_EXPIRY), None);
+}
+
+/// A consumer validates the claim's `Nats-Claim-Bucket` header against
+/// `bucket()` while reading through the handle, and a publisher that only writes
+/// that header takes `into_store()` and drops the name. Both halves have to come
+/// back out as the halves that went in, or the validation passes on one bucket
+/// while the handle reads another.
+#[test]
+fn a_binding_hands_each_half_back_as_the_half_it_was_given() {
+    let bucket = ClaimBucket::new("claims").expect("valid bucket name");
+    let binding = ClaimBucketBinding::for_test("a-store-handle", bucket.clone());
+
+    assert_eq!(binding.bucket(), &bucket);
+    assert_eq!(binding.into_store(), "a-store-handle");
 }
