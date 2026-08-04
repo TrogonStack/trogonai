@@ -8,6 +8,15 @@
 /// blocked on ADR#0027's resolver contract, and v1alpha1 is the room in which
 /// that lands additively rather than as a speculative tenant_id today (D0).
 ///
+/// Within v1alpha1 a field may still be added as LEGACY_REQUIRED, and that is
+/// admissible for exactly one reason: no deployed producer has written these
+/// events yet. The break a new required field causes is a current validator
+/// rejecting already-stored bytes, and there are no stored bytes until a producer
+/// ships. Once one ships, or once this package promotes, a new required field
+/// needs a new package version instead. buf breaking under WIRE_JSON does not
+/// catch this, because it compares fields present on both sides and a field new
+/// to one side is not among them.
+///
 /// SessionEvent is the session aggregate's event catalog: one oneof arm per
 /// concrete event type. It is a convenience union for matching and codegen, not
 /// the persisted form -- the store persists each concrete event's own bytes under
