@@ -34,9 +34,9 @@ Telegram ─HTTP─▶ webhook validated, published verbatim   trogon-gateway
                       ▼ ACP over acp-nats
                  ═══ agent works, streams notifications ═══
                       │
-                      ▼ render notifications
+                      ▼ buffer text, flush when the turn ends
                  Telegram Bot API ─HTTPS─▶               channel-bridge-telegram
-                 send, edit-in-place, chunk, throttle    (same process)
+                 send_message, chunked at 4096           (same process)
 ```
 
 Two processes, and that is the whole topology. There is no subject between the
@@ -310,7 +310,12 @@ Telegram structure map as follows:
    gracefully.
 
 Whatever the bridge does not carry is not destroyed: the raw `TELEGRAM` stream
-retains full fidelity for replay when a future need appears.
+retains full fidelity for replay when a future need appears. With one caveat that
+is currently a bug, not a design: the gateway publishes through
+`ClaimCheckPublisher`, so an update larger than the NATS max payload is stored in
+an object store and published as an empty body carrying claim headers. Fidelity is
+preserved in the stream, but only a consumer that calls `resolve_claim` sees it,
+and none does.
 
 ## Decisions and rejected alternatives
 
@@ -354,8 +359,10 @@ retains full fidelity for replay when a future need appears.
 8. **Platform structure over ACP via `_meta`**, dual-carried (text for any agent,
    `_meta` for participating agents); interactivity degrades gracefully with
    non-participating agents.
-9. **Text rendering via edit-in-place streaming** (`edit_text`), the pattern both
-   OpenClaw and Hermes converged on.
+9. **Text rendering should stream via edit-in-place** (`edit_text`), the pattern
+   both OpenClaw and Hermes converged on. Decided, not implemented: the Telegram
+   `Outbound` trait has only `typing` and `send_text`, so today the bridge buffers
+   and sends once at the end of the turn.
 10. **Recorded here, not in ADRs**, except where a decision constrains a component
     outside this design. Media placement did, because it decides what the gateway
     is allowed to become, so it is
@@ -366,10 +373,34 @@ retains full fidelity for replay when a future need appears.
 Things this design commits to that the running system does not do yet. None of
 them change the topology above.
 
+- **A claim-checked update is silently destroyed.** The gateway offloads any body
+  over the NATS max payload to an object store and publishes an empty payload with
+  claim headers. The bridge deserializes `msg.payload` directly, so it sees zero
+  bytes, logs "Unparseable Telegram update; dropping", and acks. The loss is
+  permanent and the log names the wrong cause. `resolve_claim` already exists in
+  `trogon-nats` and is called nowhere outside its own tests. This is the one gap
+  here that is a defect rather than absent work.
 - **Inbound media is dropped.** Parsing keeps only the message text, so a photo,
   voice note, or document arrives as nothing at all. ADR#0044 settles where the
   fetch belongs; the downloader and the `channel_media_{prefix}` bucket do not
   exist.
+- **No streaming output.** The renderer buffers agent text for the whole turn and
+  sends it at the end, so the chat shows a typing indicator and then silence. Only
+  `AgentMessageChunk` text is kept; tool calls, plans, thoughts, and non-text
+  content blocks are logged and dropped, which is why an agent that answers only
+  through tool output produces "Agent turn produced no text" and an empty chat.
+- **Permission requests are always refused.** A chat has no permission surface, so
+  `request_permission` returns `Cancelled`. That is the right default over
+  silently granting, but it means the bridge only works against an agent
+  configured not to ask.
+- **A turn longer than `ack_wait` is prompted twice.** At 600 seconds the message
+  becomes redeliverable while the turn is still running, and nothing dedups on
+  `message_ref` even though the field exists for it. `max_deliver` 5 bounds the
+  duplicates. The same path makes any redelivery after a partial turn re-prompt
+  the agent.
+- **The bridge exits if the agent is down at boot.** ACP `initialize` runs before
+  the consumer opens and propagates its error, so an agent that is not yet
+  reachable turns into a restart loop rather than a bridge that waits.
 - **No per-conversation concurrency.** The inbound loop awaits each turn to
   completion, so one slow agent blocks every conversation, including the `/new`
   meant to rescue it. This is the largest operational gap.
@@ -398,9 +429,12 @@ them change the topology above.
    through the ACP adapter, creating or resuming.
 4. The bridge dispatches the prompt with conversational context dual-carried (text
    prefix plus `_meta`), recording the origin endpoint for this prompt.
-5. The agent streams session notifications back over `acp-nats`. The bridge
-   renders them: `typing`, then edit-in-place preview updates, finally the
-   completed text, chunked at 4096 characters with edit throttling, plus any
-   `_meta`-carried interactivity the agent attached.
-6. The turn ends and the bridge acks the inbound message, which is when it becomes
-   free to pull the next update.
+5. The agent streams session notifications back over `acp-nats`. The bridge sends
+   one `typing` action before prompting, then accumulates the text of every
+   `AgentMessageChunk` into a per-session buffer. Every other kind of session
+   update is logged and dropped.
+6. When the turn ends, the bridge takes the buffer and sends it with
+   `send_message`, split at 4096 characters. Nothing reaches the chat before the
+   turn is over, so a long turn shows a typing indicator and then silence.
+7. The bridge acks the inbound message, which is when it becomes free to pull the
+   next update.

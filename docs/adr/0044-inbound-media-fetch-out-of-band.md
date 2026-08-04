@@ -45,9 +45,9 @@ webhook registration, and the claim-check machinery with `ObjectStorePut` and
 in place, so the objection is not capability. The objection is scope: the
 gateway is a verbatim transport shared across GitHub, GitLab, Linear, Slack,
 Discord, and Telegram sources, and its stated contract is raw fidelity. Media
-fetching would make one source materially smarter than its siblings and would
-add an object-store dependency to a component whose value is being dumb. It
-also cannot be done in the request path at all: Telegram retries webhooks that
+fetching would make one source materially smarter than its siblings, and would
+put the bot token in the ingress. It also cannot be done in the request path at
+all: Telegram retries webhooks that
 do not return promptly, so a download inside the handler trades a fast ingress
 for a slow one.
 
@@ -64,10 +64,17 @@ transport and no gateway change.
 
 ### 1. The gateway stays a verbatim transport
 
-`trogon-gateway` does not fetch media, does not depend on an object store, and
-does not gain per-source intelligence. Its contract remains raw fidelity from
-webhook to stream. This is a deliberate purchase: we accept a third credential
-holder (below) to keep the ingress generic.
+`trogon-gateway` does not fetch media and does not gain per-source
+intelligence. Its contract remains raw fidelity from webhook to stream. This is
+a deliberate purchase: we accept a third credential holder (below) to keep the
+ingress generic.
+
+The gateway does already depend on an object store, through
+`ClaimCheckPublisher`, which offloads any body over the NATS max payload and
+publishes claim headers in its place. That is transport plumbing applied
+identically to every source, not knowledge of what Telegram media is, so it does
+not weaken this decision. It does mean any consumer of a raw stream must call
+`resolve_claim` before deserializing, which today none does.
 
 ### 2. A dedicated downloader consumes the raw stream on its own durable
 
