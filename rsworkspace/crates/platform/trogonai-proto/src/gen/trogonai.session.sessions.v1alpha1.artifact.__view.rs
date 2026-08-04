@@ -35,6 +35,13 @@ pub struct ArtifactRefView<'a> {
     ///
     /// Field 6: `truncated`
     pub truncated: ::core::option::Option<bool>,
+    /// Size of the content before truncation, when the referenced bytes are
+    /// themselves a truncation of a larger original that was never stored. Unset
+    /// when size_bytes already is the full size. Recorded so a reader can tell
+    /// "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+    ///
+    /// Field 7: `untruncated_size_bytes`
+    pub untruncated_size_bytes: ::core::option::Option<u64>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -87,6 +94,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -158,6 +166,15 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                 )?;
                 view.truncated = Some(::buffa::types::decode_bool(&mut cur)?);
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.untruncated_size_bytes = Some(
+                    ::buffa::types::decode_uint64(&mut cur)?,
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -183,6 +200,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -191,6 +209,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactRefView<'a> {
             mime: self.mime.to_string(),
             preview: self.preview.map(|s| s.to_string()),
             truncated: self.truncated,
+            untruncated_size_bytes: self.untruncated_size_bytes,
             ..::core::default::Default::default()
         })
     }
@@ -200,37 +219,44 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.artifact_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.artifact_id) as u64;
         if self.digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.mime) as u32;
+        size += 1u64 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.mime) as u64;
         if let Some(ref v) = self.preview {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.truncated.is_some() {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+            size += 1u64 + ::buffa::types::BOOL_ENCODED_LEN as u64;
         }
-        size
+        if let Some(v) = self.untruncated_size_bytes {
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.artifact_id, buf);
         if self.digest.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                2u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.digest.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(3u32, self.size_bytes, buf);
@@ -240,6 +266,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactRefView<'a> {
         }
         if let Some(v) = self.truncated {
             ::buffa::types::put_bool_field(6u32, v, buf);
+        }
+        if let Some(v) = self.untruncated_size_bytes {
+            ::buffa::types::put_uint64_field(7u32, v, buf);
         }
     }
 }
@@ -284,6 +313,13 @@ impl<'__a> ::serde::Serialize for ArtifactRefView<'__a> {
         }
         if let ::core::option::Option::Some(__v) = self.truncated {
             __map.serialize_entry("truncated", &__v)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.untruncated_size_bytes {
+            __map
+                .serialize_entry(
+                    "untruncatedSizeBytes",
+                    &::buffa::json_helpers::ProtoJson(&__v),
+                )?;
         }
         __map.end()
     }
@@ -339,7 +375,9 @@ impl ArtifactRefOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ArtifactRef,
@@ -355,13 +393,13 @@ impl ArtifactRefOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ArtifactRef, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ArtifactRef {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -419,6 +457,16 @@ impl ArtifactRefOwnedView {
     #[must_use]
     pub fn truncated(&self) -> ::core::option::Option<bool> {
         self.0.reborrow().truncated
+    }
+    /// Size of the content before truncation, when the referenced bytes are
+    /// themselves a truncation of a larger original that was never stored. Unset
+    /// when size_bytes already is the full size. Recorded so a reader can tell
+    /// "1 KB of output" from "1 KB of a 40 MB output" without fetching anything.
+    ///
+    /// Field 7: `untruncated_size_bytes`
+    #[must_use]
+    pub fn untruncated_size_bytes(&self) -> ::core::option::Option<u64> {
+        self.0.reborrow().untruncated_size_bytes
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ArtifactRefView<'static>>>
@@ -521,6 +569,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -665,6 +714,7 @@ impl<'a> ::buffa::MessageView<'a> for ArtifactMetadataView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
+                        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -705,21 +755,21 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.artifact_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.artifact_id) as u64;
         if let Some(ref v) = self.preview {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.truncated.is_some() {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+            size += 1u64 + ::buffa::types::BOOL_ENCODED_LEN as u64;
         }
         if self.created_at.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.created_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let ::core::option::Option::Some(ref v) = self.source {
             match v {
@@ -730,8 +780,8 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::artifact_metadata::Source::External(
                     x,
@@ -740,18 +790,18 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -763,7 +813,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
             ::buffa::types::put_bool_field(4u32, v, buf);
         }
         if self.created_at.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.created_at.write_to(__cache, buf);
         }
         if let ::core::option::Option::Some(ref v) = self.source {
@@ -773,7 +827,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -783,7 +837,7 @@ impl<'a> ::buffa::ViewEncode<'a> for ArtifactMetadataView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         7u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -894,7 +948,9 @@ impl ArtifactMetadataOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ArtifactMetadata,
@@ -910,13 +966,13 @@ impl ArtifactMetadataOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ArtifactMetadata, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ArtifactMetadata {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -1073,6 +1129,7 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -1154,6 +1211,7 @@ impl<'a> ::buffa::MessageView<'a> for StoredArtifactView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -1170,30 +1228,34 @@ impl<'a> ::buffa::ViewEncode<'a> for StoredArtifactView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if self.digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.storage_ref) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.mime) as u32;
-        size
+        size += 1u64 + ::buffa::types::uint64_encoded_len(self.size_bytes) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.storage_ref) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.mime) as u64;
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.digest.is_set() {
-            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.digest.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(2u32, self.size_bytes, buf);
@@ -1293,7 +1355,9 @@ impl StoredArtifactOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::StoredArtifact,
@@ -1309,13 +1373,13 @@ impl StoredArtifactOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::StoredArtifact, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::StoredArtifact {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -1451,6 +1515,7 @@ impl<'a> ::buffa::MessageView<'a> for ExternalArtifactView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -1554,6 +1619,7 @@ impl<'a> ::buffa::MessageView<'a> for ExternalArtifactView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
+                        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -1562,6 +1628,7 @@ impl<'a> ::buffa::MessageView<'a> for ExternalArtifactView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -1575,37 +1642,37 @@ impl<'a> ::buffa::ViewEncode<'a> for ExternalArtifactView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.source_url) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.source_url) as u64;
         if let Some(ref v) = self.source_encoding {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if let Some(ref v) = self.declared_mime {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.fetched_at.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.fetched_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if self.content_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.content_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -1617,11 +1684,19 @@ impl<'a> ::buffa::ViewEncode<'a> for ExternalArtifactView<'a> {
             ::buffa::types::put_string_field(3u32, v, buf);
         }
         if self.fetched_at.is_set() {
-            ::buffa::types::put_len_delimited_header(4u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                4u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.fetched_at.write_to(__cache, buf);
         }
         if self.content_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.content_digest.write_to(__cache, buf);
         }
     }
@@ -1719,7 +1794,9 @@ impl ExternalArtifactOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ExternalArtifact,
@@ -1735,13 +1812,13 @@ impl ExternalArtifactOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ExternalArtifact, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ExternalArtifact {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

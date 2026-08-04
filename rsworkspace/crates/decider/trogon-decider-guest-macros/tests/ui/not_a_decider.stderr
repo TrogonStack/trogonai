@@ -90,6 +90,48 @@ note: required because it appears within the type `Session`
 11 | |     state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
 12 | | });
    | |__^
+   = note: required for `Session` to implement `wit_bindgen::resource::Resource`
+note: required by a bound in `GuestSession`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = CREATE_SCHEDULE_TYPE_URL,
+ 8 | |     proto = v1::CreateSchedule,
+ 9 | |     module = "scheduler.schedules",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ required by this bound in `GuestSession`
+   = note: this error originates in the macro `export_decider` which comes from the expansion of the macro `wit_bindgen::generate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotADecider: Decider` is not satisfied in `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = CREATE_SCHEDULE_TYPE_URL,
+ 8 | |     proto = v1::CreateSchedule,
+ 9 | |     module = "scheduler.schedules",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^ unsatisfied trait bound
+   |
+help: within `Session`, the trait `Decider` is not implemented for `NotADecider`
+  --> tests/ui/not_a_decider.rs:4:1
+   |
+ 4 | struct NotADecider;
+   | ^^^^^^^^^^^^^^^^^^
+note: required because it appears within the type `Session`
+  --> tests/ui/not_a_decider.rs:6:1
+   |
+ 6 | / export_decider!(NotADecider {
+ 7 | |     type_url = CREATE_SCHEDULE_TYPE_URL,
+ 8 | |     proto = v1::CreateSchedule,
+ 9 | |     module = "scheduler.schedules",
+10 | |     version = "0.1.0",
+11 | |     state_schema_version = SCHEDULES_STATE_SCHEMA_VERSION,
+12 | | });
+   | |__^
    = note: the return type of a function must have a statically known size
    = note: this error originates in the macro `export_decider` (in Nightly builds, run with -Z macro-backtrace for more info)
 

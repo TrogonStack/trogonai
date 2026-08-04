@@ -15,6 +15,8 @@ use trogonai_proto::scheduler::schedules::{
     CREATE_SCHEDULE_TYPE_URL, PAUSE_SCHEDULE_TYPE_URL, REMOVE_SCHEDULE_TYPE_URL, RESUME_SCHEDULE_TYPE_URL, state_v1, v1,
 };
 
+const BACKUP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
+
 fn invalid_command(other: &str) -> NativeDomainError {
     NativeDomainError {
         code: "invalid-command".to_string(),
@@ -151,7 +153,7 @@ fn create_backup_scenario() -> ScenarioIr {
 #[test]
 fn assert_parity_passes_when_declared_stream_id_matches_both_runners() {
     let mut scenario = create_backup_scenario();
-    scenario.stream_id = Some("backup".to_string());
+    scenario.stream_id = Some(BACKUP_SCHEDULE_ID.to_string());
 
     let wasm = SimFixture::schedules().bytes().to_vec();
     let host = SimHost::load(&wasm).expect("load schedules wasm component");

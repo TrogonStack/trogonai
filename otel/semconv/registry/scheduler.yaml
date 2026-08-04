@@ -55,10 +55,10 @@ groups:
         type: string
         stability: development
         brief: Position of the processed record within its event stream (recorded as a string today).
-      - id: schedule_key
+      - id: schedule_id
         type: string
         stability: development
-        brief: Key uniquely identifying the schedule the record applies to.
+        brief: Identifier of the schedule the record applies to.
 
   - id: metric.scheduler.processor.records
     type: metric
@@ -121,7 +121,7 @@ groups:
         requirement_level: recommended
       - ref: stream_position
         requirement_level: recommended
-      - ref: schedule_key
+      - ref: schedule_id
         requirement_level: recommended
       - ref: event_type
         requirement_level: recommended

@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
+import "trogonai/session/sessions/v1alpha1/workspace.proto";
 
 // SessionStarted is the creation fact for a session's logical stream and stores
 // the immutable StoredSessionExecutionPlan exactly once (ADR#0031 §6). The
@@ -15,4 +16,9 @@ import "trogonai/session/sessions/v1alpha1/execution_plan.proto";
 message SessionStarted {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   StoredSessionExecutionPlan execution_plan = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Workspace this session is bound to, carried inline so workspace-scoped
+  // reads never decode plan_bytes. It must agree with the plan's working
+  // directory; this field is the projection surface, the plan stays
+  // authoritative.
+  WorkspaceRef workspace = 3 [features.field_presence = LEGACY_REQUIRED];
 }

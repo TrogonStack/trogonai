@@ -38,6 +38,19 @@ pub struct ToolCallApproved {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub approved_by: ::buffa::alloc::string::String,
+    /// Turn the approved call belongs to (see UserMessageRecorded.turn_id).
+    /// Optional here, unlike on the lifecycle events the agent loop writes: an
+    /// approval may be recorded by an external approver that holds the call
+    /// identity without the turn context, and forcing a value would invite a
+    /// fabricated one.
+    ///
+    /// Field 5: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        skip_serializing_if = "::core::option::Option::is_none"
+    )]
+    pub turn_id: ::core::option::Option<::buffa::alloc::string::String>,
 }
 impl ::core::fmt::Debug for ToolCallApproved {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -46,6 +59,7 @@ impl ::core::fmt::Debug for ToolCallApproved {
             .field("tool_call_id", &self.tool_call_id)
             .field("tool_execution_id", &self.tool_execution_id)
             .field("approved_by", &self.approved_by)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -55,6 +69,18 @@ impl ToolCallApproved {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ToolCallApproved";
+}
+impl ToolCallApproved {
+    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
+    #[inline]
+    ///Sets [`Self::turn_id`] to `Some(value)`, consuming and returning `self`.
+    pub fn with_turn_id(
+        mut self,
+        value: impl Into<::buffa::alloc::string::String>,
+    ) -> Self {
+        self.turn_id = Some(value.into());
+        self
+    }
 }
 ::buffa::impl_default_instance!(ToolCallApproved);
 impl ::buffa::MessageName for ToolCallApproved {
@@ -66,25 +92,30 @@ impl ::buffa::MessageName for ToolCallApproved {
 impl ::buffa::Message for ToolCallApproved {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u64;
         size
-            += 1u32 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.approved_by) as u32;
-        size
+            += 1u64 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.approved_by) as u64;
+        if let Some(ref v) = self.turn_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -92,6 +123,9 @@ impl ::buffa::Message for ToolCallApproved {
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
         ::buffa::types::put_string_field(4u32, &self.approved_by, buf);
+        if let Some(ref v) = self.turn_id {
+            ::buffa::types::put_string_field(5u32, v, buf);
+        }
     }
     fn merge_field(
         &mut self,
@@ -132,6 +166,16 @@ impl ::buffa::Message for ToolCallApproved {
                 )?;
                 ::buffa::types::merge_string(&mut self.approved_by, buf)?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(
+                    self.turn_id.get_or_insert_with(::buffa::alloc::string::String::new),
+                    buf,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -143,6 +187,7 @@ impl ::buffa::Message for ToolCallApproved {
         self.tool_call_id.clear();
         self.tool_execution_id.clear();
         self.approved_by.clear();
+        self.turn_id = ::core::option::Option::None;
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for ToolCallApproved {

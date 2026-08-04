@@ -3,6 +3,12 @@
 
 /// FileChanged records that a file changed, in arrival order. It is a commuting
 /// happened-fact (WRITE_PRECONDITION = Any, ADR#0035 facet 2).
+///
+/// Every recorded change is attributed to the tool call that caused it. A change
+/// with no proximate call is not a FileChanged at all: it surfaces as a
+/// ResourceObservation whose digest differs from the last one recorded for that
+/// resource, which is the signal that something outside the session moved
+/// underneath it, and which must not be attributed to the session's own work.
 #[derive(Clone, PartialEq, Default)]
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
@@ -14,6 +20,14 @@ pub struct FileChanged {
         with = "::buffa::json_helpers::proto_string"
     )]
     pub session_id: ::buffa::alloc::string::String,
+    /// Workspace-relative path to the changed file (forward slashes, no leading
+    /// slash). A projection joins this to ResourceObservation.uri by resolving
+    /// workspace.uri + "/" + path against the session's WorkspaceRef.uri
+    /// (ADR#0035): that is how it tells whether a later digest change for the
+    /// same resource was session-authored. A resource with no workspace path --
+    /// a fetched URL, an MCP resource -- is only ever a ResourceObservation,
+    /// with no FileChanged to join against.
+    ///
     /// Field 2: `path`
     #[serde(rename = "path", with = "::buffa::json_helpers::proto_string")]
     pub path: ::buffa::alloc::string::String,
@@ -24,6 +38,8 @@ pub struct FileChanged {
         with = "::buffa::json_helpers::proto_enum"
     )]
     pub change_kind: ::buffa::EnumValue<FileChangeKind>,
+    /// Same workspace-relative form as path.
+    ///
     /// Field 4: `previous_path`
     #[serde(
         rename = "previousPath",
@@ -41,7 +57,7 @@ pub struct FileChanged {
         alias = "before_ref",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub before_ref: ::buffa::MessageField<ArtifactRef>,
+    pub before_ref: ::buffa::MessageField<ArtifactRef, ::buffa::Inline<ArtifactRef>>,
     /// Claim-check to the file's content after the change; unset for a delete or
     /// when content was not captured.
     ///
@@ -51,7 +67,36 @@ pub struct FileChanged {
         alias = "after_ref",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub after_ref: ::buffa::MessageField<ArtifactRef>,
+    pub after_ref: ::buffa::MessageField<ArtifactRef, ::buffa::Inline<ArtifactRef>>,
+    /// The tool call that caused the change, joining to ToolCallCompleted. Without
+    /// it, "which call touched this file" is only answerable by correlating
+    /// adjacency in fold order, which concurrent Any-precondition appends make
+    /// unsound.
+    ///
+    /// Field 7: `tool_call_id`
+    #[serde(
+        rename = "toolCallId",
+        alias = "tool_call_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub tool_call_id: ::buffa::alloc::string::String,
+    /// Turn the causing call belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 8: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
+    /// Precomputed line counts and rendered diff; unset when no diff was computed.
+    ///
+    /// Field 9: `diff`
+    #[serde(
+        rename = "diff",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub diff: ::buffa::MessageField<DiffSummary, ::buffa::Inline<DiffSummary>>,
 }
 impl ::core::fmt::Debug for FileChanged {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -62,6 +107,9 @@ impl ::core::fmt::Debug for FileChanged {
             .field("previous_path", &self.previous_path)
             .field("before_ref", &self.before_ref)
             .field("after_ref", &self.after_ref)
+            .field("tool_call_id", &self.tool_call_id)
+            .field("turn_id", &self.turn_id)
+            .field("diff", &self.diff)
             .finish()
     }
 }
@@ -94,45 +142,57 @@ impl ::buffa::MessageName for FileChanged {
 impl ::buffa::Message for FileChanged {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.path) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.path) as u64;
         {
             let val = self.change_kind.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
         if let Some(ref v) = self.previous_path {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.before_ref.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.before_ref.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if self.after_ref.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.after_ref.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        if self.diff.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.diff.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -143,12 +203,30 @@ impl ::buffa::Message for FileChanged {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
         if self.before_ref.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.before_ref.write_to(__cache, buf);
         }
         if self.after_ref.is_set() {
-            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.after_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(7u32, &self.tool_call_id, buf);
+        ::buffa::types::put_string_field(8u32, &self.turn_id, buf);
+        if self.diff.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.diff.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -219,6 +297,31 @@ impl ::buffa::Message for FileChanged {
                     ctx,
                 )?;
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.tool_call_id, buf)?;
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.diff.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -232,6 +335,9 @@ impl ::buffa::Message for FileChanged {
         self.previous_path = ::core::option::Option::None;
         self.before_ref = ::buffa::MessageField::none();
         self.after_ref = ::buffa::MessageField::none();
+        self.tool_call_id.clear();
+        self.turn_id.clear();
+        self.diff = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for FileChanged {

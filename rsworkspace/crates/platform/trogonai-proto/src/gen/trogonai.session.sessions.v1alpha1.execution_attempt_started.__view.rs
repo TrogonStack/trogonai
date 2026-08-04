@@ -128,6 +128,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -321,6 +322,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -331,6 +333,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Checkpoint,
+                        ::buffa::Inline<super::super::Checkpoint>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -341,6 +344,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -353,6 +357,7 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
+                        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
@@ -366,72 +371,76 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         size
-            += 1u32
-                + ::buffa::types::string_encoded_len(&self.execution_attempt_id) as u32;
+            += 1u64
+                + ::buffa::types::string_encoded_len(&self.execution_attempt_id) as u64;
         if self.session_execution_plan_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.session_execution_plan_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size += 1u32 + ::buffa::types::uint64_encoded_len(self.attempt_number) as u32;
+        size += 1u64 + ::buffa::types::uint64_encoded_len(self.attempt_number) as u64;
         if let Some(ref v) = self.previous_attempt_id {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.restored_checkpoint.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.restored_checkpoint.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.resume_cursor {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         size
-            += 1u32 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u32;
+            += 1u64 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u64;
         if self.host_artifact_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.host_artifact_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.authenticated_remote_subject {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if let Some(ref v) = self.isolation_placement {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.started_at.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.started_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         ::buffa::types::put_string_field(2u32, &self.execution_attempt_id, buf);
         if self.session_execution_plan_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.session_execution_plan_digest.write_to(__cache, buf);
         }
         ::buffa::types::put_uint64_field(4u32, self.attempt_number, buf);
@@ -439,7 +448,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
             ::buffa::types::put_string_field(5u32, v, buf);
         }
         if self.restored_checkpoint.is_set() {
-            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.restored_checkpoint.write_to(__cache, buf);
         }
         if let Some(ref v) = self.resume_cursor {
@@ -447,7 +460,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
         }
         ::buffa::types::put_string_field(8u32, &self.host_artifact_ref, buf);
         if self.host_artifact_digest.is_set() {
-            ::buffa::types::put_len_delimited_header(9u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.host_artifact_digest.write_to(__cache, buf);
         }
         if let Some(ref v) = self.authenticated_remote_subject {
@@ -457,7 +474,11 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
             ::buffa::types::put_string_field(11u32, v, buf);
         }
         if self.started_at.is_set() {
-            ::buffa::types::put_len_delimited_header(12u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                12u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.started_at.write_to(__cache, buf);
         }
     }
@@ -595,7 +616,9 @@ impl ExecutionAttemptStartedOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ExecutionAttemptStarted,
@@ -611,16 +634,13 @@ impl ExecutionAttemptStartedOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<
-        super::super::ExecutionAttemptStarted,
-        ::buffa::DecodeError,
-    > {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ExecutionAttemptStarted {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

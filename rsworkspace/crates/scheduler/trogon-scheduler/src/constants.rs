@@ -3,7 +3,6 @@
 use std::num::NonZeroU64;
 
 use trogon_decider_runtime::FrequencySnapshot;
-use uuid::Uuid;
 
 // kv: shared NATS plumbing (event stream and command snapshot bucket).
 pub const EVENTS_STREAM: &str = "SCHEDULER_EVENTS";
@@ -18,8 +17,7 @@ pub(crate) const NATS_SCHEDULE_TARGET_HEADER: &str = "Nats-Schedule-Target";
 pub(crate) const NATS_SCHEDULE_TTL_HEADER: &str = "Nats-Schedule-TTL";
 pub(crate) const NATS_SCHEDULE_SOURCE_HEADER: &str = "Nats-Schedule-Source";
 pub(crate) const CONTENT_TYPE_HEADER: &str = "Content-Type";
-pub(crate) const TROGON_SCHEDULE_KEY_HEADER: &str = "Trogon-Schedule-Key";
-pub(crate) const TROGON_SCHEDULE_ID_B64_HEADER: &str = "Trogon-Schedule-Id-B64";
+pub(crate) const TROGON_SCHEDULE_ID_HEADER: &str = "Trogon-Schedule-Id";
 pub(crate) const TROGON_SCHEDULE_OCCURRENCE_SEQUENCE_HEADER: &str = "Trogon-Schedule-Occurrence-Sequence";
 pub(crate) const TROGON_SCHEDULE_OCCURRENCE_AT_HEADER: &str = "Trogon-Schedule-Occurrence-At";
 pub(crate) const TROGON_SCHEDULE_RESERVED_PREFIX: &str = "Trogon-Schedule";
@@ -32,9 +30,6 @@ pub(crate) const NATS_RESERVED_HEADERS: [&str; 6] = [
     "Nats-Schedule-Time-Zone",
     "Nats-Schedule-TTL",
 ];
-
-// reconciliation::schedule_key
-pub(crate) const SCHEDULER_SCHEDULE_NAMESPACE: Uuid = Uuid::from_u128(0x1f8e_7d6c_5b4a_4938_8271_6050_4f3e_2d1c);
 
 // reconciliation::reconcile
 pub(crate) const CORRUPT_CHECKPOINT_PLACEHOLDER_ROUTE: &str = "trogon.scheduler.corrupt-checkpoint";
@@ -68,8 +63,8 @@ pub(crate) const CHECKPOINT_KEY_PREFIX: &str = "v1.";
 // execution::worker::consumer
 /// Event stream the scheduler consumes persisted schedule events from.
 pub const SCHEDULE_EVENT_STREAM: &str = "SCHEDULER_SCHEDULE_EVENTS";
-/// Subject the scheduler consumer filters on. Keyed by `ScheduleKey`, never the
-/// raw `ScheduleId`. Must stay `{EVENT_SUBJECT_PREFIX}.>`; a test enforces the
+/// Subject the scheduler consumer filters on. Must stay
+/// `{EVENT_SUBJECT_PREFIX}.>`; a test enforces the
 /// derivation since consts cannot be concatenated at compile time.
 pub const SCHEDULE_EVENT_FILTER: &str = "scheduler.schedules.events.v1.>";
 /// Durable name the scheduler pull consumer registers under.
@@ -95,12 +90,7 @@ pub const SCHEDULES_BUCKET: &str = "scheduler_schedules";
 
 /// Key of the catch-up checkpoint entry within [`SCHEDULES_BUCKET`].
 ///
-/// Versioned: the read model keys entries by a derived token (see
-/// `read_model_key`) rather than the raw schedule id. The version forces a
-/// one-time full rebuild on upgrade so the bucket is re-keyed under the new
-/// scheme; the catch-up reconcile then removes any entry written under the old
-/// (raw-id) scheme.
-pub const SCHEDULES_CHECKPOINT_KEY: &str = "_query.schedules.read_model.v2.last_event_sequence";
+pub const SCHEDULES_CHECKPOINT_KEY: &str = "_query.schedules.read_model.v3.last_event_sequence";
 
 // projections::postgres::store
 /// This projection's id in the shared `jetstream_projection_checkpoint` table.

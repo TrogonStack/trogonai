@@ -17,6 +17,25 @@ use trogon_scheduler::{
 };
 use trogon_std::env::{ReadEnv, SystemEnv};
 
+fn fixture_schedule_id(label: &str) -> String {
+    match label {
+        "eventful" => "00000000000000000000000000000001",
+        "retired" => "00000000000000000000000000000002",
+        "recurring" => "00000000000000000000000000000003",
+        "second" => "00000000000000000000000000000004",
+        "report-v2" => "00000000000000000000000000000005",
+        "orders-created" => "00000000000000000000000000000006",
+        "namespace-thing" => "00000000000000000000000000000007",
+        "nightly" => "00000000000000000000000000000008",
+        "finite" => "00000000000000000000000000000009",
+        "alpha" => "0000000000000000000000000000000a",
+        "durable" => "0000000000000000000000000000000b",
+        "lifecycle" => "0000000000000000000000000000000c",
+        _ => panic!("missing explicit schedule ID fixture for {label}"),
+    }
+    .to_string()
+}
+
 fn test_url() -> String {
     SystemEnv
         .var("NATS_TEST_URL")
@@ -24,7 +43,11 @@ fn test_url() -> String {
 }
 
 fn command_schedule_id(id: &str) -> command_domain::ScheduleId {
-    command_domain::ScheduleId::parse(id).unwrap()
+    command_domain::ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
+}
+
+fn query_schedule_id(id: &str) -> ScheduleId {
+    ScheduleId::parse(&fixture_schedule_id(id)).unwrap()
 }
 
 async fn connect() -> async_nats::Client {
@@ -123,7 +146,7 @@ async fn event_store_rebuilds_current_state_for_new_client() {
     let fresh = connect_store(nats).await.unwrap();
     let rebuilt = get_schedule(
         &fresh.schedules_bucket,
-        GetScheduleCommand::new(ScheduleId::parse("eventful").unwrap()),
+        GetScheduleCommand::new(query_schedule_id("eventful")),
     )
     .await
     .unwrap()
@@ -155,7 +178,7 @@ async fn removed_schedule_reads_back_as_absent() {
     // The projection deletes the key on removal, leaving a KV tombstone. Both
     // the point read and the listing must treat that tombstone as absent rather
     // than failing to deserialize its empty value.
-    let queried = ScheduleId::parse("retired").unwrap();
+    let queried = query_schedule_id("retired");
     assert!(
         get_schedule(&store.schedules_bucket, GetScheduleCommand::new(queried.clone()))
             .await
@@ -209,7 +232,7 @@ async fn catch_up_rebuilds_read_model_after_a_multi_event_append() {
     let armed = store
         .event_store
         .read_stream(ReadStreamRequest {
-            stream_id: "recurring",
+            stream_id: &id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -246,7 +269,7 @@ async fn catch_up_rebuilds_read_model_after_a_multi_event_append() {
     assert!(
         get_schedule(
             &fresh.schedules_bucket,
-            GetScheduleCommand::new(ScheduleId::parse("recurring").unwrap())
+            GetScheduleCommand::new(query_schedule_id("recurring"))
         )
         .await
         .unwrap()
@@ -255,7 +278,7 @@ async fn catch_up_rebuilds_read_model_after_a_multi_event_append() {
     assert!(
         get_schedule(
             &fresh.schedules_bucket,
-            GetScheduleCommand::new(ScheduleId::parse("second").unwrap())
+            GetScheduleCommand::new(query_schedule_id("second"))
         )
         .await
         .unwrap()
@@ -273,29 +296,22 @@ async fn purge_schedules_bucket(js: &jetstream::Context) {
 
 #[tokio::test]
 #[ignore = "requires NATS test broker"]
-async fn projection_folds_permissive_schedule_ids_through_live_and_catch_up() {
+async fn projection_preserves_canonical_schedule_ids_through_live_and_catch_up() {
     let (nats, js) = connect_js().await;
     reset_state(&js).await;
     let store = connect_store(nats.clone()).await.unwrap();
 
-    // IDs the command domain accepts but a single NATS token would reject —
-    // including ':' and non-ASCII that are not valid raw KV keys. The read model
-    // keys by a derived token, so all of them must be addressable by get, present
-    // in list, and survive a catch-up rebuild.
-    let ids = ["report.v2", "orders/created", "ns:thing", "café-nightly"];
-    for id in ids {
+    let labels = ["report-v2", "orders-created", "namespace-thing", "nightly"];
+    for id in labels {
         CommandExecution::new(&store.event_store, &base_schedule(id))
             .execute()
             .await
             .unwrap();
         assert!(
-            get_schedule(
-                &store.schedules_bucket,
-                GetScheduleCommand::new(ScheduleId::parse(id).unwrap())
-            )
-            .await
-            .unwrap()
-            .is_some(),
+            get_schedule(&store.schedules_bucket, GetScheduleCommand::new(query_schedule_id(id)))
+                .await
+                .unwrap()
+                .is_some(),
             "get could not address {id}"
         );
     }
@@ -306,9 +322,10 @@ async fn projection_folds_permissive_schedule_ids_through_live_and_catch_up() {
         .into_iter()
         .map(|schedule| schedule.id)
         .collect();
-    assert_eq!(live.len(), ids.len(), "unexpected live listing: {live:?}");
-    for id in ids {
-        assert!(live.contains(&id.to_string()), "live projection missing {id}");
+    assert_eq!(live.len(), labels.len(), "unexpected live listing: {live:?}");
+    for label in labels {
+        let id = fixture_schedule_id(label);
+        assert!(live.contains(&id), "live projection missing {label}");
     }
 
     // Drop the KV read model so a fresh client must re-fold the events.
@@ -320,18 +337,19 @@ async fn projection_folds_permissive_schedule_ids_through_live_and_catch_up() {
         .into_iter()
         .map(|schedule| schedule.id)
         .collect();
-    assert_eq!(rebuilt.len(), ids.len(), "unexpected rebuilt listing: {rebuilt:?}");
-    for id in ids {
-        assert!(rebuilt.contains(&id.to_string()), "catch-up rebuild missing {id}");
+    assert_eq!(rebuilt.len(), labels.len(), "unexpected rebuilt listing: {rebuilt:?}");
+    for label in labels {
+        let id = fixture_schedule_id(label);
+        assert!(rebuilt.contains(&id), "catch-up rebuild missing {label}");
         assert!(
             get_schedule(
                 &fresh.schedules_bucket,
-                GetScheduleCommand::new(ScheduleId::parse(id).unwrap())
+                GetScheduleCommand::new(query_schedule_id(label))
             )
             .await
             .unwrap()
             .is_some(),
-            "get could not address {id} after rebuild"
+            "get could not address {label} after rebuild"
         );
     }
 }
@@ -364,7 +382,7 @@ async fn completed_recurring_schedule_is_marked_completed_in_read_model() {
     let completed_event = store
         .event_store
         .read_stream(ReadStreamRequest {
-            stream_id: "finite",
+            stream_id: &id,
             from: ReadFrom::Beginning,
         })
         .await
@@ -380,7 +398,7 @@ async fn completed_recurring_schedule_is_marked_completed_in_read_model() {
 
     let live = get_schedule(
         &store.schedules_bucket,
-        GetScheduleCommand::new(ScheduleId::parse("finite").unwrap()),
+        GetScheduleCommand::new(query_schedule_id("finite")),
     )
     .await
     .unwrap()
@@ -393,7 +411,7 @@ async fn completed_recurring_schedule_is_marked_completed_in_read_model() {
     let fresh = connect_store(nats).await.unwrap();
     let rebuilt = get_schedule(
         &fresh.schedules_bucket,
-        GetScheduleCommand::new(ScheduleId::parse("finite").unwrap()),
+        GetScheduleCommand::new(query_schedule_id("finite")),
     )
     .await
     .unwrap()
@@ -451,7 +469,7 @@ async fn catch_up_reconcile_removes_rows_absent_from_the_folded_state() {
     assert!(
         get_schedule(
             &fresh.schedules_bucket,
-            GetScheduleCommand::new(ScheduleId::parse("alpha").unwrap())
+            GetScheduleCommand::new(query_schedule_id("alpha"))
         )
         .await
         .unwrap()
@@ -486,7 +504,7 @@ async fn catch_up_self_heals_from_a_corrupt_checkpoint() {
     assert!(
         get_schedule(
             &fresh.schedules_bucket,
-            GetScheduleCommand::new(ScheduleId::parse("durable").unwrap())
+            GetScheduleCommand::new(query_schedule_id("durable"))
         )
         .await
         .unwrap()
@@ -535,7 +553,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
         Some(state_v1::StateValue::STATE_VALUE_PRESENT_ENABLED)
     );
 
-    let removed = CommandExecution::new(&store.event_store, &RemoveSchedule::new(command_id))
+    let removed = CommandExecution::new(&store.event_store, &RemoveSchedule::new(command_id.clone()))
         .with_snapshot(&store.event_store)
         .with_task_runtime(TokioSnapshotTaskScheduler)
         .execute()
@@ -551,7 +569,7 @@ async fn commands_execute_full_lifecycle_against_event_store() {
     let stream = fresh
         .event_store
         .read_stream(ReadStreamRequest {
-            stream_id: "lifecycle",
+            stream_id: &command_id,
             from: ReadFrom::Beginning,
         })
         .await

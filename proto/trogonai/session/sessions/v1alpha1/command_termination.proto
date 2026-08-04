@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.session.sessions.v1alpha1;
+
+// CommandTermination is how a process-executing tool call ended, kept as a
+// typed fact rather than left to be parsed back out of the tool's rendered
+// output. It belongs to ToolCallCompleted, which owns the execution and audit
+// fold, and deliberately not to ToolCallResult, which owns the provider-visible
+// transcript the model actually received (D11): an exit status the model never
+// saw must not enter the replay shape.
+//
+// A command that ran and exited non-zero is a ToolCallCompleted whose result
+// status is TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR and whose termination is
+// set. A command that never ran is a ToolCallFailed and carries no termination.
+message CommandTermination {
+  oneof outcome {
+    // Process exit status.
+    int32 exit_code = 1;
+    // Signal number that terminated the process.
+    int32 signal = 2;
+  }
+}

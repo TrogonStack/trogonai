@@ -28,6 +28,8 @@ message AssistantMessageFailed {
   // provider reported none. Recorded so a cost fold does not undercount tokens
   // consumed by a turn that failed mid-generation.
   TokenUsage usage = 5;
+  // Turn this generation belongs to (see UserMessageRecorded.turn_id).
+  string turn_id = 6 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // AssistantMessageFailureReason is why an assistant turn did not complete.

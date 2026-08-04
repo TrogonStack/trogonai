@@ -12,4 +12,10 @@ message ToolCallApproved {
   string tool_call_id = 2 [features.field_presence = LEGACY_REQUIRED];
   string tool_execution_id = 3 [features.field_presence = LEGACY_REQUIRED];
   string approved_by = 4 [features.field_presence = LEGACY_REQUIRED];
+  // Turn the approved call belongs to (see UserMessageRecorded.turn_id).
+  // Optional here, unlike on the lifecycle events the agent loop writes: an
+  // approval may be recorded by an external approver that holds the call
+  // identity without the turn context, and forcing a value would invite a
+  // fabricated one.
+  string turn_id = 5;
 }

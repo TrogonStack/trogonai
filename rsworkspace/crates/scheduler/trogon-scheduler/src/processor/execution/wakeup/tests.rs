@@ -29,8 +29,9 @@ struct MemoryEventStore {
 
 impl MemoryEventStore {
     fn events(&self, stream_id: &str) -> Vec<StreamEvent> {
+        let stream_id = ScheduleId::parse(stream_id).unwrap();
         futures::executor::block_on(self.read_stream(ReadStreamRequest {
-            stream_id,
+            stream_id: &stream_id,
             from: ReadFrom::Beginning,
         }))
         .unwrap()
@@ -38,12 +39,12 @@ impl MemoryEventStore {
     }
 }
 
-impl StreamRead<str> for MemoryEventStore {
+impl StreamRead<ScheduleId> for MemoryEventStore {
     type Error = MemoryStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(&self, request: ReadStreamRequest<'_, ScheduleId>) -> Result<ReadStreamResponse, Self::Error> {
         let streams = self.streams.lock().unwrap();
-        let events = streams.get(request.stream_id).cloned().unwrap_or_default();
+        let events = streams.get(&request.stream_id.to_string()).cloned().unwrap_or_default();
         let current_position = stream_position_for_len(events.len());
         let from = match request.from {
             ReadFrom::Beginning => 1,
@@ -70,10 +71,13 @@ impl StreamRead<str> for MemoryEventStore {
     }
 }
 
-impl StreamAppend<str> for MemoryEventStore {
+impl StreamAppend<ScheduleId> for MemoryEventStore {
     type Error = MemoryStoreError;
 
-    async fn append_stream(&self, request: AppendStreamRequest<'_, str>) -> Result<AppendStreamResponse, Self::Error> {
+    async fn append_stream(
+        &self,
+        request: AppendStreamRequest<'_, ScheduleId>,
+    ) -> Result<AppendStreamResponse, Self::Error> {
         let mut streams = self.streams.lock().unwrap();
         let events = streams.entry(request.stream_id.to_string()).or_default();
         let current_position = stream_position_for_len(events.len());
@@ -95,7 +99,7 @@ impl StreamAppend<str> for MemoryEventStore {
 }
 
 fn schedule_id() -> ScheduleId {
-    ScheduleId::parse("orders/rrule").unwrap()
+    crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c04").unwrap()
 }
 
 fn stream_position_for_len(len: usize) -> Option<StreamPosition> {
@@ -123,9 +127,7 @@ fn wakeup_payload(id: &ScheduleId) -> Vec<u8> {
 }
 
 fn wakeup_subject(id: &ScheduleId) -> String {
-    ScheduleSubject::rrule_wakeup(&ScheduleKey::derive(id))
-        .as_str()
-        .to_string()
+    ScheduleSubject::rrule_wakeup(id).as_str().to_string()
 }
 
 fn create_schedule(id: ScheduleId, status: ScheduleEventStatus) -> CreateSchedule {
@@ -177,7 +179,7 @@ async fn wakeup_records_occurrence_into_the_schedule_stream() {
             stream_position: trogon_decider_runtime::StreamPosition::try_new(4).unwrap(),
         }
     );
-    let events = store.events(id.as_str());
+    let events = store.events(&id.to_string());
     assert_eq!(events.len(), 4);
     let decoded = v1_event(&events[2]);
     let Some(trogonai_proto::scheduler::schedules::ScheduleEventCase::ScheduleOccurrenceRecorded(recorded)) =
@@ -225,7 +227,7 @@ async fn wakeup_duplicate_is_acknowledgeable_without_a_second_append() {
         .unwrap();
 
     assert_eq!(duplicate, RRuleWakeupOutcome::DuplicateStale);
-    assert_eq!(store.events(id.as_str()).len(), 4);
+    assert_eq!(store.events(&id.to_string()).len(), 4);
 }
 
 #[tokio::test]
@@ -239,7 +241,7 @@ async fn wakeup_for_paused_schedule_without_pending_occurrence_is_duplicate_stal
         .unwrap();
 
     assert_eq!(outcome, RRuleWakeupOutcome::DuplicateStale);
-    assert_eq!(store.events(id.as_str()).len(), 1);
+    assert_eq!(store.events(&id.to_string()).len(), 1);
 }
 
 #[test]
@@ -300,7 +302,7 @@ async fn memory_store_honors_position_reads_and_preconditions() {
 
     let from_second = store
         .read_stream(ReadStreamRequest {
-            stream_id: id.as_str(),
+            stream_id: &id,
             from: ReadFrom::Position(StreamPosition::try_new(2).unwrap()),
         })
         .await
@@ -311,7 +313,7 @@ async fn memory_store_honors_position_reads_and_preconditions() {
 
     store
         .append_stream(AppendStreamRequest {
-            stream_id: id.as_str(),
+            stream_id: &id,
             stream_write_precondition: StreamWritePrecondition::Any,
             events: Vec::new(),
         })
@@ -319,7 +321,7 @@ async fn memory_store_honors_position_reads_and_preconditions() {
         .unwrap();
     store
         .append_stream(AppendStreamRequest {
-            stream_id: id.as_str(),
+            stream_id: &id,
             stream_write_precondition: StreamWritePrecondition::StreamExists,
             events: Vec::new(),
         })
@@ -327,7 +329,7 @@ async fn memory_store_honors_position_reads_and_preconditions() {
         .unwrap();
     let conflict = store
         .append_stream(AppendStreamRequest {
-            stream_id: id.as_str(),
+            stream_id: &id,
             stream_write_precondition: StreamWritePrecondition::NoStream,
             events: Vec::new(),
         })
@@ -349,7 +351,7 @@ fn wakeup_consumer_filter_matches_rrule_subject_prefix() {
 async fn wakeup_subject_must_match_payload_schedule_id() {
     let (store, id) = store_with_schedule(ScheduleEventStatus::Scheduled).await;
     let processor = RRuleWakeupProcessor::new(store);
-    let other = ScheduleId::parse("orders/other").unwrap();
+    let other = crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c03").unwrap();
 
     let error = processor
         .process(&wakeup_subject(&other), &wakeup_payload(&id))

@@ -33,6 +33,7 @@ impl<'a> ::buffa::MessageView<'a> for SessionEventView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -1723,7 +1724,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.event {
             match v {
                 super::super::__buffa::view::oneof::session_event::Event::SessionStarted(
@@ -1733,8 +1734,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionClosed(
                     x,
@@ -1743,8 +1744,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionCancelled(
                     x,
@@ -1753,8 +1754,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionFailed(
                     x,
@@ -1763,8 +1764,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionHidden(
                     x,
@@ -1773,8 +1774,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionForked(
                     x,
@@ -1783,8 +1784,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionRewound(
                     x,
@@ -1793,8 +1794,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::Compacted(
                     x,
@@ -1803,8 +1804,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::UserMessageRecorded(
                     x,
@@ -1813,8 +1814,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::AssistantMessageStarted(
                     x,
@@ -1823,8 +1824,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::AssistantMessageCompleted(
                     x,
@@ -1833,8 +1834,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::AssistantMessageFailed(
                     x,
@@ -1843,8 +1844,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallRequested(
                     x,
@@ -1853,8 +1854,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallApproved(
                     x,
@@ -1863,8 +1864,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallDenied(
                     x,
@@ -1873,8 +1874,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallStarted(
                     x,
@@ -1883,8 +1884,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallCompleted(
                     x,
@@ -1893,8 +1894,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ToolCallFailed(
                     x,
@@ -1903,8 +1904,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ArtifactRecorded(
                     x,
@@ -1913,8 +1914,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::FileChanged(
                     x,
@@ -1923,8 +1924,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ExecutionAttemptStarted(
                     x,
@@ -1933,8 +1934,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ExecutionAttemptReady(
                     x,
@@ -1943,8 +1944,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ExecutionAttemptEnded(
                     x,
@@ -1953,8 +1954,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::CheckpointProduced(
                     x,
@@ -1963,8 +1964,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::DelegationDispatched(
                     x,
@@ -1973,8 +1974,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ParentLinked(
                     x,
@@ -1983,8 +1984,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ParentTerminated(
                     x,
@@ -1993,8 +1994,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::DelegationDetached(
                     x,
@@ -2003,8 +2004,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ParentHistoryInvalidated(
                     x,
@@ -2013,8 +2014,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ParentDetached(
                     x,
@@ -2023,8 +2024,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ExternalDelegationDispatched(
                     x,
@@ -2033,8 +2034,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::OperationReserved(
                     x,
@@ -2043,8 +2044,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::OperationOutcomeRecorded(
                     x,
@@ -2053,8 +2054,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::OperationCancellationRequested(
                     x,
@@ -2063,8 +2064,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::ArtifactErased(
                     x,
@@ -2073,8 +2074,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::RedactionApplied(
                     x,
@@ -2083,8 +2084,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SystemNoticeRecorded(
                     x,
@@ -2093,8 +2094,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::TodoUpdated(
                     x,
@@ -2103,8 +2104,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionRenamed(
                     x,
@@ -2113,8 +2114,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionArchived(
                     x,
@@ -2123,8 +2124,8 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 super::super::__buffa::view::oneof::session_event::Event::SessionUnarchived(
                     x,
@@ -2133,18 +2134,18 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 2u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 2u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -2155,7 +2156,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         1u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2165,7 +2166,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2175,7 +2176,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2185,7 +2186,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2195,7 +2196,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2205,7 +2206,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2215,7 +2216,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         7u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2225,7 +2226,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         8u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2235,7 +2236,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         9u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2245,7 +2246,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         10u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2255,7 +2256,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         11u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2265,7 +2266,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         28u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2275,7 +2276,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         12u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2285,7 +2286,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         13u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2295,7 +2296,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         29u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2305,7 +2306,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         14u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2315,7 +2316,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         15u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2325,7 +2326,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         16u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2335,7 +2336,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         17u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2345,7 +2346,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         18u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2355,7 +2356,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         19u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2365,7 +2366,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         20u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2375,7 +2376,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         21u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2385,7 +2386,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         30u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2395,7 +2396,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         22u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2405,7 +2406,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         23u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2415,7 +2416,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         24u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2425,7 +2426,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         25u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2435,7 +2436,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         33u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2445,7 +2446,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         34u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2455,7 +2456,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         35u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2465,7 +2466,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         26u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2475,7 +2476,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         27u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2485,7 +2486,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         36u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2495,7 +2496,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         37u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2505,7 +2506,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         38u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2515,7 +2516,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         31u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2525,7 +2526,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         32u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2535,7 +2536,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         39u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2545,7 +2546,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         40u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2555,7 +2556,7 @@ impl<'a> ::buffa::ViewEncode<'a> for SessionEventView<'a> {
                 ) => {
                     ::buffa::types::put_len_delimited_header(
                         41u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -2845,7 +2846,9 @@ impl SessionEventOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::SessionEvent,
@@ -2861,13 +2864,13 @@ impl SessionEventOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::SessionEvent, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::SessionEvent {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

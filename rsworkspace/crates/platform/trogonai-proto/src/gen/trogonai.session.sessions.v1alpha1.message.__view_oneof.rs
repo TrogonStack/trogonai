@@ -28,5 +28,23 @@ pub mod content_block {
             >,
         ),
         RedactedThinking(&'a [u8]),
+        Provider(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ProviderBlockView<'a>,
+            >,
+        ),
+    }
+}
+pub mod provider_block {
+    #[allow(unused_imports)]
+    use super::*;
+    #[derive(Clone, Debug)]
+    pub enum Payload<'a> {
+        Inline(&'a [u8]),
+        Ref(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::ArtifactRefView<'a>,
+            >,
+        ),
     }
 }

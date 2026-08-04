@@ -18,10 +18,20 @@ use trogon_scheduler::{
     SchedulesProjector, commands::domain as command_domain, connect_store, projection_queries, projections_v1,
 };
 
+fn fixture_schedule_id(label: &str) -> String {
+    match label {
+        "orders" => "00000000000000000000000000000001",
+        "reports" => "00000000000000000000000000000002",
+        "ghost" => "00000000000000000000000000000003",
+        _ => panic!("missing explicit schedule ID fixture for {label}"),
+    }
+    .to_string()
+}
+
 /// A complete-but-event-less projection, used to seed an orphan row.
 fn orphan_projection(id: &str) -> projections_v1::ScheduleProjection {
     projections_v1::ScheduleProjection {
-        schedule_id: id.to_string(),
+        schedule_id: fixture_schedule_id(id),
         schedule: MessageField::some(projections_v1::Schedule {
             kind: Some(
                 projections_v1::schedule::Every {
@@ -47,7 +57,7 @@ fn orphan_projection(id: &str) -> projections_v1::ScheduleProjection {
 
 fn base_schedule(id: &str) -> CreateSchedule {
     CreateSchedule {
-        id: command_domain::ScheduleId::parse(id).unwrap(),
+        id: command_domain::ScheduleId::parse(&fixture_schedule_id(id)).unwrap(),
         status: command_domain::ScheduleEventStatus::Scheduled,
         schedule: command_domain::Schedule::every(Duration::from_secs(2)).unwrap(),
         delivery: command_domain::Delivery::NatsEvent {
@@ -116,10 +126,13 @@ async fn projector_folds_event_stream_into_postgres() {
 
     for id in ["orders", "reports"] {
         assert!(
-            projection_queries::get_schedule(&pg, GetScheduleCommand::new(ScheduleId::parse(id).unwrap()))
-                .await
-                .unwrap()
-                .is_some(),
+            projection_queries::get_schedule(
+                &pg,
+                GetScheduleCommand::new(ScheduleId::parse(&fixture_schedule_id(id)).unwrap())
+            )
+            .await
+            .unwrap()
+            .is_some(),
             "postgres projection is missing {id}"
         );
     }
@@ -149,7 +162,7 @@ async fn projector_folds_event_stream_into_postgres() {
         .map(|schedule| schedule.id)
         .collect();
     assert!(
-        !ids.contains(&"ghost".to_string()),
+        !ids.contains(&fixture_schedule_id("ghost")),
         "orphan must be reconciled away: {ids:?}"
     );
     assert_eq!(ids.len(), 2, "the two event-backed schedules survive: {ids:?}");

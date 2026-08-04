@@ -193,13 +193,16 @@ pub struct CanonicalMessage {
         rename = "usage",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub usage: ::buffa::MessageField<TokenUsage>,
+    pub usage: ::buffa::MessageField<TokenUsage, ::buffa::Inline<TokenUsage>>,
     /// Wall-clock instant the message was created: a real external occurrence
     /// distinct from envelope append time (D10).
     ///
     /// Field 6: `created_at`
     #[serde(rename = "createdAt", alias = "created_at")]
-    pub created_at: ::buffa::MessageField<::buffa_types::google::protobuf::Timestamp>,
+    pub created_at: ::buffa::MessageField<
+        ::buffa_types::google::protobuf::Timestamp,
+        ::buffa::Inline<::buffa_types::google::protobuf::Timestamp>,
+    >,
 }
 impl ::core::fmt::Debug for CanonicalMessage {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -242,70 +245,84 @@ impl ::buffa::MessageName for CanonicalMessage {
 impl ::buffa::Message for CanonicalMessage {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.message_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.message_id) as u64;
         {
             let val = self.role.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
         for v in &self.content {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if let Some(ref v) = self.model {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.usage.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.usage.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         if self.created_at.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.created_at.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.message_id, buf);
         ::buffa::types::put_int32_field(2u32, self.role.to_i32(), buf);
         for v in &self.content {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             v.write_to(__cache, buf);
         }
         if let Some(ref v) = self.model {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
         if self.usage.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.usage.write_to(__cache, buf);
         }
         if self.created_at.is_set() {
-            ::buffa::types::put_len_delimited_header(6u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                6u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.created_at.write_to(__cache, buf);
         }
     }
@@ -340,6 +357,9 @@ impl ::buffa::Message for CanonicalMessage {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
                 let mut elem = ::core::default::Default::default();
+                ctx.register_element_memory(
+                    ::buffa::__private::element_footprint(&elem),
+                )?;
                 ::buffa::Message::merge_length_delimited(&mut elem, buf, ctx)?;
                 self.content.push(elem);
             }
@@ -440,62 +460,72 @@ impl ::buffa::MessageName for ContentBlock {
 impl ::buffa::Message for ContentBlock {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let ::core::option::Option::Some(ref v) = self.kind {
             match v {
                 __buffa::oneof::content_block::Kind::Text(x) => {
-                    size += 1u32 + ::buffa::types::string_encoded_len(x) as u32;
+                    size += 1u64 + ::buffa::types::string_encoded_len(x) as u64;
                 }
                 __buffa::oneof::content_block::Kind::ArtifactRef(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::content_block::Kind::Thinking(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::content_block::Kind::ToolUse(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::content_block::Kind::ToolResult(x) => {
                     let __slot = __cache.reserve();
                     let inner = x.compute_size(__cache);
                     __cache.set(__slot, inner);
                     size
-                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
-                            + inner;
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
                 __buffa::oneof::content_block::Kind::RedactedThinking(x) => {
-                    size += 1u32 + ::buffa::types::bytes_encoded_len(x) as u32;
+                    size += 1u64 + ::buffa::types::bytes_encoded_len(x) as u64;
+                }
+                __buffa::oneof::content_block::Kind::Provider(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
                 }
             }
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -507,7 +537,7 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::ArtifactRef(x) => {
                     ::buffa::types::put_len_delimited_header(
                         2u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -515,7 +545,7 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::Thinking(x) => {
                     ::buffa::types::put_len_delimited_header(
                         3u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -523,7 +553,7 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::ToolUse(x) => {
                     ::buffa::types::put_len_delimited_header(
                         4u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
@@ -531,13 +561,21 @@ impl ::buffa::Message for ContentBlock {
                 __buffa::oneof::content_block::Kind::ToolResult(x) => {
                     ::buffa::types::put_len_delimited_header(
                         5u32,
-                        __cache.consume_next(),
+                        u64::from(__cache.consume_next()),
                         buf,
                     );
                     x.write_to(__cache, buf);
                 }
                 __buffa::oneof::content_block::Kind::RedactedThinking(x) => {
-                    ::buffa::types::put_bytes_field(6u32, x, buf);
+                    ::buffa::types::put_shared_bytes_field(6u32, x, buf);
+                }
+                __buffa::oneof::content_block::Kind::Provider(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        7u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
                 }
             }
         }
@@ -654,6 +692,26 @@ impl ::buffa::Message for ContentBlock {
                         ::buffa::types::decode_bytes(buf)?,
                     ),
                 );
+            }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::content_block::Kind::Provider(ref mut existing),
+                ) = self.kind
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.kind = ::core::option::Option::Some(
+                        __buffa::oneof::content_block::Kind::Provider(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -838,6 +896,30 @@ impl<'de> serde::Deserialize<'de> for ContentBlock {
                                 );
                             }
                         }
+                        "provider" => {
+                            let v: ::core::option::Option<ProviderBlock> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            ProviderBlock,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_kind.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'kind'",
+                                        ),
+                                    );
+                                }
+                                __oneof_kind = Some(
+                                    __buffa::oneof::content_block::Kind::Provider(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
                         _ => {
                             map.next_value::<serde::de::IgnoredAny>()?;
                         }
@@ -878,6 +960,352 @@ pub mod content_block {
     pub use super::__buffa::oneof::content_block::Kind;
     #[doc(inline)]
     pub use super::__buffa::view::oneof::content_block::Kind as KindView;
+}
+/// ProviderBlock is a content block this package does not model, kept verbatim so
+/// a provider that ships a new block type does not force a schema change before a
+/// session using it can be recorded or replayed. It is the same concession
+/// ThinkingBlock.signature already makes, generalized: the alternative is
+/// dropping the block, which silently corrupts replay of the turn that contained
+/// it.
+///
+/// Write-verbatim, read-never. A projection must never interpret this payload; a
+/// block that any reader needs to understand is a block that has earned its own
+/// arm in the oneof. Treating this as an extension point for our own data would
+/// turn the canonical form back into an untyped provider blob.
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize)]
+#[serde(default)]
+pub struct ProviderBlock {
+    /// Provider that emitted the block, for example "anthropic".
+    ///
+    /// Field 1: `provider`
+    #[serde(rename = "provider", with = "::buffa::json_helpers::proto_string")]
+    pub provider: ::buffa::alloc::string::String,
+    /// The provider's own discriminator for the block, verbatim.
+    ///
+    /// Field 2: `block_type`
+    #[serde(
+        rename = "blockType",
+        alias = "block_type",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub block_type: ::buffa::alloc::string::String,
+    #[serde(flatten)]
+    pub payload: ::core::option::Option<__buffa::oneof::provider_block::Payload>,
+}
+impl ::core::fmt::Debug for ProviderBlock {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("ProviderBlock")
+            .field("provider", &self.provider)
+            .field("block_type", &self.block_type)
+            .field("payload", &self.payload)
+            .finish()
+    }
+}
+impl ProviderBlock {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ProviderBlock";
+}
+::buffa::impl_default_instance!(ProviderBlock);
+impl ::buffa::MessageName for ProviderBlock {
+    const PACKAGE: &'static str = "trogonai.session.sessions.v1alpha1";
+    const NAME: &'static str = "ProviderBlock";
+    const FULL_NAME: &'static str = "trogonai.session.sessions.v1alpha1.ProviderBlock";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.session.sessions.v1alpha1.ProviderBlock";
+}
+impl ::buffa::Message for ProviderBlock {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.provider) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.block_type) as u64;
+        if let ::core::option::Option::Some(ref v) = self.payload {
+            match v {
+                __buffa::oneof::provider_block::Payload::Inline(x) => {
+                    size += 1u64 + ::buffa::types::bytes_encoded_len(x) as u64;
+                }
+                __buffa::oneof::provider_block::Payload::Ref(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u64 + ::buffa::encoding::varint_len(inner as u64) as u64
+                            + inner as u64;
+                }
+            }
+        }
+        ::buffa::saturate_size(size)
+    }
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::EncodeSink,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        ::buffa::types::put_string_field(1u32, &self.provider, buf);
+        ::buffa::types::put_string_field(2u32, &self.block_type, buf);
+        if let ::core::option::Option::Some(ref v) = self.payload {
+            match v {
+                __buffa::oneof::provider_block::Payload::Inline(x) => {
+                    ::buffa::types::put_shared_bytes_field(3u32, x, buf);
+                }
+                __buffa::oneof::provider_block::Payload::Ref(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        4u32,
+                        u64::from(__cache.consume_next()),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+            }
+        }
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.provider, buf)?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.block_type, buf)?;
+            }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                self.payload = ::core::option::Option::Some(
+                    __buffa::oneof::provider_block::Payload::Inline(
+                        ::buffa::types::decode_bytes(buf)?,
+                    ),
+                );
+            }
+            4u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::provider_block::Payload::Ref(ref mut existing),
+                ) = self.payload
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.payload = ::core::option::Option::Some(
+                        __buffa::oneof::provider_block::Payload::Ref(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.provider.clear();
+        self.block_type.clear();
+        self.payload = ::core::option::Option::None;
+    }
+}
+impl<'de> serde::Deserialize<'de> for ProviderBlock {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        struct _V;
+        impl<'de> serde::de::Visitor<'de> for _V {
+            type Value = ProviderBlock;
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("struct ProviderBlock")
+            }
+            #[allow(clippy::field_reassign_with_default)]
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> ::core::result::Result<ProviderBlock, A::Error> {
+                let mut __f_provider: ::core::option::Option<
+                    ::buffa::alloc::string::String,
+                > = None;
+                let mut __f_block_type: ::core::option::Option<
+                    ::buffa::alloc::string::String,
+                > = None;
+                let mut __oneof_payload: ::core::option::Option<
+                    __buffa::oneof::provider_block::Payload,
+                > = None;
+                while let Some(key) = map.next_key::<::buffa::alloc::string::String>()? {
+                    match key.as_str() {
+                        "provider" => {
+                            __f_provider = Some({
+                                struct _S;
+                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                    type Value = ::buffa::alloc::string::String;
+                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                        self,
+                                        d: D,
+                                    ) -> ::core::result::Result<
+                                        ::buffa::alloc::string::String,
+                                        D::Error,
+                                    > {
+                                        ::buffa::json_helpers::proto_string::deserialize(d)
+                                    }
+                                }
+                                map.next_value_seed(_S)?
+                            });
+                        }
+                        "blockType" | "block_type" => {
+                            __f_block_type = Some({
+                                struct _S;
+                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                    type Value = ::buffa::alloc::string::String;
+                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                        self,
+                                        d: D,
+                                    ) -> ::core::result::Result<
+                                        ::buffa::alloc::string::String,
+                                        D::Error,
+                                    > {
+                                        ::buffa::json_helpers::proto_string::deserialize(d)
+                                    }
+                                }
+                                map.next_value_seed(_S)?
+                            });
+                        }
+                        "inline" => {
+                            struct _DeserSeed;
+                            impl<'de> serde::de::DeserializeSeed<'de> for _DeserSeed {
+                                type Value = ::buffa::alloc::vec::Vec<u8>;
+                                fn deserialize<D: serde::Deserializer<'de>>(
+                                    self,
+                                    d: D,
+                                ) -> ::core::result::Result<
+                                    ::buffa::alloc::vec::Vec<u8>,
+                                    D::Error,
+                                > {
+                                    ::buffa::json_helpers::bytes::deserialize(d)
+                                }
+                            }
+                            let v: ::core::option::Option<
+                                ::buffa::alloc::vec::Vec<u8>,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(_DeserSeed),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_payload.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'payload'",
+                                        ),
+                                    );
+                                }
+                                __oneof_payload = Some(
+                                    __buffa::oneof::provider_block::Payload::Inline(v),
+                                );
+                            }
+                        }
+                        "ref" => {
+                            let v: ::core::option::Option<ArtifactRef> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            ArtifactRef,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_payload.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'payload'",
+                                        ),
+                                    );
+                                }
+                                __oneof_payload = Some(
+                                    __buffa::oneof::provider_block::Payload::Ref(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                let mut __r = <ProviderBlock as ::core::default::Default>::default();
+                if let ::core::option::Option::Some(v) = __f_provider {
+                    __r.provider = v;
+                }
+                if let ::core::option::Option::Some(v) = __f_block_type {
+                    __r.block_type = v;
+                }
+                __r.payload = __oneof_payload;
+                Ok(__r)
+            }
+        }
+        d.deserialize_map(_V)
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for ProviderBlock {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __PROVIDER_BLOCK_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.session.sessions.v1alpha1.ProviderBlock",
+    to_json: ::buffa::type_registry::any_to_json::<ProviderBlock>,
+    from_json: ::buffa::type_registry::any_from_json::<ProviderBlock>,
+    is_wkt: false,
+};
+pub mod provider_block {
+    #[allow(unused_imports)]
+    use super::*;
+    #[doc(inline)]
+    pub use super::__buffa::oneof::provider_block::Payload;
+    #[doc(inline)]
+    pub use super::__buffa::view::oneof::provider_block::Payload as PayloadView;
 }
 /// ThinkingBlock is visible model reasoning plus the provider's opaque
 /// continuation/verification signature, kept so a thinking-bearing turn can be
@@ -936,30 +1364,32 @@ impl ::buffa::MessageName for ThinkingBlock {
 impl ::buffa::Message for ThinkingBlock {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.text) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.text) as u64;
         if let Some(ref v) = self.signature {
-            size += 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::bytes_encoded_len(v) as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.text, buf);
         if let Some(ref v) = self.signature {
-            ::buffa::types::put_bytes_field(2u32, v, buf);
+            ::buffa::types::put_shared_bytes_field(2u32, v, buf);
         }
     }
     fn merge_field(
@@ -1097,26 +1527,28 @@ impl ::buffa::MessageName for ToolUseBlock {
 impl ::buffa::Message for ToolUseBlock {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.input_json) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.name) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.input_json) as u64;
         if let Some(ref v) = self.parent_tool_use_id {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -1222,7 +1654,7 @@ pub struct ToolResultBlock {
     pub tool_use_id: ::buffa::alloc::string::String,
     /// Field 2: `result`
     #[serde(rename = "result")]
-    pub result: ::buffa::MessageField<ToolCallResult>,
+    pub result: ::buffa::MessageField<ToolCallResult, ::buffa::Inline<ToolCallResult>>,
 }
 impl ::core::fmt::Debug for ToolResultBlock {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1249,35 +1681,41 @@ impl ::buffa::MessageName for ToolResultBlock {
 impl ::buffa::Message for ToolResultBlock {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_use_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_use_id) as u64;
         if self.result.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.result.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.tool_use_id, buf);
         if self.result.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                2u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.result.write_to(__cache, buf);
         }
     }

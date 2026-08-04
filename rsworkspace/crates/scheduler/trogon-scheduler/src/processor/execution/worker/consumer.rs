@@ -9,8 +9,8 @@
 //! `last_applied_stream_position` collapses any redelivered overlap into
 //! duplicate/stale no-ops.
 //!
-//! Per-`ScheduleKey` ordering is enforced only within one process (the
-//! dispatcher lanes). JetStream distributes pulled messages across consumer
+//! Per-schedule ordering is enforced only within one process (the dispatcher
+//! lanes). JetStream distributes pulled messages across consumer
 //! instances arbitrarily, so concurrent instances can interleave side effects
 //! for the same schedule: an instance still applying an older Paused can purge
 //! the execution message a newer Resumed just published on another instance,

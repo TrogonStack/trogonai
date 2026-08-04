@@ -22,13 +22,25 @@ pub struct SessionStarted {
     pub session_id: ::buffa::alloc::string::String,
     /// Field 2: `execution_plan`
     #[serde(rename = "executionPlan", alias = "execution_plan")]
-    pub execution_plan: ::buffa::MessageField<StoredSessionExecutionPlan>,
+    pub execution_plan: ::buffa::MessageField<
+        StoredSessionExecutionPlan,
+        ::buffa::Inline<StoredSessionExecutionPlan>,
+    >,
+    /// Workspace this session is bound to, carried inline so workspace-scoped
+    /// reads never decode plan_bytes. It must agree with the plan's working
+    /// directory; this field is the projection surface, the plan stays
+    /// authoritative.
+    ///
+    /// Field 3: `workspace`
+    #[serde(rename = "workspace")]
+    pub workspace: ::buffa::MessageField<WorkspaceRef, ::buffa::Inline<WorkspaceRef>>,
 }
 impl ::core::fmt::Debug for SessionStarted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("SessionStarted")
             .field("session_id", &self.session_id)
             .field("execution_plan", &self.execution_plan)
+            .field("workspace", &self.workspace)
             .finish()
     }
 }
@@ -49,36 +61,58 @@ impl ::buffa::MessageName for SessionStarted {
 impl ::buffa::Message for SessionStarted {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         if self.execution_plan.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.execution_plan.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        if self.workspace.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.workspace.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         if self.execution_plan.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                2u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.execution_plan.write_to(__cache, buf);
+        }
+        if self.workspace.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.workspace.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -110,6 +144,17 @@ impl ::buffa::Message for SessionStarted {
                     ctx,
                 )?;
             }
+            3u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.workspace.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -119,6 +164,7 @@ impl ::buffa::Message for SessionStarted {
     fn clear(&mut self) {
         self.session_id.clear();
         self.execution_plan = ::buffa::MessageField::none();
+        self.workspace = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for SessionStarted {

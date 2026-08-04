@@ -16,6 +16,14 @@ pub struct ToolCallApprovedView<'a> {
     pub tool_execution_id: &'a str,
     /// Field 4: `approved_by`
     pub approved_by: &'a str,
+    /// Turn the approved call belongs to (see UserMessageRecorded.turn_id).
+    /// Optional here, unlike on the lifecycle events the agent loop writes: an
+    /// approval may be recorded by an external approver that holds the call
+    /// identity without the turn context, and forcing a value would invite a
+    /// fabricated one.
+    ///
+    /// Field 5: `turn_id`
+    pub turn_id: ::core::option::Option<&'a str>,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -68,6 +76,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallApprovedView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -112,6 +121,13 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallApprovedView<'a> {
                 view.approved_by = ::buffa::types::borrow_str(&mut cur)?;
                 view.__buffa_required_seen_0 |= 8u64;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = Some(::buffa::types::borrow_str(&mut cur)?);
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -136,6 +152,7 @@ impl<'a> ::buffa::MessageView<'a> for ToolCallApprovedView<'a> {
             tool_call_id: self.tool_call_id.to_string(),
             tool_execution_id: self.tool_execution_id.to_string(),
             approved_by: self.approved_by.to_string(),
+            turn_id: self.turn_id.map(|s| s.to_string()),
             ..::core::default::Default::default()
         })
     }
@@ -145,19 +162,22 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallApprovedView<'a> {
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.tool_call_id) as u64;
         size
-            += 1u32 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.approved_by) as u32;
-        size
+            += 1u64 + ::buffa::types::string_encoded_len(&self.tool_execution_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.approved_by) as u64;
+        if let Some(ref v) = self.turn_id {
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -165,6 +185,9 @@ impl<'a> ::buffa::ViewEncode<'a> for ToolCallApprovedView<'a> {
         ::buffa::types::put_string_field(2u32, &self.tool_call_id, buf);
         ::buffa::types::put_string_field(3u32, &self.tool_execution_id, buf);
         ::buffa::types::put_string_field(4u32, &self.approved_by, buf);
+        if let Some(ref v) = self.turn_id {
+            ::buffa::types::put_string_field(5u32, v, buf);
+        }
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -196,6 +219,9 @@ impl<'__a> ::serde::Serialize for ToolCallApprovedView<'__a> {
         }
         {
             __map.serialize_entry("approvedBy", self.approved_by)?;
+        }
+        if let ::core::option::Option::Some(__v) = self.turn_id {
+            __map.serialize_entry("turnId", __v)?;
         }
         __map.end()
     }
@@ -253,7 +279,9 @@ impl ToolCallApprovedOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::ToolCallApproved,
@@ -269,13 +297,13 @@ impl ToolCallApprovedOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::ToolCallApproved, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::ToolCallApproved {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -307,6 +335,17 @@ impl ToolCallApprovedOwnedView {
     #[must_use]
     pub fn approved_by(&self) -> &'_ str {
         self.0.reborrow().approved_by
+    }
+    /// Turn the approved call belongs to (see UserMessageRecorded.turn_id).
+    /// Optional here, unlike on the lifecycle events the agent loop writes: an
+    /// approval may be recorded by an external approver that holds the call
+    /// identity without the turn context, and forcing a value would invite a
+    /// fabricated one.
+    ///
+    /// Field 5: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> ::core::option::Option<&'_ str> {
+        self.0.reborrow().turn_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<ToolCallApprovedView<'static>>>

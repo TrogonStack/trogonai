@@ -231,7 +231,10 @@ pub struct AssistantMessageCompleted {
     pub session_id: ::buffa::alloc::string::String,
     /// Field 2: `message`
     #[serde(rename = "message")]
-    pub message: ::buffa::MessageField<CanonicalMessage>,
+    pub message: ::buffa::MessageField<
+        CanonicalMessage,
+        ::buffa::Inline<CanonicalMessage>,
+    >,
     /// Field 3: `finish_reason`
     #[serde(
         rename = "finishReason",
@@ -249,6 +252,15 @@ pub struct AssistantMessageCompleted {
         skip_serializing_if = "::core::option::Option::is_none"
     )]
     pub matched_stop_sequence: ::core::option::Option<::buffa::alloc::string::String>,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 5: `turn_id`
+    #[serde(
+        rename = "turnId",
+        alias = "turn_id",
+        with = "::buffa::json_helpers::proto_string"
+    )]
+    pub turn_id: ::buffa::alloc::string::String,
 }
 impl ::core::fmt::Debug for AssistantMessageCompleted {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -257,6 +269,7 @@ impl ::core::fmt::Debug for AssistantMessageCompleted {
             .field("message", &self.message)
             .field("finish_reason", &self.finish_reason)
             .field("matched_stop_sequence", &self.matched_stop_sequence)
+            .field("turn_id", &self.turn_id)
             .finish()
     }
 }
@@ -289,48 +302,56 @@ impl ::buffa::MessageName for AssistantMessageCompleted {
 impl ::buffa::Message for AssistantMessageCompleted {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
         if self.message.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.message.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
         {
             let val = self.finish_reason.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
         if let Some(ref v) = self.matched_stop_sequence {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
-        size
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         ::buffa::types::put_string_field(1u32, &self.session_id, buf);
         if self.message.is_set() {
-            ::buffa::types::put_len_delimited_header(2u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                2u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.message.write_to(__cache, buf);
         }
         ::buffa::types::put_int32_field(3u32, self.finish_reason.to_i32(), buf);
         if let Some(ref v) = self.matched_stop_sequence {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
+        ::buffa::types::put_string_field(5u32, &self.turn_id, buf);
     }
     fn merge_field(
         &mut self,
@@ -382,6 +403,13 @@ impl ::buffa::Message for AssistantMessageCompleted {
                     buf,
                 )?;
             }
+            5u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.turn_id, buf)?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -393,6 +421,7 @@ impl ::buffa::Message for AssistantMessageCompleted {
         self.message = ::buffa::MessageField::none();
         self.finish_reason = ::buffa::EnumValue::from(0);
         self.matched_stop_sequence = ::core::option::Option::None;
+        self.turn_id.clear();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for AssistantMessageCompleted {

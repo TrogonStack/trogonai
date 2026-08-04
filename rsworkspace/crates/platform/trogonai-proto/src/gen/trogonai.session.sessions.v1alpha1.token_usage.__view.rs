@@ -23,6 +23,16 @@ pub struct TokenUsageView<'a> {
     ///
     /// Field 5: `cost`
     pub cost: ::buffa::MessageFieldView<super::super::__buffa::view::CostView<'a>>,
+    /// Whether these counters are the provider's final accounting for the message
+    /// or a mid-generation reading. A partial reading exists so a turn that failed
+    /// or was interrupted still accounts for what it consumed, but summing partial
+    /// and final readings for the same message double-counts. Unset is read as
+    /// final, which is what every counter recorded before this field meant.
+    ///
+    /// Field 6: `completeness`
+    pub completeness: ::core::option::Option<
+        ::buffa::EnumValue<super::super::UsageCompleteness>,
+    >,
 }
 impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
     type Owned = super::super::TokenUsage;
@@ -39,6 +49,7 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -102,6 +113,15 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
                     }
                 }
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::Varint,
+                )?;
+                view.completeness = Some(
+                    ::buffa::EnumValue::from(::buffa::types::decode_int32(&mut cur)?),
+                );
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -130,10 +150,12 @@ impl<'a> ::buffa::MessageView<'a> for TokenUsageView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Cost,
+                        ::buffa::Inline<super::super::Cost>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
             },
+            completeness: self.completeness,
             ..::core::default::Default::default()
         })
     }
@@ -143,34 +165,37 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
+        let mut size = 0u64;
         if let Some(v) = self.input_tokens {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if let Some(v) = self.output_tokens {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if let Some(v) = self.cache_creation_tokens {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if let Some(v) = self.cache_read_tokens {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if self.cost.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.cost.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        if let Some(ref v) = self.completeness {
+            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
+        }
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -187,8 +212,15 @@ impl<'a> ::buffa::ViewEncode<'a> for TokenUsageView<'a> {
             ::buffa::types::put_uint64_field(4u32, v, buf);
         }
         if self.cost.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.cost.write_to(__cache, buf);
+        }
+        if let Some(ref v) = self.completeness {
+            ::buffa::types::put_int32_field(6u32, v.to_i32(), buf);
         }
     }
 }
@@ -242,6 +274,9 @@ impl<'__a> ::serde::Serialize for TokenUsageView<'__a> {
             if let ::core::option::Option::Some(__v) = self.cost.as_option() {
                 __map.serialize_entry("cost", __v)?;
             }
+        }
+        if let ::core::option::Option::Some(ref __v) = self.completeness {
+            __map.serialize_entry("completeness", __v)?;
         }
         __map.end()
     }
@@ -297,7 +332,9 @@ impl TokenUsageOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::TokenUsage,
@@ -313,13 +350,13 @@ impl TokenUsageOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::TokenUsage, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::TokenUsage {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -366,6 +403,19 @@ impl TokenUsageOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CostView<'_>> {
         &self.0.reborrow().cost
+    }
+    /// Whether these counters are the provider's final accounting for the message
+    /// or a mid-generation reading. A partial reading exists so a turn that failed
+    /// or was interrupted still accounts for what it consumed, but summing partial
+    /// and final readings for the same message double-counts. Unset is read as
+    /// final, which is what every counter recorded before this field meant.
+    ///
+    /// Field 6: `completeness`
+    #[must_use]
+    pub fn completeness(
+        &self,
+    ) -> ::core::option::Option<::buffa::EnumValue<super::super::UsageCompleteness>> {
+        self.0.reborrow().completeness
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<TokenUsageView<'static>>>
@@ -449,6 +499,7 @@ impl<'a> ::buffa::MessageView<'a> for CostView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -516,19 +567,19 @@ impl<'a> ::buffa::ViewEncode<'a> for CostView<'a> {
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::int64_encoded_len(self.amount_micros) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.currency_code) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::int64_encoded_len(self.amount_micros) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.currency_code) as u64;
         if let Some(ref v) = self.rate_ref {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -622,7 +673,9 @@ impl CostOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::Cost,
@@ -636,13 +689,13 @@ impl CostOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<super::super::Cost, ::buffa::DecodeError> {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::Cost {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.

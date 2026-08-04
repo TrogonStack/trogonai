@@ -412,6 +412,88 @@ streaming, `ToolCallRequested` and the approval UI precede
 `AssistantMessageCompleted`, so an id-only request event cannot drive approval
 before the message that would supply the missing fields exists.)
 
+**Unmodelled provider blocks are kept verbatim, never interpreted.**
+`ContentBlock` gains a `ProviderBlock` arm carrying the emitting provider, the
+provider's own block discriminator, and either inline bytes or an `ArtifactRef`.
+It exists so a provider shipping a new block type does not force a schema change
+before a session using it can be recorded or replayed; the alternative is
+dropping the block, which silently corrupts replay of the turn that contained
+it. It is the concession `ThinkingBlock.signature` already makes, generalized.
+The rule is write-verbatim, read-never: a projection must never interpret this
+payload, and a block any reader needs to understand is a block that has earned
+its own arm in the oneof. Using it as an extension point for our own data would
+turn the canonical form back into the untyped provider blob this facet exists to
+replace.
+
+**Turn identity is stamped, never inferred.** A turn is one
+user-prompt-to-final-assistant-message cycle, including every tool call made on
+the way. It is the unit a person names when they ask to rewind, retry, or cost
+out work, so it is carried as a `turn_id` on every conversation and tool event
+rather than reconstructed at read time. It cannot be folded: concurrent
+`Any`-precondition appends give no reliable "next event after" relation to infer
+membership from (facet 2, and the tool-fact ownership note above). It is
+required on `UserMessageRecorded`, the three `AssistantMessage*` events, and
+`ToolCallRequested`/`Started`/`Completed`/`Failed`, and optional on
+`ToolCallApproved`/`Denied`, where an external approver may hold the call
+identity without the turn context.
+
+**Reads are observations on the completing call, not facts of their own.** A
+session reads far more than it writes, so a per-read event would dominate the
+log while carrying almost no decision value. Instead `ToolCallCompleted` carries
+`repeated ResourceObservation observed`: the uri, what the read found, and the
+byte range actually seen, with `complete` distinguishing a whole-resource read
+from a partial one. Absence is a recorded outcome rather than a missing digest,
+so a producer that failed to hash content is never mistaken for one that
+looked and found nothing, and an absent outcome marked complete is a
+confirmed-absent-in-full precondition exactly as strong as a whole-resource
+read. This is what makes a replayed write checkable rather than merely
+repeatable: the observations are the preconditions the call was decided under,
+so a replay can compare current digests against them and refuse a stale
+apply. It keeps
+[ADR#0024](./0024-agent-platform-stream-topology.md)'s "a fact is recorded once"
+rule intact by hanging the read set on the fact that already exists rather than
+multiplying events.
+
+Correspondingly, `FileChanged` requires `tool_call_id` and `turn_id`: every
+recorded change is attributed to the call that made it. A change with no
+proximate tool call is not an unattributed `FileChanged`; it surfaces as a
+`ResourceObservation` with a digest that no longer matches what was last
+observed, which is the honest shape for "something changed and we do not know
+who did it."
+
+The two facts only share a resource when their locations resolve to the same
+URI: `ResourceObservation.uri` is already in that form, while `FileChanged.path`
+is workspace-relative and must be resolved against the session's
+`WorkspaceRef.uri` (`workspace.uri + "/" + path`) before the comparison holds.
+The asymmetry is deliberate: `FileChanged` is inherently workspace-scoped,
+while `ResourceObservation` also covers resources a workspace-relative path
+cannot name at all, such as a fetched URL or an MCP resource, and those have no
+`FileChanged` counterpart to join against.
+
+**Typed process outcome.** `ToolCallCompleted.termination` carries a
+`CommandTermination` oneof of `exit_code` or `signal`, plus a
+`google.protobuf.Duration duration`. It belongs to the execution/audit fold, not
+the provider transcript: a command that ran and exited non-zero is
+`ToolCallCompleted` with `TOOL_CALL_RESULT_STATUS_APPLICATION_ERROR` and
+termination set, while a command that never ran at all is `ToolCallFailed` with
+no termination. Parsing an exit status back out of result text is not a
+projection this store asks readers to write.
+
+**Workspace, settings, change shape, and usage completeness.**
+`SessionStarted.workspace` is a required `WorkspaceRef` (`workspace_id`, `uri`,
+optional `revision`), so the ground a session's file facts refer to is recorded
+with the session rather than inferred from paths.
+`AssistantMessageStarted.settings` carries the `ModelSettings` a completion was
+requested under, which is what makes a replay reproducible rather than merely
+re-runnable. `FileChanged.diff` carries a `DiffSummary` (added/removed lines,
+truncation flag, rendered artifact) so a change list renders from one read
+instead of fetching both artifact sides per row. `TokenUsage.completeness`
+distinguishes a final counter from a partial one; unset reads as final, which is
+what every counter recorded before the field meant.
+`ArtifactRef.untruncated_size_bytes` records the pre-truncation size when the
+referenced bytes are themselves a truncation, so a reader can tell "1 KB of
+output" from "1 KB of a 40 MB output" without fetching anything.
+
 **Event-time policy.** Envelope append time is transport metadata; fold logic
 never depends on it. A payload carries its own occurrence timestamp only where
 the fact has a real external occurrence distinct from when it was appended:
@@ -435,7 +517,9 @@ the rest. At minimum the validator rejects:
   the safe default before append, per the [cascade policy](../glossary/cascade-policy)
   glossary correction).
 - Set oneofs: `ContentBlock.kind`, `ToolCallResult.kind`,
-  `ArtifactMetadata.source`, `OperationOutcomeRecorded.outcome`.
+  `ArtifactMetadata.source`, `OperationOutcomeRecorded.outcome`,
+  `CommandTermination.outcome`, `ProviderBlock.payload`,
+  `ResourceObservation.outcome`.
 - Role agreement: `UserMessageRecorded.message.role` is `USER`;
   `AssistantMessageCompleted.message.role` is `ASSISTANT`.
 - Started-and-completed assistant message id and model agreement.
@@ -451,8 +535,19 @@ the rest. At minimum the validator rejects:
 - Valid `input_json`, with the operation digest computed over the exact
   persisted bytes.
 - Valid ISO 4217 currency codes.
-- Valid timestamps.
+- Valid timestamps, and non-negative durations with sub-second nanos.
 - Unique todo ids with valid statuses.
+- Finite `ModelSettings` floats; provider-specific numeric ranges are
+  deliberately not enforced here, since they change per model and would make the
+  storage boundary a provider-compatibility oracle.
+- `ArtifactRef.untruncated_size_bytes`, when set, strictly greater than
+  `size_bytes`; equal or smaller means the field is meaningless and is a
+  producer bug.
+- `DiffSummary.rendered` present whenever `DiffSummary.truncated` is true: a
+  truncated diff with nothing to fetch is unreadable.
+- `ResourceObservation` with a non-empty uri, a set `outcome`, a nonzero
+  `range.length` when a range is given, and no `range` when the outcome is
+  absent.
 
 Every unset oneof, unspecified enum, and malformed shape above is rejected
 before append, never persisted and reconciled later.

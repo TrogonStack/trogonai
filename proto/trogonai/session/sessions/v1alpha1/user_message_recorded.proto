@@ -9,4 +9,13 @@ import "trogonai/session/sessions/v1alpha1/message.proto";
 message UserMessageRecorded {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   CanonicalMessage message = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The turn this message opens. A turn is one user-prompt-to-final-assistant-
+  // message cycle, and every event produced within it repeats this id, so "what
+  // happened in this turn" is a filter over a decoded field rather than a
+  // reconstruction that walks message and tool-call joins in fold order. The id
+  // is stamped rather than folded for the same reason tool_call_id and
+  // tool_execution_id are both recorded: the boundary is a fact the writer knows
+  // and the fold cannot recover, since concurrent Any-precondition appends give
+  // no reliable "next event after" relation to infer it from (D11).
+  string turn_id = 3 [features.field_presence = LEGACY_REQUIRED];
 }

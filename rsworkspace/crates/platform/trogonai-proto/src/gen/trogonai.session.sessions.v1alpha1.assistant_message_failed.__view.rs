@@ -35,6 +35,10 @@ pub struct AssistantMessageFailedView<'a> {
     pub usage: ::buffa::MessageFieldView<
         super::super::__buffa::view::TokenUsageView<'a>,
     >,
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 6: `turn_id`
+    pub turn_id: &'a str,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -63,6 +67,14 @@ Distinguishes a field that was absent from one explicitly encoded with its defau
     pub const fn has_reason(&self) -> bool {
         self.__buffa_required_seen_0 & 4u64 != 0
     }
+    /**Whether required field `turn_id` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_turn_id(&self) -> bool {
+        self.__buffa_required_seen_0 & 8u64 != 0
+    }
 }
 impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
     type Owned = super::super::AssistantMessageFailed;
@@ -79,6 +91,7 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
     }
+    #[inline]
     fn merge_view_field(
         &mut self,
         tag: ::buffa::encoding::Tag,
@@ -145,6 +158,14 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
                     }
                 }
             }
+            6u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.turn_id = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 8u64;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -179,10 +200,12 @@ impl<'a> ::buffa::MessageView<'a> for AssistantMessageFailedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::TokenUsage,
+                        ::buffa::Inline<super::super::TokenUsage>,
                     >::some(v.to_owned_from_source(__buffa_src)?)
                 }
                 None => ::buffa::MessageField::none(),
             },
+            turn_id: self.turn_id.to_string(),
             ..::core::default::Default::default()
         })
     }
@@ -192,31 +215,32 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageFailedView<'a> {
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.session_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.message_id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.session_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.message_id) as u64;
         {
             let val = self.reason.to_i32();
-            size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(val) as u64;
         }
         if let Some(ref v) = self.detail {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
         }
         if self.usage.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.usage.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.turn_id) as u64;
+        ::buffa::saturate_size(size)
     }
     #[allow(clippy::needless_borrow)]
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -227,9 +251,14 @@ impl<'a> ::buffa::ViewEncode<'a> for AssistantMessageFailedView<'a> {
             ::buffa::types::put_string_field(4u32, v, buf);
         }
         if self.usage.is_set() {
-            ::buffa::types::put_len_delimited_header(5u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                5u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.usage.write_to(__cache, buf);
         }
+        ::buffa::types::put_string_field(6u32, &self.turn_id, buf);
     }
 }
 /// Serializes this view as protobuf JSON.
@@ -266,6 +295,9 @@ impl<'__a> ::serde::Serialize for AssistantMessageFailedView<'__a> {
             if let ::core::option::Option::Some(__v) = self.usage.as_option() {
                 __map.serialize_entry("usage", __v)?;
             }
+        }
+        {
+            __map.serialize_entry("turnId", self.turn_id)?;
         }
         __map.end()
     }
@@ -325,7 +357,9 @@ impl AssistantMessageFailedOwnedView {
     ///
     /// # Errors
     ///
-    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// Returns [`::buffa::DecodeError::MessageTooLarge`] if the
+    /// message's encoded size exceeds the 2 GiB protobuf limit, or
+    /// another [`::buffa::DecodeError`] if the re-encoded bytes are
     /// somehow invalid (should not happen for well-formed messages).
     pub fn from_owned(
         msg: &super::super::AssistantMessageFailed,
@@ -341,16 +375,13 @@ impl AssistantMessageFailedOwnedView {
     }
     /// Convert to the owned message type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if re-materializing preserved unknown fields
-    /// fails (e.g. the unknown-field limit is exceeded).
-    pub fn to_owned_message(
-        &self,
-    ) -> ::core::result::Result<
-        super::super::AssistantMessageFailed,
-        ::buffa::DecodeError,
-    > {
+    /// Infallible: this type's constructors wire-decode their
+    /// buffer, and a view produced by wire decoding always
+    /// converts. Delegates to [`::buffa::OwnedView::to_owned_message`],
+    /// whose contract also governs handles converted from a raw
+    /// [`::buffa::OwnedView`].
+    #[must_use]
+    pub fn to_owned_message(&self) -> super::super::AssistantMessageFailed {
         self.0.to_owned_message()
     }
     /// The underlying bytes buffer.
@@ -397,6 +428,13 @@ impl AssistantMessageFailedOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::TokenUsageView<'_>> {
         &self.0.reborrow().usage
+    }
+    /// Turn this generation belongs to (see UserMessageRecorded.turn_id).
+    ///
+    /// Field 6: `turn_id`
+    #[must_use]
+    pub fn turn_id(&self) -> &'_ str {
+        self.0.reborrow().turn_id
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<AssistantMessageFailedView<'static>>>

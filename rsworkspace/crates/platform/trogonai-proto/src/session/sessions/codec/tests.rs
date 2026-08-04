@@ -18,6 +18,14 @@ fn session_ordinal(value: u64) -> v1alpha1::SessionOrdinal {
     v1alpha1::SessionOrdinal { value }
 }
 
+fn workspace_ref() -> v1alpha1::WorkspaceRef {
+    v1alpha1::WorkspaceRef {
+        workspace_id: "workspace-1".to_string(),
+        uri: "file:///workspace".to_string(),
+        revision: None,
+    }
+}
+
 fn artifact_ref() -> v1alpha1::ArtifactRef {
     v1alpha1::ArtifactRef {
         artifact_id: "artifact-1".to_string(),
@@ -26,6 +34,7 @@ fn artifact_ref() -> v1alpha1::ArtifactRef {
         mime: "text/plain".to_string(),
         preview: None,
         truncated: None,
+        untruncated_size_bytes: None,
     }
 }
 
@@ -62,6 +71,7 @@ fn session_started() -> v1alpha1::SessionStarted {
             plan_bytes: b"plan".to_vec(),
             plan_digest: MessageField::some(digest()),
         }),
+        workspace: MessageField::some(workspace_ref()),
     }
 }
 
@@ -132,6 +142,7 @@ fn user_message_recorded() -> v1alpha1::UserMessageRecorded {
     v1alpha1::UserMessageRecorded {
         session_id: "session-1".to_string(),
         message: MessageField::some(canonical_message(v1alpha1::MessageRole::User)),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -140,6 +151,8 @@ fn assistant_message_started() -> v1alpha1::AssistantMessageStarted {
         session_id: "session-1".to_string(),
         message_id: "message-1".to_string(),
         model: "model".to_string(),
+        settings: MessageField::none(),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -149,6 +162,7 @@ fn assistant_message_completed() -> v1alpha1::AssistantMessageCompleted {
         message: MessageField::some(canonical_message(v1alpha1::MessageRole::Assistant)),
         finish_reason: buffa::EnumValue::from(v1alpha1::FinishReason::EndTurn),
         matched_stop_sequence: None,
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -159,6 +173,7 @@ fn assistant_message_failed() -> v1alpha1::AssistantMessageFailed {
         reason: buffa::EnumValue::from(v1alpha1::AssistantMessageFailureReason::Error),
         detail: None,
         usage: MessageField::none(),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -171,6 +186,7 @@ fn tool_call_requested() -> v1alpha1::ToolCallRequested {
         input_json: "{}".to_string(),
         parent_tool_use_id: None,
         operation_id: None,
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -180,6 +196,7 @@ fn tool_call_approved() -> v1alpha1::ToolCallApproved {
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
         approved_by: "user-1".to_string(),
+        turn_id: None,
     }
 }
 
@@ -190,6 +207,7 @@ fn tool_call_denied() -> v1alpha1::ToolCallDenied {
         tool_execution_id: "tool-exec-1".to_string(),
         denied_by: "user-1".to_string(),
         reason: None,
+        turn_id: None,
     }
 }
 
@@ -198,6 +216,7 @@ fn tool_call_started() -> v1alpha1::ToolCallStarted {
         session_id: "session-1".to_string(),
         tool_call_id: "tool-call-1".to_string(),
         tool_execution_id: "tool-exec-1".to_string(),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -215,6 +234,10 @@ fn tool_call_completed() -> v1alpha1::ToolCallCompleted {
                 },
             ))),
         }),
+        duration: MessageField::none(),
+        observed: Vec::new(),
+        termination: MessageField::none(),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -225,6 +248,7 @@ fn tool_call_failed() -> v1alpha1::ToolCallFailed {
         tool_execution_id: "tool-exec-1".to_string(),
         error: "boom".to_string(),
         reason: buffa::EnumValue::from(v1alpha1::ToolCallFailureReason::Error),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -256,6 +280,9 @@ fn file_changed() -> v1alpha1::FileChanged {
         previous_path: None,
         before_ref: MessageField::some(artifact_ref()),
         after_ref: MessageField::some(artifact_ref()),
+        diff: MessageField::none(),
+        tool_call_id: "tool-call-1".to_string(),
+        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -926,4 +953,151 @@ fn event_type_rejects_missing_event_case() {
         event.event_type(),
         Err(SessionEventPayloadError::MissingEvent)
     ));
+}
+
+fn assert_round_trips(event: v1alpha1::SessionEvent) {
+    let encoded = EventEncode::encode(&event).unwrap();
+    let full_name = assert_variant_round_trips(&event, &encoded);
+
+    let decoded = <v1alpha1::SessionEvent as EventDecode>::decode(EventData::new(full_name, &encoded))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+
+    assert_eq!(decoded, event);
+}
+
+#[test]
+fn tool_call_completed_round_trips_termination_duration_and_observations() {
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallCompleted {
+                termination: MessageField::some(v1alpha1::CommandTermination {
+                    outcome: Some(v1alpha1::command_termination::Outcome::ExitCode(2)),
+                }),
+                duration: MessageField::some(buffa_types::google::protobuf::Duration::from_secs_nanos(1, 500_000_000)),
+                observed: vec![
+                    v1alpha1::ResourceObservation {
+                        uri: "file:///workspace/src/main.rs".to_string(),
+                        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+                            digest(),
+                        ))),
+                        range: MessageField::none(),
+                        complete: Some(true),
+                    },
+                    v1alpha1::ResourceObservation {
+                        uri: "file:///workspace/src/lib.rs".to_string(),
+                        outcome: Some(v1alpha1::resource_observation::Outcome::ContentDigest(Box::new(
+                            digest(),
+                        ))),
+                        range: MessageField::some(v1alpha1::ByteRange { offset: 64, length: 32 }),
+                        complete: Some(false),
+                    },
+                ],
+                ..tool_call_completed()
+            }
+            .into(),
+        ),
+    });
+}
+
+#[test]
+fn tool_call_completed_round_trips_signal_termination() {
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::ToolCallCompleted {
+                termination: MessageField::some(v1alpha1::CommandTermination {
+                    outcome: Some(v1alpha1::command_termination::Outcome::Signal(9)),
+                }),
+                ..tool_call_completed()
+            }
+            .into(),
+        ),
+    });
+}
+
+#[test]
+fn file_changed_round_trips_diff_summary() {
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::FileChanged {
+                diff: MessageField::some(v1alpha1::DiffSummary {
+                    added_lines: Some(12),
+                    removed_lines: Some(3),
+                    truncated: Some(true),
+                    rendered: MessageField::some(artifact_ref()),
+                }),
+                ..file_changed()
+            }
+            .into(),
+        ),
+    });
+}
+
+#[test]
+fn assistant_message_started_round_trips_model_settings() {
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageStarted {
+                settings: MessageField::some(v1alpha1::ModelSettings {
+                    max_output_tokens: Some(4096),
+                    temperature: Some(0.7),
+                    top_p: Some(0.95),
+                    thinking_budget_tokens: Some(1024),
+                    stop_sequences: vec!["\n\n".to_string()],
+                    raw_settings: MessageField::some(artifact_ref()),
+                }),
+                ..assistant_message_started()
+            }
+            .into(),
+        ),
+    });
+}
+
+#[test]
+fn assistant_message_completed_round_trips_provider_block_and_usage_completeness() {
+    let message = v1alpha1::CanonicalMessage {
+        content: vec![v1alpha1::ContentBlock {
+            kind: Some(v1alpha1::content_block::Kind::Provider(Box::new(
+                v1alpha1::ProviderBlock {
+                    provider: "anthropic".to_string(),
+                    block_type: "server_tool_use".to_string(),
+                    payload: Some(v1alpha1::provider_block::Payload::Inline(b"{}".to_vec())),
+                },
+            ))),
+        }],
+        usage: MessageField::some(v1alpha1::TokenUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(20),
+            completeness: Some(buffa::EnumValue::from(v1alpha1::UsageCompleteness::Partial)),
+            ..Default::default()
+        }),
+        ..canonical_message(v1alpha1::MessageRole::Assistant)
+    };
+
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::AssistantMessageCompleted {
+                message: MessageField::some(message),
+                ..assistant_message_completed()
+            }
+            .into(),
+        ),
+    });
+}
+
+#[test]
+fn artifact_ref_round_trips_untruncated_size() {
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(
+            v1alpha1::SessionClosed {
+                result_ref: MessageField::some(v1alpha1::ArtifactRef {
+                    untruncated_size_bytes: Some(40 * 1024 * 1024),
+                    ..artifact_ref()
+                }),
+                ..session_closed()
+            }
+            .into(),
+        ),
+    });
 }

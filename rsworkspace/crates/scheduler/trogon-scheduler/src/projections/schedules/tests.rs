@@ -125,7 +125,7 @@ fn occurrence_recorded_event(id: &str, sequence: u64, at: &str) -> v1::ScheduleE
     }
 }
 
-fn present(state: ScheduleStreamState) -> projections_v1::ScheduleProjection {
+fn present(state: ScheduleStreamState) -> Box<projections_v1::ScheduleProjection> {
     match state {
         ScheduleStreamState::Present(view) => view,
         other => panic!("expected present schedule, got {other:?}"),
@@ -371,22 +371,23 @@ fn read_model_state_rejects_recreating_deleted_schedule() {
 fn round_trips_through_the_kv_codec() {
     // What the projection writes must decode back to an equal view.
     let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
-    let encoded = buffa::Message::encode_to_vec(&view);
+    let encoded = buffa::Message::encode_to_vec(view.as_ref());
     let decoded = <projections_v1::ScheduleProjection as buffa::Message>::decode_from_slice(&encoded).unwrap();
-    assert_eq!(decoded, view);
+    assert_eq!(decoded, *view);
 }
 
 #[test]
-fn read_model_token_from_event_subject_extracts_last_segment() {
-    let subject = format!("{EVENTS_SUBJECT_PREFIX}deadbeef");
-    assert_eq!(read_model_token_from_event_subject(&subject).unwrap(), "deadbeef");
+fn schedule_id_from_event_subject_extracts_last_segment() {
+    let id = crate::commands::domain::ScheduleId::parse("0198fa2f6d0a7b1a8cf9f762e73a1c07").unwrap();
+    let subject = format!("{EVENTS_SUBJECT_PREFIX}{id}");
+    assert_eq!(schedule_id_from_event_subject(&subject).unwrap(), id);
 }
 
 #[test]
-fn read_model_token_rejects_foreign_and_empty_subjects() {
-    assert!(read_model_token_from_event_subject("other.subject.deadbeef").is_err());
+fn schedule_id_parser_rejects_foreign_and_empty_subjects() {
+    assert!(schedule_id_from_event_subject("other.subject.deadbeef").is_err());
     let empty_token = EVENTS_SUBJECT_PREFIX.to_string();
-    assert!(read_model_token_from_event_subject(&empty_token).is_err());
+    assert!(schedule_id_from_event_subject(&empty_token).is_err());
 }
 
 #[test]
@@ -482,7 +483,7 @@ fn twin_converts_paused_status_and_delivery_with_source() {
 fn schedule_projection_converts_to_present_stream_state() {
     let view = present(apply("backup", initial_state(), &added_event("backup")).unwrap());
     assert_eq!(
-        ScheduleStreamState::from(view.clone()),
+        ScheduleStreamState::from(*view.clone()),
         ScheduleStreamState::Present(view)
     );
 }
