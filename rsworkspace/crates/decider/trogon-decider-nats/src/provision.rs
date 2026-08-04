@@ -18,13 +18,13 @@
 //! field that diverged, rather than dumping the whole configuration.
 
 use async_nats::jetstream;
-use async_nats::jetstream::ErrorCode;
-use async_nats::jetstream::context::{
-    CreateKeyValueError, CreateStreamError, GetStreamError, GetStreamErrorKind, KeyValueError, KeyValueErrorKind,
-};
+use async_nats::jetstream::context::{CreateKeyValueError, CreateStreamError, GetStreamError, KeyValueError};
 use async_nats::jetstream::kv;
 use async_nats::jetstream::stream::RetentionPolicy;
-use trogon_nats::jetstream::{is_create_key_value_already_exists, is_create_stream_already_exists};
+use trogon_nats::jetstream::{
+    is_create_key_value_already_exists, is_create_stream_already_exists, is_get_key_value_not_found,
+    is_get_stream_not_found,
+};
 
 /// A single divergent field between a required and an existing stream
 /// configuration.
@@ -207,23 +207,6 @@ pub async fn ensure_bucket(js: &jetstream::Context, config: kv::Config) -> Resul
         }
         Err(source) => Err(EnsureBucketError::Create { bucket, source }),
     }
-}
-
-fn is_get_stream_not_found(error: &GetStreamError) -> bool {
-    matches!(
-        error.kind(),
-        GetStreamErrorKind::JetStream(ref source) if source.error_code() == ErrorCode::STREAM_NOT_FOUND
-    )
-}
-
-fn is_get_key_value_not_found(error: &KeyValueError) -> bool {
-    if error.kind() != KeyValueErrorKind::GetBucket {
-        return false;
-    }
-
-    std::error::Error::source(error)
-        .and_then(|source| source.downcast_ref::<GetStreamError>())
-        .is_some_and(is_get_stream_not_found)
 }
 
 fn validate_stream_config(

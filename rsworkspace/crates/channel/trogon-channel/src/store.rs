@@ -3,10 +3,21 @@ use crate::endpoint::{Endpoint, PrincipalId};
 use async_nats::jetstream;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use trogon_nats::jetstream::{is_create_key_value_already_exists, is_get_key_value_not_found};
 use trogon_std::NowV7;
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod store_tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChannelStoreError {
+    #[error("failed to open KV bucket {bucket}: {source}")]
+    OpenBucket {
+        bucket: String,
+        #[source]
+        source: async_nats::jetstream::context::KeyValueError,
+    },
     #[error("failed to create KV bucket {bucket}: {source}")]
     CreateBucket {
         bucket: String,
@@ -38,19 +49,40 @@ pub struct ChannelStore {
     conversations: jetstream::kv::Store,
 }
 
+/// Opens a bucket, creating it only when JetStream says it is not there.
+///
+/// A get that failed for any other reason (a request timeout, a denied
+/// `STREAM.INFO`) is surfaced instead of being read as absence. The bucket
+/// probably does exist in that case, and `STREAM.CREATE` silently applies some
+/// divergent fields as an in-place update of the existing stream, so falling
+/// through would let a momentary read failure reconfigure live storage.
 async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChannelStoreError> {
-    if let Ok(store) = js.get_key_value(&bucket).await {
-        return Ok(store);
+    match js.get_key_value(&bucket).await {
+        Ok(store) => return Ok(store),
+        Err(source) if is_get_key_value_not_found(&source) => {}
+        Err(source) => return Err(ChannelStoreError::OpenBucket { bucket, source }),
     }
+
     info!(bucket = %bucket, "Creating channel KV bucket");
-    js.create_key_value(jetstream::kv::Config {
-        bucket: bucket.clone(),
-        history: 5,
-        storage: jetstream::stream::StorageType::File,
-        ..Default::default()
-    })
-    .await
-    .map_err(|source| ChannelStoreError::CreateBucket { bucket, source })
+    match js
+        .create_key_value(jetstream::kv::Config {
+            bucket: bucket.clone(),
+            history: 5,
+            storage: jetstream::stream::StorageType::File,
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(store) => Ok(store),
+        // Another replica created it between the get and the create, which is
+        // the one already-exists that means the bucket is ready rather than
+        // that provisioning went wrong.
+        Err(source) if is_create_key_value_already_exists(&source) => match js.get_key_value(&bucket).await {
+            Ok(store) => Ok(store),
+            Err(source) => Err(ChannelStoreError::OpenBucket { bucket, source }),
+        },
+        Err(source) => Err(ChannelStoreError::CreateBucket { bucket, source }),
+    }
 }
 
 impl ChannelStore {

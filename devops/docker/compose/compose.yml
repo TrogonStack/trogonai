@@ -63,7 +63,11 @@ services:
       TELEGRAM_BOT_TOKEN:
       CHANNEL_SEED_TELEGRAM_USERS:
       CHANNEL_PREFIX: "${CHANNEL_PREFIX:-prod}"
-      CHANNEL_NEW_SESSION_TRIGGERS: "${CHANNEL_NEW_SESSION_TRIGGERS:-/new,/reset}"
+      # "${VAR-default}" rather than "${VAR:-default}": the bridge reads a blank
+      # trigger list as "recognize nothing, forward everything", so the default
+      # may only fill in for an unset variable. The colon form substitutes on
+      # blank too, which would make that setting unreachable from Compose.
+      CHANNEL_NEW_SESSION_TRIGGERS: "${CHANNEL_NEW_SESSION_TRIGGERS-/new,/reset}"
       TELEGRAM_INBOUND_STREAM: "${TELEGRAM_INBOUND_STREAM:-TELEGRAM}"
       ACP_PREFIX: "${ACP_PREFIX:-acp}"
       NATS_URL: "nats:4222"

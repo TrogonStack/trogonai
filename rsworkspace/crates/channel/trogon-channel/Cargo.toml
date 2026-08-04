@@ -8,6 +8,7 @@ license = "Apache-2.0"
 workspace = true
 
 [dependencies]
+trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["uuid"] }
 
 async-nats = { workspace = true, features = ["jetstream", "kv"] }
@@ -15,3 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
