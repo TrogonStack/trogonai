@@ -85,6 +85,39 @@ pub enum EndpointBinding {
     AlreadyBound(ConversationId, ConversationRecord),
 }
 
+impl EndpointBinding {
+    /// The conversation this endpoint's next message belongs to, and the record
+    /// to carry on with. `mine` is the record the caller built for the
+    /// reservation, and it survives only if the reservation was won; losing the
+    /// claim means continuing on the winner's record instead, so the caller
+    /// cannot be left holding one that nothing routes to.
+    ///
+    /// Which way it went is reported here rather than by the caller, because
+    /// only one of the two is a race worth reading in a log and every caller
+    /// wants the same pair out of it.
+    pub fn into_conversation(
+        self,
+        endpoint: &Endpoint,
+        mine: ConversationRecord,
+    ) -> (ConversationId, ConversationRecord) {
+        match self {
+            Self::Created(id) => {
+                info!(conversation = %id, endpoint = %endpoint, agent = %mine.agent_id, "Created conversation");
+                (id, mine)
+            }
+            Self::AlreadyBound(id, bound) => {
+                info!(
+                    conversation = %id,
+                    endpoint = %endpoint,
+                    agent = %bound.agent_id,
+                    "Endpoint was bound while this conversation was being created; continuing on the one already bound"
+                );
+                (id, bound)
+            }
+        }
+    }
+}
+
 /// What we know about a principal beyond its id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrincipalRecord {
@@ -179,12 +212,24 @@ impl ChannelStore {
         &self,
         endpoint: &Endpoint,
     ) -> Result<Option<(ConversationId, ConversationRecord)>, ChannelStoreError> {
-        let Some(bytes) = self.bindings.get(endpoint.kv_key()).await? else {
+        self.bound_conversation(self.bindings.get(endpoint.kv_key()).await?)
+            .await
+    }
+
+    /// The conversation an encoded binding leads to. An endpoint with no binding
+    /// and one bound to a record that is no longer there answer alike, because
+    /// neither routes anywhere: the next message for that endpoint has to open a
+    /// conversation either way.
+    async fn bound_conversation(
+        &self,
+        binding: Option<impl AsRef<[u8]>>,
+    ) -> Result<Option<(ConversationId, ConversationRecord)>, ChannelStoreError> {
+        let Some(bytes) = binding else {
             return Ok(None);
         };
-        let id: ConversationId = serde_json::from_slice(&bytes)?;
+        let id: ConversationId = serde_json::from_slice(bytes.as_ref())?;
         match self.conversations.get(id.as_str()).await? {
-            Some(bytes) => Ok(Some((id.clone(), serde_json::from_slice(&bytes)?))),
+            Some(bytes) => Ok(Some((id, serde_json::from_slice(&bytes)?))),
             None => Ok(None),
         }
     }
@@ -231,14 +276,18 @@ impl ChannelStore {
         };
 
         // Read the claim that won as an entry rather than a value: replacing a
-        // stale one is only safe against the revision it was read at.
-        let Some(bound) = self.bindings.entry(endpoint.kv_key()).await? else {
-            return Err(self.unwind(endpoint, id, taken.into()).await);
-        };
-        let bound_id: ConversationId = serde_json::from_slice(&bound.value)?;
+        // stale one is only safe against the revision it was read at. A claim
+        // that is gone by the time it is read is claimed at revision zero, which
+        // the server honours only while the key is still absent, so the race
+        // that emptied it cannot be lost twice.
+        let claimed = self.bindings.entry(endpoint.kv_key()).await?;
+        let revision = claimed.as_ref().map_or(0, |claim| claim.revision);
 
-        if let Some(bytes) = self.conversations.get(bound_id.as_str()).await? {
-            let bound_record = serde_json::from_slice(&bytes)?;
+        // Only a claim that leads to a conversation is one to yield to. One that
+        // leads nowhere is taken over below, and so is a claim that is gone by
+        // the time it is read: revision zero says the key must still be absent,
+        // so the race that emptied it cannot be lost twice.
+        if let Some((bound_id, bound_record)) = self.bound_conversation(claimed.map(|claim| claim.value)).await? {
             return match self.conversations.delete(id.as_str()).await {
                 Ok(()) => Ok(EndpointBinding::AlreadyBound(bound_id, bound_record)),
                 Err(cleanup) => Err(ChannelStoreError::OrphanedConversation {
@@ -252,14 +301,10 @@ impl ChannelStore {
 
         info!(
             endpoint = %endpoint,
-            conversation = %bound_id,
-            "Endpoint was bound to a conversation record that is gone; re-pointing it"
+            conversation = %id,
+            "The endpoint's claim leads to no conversation record; taking it over"
         );
-        match self
-            .bindings
-            .update(endpoint.kv_key(), binding.into(), bound.revision)
-            .await
-        {
+        match self.bindings.update(endpoint.kv_key(), binding.into(), revision).await {
             Ok(_) => Ok(EndpointBinding::Created(id)),
             Err(source) => Err(self.unwind(endpoint, id, source.into()).await),
         }
