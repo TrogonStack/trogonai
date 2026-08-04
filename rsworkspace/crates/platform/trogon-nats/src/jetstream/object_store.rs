@@ -91,6 +91,18 @@ impl NatsObjectStore {
         }
     }
 
+    /// Open an existing bucket without creating it or touching its retention.
+    /// A consumer redeeming claims reads a bucket whose lifecycle belongs to the
+    /// publisher that fills it, so creating one here would only hide the fact
+    /// that the publisher never ran.
+    pub async fn bind(js: &async_nats::jetstream::Context, bucket: &str) -> Result<Self, ProvisionObjectStoreError> {
+        let store = js
+            .get_object_store(bucket)
+            .await
+            .map_err(ProvisionObjectStoreError::Get)?;
+        Ok(Self { store })
+    }
+
     /// Provision a bucket that backs claim-check payloads, sizing its `max_age`
     /// from [`ClaimRetention`] so the object always outlives the messages that
     /// reference it. Callers cannot forget the retention or let it drift from

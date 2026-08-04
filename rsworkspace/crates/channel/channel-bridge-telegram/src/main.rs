@@ -31,6 +31,7 @@ use teloxide::Bot;
 use tracing::{error, info, warn};
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{ChannelStore, Endpoint, PrincipalId};
+use trogon_nats::jetstream::{ClaimResolver, NatsObjectStore};
 use trogon_std::UuidV7Generator;
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
@@ -63,6 +64,20 @@ async fn main() -> anyhow::Result<()> {
             config.inbound_stream
         )
     })?;
+    // Same ownership as the stream: the gateway creates this bucket at startup
+    // and sizes its retention against the longest-retained stream it serves.
+    // Refusing to start without it turns a missing gateway into a boot failure,
+    // rather than into an oversized update that arrives one day and cannot be
+    // redeemed.
+    let claims = ClaimResolver::new(
+        NatsObjectStore::bind(&js, &config.claim_bucket).await.map_err(|e| {
+            anyhow::anyhow!(
+                "claim bucket '{}' not found; the trogon-gateway must provision it: {e}",
+                config.claim_bucket
+            )
+        })?,
+        config.claim_bucket.clone(),
+    );
     let consumer_name = format!("{INBOUND_DURABLE}-{}", config.channel_prefix);
     let consumer = stream
         .get_or_create_consumer(
@@ -88,7 +103,9 @@ async fn main() -> anyhow::Result<()> {
     let bot = Bot::new(config.bot_token.clone());
 
     let local = tokio::task::LocalSet::new();
-    let result = local.run_until(run(nats_client, store, messages, bot, config)).await;
+    let result = local
+        .run_until(run(nats_client, store, claims, messages, bot, config))
+        .await;
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");
@@ -111,6 +128,7 @@ async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow:
 async fn run(
     nats_client: async_nats::Client,
     store: ChannelStore,
+    claims: ClaimResolver<NatsObjectStore>,
     mut messages: async_nats::jetstream::consumer::pull::Stream,
     bot: Bot,
     config: BridgeConfig,
@@ -160,6 +178,7 @@ async fn run(
         port: &port,
         renderer: renderer.as_ref(),
         outbound: &telegram,
+        claims: &claims,
         bot_account: &config.bot_account,
         agent_id: &config.agent_id,
         triggers: &config.command_triggers,

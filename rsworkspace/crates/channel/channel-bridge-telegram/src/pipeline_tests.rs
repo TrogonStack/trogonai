@@ -11,6 +11,9 @@ use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
     AgentPortError, AgentSessionId, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseStep, SessionRelease,
 };
+use trogon_nats::jetstream::{
+    ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
+};
 use trogon_std::UuidV7Generator;
 
 struct NatsServer {
@@ -132,6 +135,33 @@ fn raw_update(update_id: u64, chat_id: i64, user_id: u64, text: &str) -> Vec<u8>
     .expect("serialize update")
 }
 
+/// Consumer state once its acks have landed. `msg.ack()` does not wait for the
+/// server, so a snapshot taken the instant the pipeline returns can still show
+/// the last message pending.
+async fn settled_consumer_info(
+    stream: &async_nats::jetstream::stream::Stream,
+    consumer: &str,
+) -> async_nats::jetstream::consumer::Info {
+    for _ in 0..40 {
+        let info = stream.consumer_info(consumer).await.expect("consumer info");
+        if info.num_ack_pending == 0 && info.num_pending == 0 {
+            return info;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    stream.consumer_info(consumer).await.expect("consumer info")
+}
+
+/// The bucket the gateway offloads oversized bodies into, opened the way the
+/// bridge opens it. Provisioned here because in a deployment the gateway has
+/// already done so.
+async fn claim_resolver(js: &async_nats::jetstream::Context) -> ClaimResolver<NatsObjectStore> {
+    let store = NatsObjectStore::provision_claim_bucket(js, DEFAULT_CLAIM_BUCKET, ClaimRetention::EventSourced)
+        .await
+        .expect("provision claim bucket");
+    ClaimResolver::new(store, DEFAULT_CLAIM_BUCKET)
+}
+
 /// End to end against a real NATS: gateway-shaped raw updates in, identity
 /// gate, conversation + session KV, prompt, rendered reply out, and the reset
 /// command that rotates the session under a stable conversation. One container
@@ -196,11 +226,13 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     };
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let claims = claim_resolver(&js).await;
     let pipeline = Pipeline {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
         outbound: &outbound,
+        claims: &claims,
         bot_account: "mybot",
         agent_id: "default",
         triggers: &triggers,
@@ -264,7 +296,200 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     );
 
     // Everything acked: nothing left pending for redelivery.
-    let info = stream.consumer_info("bridge-test").await.expect("consumer info");
+    let info = settled_consumer_info(&stream, "bridge-test").await;
     assert_eq!(info.num_ack_pending, 0);
     assert_eq!(info.num_pending, 0);
+}
+
+/// An update the gateway had to offload still reaches the agent. The gateway
+/// publishes through `ClaimCheckPublisher`, so a body over the NATS max payload
+/// arrives on the stream as an empty payload plus claim headers, and a consumer
+/// that deserializes the payload sees zero bytes. Published here through the
+/// same publisher the gateway uses, with the threshold driven to zero so every
+/// body takes that path.
+#[tokio::test]
+async fn pipeline_redeems_a_claim_checked_update() {
+    let server = NatsServer::start().await;
+    let client = async_nats::connect(&server.url).await.expect("connect");
+    let js = async_nats::jetstream::new(client);
+
+    js.create_stream(async_nats::jetstream::stream::Config {
+        name: "TELEGRAM".to_string(),
+        subjects: vec!["telegram.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("create TELEGRAM stream");
+
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
+    let principal = PrincipalId::new("telegram-42").expect("principal");
+    let endpoint = Endpoint::new("telegram", "mybot", "42").expect("endpoint");
+    store
+        .link_endpoint(&principal, &PrincipalRecord { display_name: None }, &endpoint)
+        .await
+        .expect("seed principal");
+
+    let claims = claim_resolver(&js).await;
+    let gateway = ClaimCheckPublisher::new(
+        NatsJetStreamClient::new(js.clone()),
+        NatsObjectStore::bind(&js, DEFAULT_CLAIM_BUCKET)
+            .await
+            .expect("bind claim bucket"),
+        DEFAULT_CLAIM_BUCKET.to_string(),
+        MaxPayload::from_server_limit(0),
+    );
+    let outcome = gateway
+        .publish_event(
+            "telegram.message".to_string(),
+            async_nats::HeaderMap::new(),
+            raw_update(1, 42, 42, "hello from a big body").into(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    assert!(outcome.is_ok(), "gateway publish failed: {outcome:?}");
+
+    let stream = js.get_stream("TELEGRAM").await.expect("get stream");
+    let consumer = stream
+        .get_or_create_consumer(
+            "bridge-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bridge-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("consumer");
+    let mut messages = consumer.messages().await.expect("messages");
+
+    let renderer = Rc::new(TelegramRenderClient::new());
+    let port = FakePort {
+        renderer: renderer.clone(),
+        reply: "hi there".to_string(),
+        sessions_created: RefCell::new(0),
+        prompted: RefCell::new(Vec::new()),
+        released: RefCell::new(Vec::new()),
+    };
+    let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &outbound,
+        claims: &claims,
+        bot_account: "mybot",
+        agent_id: "default",
+        triggers: &triggers,
+        ids: &UuidV7Generator,
+    };
+
+    let msg = messages.next().await.expect("stream yields").expect("message received");
+    // The premise of the test: parsing what arrived would have failed.
+    assert!(msg.payload.is_empty());
+    pipeline.handle_message(&msg).await.expect("handled");
+
+    assert_eq!(
+        *port.prompted.borrow(),
+        vec![("sess-1".to_string(), "hello from a big body".to_string())]
+    );
+    assert_eq!(*outbound.sent.borrow(), vec![(42, "hi there".to_string())]);
+
+    let info = settled_consumer_info(&stream, "bridge-test").await;
+    assert_eq!(info.num_ack_pending, 0);
+    assert_eq!(info.num_pending, 0);
+}
+
+/// A claim that cannot be redeemed is left for redelivery instead of acked.
+/// Dropping it would be permanent, and the payload alone carries no sign that
+/// anything was lost.
+#[tokio::test]
+async fn pipeline_leaves_an_unredeemable_claim_unacked() {
+    let server = NatsServer::start().await;
+    let client = async_nats::connect(&server.url).await.expect("connect");
+    let js = async_nats::jetstream::new(client);
+
+    js.create_stream(async_nats::jetstream::stream::Config {
+        name: "TELEGRAM".to_string(),
+        subjects: vec!["telegram.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("create TELEGRAM stream");
+
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
+    let claims = claim_resolver(&js).await;
+    let gateway = ClaimCheckPublisher::new(
+        NatsJetStreamClient::new(js.clone()),
+        NatsObjectStore::bind(&js, DEFAULT_CLAIM_BUCKET)
+            .await
+            .expect("bind claim bucket"),
+        DEFAULT_CLAIM_BUCKET.to_string(),
+        MaxPayload::from_server_limit(0),
+    );
+    let outcome = gateway
+        .publish_event(
+            "telegram.message".to_string(),
+            async_nats::HeaderMap::new(),
+            raw_update(1, 42, 42, "hello").into(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+    assert!(outcome.is_ok(), "gateway publish failed: {outcome:?}");
+
+    // Simulates an object expired or never written: the claim survives, the
+    // bytes do not.
+    js.delete_object_store(DEFAULT_CLAIM_BUCKET)
+        .await
+        .expect("drop claim bucket");
+    js.create_object_store(async_nats::jetstream::object_store::Config {
+        bucket: DEFAULT_CLAIM_BUCKET.to_string(),
+        ..Default::default()
+    })
+    .await
+    .expect("recreate claim bucket");
+
+    let stream = js.get_stream("TELEGRAM").await.expect("get stream");
+    let consumer = stream
+        .get_or_create_consumer(
+            "bridge-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bridge-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("consumer");
+    let mut messages = consumer.messages().await.expect("messages");
+
+    let renderer = Rc::new(TelegramRenderClient::new());
+    let port = FakePort {
+        renderer: renderer.clone(),
+        reply: "hi there".to_string(),
+        sessions_created: RefCell::new(0),
+        prompted: RefCell::new(Vec::new()),
+        released: RefCell::new(Vec::new()),
+    };
+    let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &outbound,
+        claims: &claims,
+        bot_account: "mybot",
+        agent_id: "default",
+        triggers: &triggers,
+        ids: &UuidV7Generator,
+    };
+
+    let msg = messages.next().await.expect("stream yields").expect("message received");
+    let error = pipeline.handle_message(&msg).await.expect_err("must not be acked");
+    assert!(error.to_string().contains("failed to redeem claim-checked update"));
+
+    assert!(port.prompted.borrow().is_empty());
+    assert!(outbound.sent.borrow().is_empty());
+
+    let info = stream.consumer_info("bridge-test").await.expect("consumer info");
+    assert_eq!(info.num_ack_pending, 1);
 }

@@ -73,8 +73,9 @@ The gateway does already depend on an object store, through
 `ClaimCheckPublisher`, which offloads any body over the NATS max payload and
 publishes claim headers in its place. That is transport plumbing applied
 identically to every source, not knowledge of what Telegram media is, so it does
-not weaken this decision. It does mean any consumer of a raw stream must call
-`resolve_claim` before deserializing, which today none does.
+not weaken this decision. It does mean any consumer of a raw stream must redeem
+the claim before deserializing, the downloader below included. A consumer that
+skips it gets no error, only an empty body.
 
 ### 2. A dedicated downloader consumes the raw stream on its own durable
 
@@ -131,8 +132,9 @@ pay nothing.
 
 ## Invariants
 
-- The gateway never holds an object-store dependency and never interprets a
-  source's payload beyond what publishing requires.
+- The gateway never interprets a source's payload beyond what publishing
+  requires. Its object-store use is claim-check transport, identical for every
+  source.
 - No component blocks a conversational turn on media the agent has not asked
   for.
 - Any component that redeems a platform handle holds that platform's

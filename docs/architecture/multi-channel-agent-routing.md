@@ -45,9 +45,9 @@ between the bridge's halves, because it has no halves.
 
 **The two legs are not symmetric.** Inbound goes through the gateway, which owns
 the webhook and publishes verbatim. Outbound does not: the bridge holds a
-`teloxide::Bot` and calls `send_message`, `edit_message_text`, and
-`send_chat_action` against the Telegram API itself. The gateway has no outbound
-role, which is why the bot token lives in both processes.
+`teloxide::Bot` and calls `send_message` and `send_chat_action` against the
+Telegram API itself. The gateway has no outbound role, which is why the bot token
+lives in both processes.
 
 **Delivery is the consumer's configuration.** The durable is
 `channel-bridge-telegram-{prefix}` on stream `TELEGRAM`
@@ -55,9 +55,13 @@ role, which is why the bot token lives in both processes.
 arrives from then on rather than replaying whatever the stream still retains;
 restarts resume from the durable's own ack floor. `ack_wait` is 600 seconds
 because a prompt turn legitimately runs for minutes, and a turn that fails is
-left unacked so JetStream redelivers, bounded by `max_deliver` 5. The bridge does
-not create the stream: the gateway's Telegram source provisions it, and the
-bridge refuses to start if it is missing.
+left unacked so JetStream redelivers, bounded by `max_deliver` 5. The bridge
+creates neither of the two resources it reads. The gateway provisions the stream
+and the claim bucket, sizing the bucket's retention against the longest-retained
+stream it serves; the bridge only names the bucket (`TROGON_CLAIM_BUCKET`,
+defaulting to the same `trogon-claims` the gateway writes) and refuses to start if
+either resource is missing, rather than create a wrong one and find out on the
+first oversized update.
 
 **The bridge handles one update at a time.** The inbound loop awaits each turn to
 completion before pulling the next message. What the design requires is
@@ -310,12 +314,14 @@ Telegram structure map as follows:
    gracefully.
 
 Whatever the bridge does not carry is not destroyed: the raw `TELEGRAM` stream
-retains full fidelity for replay when a future need appears. With one caveat that
-is currently a bug, not a design: the gateway publishes through
-`ClaimCheckPublisher`, so an update larger than the NATS max payload is stored in
-an object store and published as an empty body carrying claim headers. Fidelity is
-preserved in the stream, but only a consumer that calls `resolve_claim` sees it,
-and none does.
+retains full fidelity for replay when a future need appears. Fidelity there is
+not the same thing as fidelity in the payload, though. The gateway publishes
+through `ClaimCheckPublisher`, so an update larger than the NATS max payload is
+stored in an object store and published as an empty body carrying claim headers.
+The bytes are only visible to a consumer that redeems the claim, so the bridge
+holds a `ClaimResolver` bound to the same bucket and resolves before it
+deserializes. Any future consumer of a raw stream owes the same, and a consumer
+that skips it does not see an error: it sees an empty body.
 
 ## Decisions and rejected alternatives
 
@@ -373,13 +379,6 @@ and none does.
 Things this design commits to that the running system does not do yet. None of
 them change the topology above.
 
-- **A claim-checked update is silently destroyed.** The gateway offloads any body
-  over the NATS max payload to an object store and publishes an empty payload with
-  claim headers. The bridge deserializes `msg.payload` directly, so it sees zero
-  bytes, logs "Unparseable Telegram update; dropping", and acks. The loss is
-  permanent and the log names the wrong cause. `resolve_claim` already exists in
-  `trogon-nats` and is called nowhere outside its own tests. This is the one gap
-  here that is a defect rather than absent work.
 - **Inbound media is dropped.** Parsing keeps only the message text, so a photo,
   voice note, or document arrives as nothing at all. ADR#0044 settles where the
   fetch belongs; the downloader and the `channel_media_{prefix}` bucket do not
@@ -398,6 +397,12 @@ them change the topology above.
   `message_ref` even though the field exists for it. `max_deliver` 5 bounds the
   duplicates. The same path makes any redelivery after a partial turn re-prompt
   the agent.
+- **Exhausted redeliveries go nowhere.** A message the bridge keeps failing on is
+  dropped by JetStream after `max_deliver` 5 with no dead-letter subject, so a
+  claim whose object genuinely expired, or a bucket misconfiguration, costs five
+  loud failures and then silence. The failure is at least legible in the log,
+  which is the difference from acking on the first attempt, but nothing holds the
+  message for inspection.
 - **The bridge exits if the agent is down at boot.** ACP `initialize` runs before
   the consumer opens and propagates its error, so an agent that is not yet
   reachable turns into a restart loop rather than a bridge that waits.
@@ -421,8 +426,9 @@ them change the topology above.
 1. A user sends "hello" to the bot on Telegram. Telegram POSTs the webhook;
    `trogon-gateway` validates it and publishes the raw Update to
    `telegram.message` on stream `TELEGRAM`.
-2. `channel-bridge-telegram` consumes it on its durable, parses the Update, and
-   encodes the endpoint address.
+2. `channel-bridge-telegram` consumes it on its durable, redeems the body if the
+   message is a claim rather than a payload, parses the Update, and encodes the
+   endpoint address.
 3. The bridge resolves endpoint to principal, dropping the message if there is
    none; then endpoint to conversation, creating one via routing policy if absent
    and writing the sticky `agent_id`; then ensures a live session on that agent

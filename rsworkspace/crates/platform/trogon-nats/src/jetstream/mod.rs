@@ -12,8 +12,8 @@ pub mod traits;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
-pub use crate::constants::{HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY};
-pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, MaxPayload, is_claim, resolve_claim};
+pub use crate::constants::{DEFAULT_CLAIM_BUCKET, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY};
+pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, ClaimResolver, MaxPayload, is_claim, resolve_claim};
 pub use claim_retention::ClaimRetention;
 #[cfg(not(coverage))]
 pub use client::{

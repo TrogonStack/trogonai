@@ -4,7 +4,6 @@ use trogon_std::NonZeroDuration;
 
 pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const NATS_SERVER_INFO_POLL_INTERVAL: Duration = Duration::from_millis(50);
-pub const CLAIM_CHECK_BUCKET: &str = "trogon-claims";
 /// Grace window added to the longest configured stream retention when sizing the
 /// claim-check bucket TTL, so a message at the edge of expiry can still resolve
 /// its claim before the object is reclaimed.

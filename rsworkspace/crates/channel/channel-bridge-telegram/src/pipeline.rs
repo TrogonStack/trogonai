@@ -11,6 +11,7 @@ use trogon_channel::{
     AgentId, AgentPort, AgentPortError as _, ChannelStore, Command, CommandTriggers, ConversationId,
     ConversationRecord, InboundEvent, ReleaseReason,
 };
+use trogon_nats::jetstream::{ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
 
 /// What the bridge says back when a command has nothing else to do. A reset
@@ -18,11 +19,12 @@ use trogon_std::NowV7;
 /// gets silence.
 const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
 
-pub struct Pipeline<'a, P, O, G> {
+pub struct Pipeline<'a, P, O, G, S> {
     pub store: &'a ChannelStore,
     pub port: &'a P,
     pub renderer: &'a TelegramRenderClient,
     pub outbound: &'a O,
+    pub claims: &'a ClaimResolver<S>,
     pub bot_account: &'a str,
     pub agent_id: &'a str,
     pub triggers: &'a CommandTriggers,
@@ -39,7 +41,7 @@ async fn ack(msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
     msg.ack().await.map_err(|e| anyhow::anyhow!("ack failed: {e}"))
 }
 
-impl<P: AgentPort, O: Outbound, G: NowV7> Pipeline<'_, P, O, G> {
+impl<P: AgentPort, O: Outbound, G: NowV7, S: ObjectStoreGet> Pipeline<'_, P, O, G, S> {
     /// Whether the individual who sent this message is a known principal. The
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
@@ -83,10 +85,21 @@ impl<P: AgentPort, O: Outbound, G: NowV7> Pipeline<'_, P, O, G> {
     /// dropped; processing errors return `Err` with the message unacked so
     /// JetStream redelivers.
     pub async fn handle_message(&self, msg: &async_nats::jetstream::Message) -> anyhow::Result<()> {
-        let update = match serde_json::from_slice::<teloxide::types::Update>(&msg.payload) {
+        // An update over the NATS max payload reaches the stream as an empty
+        // body plus claim headers, so the parse below has to run on the redeemed
+        // bytes. A failure here returns Err rather than acking: the update is
+        // real and recoverable, and dropping it would lose it permanently while
+        // blaming the parser.
+        let body = self
+            .claims
+            .resolve(msg.headers.as_ref(), msg.payload.clone())
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to redeem claim-checked update: {e}"))?;
+
+        let update = match serde_json::from_slice::<teloxide::types::Update>(&body) {
             Ok(update) => update,
             Err(e) => {
-                warn!(error = %e, body_len = msg.payload.len(), "Unparseable Telegram update; dropping");
+                warn!(error = %e, body_len = body.len(), "Unparseable Telegram update; dropping");
                 return ack(msg).await;
             }
         };

@@ -10,6 +10,10 @@ pub struct BridgeConfig {
     pub channel_prefix: String,
     /// JetStream stream the trogon-gateway Telegram source provisions.
     pub inbound_stream: String,
+    /// Object-store bucket the gateway offloads oversized bodies to. Reading it
+    /// is not optional: an update over the NATS max payload arrives as an empty
+    /// body plus claim headers, and the bytes are only in the bucket.
+    pub claim_bucket: String,
     pub bot_token: String,
     /// Endpoint account token; identifies which bot account on Telegram.
     pub bot_account: String,
@@ -35,6 +39,9 @@ impl BridgeConfig {
         let inbound_stream = env
             .var("TELEGRAM_INBOUND_STREAM")
             .unwrap_or_else(|_| "TELEGRAM".to_string());
+        let claim_bucket = env
+            .var("TROGON_CLAIM_BUCKET")
+            .unwrap_or_else(|_| trogon_nats::jetstream::DEFAULT_CLAIM_BUCKET.to_string());
         let bot_account = env.var("TELEGRAM_BOT_ACCOUNT").unwrap_or_else(|_| "bot".to_string());
         let agent_id = env.var("CHANNEL_AGENT_ID").unwrap_or_else(|_| "default".to_string());
         let agent_cwd = env
@@ -76,6 +83,7 @@ impl BridgeConfig {
             acp,
             channel_prefix,
             inbound_stream,
+            claim_bucket,
             bot_token,
             bot_account,
             agent_id,

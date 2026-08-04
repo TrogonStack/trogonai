@@ -73,10 +73,65 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
     Ok(Bytes::from(buf))
 }
 
+/// The consumer half of a claim check: an object store bound to the bucket the
+/// publisher was configured to write.
+///
+/// [`resolve_claim`] takes an already-bound store and cannot tell whether it is
+/// the right one, so a consumer pointed at the wrong bucket reports every claim
+/// as a missing object. Pairing the store with its bucket name lets the
+/// [`HEADER_CLAIM_BUCKET`] the publisher already sends be checked, which turns
+/// that misconfiguration into its own error.
+#[derive(Debug, Clone)]
+pub struct ClaimResolver<S> {
+    store: S,
+    bucket: String,
+}
+
+impl<S: ObjectStoreGet> ClaimResolver<S> {
+    pub fn new(store: S, bucket: impl Into<String>) -> Self {
+        Self {
+            store,
+            bucket: bucket.into(),
+        }
+    }
+
+    pub fn bucket(&self) -> &str {
+        &self.bucket
+    }
+
+    /// The body a consumer should act on: `payload` itself when the message
+    /// carries one, or the stored object when the payload was offloaded.
+    /// Headers are optional because that is how a subscription hands them over,
+    /// and a message without headers is never a claim.
+    pub async fn resolve(
+        &self,
+        headers: Option<&HeaderMap>,
+        payload: Bytes,
+    ) -> Result<Bytes, ClaimResolveError<S::Error>> {
+        let Some(headers) = headers else {
+            return Ok(payload);
+        };
+        if !is_claim(headers) {
+            return Ok(payload);
+        }
+        if let Some(named) = headers.get(HEADER_CLAIM_BUCKET)
+            && named.as_str() != self.bucket
+        {
+            return Err(ClaimResolveError::BucketMismatch {
+                expected: self.bucket.clone(),
+                named: named.as_str().to_string(),
+            });
+        }
+        resolve_claim(headers, payload, &self.store).await
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClaimResolveError<E> {
     #[error("claim message missing {} header", HEADER_CLAIM_KEY)]
     MissingKey,
+    #[error("claim names bucket {named:?} but this consumer reads {expected:?}")]
+    BucketMismatch { expected: String, named: String },
     #[error("failed to resolve claim from object store: {0}")]
     StoreFailed(#[source] E),
     #[error("failed to read claim payload: {0}")]

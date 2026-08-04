@@ -46,8 +46,9 @@ services:
       retries: 3
 
   # Telegram channel bridge: consumes the gateway's raw TELEGRAM stream and
-  # drives the shared agent over acp-nats. Needs the gateway's Telegram
-  # source enabled (provisions the stream) and an agent behind acp-nats.
+  # drives the shared agent over acp-nats. Needs the gateway running (it
+  # provisions both the stream and the claim bucket an oversized update is
+  # offloaded into) and an agent behind acp-nats.
   channel-bridge-telegram:
     build:
       context: ../../../rsworkspace
