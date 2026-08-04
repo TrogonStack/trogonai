@@ -229,15 +229,22 @@ The plan's model fields inherit the contested ownership recorded in section 1.
 The shipped AgentConfiguration contract exposes no typed ModelSelection for
 admission to read, so `primary_model_selection`, `auxiliary_model_selections`,
 and their resolved model routes are provisional, together with admission
-steps 4 and 5 and the model-protocol check in step 7 below. Until the
-reconciliation tracked in
+steps 4 and 5, the model-protocol check in step 7, the model-access grants in
+step 10, and the ExactModelUnavailable and ExactModelMismatch failure
+categories below; none of them has anything to read until typed selections
+land, the same block
+[ADR#0032](./0032-model-route-and-credential-binding.md) records for route
+admission. Until the reconciliation tracked in
 [ADR#0025](./0025-agent-definition-data-ownership.md) lands, the authoritative
 interim source of model selection is the runtime-owned settings inside the
-pinned AgentConfiguration: the selection cannot change within a revision,
-because `configuration_digest` commits to those settings, but the platform
-cannot read it as a typed value, resolve a provider route for it, or enforce
-the no-substitution rule above. Every other plan field and admission step is
-normative now.
+pinned AgentConfiguration, when they record one: that selection cannot change
+within a revision, because `configuration_digest` commits to those settings,
+but the platform cannot read it as a typed value, resolve a provider route
+for it, or enforce the no-substitution rule above. When those settings are
+absent, the shipped contract lets the implementation's own defaults choose
+the model, which is exactly the invisibility this decision exists to remove;
+the reconciliation must close that gap. The plan fields and admission steps
+that do not depend on model selection are normative now.
 
 Admission proceeds in this order:
 
@@ -361,8 +368,13 @@ attempt's confirmation key, a binding of the artifact reference and digest,
 `checkpoint_id`, `checkpoint_type`, producing ExecutionAttempt,
 SessionExecutionPlan digest, `covers_through`, and that effective-history
 digest. Admission verifies the signature against the producing attempt's
-confirmation-key thumbprint, recomputes the effective-history digest from
-authoritative Session history, and requires equality with the attested value.
+confirmation-key thumbprint, requires every attested value to equal the
+corresponding field of the checkpoint evidence being admitted, recomputes the
+effective-history digest from authoritative Session history, and requires
+equality with the attested value. An attestation is not transferable:
+evidence whose artifact reference, digest, id, type, cut, attempt, or plan
+digest differs from what the supervisor signed is rejected, never partially
+matched.
 The admitted checkpoint evidence retains the attestation reference and digest
 beside the effective-history digest, so restoration re-verifies the same proof
 before trusting any bytes. The attestation proves the binding: the measured
@@ -400,11 +412,13 @@ history at or before the cut therefore disqualifies the checkpoint: a rewind
 that makes `covers_through` ineffective, a redaction targeting any event at or
 before it, or an artifact erasure reaching an artifact recorded at or before
 it. Without this rule, a restored attempt would keep content a fresh replay
-masks. A compaction marker after the cut does not disqualify: it is
-self-sufficient, masks no covered fact, and folds identically in the tail and
-in a fresh replay. An ineligible checkpoint falls back to fresh replay from
-authoritative history, which applies the changed interpretation from the
-first fact.
+masks. A compaction marker in the tail does not disqualify, whatever range it
+covers: applying it is the loop's ordinary live operation, the restored
+attempt and a fresh replay hold the same covered facts and fold the same
+self-sufficient marker, and unlike redaction and erasure it removes nothing a
+fresh replay would still deliver. An ineligible checkpoint falls back to
+fresh replay from authoritative history, which applies the changed
+interpretation from the first fact.
 
 This makes checkpoint restore observationally equivalent to rebuilding the
 harness from authoritative history through the same selected head. A checkpoint

@@ -135,11 +135,13 @@ contract, and it is invisible until a shape change breaks it in production.
 ### 1. Name, in the ADR or in `checkpoint_produced.proto`'s comment, exactly which bytes the checkpoint evidence digest covers
 
 **The change.** [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) decision 2's fold rule for `CheckpointProduced` states
-"the command idempotency key includes the artifact digest, so conflicting
-evidence remains visible while byte-identical redelivery collapses through the
-event identity contract." Neither `checkpoint.proto` nor the decision text pins
-down, in writing, which fields of the checkpoint artifact are included in that
-digest and which (if any) are excluded as volatile.
+that the command idempotency key includes "a canonical digest of the complete
+checkpoint evidence (the exact `Checkpoint` bytes the command persists)," so
+conflicting evidence remains visible while byte-identical redelivery collapses
+through the event identity contract. That names the covered bytes; what
+neither `checkpoint.proto` nor the decision text pins down, in writing, is the
+canonical encoding those bytes rely on and that no field of it may vary
+harmlessly between logically identical requests.
 
 **Evidence anchor.** This SDK, store maturity 5/12 (thin evidence on its own):
 `fingerprint_input_item` "strips internal metadata and (optionally) the `id`
@@ -361,9 +363,9 @@ product actually shipped.
   production for two unrelated teams (this SDK's `fingerprint_input_item`,
   Cline's `source_prefix_hash`). Wherever our own design computes a content
   digest for comparison purposes (`ResourceObservation.content_digest`, the
-  artifact digest feeding a `CheckpointProduced` idempotency key), the covered
-  bytes must be pinned down explicitly, per recommendation 1, rather than left
-  to whatever a serializer happens to emit.
+  canonical complete-evidence digest feeding a `CheckpointProduced`
+  idempotency key), the covered bytes must be pinned down explicitly, per
+  recommendation 1, rather than left to whatever a serializer happens to emit.
 - **Letting listing be "whatever the backend's native tooling supports."** Nine
   backends, nine incompatible listing stories, none portable across a backend
   change. Decision 8's single rebuildable `SessionProjection` is the fix; do not
@@ -501,10 +503,12 @@ offers a cruder version of exactly the capability decision 7 defers.
    session boundary at all" pattern (this SDK's Handoffs) in scope for the
    Session Store, or is it purely an agent-loop concern the store never needs
    to represent? Nothing in [ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) or this dossier answers this directly.
-3. What bytes does the artifact digest feeding a `CheckpointProduced` command's
-   idempotency key actually cover, and are any of them volatile (a
-   producing-side timestamp, a non-canonical serialization) in a way that could
-   make byte-identical checkpoints hash differently? See recommendation 1.
+3. The complete-evidence digest feeding a `CheckpointProduced` command's
+   idempotency key now names its covered bytes (the exact `Checkpoint` bytes
+   the command persists), but what canonical encoding produces them, and could
+   any serialization detail vary (a non-canonical map ordering, a
+   producing-side timestamp) in a way that makes byte-identical checkpoints
+   hash differently? See recommendation 1.
 4. Given decision 7 defers erasure-grade deletion to a named follow-up ADR, and
    at least one shipped vendor product already offers a cruder but real
    physical-delete primitive today, should that follow-up ADR be prioritized

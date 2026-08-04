@@ -444,9 +444,11 @@ standalone payload validator enforces local shape, including equality between a
 restored checkpoint's plan digest and the plan digest on its containing
 `ExecutionAttemptStarted`. The Session decider separately enforces attempt,
 stored-plan, and ordinal relationships against folded state. Artifact
-verification enforces sealing, digest, the capture attestation and its
-effective-history equality, and compatibility with the harness implementation
-version committed by the plan.
+verification enforces sealing, digest, and compatibility with the harness
+implementation version committed by the plan, plus the capture attestation:
+its signature, field-for-field equality between the attested values and the
+admitted checkpoint evidence, and equality between the attested
+effective-history digest and the platform's own recomputation.
 
 `CheckpointProduced` records evidence about a cut that is already settled. The
 evidence remains historically valid when later Session events append, although
@@ -468,9 +470,10 @@ Restoration is the head-dependent choice. At the current head selected by
 - no `RedactionApplied` folded through the selected head targets an event at
   or before `covers_through`, and no `ArtifactErased` erases an artifact
   recorded at or before it, because tail replay cannot rebuild the sealed
-  prefix a reinterpretation retargets (a `Compacted` marker after the cut does
-  not disqualify: it masks nothing and folds identically in the tail and in a
-  fresh replay); and
+  prefix a reinterpretation retargets (a `Compacted` marker in the tail does
+  not disqualify, whatever range it covers: the restored attempt and a fresh
+  replay hold the same covered facts and fold the same self-sufficient
+  marker); and
 - the producing attempt and stored Session plan still satisfy the recovery
   contract.
 
@@ -902,7 +905,11 @@ authoritative replay, which applies the mask from the first fact.
 New event `ArtifactErased{session_id, artifact_id, reason}` (`At`-guarded)
 records out-of-band destruction of claim-checked artifact bytes; the
 artifact's digest and metadata remain on the log as provenance even after the
-bytes themselves are gone.
+bytes themselves are gone. Erasing an artifact recorded at or before an
+admitted harness recovery checkpoint's `covers_through` also makes that
+checkpoint ineligible for restoration (facet 3): sealed state may retain
+fetched artifact content the log no longer serves, so restoration falls back
+to authoritative replay.
 
 **Ingress rules keep secrets out in the first place.** Credential-bearing URLs,
 signed URLs, and other secrets are prohibited in durable fields;
