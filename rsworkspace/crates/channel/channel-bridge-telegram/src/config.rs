@@ -20,16 +20,16 @@ pub struct BotToken(String);
 
 #[derive(Debug, thiserror::Error)]
 #[error("bot token is blank")]
-pub struct BlankBotToken;
+pub struct BlankBotTokenError;
 
 impl BotToken {
     /// Surrounding whitespace is trimmed rather than rejected: a token read
     /// from a file or a heredoc almost always arrives with a trailing newline,
     /// and Telegram would reject it with no hint as to which byte was wrong.
-    pub fn new(raw: impl AsRef<str>) -> Result<Self, BlankBotToken> {
+    pub fn new(raw: impl AsRef<str>) -> Result<Self, BlankBotTokenError> {
         let trimmed = raw.as_ref().trim();
         if trimmed.is_empty() {
-            return Err(BlankBotToken);
+            return Err(BlankBotTokenError);
         }
         Ok(Self(trimmed.to_string()))
     }

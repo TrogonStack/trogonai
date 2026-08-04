@@ -2,9 +2,10 @@
 #[path = "pipeline_tests.rs"]
 mod pipeline_tests;
 
+use crate::constants::{NEW_SESSION_ACKNOWLEDGEMENT, TEXT_CHUNK_LIMIT};
 use crate::outbound::Outbound;
 use crate::parse;
-use crate::render::{TEXT_CHUNK_LIMIT, TelegramRenderClient, chunk_text};
+use crate::render::{TelegramRenderClient, chunk_text};
 use anyhow::Context as _;
 use tracing::{info, warn};
 use trogon_channel::{
@@ -13,11 +14,6 @@ use trogon_channel::{
 };
 use trogon_nats::jetstream::{ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
-
-/// What the bridge says back when a command has nothing else to do. A reset
-/// with no follow-up prompt produces no agent output, so without this the user
-/// gets silence.
-const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
 
 pub struct Pipeline<'a, P, O, G, S> {
     pub store: &'a ChannelStore,

@@ -10,6 +10,7 @@
 
 mod acp_port;
 mod config;
+mod constants;
 mod outbound;
 mod parse;
 mod pipeline;
@@ -37,12 +38,6 @@ use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
 use trogon_std::signal::shutdown_signal;
 use trogon_telemetry::ServiceName;
-
-/// Durable consumer identity on the inbound stream. JetStream keys the ack
-/// floor by this string, so it is deployment state rather than a build
-/// artifact name: a literal here means a future crate rename cannot silently
-/// strand every deployment's position in the stream.
-const INBOUND_DURABLE: &str = "channel-bridge-telegram";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -78,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         })?,
         config.claim_bucket.clone(),
     );
-    let consumer_name = format!("{INBOUND_DURABLE}-{}", config.channel_prefix);
+    let consumer_name = format!("{}-{}", constants::INBOUND_DURABLE, config.channel_prefix);
     let consumer = stream
         .get_or_create_consumer(
             &consumer_name,

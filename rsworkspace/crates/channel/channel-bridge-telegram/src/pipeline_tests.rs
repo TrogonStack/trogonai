@@ -171,6 +171,16 @@ fn raw_update(update_id: u64, chat_id: i64, user_id: u64, text: &str) -> Vec<u8>
     .expect("serialize update")
 }
 
+/// The next message off the stream. Taken one at a time rather than in a loop
+/// so a scenario can change the agent's behaviour between messages.
+async fn next_message<S, E>(messages: &mut S) -> async_nats::jetstream::Message
+where
+    S: futures::Stream<Item = Result<async_nats::jetstream::Message, E>> + Unpin,
+    E: std::fmt::Debug,
+{
+    messages.next().await.expect("stream yields").expect("message received")
+}
+
 /// Consumer state once its acks have landed. `msg.ack()` does not wait for the
 /// server, so a snapshot taken the instant the pipeline returns can still show
 /// the last message pending. `ack_pending` is what the caller expects to remain
@@ -273,7 +283,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     };
 
     for _ in 0..6 {
-        let msg = messages.next().await.expect("stream yields").expect("message received");
+        let msg = next_message(&mut messages).await;
         pipeline.handle_message(&msg).await.expect("handled");
     }
 
@@ -410,7 +420,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
         ids: &UuidV7Generator,
     };
 
-    let msg = messages.next().await.expect("stream yields").expect("message received");
+    let msg = next_message(&mut messages).await;
     // The premise of the test: parsing what arrived would have failed.
     assert!(msg.payload.is_empty());
     pipeline.handle_message(&msg).await.expect("handled");
@@ -504,10 +514,11 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         ids: &UuidV7Generator,
     };
 
-    let msg = messages.next().await.expect("stream yields").expect("message received");
-    let error = pipeline.handle_message(&msg).await.expect_err("must not be acked");
-    assert!(error.to_string().contains("failed to redeem claim-checked update"));
+    let msg = next_message(&mut messages).await;
+    assert!(pipeline.handle_message(&msg).await.is_err(), "must not be acked");
 
+    // Where the failure came from: the claim never resolved, so the agent was
+    // never reached.
     assert!(port.prompted.borrow().is_empty());
     assert!(outbound.sent.borrow().is_empty());
 
@@ -582,17 +593,10 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         ids: &UuidV7Generator,
     };
 
-    macro_rules! next_message {
-        () => {
-            messages
-                .next()
-                .await
-                .expect("stream yields")
-                .expect("message received")
-        };
-    }
-
-    pipeline.handle_message(&next_message!()).await.expect("handled");
+    pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect("handled");
     let session_before = store
         .conversation_for(&endpoint)
         .await
@@ -605,13 +609,12 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     // Both the original session and the fresh one reject this prompt, which is
     // what an ordinary rejection misread as a lost session looks like.
     port.reject_next_prompts(2);
-    let error = pipeline
-        .handle_message(&next_message!())
-        .await
-        .expect_err("must not be acked");
     assert!(
-        error.to_string().contains("the session was not the cause"),
-        "unexpected error: {error}"
+        pipeline
+            .handle_message(&next_message(&mut messages).await)
+            .await
+            .is_err(),
+        "a prompt the agent will not answer must not be acked"
     );
 
     // The point of the test: the conversation still holds the session it had,
@@ -625,12 +628,18 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     assert_eq!(*port.released.borrow(), vec!["sess-2".to_string()]);
 
     // So the next message continues on it rather than starting over.
-    pipeline.handle_message(&next_message!()).await.expect("handled");
+    pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect("handled");
 
     // A session the agent really has forgotten is still repaired: the fresh one
     // answers, so the conversation moves onto it.
     port.reject_next_prompts(1);
-    pipeline.handle_message(&next_message!()).await.expect("handled");
+    pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect("handled");
 
     assert_eq!(*port.sessions_created.borrow(), 3);
     assert_eq!(

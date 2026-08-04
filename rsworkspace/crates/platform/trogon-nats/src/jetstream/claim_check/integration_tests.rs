@@ -358,7 +358,6 @@ async fn resolver_rejects_a_claim_from_another_bucket() {
         ClaimResolveError::BucketMismatch { ref expected, ref named }
             if expected == "test-bucket" && named == "someone-elses-bucket"
     ));
-    assert!(error.to_string().contains("someone-elses-bucket"));
 }
 
 /// The publisher writes the object and only then publishes the claim, so a

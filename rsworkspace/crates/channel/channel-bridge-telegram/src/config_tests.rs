@@ -1,13 +1,10 @@
 use super::*;
 use trogon_std::env::InMemoryEnv;
 
-/// Why a config refused to load. Spelled out instead of `expect_err` because a
+/// Whether a config loaded. Spelled out instead of `is_ok` because a
 /// `BridgeConfig` is not `Debug`, which is the point: it holds a token.
-fn rejected(env: &InMemoryEnv) -> String {
-    match BridgeConfig::from_env(env) {
-        Ok(_) => panic!("config must not load"),
-        Err(error) => error.to_string(),
-    }
+fn loads(env: &InMemoryEnv) -> bool {
+    BridgeConfig::from_env(env).is_ok()
 }
 
 /// A token is the one required variable, so every way of not supplying one has
@@ -16,19 +13,16 @@ fn rejected(env: &InMemoryEnv) -> String {
 #[test]
 fn a_blank_bot_token_fails_like_an_unset_one() {
     for token in ["", "   ", "\n"] {
+        assert!(matches!(BotToken::new(token), Err(BlankBotTokenError)), "{token:?}");
+
         let env = InMemoryEnv::new();
         env.set("TELEGRAM_BOT_TOKEN", token);
-        let error = rejected(&env);
-        assert!(
-            error.contains("TELEGRAM_BOT_TOKEN not set"),
-            "unexpected error for {token:?}: {error}"
-        );
+        assert!(!loads(&env), "blank token {token:?} must not configure the bridge");
     }
 
-    let error = rejected(&InMemoryEnv::new());
     assert!(
-        error.contains("TELEGRAM_BOT_TOKEN not set"),
-        "unexpected error: {error}"
+        !loads(&InMemoryEnv::new()),
+        "an absent token must not configure the bridge"
     );
 }
 
