@@ -380,7 +380,8 @@ Things this design commits to that the running system does not do yet. None of
 them change the topology above.
 
 - **Inbound media is dropped.** Parsing keeps only the message text, so a photo,
-  voice note, or document arrives as nothing at all. ADR#0044 settles where the
+  voice note, or document arrives as nothing at all.
+  [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md) settles where the
   fetch belongs; the downloader and the `channel_media_{prefix}` bucket do not
   exist.
 - **No streaming output.** The renderer buffers agent text for the whole turn and
