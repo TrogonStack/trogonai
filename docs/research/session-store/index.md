@@ -21,7 +21,7 @@ evidence rules behind every artifact remain reproducible.
 
 ## Status
 
-Synthesis complete for the first ten products, and the decision record exists
+Synthesis complete for the first nine products, and the decision record exists
 as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
 The fx artifacts (the dossier, the session detail JSON reference, and the
@@ -35,9 +35,12 @@ prompt; Cline, OpenHands, and Zed were the calibration batch that exercised it
 against fresh dossiers, and the remaining comparisons follow their shape.
 
 Stage-two comparisons now exist for sixteen of those products and are listed
-under their dossiers below. The synthesis has not yet absorbed any of them, so
-where a comparison's ranked recommendations disagree with the synthesis, the
-comparison is the newer reading and the ADR is still authoritative over both.
+under their dossiers below. The synthesis's frozen decision-time text has not
+absorbed them, but its cross-corpus results are recorded in
+[a closing section](./synthesis.md#stage-two-results-not-yet-absorbed-above)
+rather than left in nobody's hands. Where a comparison's ranked recommendations
+disagree with the frozen text, the comparison is the newer reading and the ADR is
+still authoritative over both.
 
 Every dossier and comparison listed below has been verified in two layers.
 First, mechanically: each `path:line` citation is resolved against the pinned
@@ -79,13 +82,26 @@ conclusions; any claim about how code behaves carries a product source path
 opened during the comparison.
 
 A third failure mode surfaced in the Mastra dossier and is the hardest of the
-three to catch: a paraphrase presented inside quotation marks. A default-throw
+citation defects to catch: a paraphrase presented inside quotation marks. A default-throw
 message was quoted as "this is likely a bug -- all adapters should implement
 this" when the source reads "This is likely a bug - all Mastra storage adapters
 should implement resource support." The citation resolved, the claim it
 supported was sound, and only reading the line back word for word showed the
 quotation marks were doing work the source did not authorize. Quoted text is
 now transcribed, never summarized inside quotes.
+
+A fourth failure mode is not about citations at all but about what a section
+leaves out, and it survived every check above because nothing it says is wrong.
+Two dossiers document an entry's envelope and never open the payload inside it:
+Google ADK's records every field `Event` declares while its content is inherited
+from a superclass the dossier names only in passing, and Grok Build's names
+`SessionUpdateEnvelope{timestamp, method, params}` as the source-of-truth log
+line without opening `params`. Both quoted a type definition, as the prompt
+asked; both quoted the wrong half. Rule 7 of the [stage-one
+prompt](./RESEARCH_PROMPT.md) now says an envelope is not the payload, and the
+two repairs are queued in the [backlog](./backlog.md), together with a queued
+stage three that takes a provider rather than a product as its unit of study,
+since nothing in the corpus enumerates what a `ProviderBlock` would carry.
 
 ## Product dossiers
 

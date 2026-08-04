@@ -439,3 +439,78 @@ in the shipped distribution remains an open question -- and approximated it
 everywhere else with append-only JSONL, which means our job is not to
 invent the pattern but to close the two gaps nobody has closed yet:
 subagent cascade semantics and retention on an unbounded log.
+
+## Stage-two results, not yet absorbed above
+
+Everything above is frozen as decision-time input from nine dossiers. Sixteen
+stage-two comparisons have landed since, and this section records what they add
+without rewriting the frozen text around it. Where the two disagree, the
+comparisons are the newer reading and the ADR is authoritative over both.
+
+**The design mostly survives contact with the evidence.** Across the
+comparisons' 55 numbered recommendations there are 45 blast-radius statements.
+Eight mention breaking in any form: four are "do not do X later" guardrails
+against regressions we have not committed to (Cline on deterministic child ids,
+Letta on relaxing optimistic concurrency for an `At` transition, OpenHands on a
+second non-replayable authoritative store, Zed on a pre-session draft keyspace),
+three are conditional on which answer we pick (Crush on a parent-cost rollup,
+Pi on `SessionForked` crossing a `WorkspaceRef`, Cline on a claim-check
+threshold), and exactly one asks for a change that breaks something today:
+adopt an explicit schema-version marker and a written back-compat policy at the
+`v1alpha1` to `v1` promotion (Google ADK, 10/12, with AWS Strands at 6/12
+arriving at the same question from the opposite direction). The remaining
+statements are additive, and most of those are documentation, Non-Goals, tests,
+or CI. The two thinnest stores, SWE-agent at 3/12 and Aider at 4/12, yield zero
+recommendations by explicit argument, which is the maturity rubric discarding
+evidence rather than letting a weak store anchor a change.
+
+**A tenth convergence, and the strongest single finding of the second stage: a
+pluggable store interface systematically hides the guarantees callers assume it
+provides.** Four products span the full maturity range and fail the same way.
+Google ADK (10/12) has real expected-version optimistic concurrency in
+`DatabaseSessionService`, materially weaker checking in `SqliteSessionService`,
+and none at all in the in-memory and Vertex backends, so "the same interface"
+conceals a behavioral cliff on concurrent append. Mastra (11/12) has four
+adapters reaching four different atomicity conclusions from one abstract
+interface. The OpenAI Agents SDK (5/12) has nine backends each re-deriving
+identity, ordering, and concurrency independently (an autoincrement column, a
+Mongo `seq`, a Dapr ETag), several imperfectly. Pi (7/12) has three
+implementations of one interface that have already silently diverged on a single
+field, with the checked-in documentation then describing harness-only behavior as
+if it were the CLI's. This converts Pi's recommendation 2 from a nice-to-have
+into the best-supported precondition in the corpus: any second `trogon-decider`
+implementation must pass a shared conformance suite over every
+`WRITE_PRECONDITION` class before it ships.
+
+**Convergence 8 above survives eighteen more products and gets sharper.** Even
+the two stores that do have optimistic concurrency put it in the wrong place.
+Letta version-checks exactly one ORM model, `Block`, which holds
+memory-configuration data, while the actual per-turn hot pointer
+`Agent.message_ids` has no guard at all. Substrate-level `At(current_position)`
+by default remains the corpus outlier, in our favor.
+
+**Cascade-on-terminal is validated, and the rewind split is not merely
+unvalidated but unattempted.** Zed is the only studied product with genuinely
+transitive cascade, and it chose the same behavior ADR#0035 decision 6 does,
+independently. Cline's stops one level deep and only from a root. Codex CLI,
+Goose, OpenCode, and T3 Code orphan. Roo Code, queued as a presumed restatement
+of Cline, recurses the full child-task tree and is the second real cascade in the
+corpus. Nobody anywhere has an analog to invalidating a child whose dispatch
+point a still-running parent has rewound away, so that half of decision 6 is
+original design work rather than industry practice restated.
+
+**Decision 7 gets no evidence either way, structurally.** A mutable-document
+store never faces the problem, because replacing or deleting a whole document is
+strictly easier than masking part of a keep-forever fact stream. This is why no
+product validates `SessionHidden`, `RedactionApplied`, or `ArtifactErased`, and
+it is a property of the sample rather than a weakness in the decision.
+
+**The message payload is documented per product and not at all per provider.**
+Twenty-four of twenty-five dossiers carry an entry-structure section, and twelve
+comparisons map the product's message type row by row against `CanonicalMessage`
+and its seven-arm `ContentBlock` oneof. What no artifact covers is the provider
+side: `ProviderBlock` exists to absorb blocks the typed arms cannot model, and
+nothing in the corpus enumerates what would go through it, so whether seven arms
+are the right seven is still open. The queued stage three in the
+[backlog](./backlog.md) takes a provider rather than a product as its unit of
+study for that reason.

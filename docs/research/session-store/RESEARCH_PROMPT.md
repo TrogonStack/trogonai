@@ -102,6 +102,18 @@ to the durable session.
   wrapper (timestamps, method/kind tags, ids), the payload shape, how message
   types are distinguished, and how entries link into a chain or thread
   (parent/uuid references, ordering fields). Quote the type definitions.
+- **An envelope is not the payload.** If the entry type inherits its content
+  field from a base class, or carries the message in a generic `params`, `data`,
+  or `content` field, open that type too and quote it. Quoting only the
+  wrapper's own declared fields satisfies "quote the type definitions" while
+  leaving the actual message undocumented, and two dossiers here did exactly
+  that: Google ADK's records every field `Event` declares but never opens its
+  superclass, where the payload lives (`content: Optional[types.Content]`,
+  `src/google/adk/models/llm_response.py:62`), and Grok Build's names
+  `SessionUpdateEnvelope{timestamp, method, params}` as the source-of-truth log
+  line without ever opening `params` or the `ConversationItem` in the cache it
+  derives. In both cases the envelope is the easy half and the payload is the
+  half a reader needs.
 - Is the entry opaque to the store (persisted and returned verbatim) or does
   the store parse and interpret it? What field, if any, does the store rely on
   for identity/dedup?

@@ -251,6 +251,55 @@ mint sites turn out to be `Uuid::new_v4()`, so the identifier scheme the dossier
 listed as undetermined is settled. Fixing a citation means opening the file, and
 opening the file answers questions the original pass had left open.
 
+## Stage three -- the per-provider payload catalog
+
+Both stages so far take a product as the unit of study. Neither takes a
+provider, and the omission is measurable rather than arguable. Across the whole
+corpus, "Anthropic" appears four times, one of which is our own proto comment
+offering `"anthropic"` as an example value; "Messages API", "Bedrock", and
+"LiteLLM" appear zero times; "Responses API" appears once. There is no catalog
+anywhere of Anthropic content-block types, OpenAI Responses API item types,
+Google GenAI `types.Content` and `Part` variants, or Bedrock Converse blocks.
+
+This matters because `ProviderBlock`
+(`proto/trogonai/session/sessions/v1alpha1/message.proto:62-70`) exists to
+absorb precisely what the typed `ContentBlock` arms cannot model. It carries a
+`provider` string and a `block_type` described as "the provider's own
+discriminator for the block, verbatim". We designed the escape hatch and never
+enumerated what goes through it, so we cannot currently say whether the seven
+typed arms are the right seven, which is the question the schema's shape
+actually turns on. The fx comparison raises the same doubt from the other side
+and leaves it open: whether a provider-native escape hatch belongs in a
+canonical catalog at all.
+
+Two data points bound the problem. Google ADK, the corpus's joint
+second-strongest store at 10/12, inherits its payload from `LlmResponse` rather
+than declaring it, so the shape a reader needs is one class away from the shape
+the dossier documents. The OpenAI Agents SDK, at 5/12, stores
+`TResponseInputItem = ResponseInputItemParam`, a bare alias onto the provider's
+own wire type with no envelope and no version field, which means its durable
+payload *is* the provider format. That is the exact failure mode `ProviderBlock`
+is meant to avoid, and it is currently the corpus's only worked example of it,
+supplied by one of its weakest stores.
+
+What a stage-three prompt must answer, per provider rather than per product:
+enumerate the block and item discriminators from the published API surface, mark
+which map onto a typed `ContentBlock` arm and which can only land in
+`ProviderBlock`, and decide whether `block_type` needs a registry or stays
+genuinely opaque.
+
+**Two dossier repairs this surfaced**, both the same defect and now covered by
+rule 7 of the stage-one prompt:
+
+- **Google ADK dossier**: document the inherited payload. `Event` extends
+  `LlmResponse`, which is named twice and only as a superclass; the actual
+  content field and its `parts` structure are absent.
+- **Grok Build dossier**: open `SessionUpdateEnvelope.params` and
+  `ConversationItem`. Both are named in the directory-contents table and never
+  again, so the payload inside the source-of-truth append log is undocumented.
+  This dossier also has no entry-structure section at all, unlike the other
+  twenty-four.
+
 ## Verification state at queue time
 
 The pinned commits and licenses above are verified. The store descriptions
