@@ -125,6 +125,17 @@ are accepted and those obligations are met. `v1alpha1` is also the room in which
 breaking rename. `events.proto` carries a file-level comment naming this
 promotion criteria.
 
+Within `v1alpha1`, a field may still be added as `LEGACY_REQUIRED`, and the
+reason it is admissible is narrower than the version suffix: no deployed producer
+has written these events yet. A new required field breaks by having a current
+validator reject already-stored bytes, and there are no stored bytes until a
+producer ships. The gate is therefore the first deployed producer, not the
+promotion to `v1` -- a producer shipping on `v1alpha1` would close this window
+early, and from then on a new required field needs a new package version. Note
+that `buf breaking` under `WIRE_JSON` passes either way, since it compares fields
+present on both sides and a field new to one side is not among them; the check
+here is a review obligation, not a mechanical one.
+
 ### 2. Append-only mutation, opaque identity, ordinal anchors, and per-command optimistic concurrency
 
 Append is the only mutation primitive. `decide` returns only new events, `evolve`
