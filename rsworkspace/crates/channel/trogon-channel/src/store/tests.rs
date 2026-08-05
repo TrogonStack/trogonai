@@ -674,3 +674,53 @@ async fn a_recovery_read_that_also_fails_surfaces_as_a_bucket_read_failure() {
         "expected the recovery read failure to surface, got {error:?}"
     );
 }
+
+/// A plain lookup carries the same two failures a reservation does, and it has
+/// no reservation to unwind, so they have to arrive as themselves rather than
+/// wrapped in a bind failure. A binding that is not a conversation id fails the
+/// decode; a conversations bucket that is gone fails the read.
+#[tokio::test]
+async fn a_lookup_reports_a_binding_it_cannot_decode_and_a_record_it_cannot_read() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let store = ChannelStore::ensure(&js, "unfollowable").await.expect("ensure");
+
+    let undecodable = endpoint("777");
+    store
+        .bindings
+        .put(undecodable.kv_key(), "not a conversation id".into())
+        .await
+        .expect("write a binding nothing can decode");
+
+    let Err(error) = store.conversation_for(&undecodable).await else {
+        panic!("a lookup must fail when the binding it finds is not a conversation id");
+    };
+    assert!(
+        matches!(error, ChannelStoreError::Decode(_)),
+        "expected the decode failure to surface as itself, got {error:?}"
+    );
+
+    let unreadable = endpoint("888");
+    let record = record(&principal("user-8"));
+    let bound = created(
+        store
+            .create_conversation(&unreadable, &record, &UuidV7Generator)
+            .await
+            .expect("bind an endpoint to a record that can still be read"),
+    );
+
+    // The binding survives its conversation here, which no public API does: the
+    // record is not deleted, the bucket holding it is, so the read fails for a
+    // reason other than absence.
+    js.delete_key_value("channel_conversations_unfollowable")
+        .await
+        .expect("take the conversations bucket out from under the binding");
+
+    let Err(error) = store.conversation_for(&unreadable).await else {
+        panic!("a lookup must fail when the record its binding leads to cannot be read: {bound}");
+    };
+    assert!(
+        matches!(error, ChannelStoreError::Read(_)),
+        "expected the read failure to surface as itself, got {error:?}"
+    );
+}

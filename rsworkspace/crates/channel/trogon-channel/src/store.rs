@@ -304,29 +304,13 @@ impl ChannelStore {
             Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
         };
 
-        // Read the claim that won as an entry rather than a value: replacing a
-        // stale one is only safe against the revision it was read at. A claim
-        // that is gone by the time it is read is claimed at revision zero, which
-        // the server honours only while the key is still absent, so the race
-        // that emptied it cannot be lost twice.
-        //
-        // Both this read and the one that follows it unwind the record written
-        // above, for the same reason the write failures do: the id is minted per
+        // Reading the claim that won unwinds the record written above when it
+        // fails, for the same reason the write failures do: the id is minted per
         // attempt, so a record left behind by a read that failed is one nothing
         // can ever reach again.
-        let claimed = match self.bindings.entry(endpoint.kv_key()).await {
-            Ok(claimed) => claimed,
-            Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
-        };
-        let revision = claimed.as_ref().map_or(0, |claim| claim.revision);
-
-        // Only a claim that leads to a conversation is one to yield to. One that
-        // leads nowhere is taken over below, and so is a claim that is gone by
-        // the time it is read: revision zero says the key must still be absent,
-        // so the race that emptied it cannot be lost twice.
-        let bound = match self.bound_conversation(claimed.map(|claim| claim.value)).await {
-            Ok(bound) => bound,
-            Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
+        let (revision, bound) = match self.winning_claim(endpoint).await {
+            Ok(winner) => winner,
+            Err(source) => return Err(self.unwind(endpoint, id, source).await),
         };
 
         if let Some((bound_id, bound_record)) = bound {
@@ -350,6 +334,26 @@ impl ChannelStore {
             Ok(_) => Ok(EndpointBinding::Created(id)),
             Err(source) => Err(self.unwind(endpoint, id, source.into()).await),
         }
+    }
+
+    /// The revision the endpoint's claim was read at, and the conversation that
+    /// claim leads to. One read answers both, because neither answer is usable
+    /// without the other: a claim is only worth yielding to when it leads to a
+    /// conversation, and replacing one that leads nowhere is only safe against
+    /// the revision it was read at.
+    ///
+    /// The claim is read as an entry rather than a value for that revision. A
+    /// claim that is gone by the time it is read comes back as revision zero,
+    /// which the server honours only while the key is still absent, so the race
+    /// that emptied it cannot be lost twice.
+    async fn winning_claim(
+        &self,
+        endpoint: &Endpoint,
+    ) -> Result<(u64, Option<(ConversationId, ConversationRecord)>), ReserveEndpointError> {
+        let claimed = self.bindings.entry(endpoint.kv_key()).await?;
+        let revision = claimed.as_ref().map_or(0, |claim| claim.revision);
+        let bound = self.bound_conversation(claimed.map(|claim| claim.value)).await?;
+        Ok((revision, bound))
     }
 
     /// Take back the record this call wrote, so a reservation that never
