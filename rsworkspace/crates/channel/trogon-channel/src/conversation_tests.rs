@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent_port::AgentSessionId;
+use crate::agent_port::{AgentSessionId, AgentSessionIdError};
 use trogon_std::UuidV7Generator;
 
 #[test]
@@ -74,7 +74,7 @@ fn agent_id_deserialize_rejects_unsafe_tokens() {
 fn agent_session_id_rejects_unsafe_tokens() {
     assert_eq!(
         AgentSessionId::new("sess.1").unwrap_err(),
-        EndpointError::InvalidCharacter('.')
+        AgentSessionIdError::InvalidCharacter('.')
     );
 }
 

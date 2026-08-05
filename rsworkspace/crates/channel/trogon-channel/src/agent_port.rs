@@ -3,22 +3,50 @@
 mod agent_port_tests;
 
 use crate::conversation::ConversationRecord;
-use crate::endpoint::EndpointError;
 use crate::event::InboundEvent;
-use crate::safe_token::SafeToken;
 use serde::{Deserialize, Deserializer, Serialize};
+use trogon_nats::{NatsToken, SubjectTokenViolationError};
+
+/// Why a handle an agent minted cannot be an [`AgentSessionId`].
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum AgentSessionIdError {
+    #[error("a session id must not be empty")]
+    Empty,
+    #[error("a session id contains invalid character: {0:?}")]
+    InvalidCharacter(char),
+    #[error("a session id is too long: {0} characters")]
+    TooLong(usize),
+}
+
+impl From<SubjectTokenViolationError> for AgentSessionIdError {
+    fn from(error: SubjectTokenViolationError) -> Self {
+        match error {
+            SubjectTokenViolationError::Empty => Self::Empty,
+            SubjectTokenViolationError::InvalidCharacter(c) => Self::InvalidCharacter(c),
+            SubjectTokenViolationError::TooLong(len) => Self::TooLong(len),
+        }
+    }
+}
 
 /// An agent-side session handle. Opaque to everything except the port
 /// implementation that minted it: only meaningful at the agent it belongs to,
 /// which is why a conversation stores it next to (never instead of) the
 /// agent binding.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct AgentSessionId(SafeToken);
+///
+/// A subject token rather than a channel token: this is the one identifier here
+/// the bridge does not choose, and it is only ever a value inside a stored
+/// record, never a KV key, so the channel's key alphabet has no claim on it.
+/// What does constrain it is the narrowest thing every agent transport must do
+/// with a handle, which is address a session by it (acp-nats spends it as a
+/// subject token). Holding it to less than that rejects ids a protocol and its
+/// transport both accept, and the rejection lands after the agent has already
+/// minted the session.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AgentSessionId(NatsToken);
 
 impl AgentSessionId {
-    pub fn new(id: impl Into<String>) -> Result<Self, EndpointError> {
-        Ok(Self(SafeToken::new(id)?))
+    pub fn new(id: impl AsRef<str>) -> Result<Self, AgentSessionIdError> {
+        Ok(Self(NatsToken::new(id)?))
     }
 
     pub fn as_str(&self) -> &str {
@@ -29,6 +57,15 @@ impl AgentSessionId {
 impl std::fmt::Display for AgentSessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for AgentSessionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -85,6 +122,11 @@ pub enum ReleaseReason {
     /// suspicion is a guess, so the agent may still hold the old session; it is
     /// told to let go rather than left holding one nothing points at.
     Replaced,
+    /// The agent answered `session/new` with a handle this bridge cannot name
+    /// (see [`AgentSessionIdError`]). The session exists at the agent and
+    /// nothing above the port will ever be able to ask for it, so it goes back
+    /// immediately rather than being left for the agent's lifetime.
+    Unnamable,
 }
 
 /// How one step of the release ladder ended.

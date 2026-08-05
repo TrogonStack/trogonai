@@ -126,10 +126,11 @@ fn only_a_rejected_session_id_reads_as_a_lost_session() {
     }
 }
 
-/// An id the agent handed back that is not a usable token failed before any
-/// session existed, so there is no session for a fresh one to repair. Reading it
-/// as a lost session would have the pipeline open a replacement against an agent
-/// that is going to name the next one just as unusably.
+/// An id the agent handed back that is not a usable token names a session the
+/// port has already handed straight back, so there is nothing for a fresh one to
+/// repair. Reading it as a lost session would have the pipeline open a
+/// replacement against an agent that is going to name the next one just as
+/// unusably.
 #[test]
 fn an_unusable_session_id_is_not_a_lost_session() {
     let error = trogon_channel::AgentSessionId::new("sess 1").expect_err("an id with a space is not a token");

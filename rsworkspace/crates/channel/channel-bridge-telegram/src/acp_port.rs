@@ -35,7 +35,7 @@ pub enum AcpPortError {
     #[error("agent request failed: {0}")]
     Rpc(agent_client_protocol::Error),
     #[error(transparent)]
-    SessionId(#[from] trogon_channel::EndpointError),
+    SessionId(#[from] trogon_channel::AgentSessionIdError),
 }
 
 impl AgentPortError for AcpPortError {
@@ -176,6 +176,46 @@ impl AcpPort {
             methods,
         }
     }
+
+    async fn cancel_id(&self, session_id: &str) -> Result<(), AcpPortError> {
+        self.bridge
+            .cancel(CancelNotification::new(session_id.to_string()))
+            .await
+            .map_err(AcpPortError::Rpc)
+    }
+
+    /// The release ladder, walked against a session named the way the agent
+    /// named it. [`AgentPort::release_session`] is the same walk over a session
+    /// the bridge can hold; this one also serves the session it cannot, which
+    /// has no [`AgentSessionId`] to be passed as.
+    async fn release_id(&self, session_id: &str, reason: ReleaseReason) -> SessionRelease {
+        let cancelled = match self.cancel_id(session_id).await {
+            Ok(()) => ReleaseStep::Done,
+            Err(error) => {
+                warn!(session = %session_id, reason = ?reason, error = %error, "Cancel failed while releasing session");
+                ReleaseStep::Failed
+            }
+        };
+
+        let closed = if self.methods.supports(SessionMethod::Close) {
+            match self
+                .bridge
+                .close_session(CloseSessionRequest::new(session_id.to_string()))
+                .await
+            {
+                Ok(_) => ReleaseStep::Done,
+                Err(error) => {
+                    warn!(session = %session_id, reason = ?reason, error = %error, "Close failed while releasing session");
+                    ReleaseStep::Failed
+                }
+            }
+        } else {
+            info!(session = %session_id, "Agent does not advertise session/close; releasing without it");
+            ReleaseStep::Unsupported
+        };
+
+        SessionRelease { cancelled, closed }
+    }
 }
 
 /// Human-readable context prefix: the only part of the conversational
@@ -218,7 +258,27 @@ impl AgentPort for AcpPort {
             .new_session(NewSessionRequest::new(self.agent_cwd.clone()))
             .await
             .map_err(AcpPortError::Rpc)?;
-        Ok(AgentSessionId::new(response.session_id.to_string())?)
+        let minted = response.session_id.to_string();
+        match AgentSessionId::new(&minted) {
+            Ok(session) => Ok(session),
+            // The agent is holding a session by the time it answers, so failing
+            // here is not failing to create one: it is being handed one nothing
+            // can ask for again. Nobody above the port can release what it
+            // cannot name, and redelivery calls this again, so an id refused
+            // without this would leave one live session per attempt at the
+            // agent until the message is finally dropped.
+            Err(error) => {
+                let release = self.release_id(&minted, ReleaseReason::Unnamable).await;
+                warn!(
+                    session = %minted,
+                    error = %error,
+                    cancelled = ?release.cancelled,
+                    closed = ?release.closed,
+                    "Agent named a session this bridge cannot hold; released it instead"
+                );
+                Err(AcpPortError::SessionId(error))
+            }
+        }
     }
 
     async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error> {
@@ -238,10 +298,7 @@ impl AgentPort for AcpPort {
     }
 
     async fn cancel(&self, session: &AgentSessionId) -> Result<(), Self::Error> {
-        self.bridge
-            .cancel(CancelNotification::new(session.as_str().to_string()))
-            .await
-            .map_err(AcpPortError::Rpc)
+        self.cancel_id(session.as_str()).await
     }
 
     /// Stop the turn first, then hand the session back. Cancel before close so
@@ -251,31 +308,6 @@ impl AgentPort for AcpPort {
     /// part of this: the bridge is done with the session, which is not the same
     /// as the user asking for its history to be destroyed.
     async fn release_session(&self, session: &AgentSessionId, reason: ReleaseReason) -> SessionRelease {
-        let cancelled = match self.cancel(session).await {
-            Ok(()) => ReleaseStep::Done,
-            Err(error) => {
-                warn!(session = %session, reason = ?reason, error = %error, "Cancel failed while releasing session");
-                ReleaseStep::Failed
-            }
-        };
-
-        let closed = if self.methods.supports(SessionMethod::Close) {
-            match self
-                .bridge
-                .close_session(CloseSessionRequest::new(session.as_str().to_string()))
-                .await
-            {
-                Ok(_) => ReleaseStep::Done,
-                Err(error) => {
-                    warn!(session = %session, reason = ?reason, error = %error, "Close failed while releasing session");
-                    ReleaseStep::Failed
-                }
-            }
-        } else {
-            info!(session = %session, "Agent does not advertise session/close; releasing without it");
-            ReleaseStep::Unsupported
-        };
-
-        SessionRelease { cancelled, closed }
+        self.release_id(session.as_str(), reason).await
     }
 }

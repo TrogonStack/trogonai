@@ -27,7 +27,8 @@ pub mod safe_token;
 pub mod store;
 
 pub use agent_port::{
-    AgentPort, AgentPortError, AgentSessionId, PromptOutcome, ReleaseReason, ReleaseStep, SessionRelease,
+    AgentPort, AgentPortError, AgentSessionId, AgentSessionIdError, PromptOutcome, ReleaseReason, ReleaseStep,
+    SessionRelease,
 };
 pub use command::{Command, CommandTriggers, ParsedText};
 pub use command_trigger::{CommandTrigger, CommandTriggerError};
