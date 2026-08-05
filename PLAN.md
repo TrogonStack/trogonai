@@ -211,18 +211,14 @@ the sections split into their own files:
 
 ### Required Decisions
 
-- Owner boundary: workspace, organization, project, tenant, or user.
-- First credential metadata backend: Postgres, NATS KV, or existing control
-  plane store.
-- First OpenBao path convention. The gateway prototype bakes in
-  `trogonai/{owner_id}/credentials/{credential_id}`; ratify or replace it as
-  the published convention.
+Owner boundary, metadata backend, path convention, cache TTL, and latency
+target are decided in ADR#0042..0045.
+
 - First OpenBao auth method per service. The prototype uses a static dev
   token; that is not a production answer.
 - First supported credential kinds.
 - First API keyspaces.
 - First signed-key algorithm.
-- First default cache TTL and revocation latency target.
 
 ### Acceptance Criteria
 
@@ -244,9 +240,9 @@ model around them.
 Define rich types instead of primitive strings:
 
 ```text
-OwnerId          (canonical owner boundary, pending the Phase 0 decision;
-                  today only a credential-scoped CredentialOwnerId exists)
-WorkspaceId
+OwnerId          (project id per ADR#0042; today only a credential-scoped
+                  CredentialOwnerId exists)
+WorkspaceId      (collapses into the project id per ADR#0042)
 VaultId
 CredentialVersionId
 CredentialPath   (today path building lives inside the OpenBao adapter)
@@ -359,7 +355,7 @@ The client supplies an opaque key. The server supplies the scope.
 ```text
 IdempotencyRecord
   owner_id
-  workspace_id
+  workspace_id       (project id per ADR#0042)
   command_namespace
   target_resource_id
   idempotency_key
@@ -415,25 +411,28 @@ resubmit-secret concept behind it.
 
 ### Endpoints
 
+Paths are parent-scoped resource names rooted at the project, following
+ADR#0042 section 3.
+
 ```text
-POST   /v1/credential-vaults
-GET    /v1/credential-vaults
-GET    /v1/credential-vaults/{vault_id}
-PATCH  /v1/credential-vaults/{vault_id}
-POST   /v1/credential-vaults/{vault_id}/archive
-POST   /v1/credential-vaults/{vault_id}/restore
+POST   /v1/projects/{project}/credential-vaults
+GET    /v1/projects/{project}/credential-vaults
+GET    /v1/projects/{project}/credential-vaults/{vault_id}
+PATCH  /v1/projects/{project}/credential-vaults/{vault_id}
+POST   /v1/projects/{project}/credential-vaults/{vault_id}/archive
+POST   /v1/projects/{project}/credential-vaults/{vault_id}/restore
 
-POST   /v1/credentials
-GET    /v1/credentials
-GET    /v1/credentials/{credential_id}
-PATCH  /v1/credentials/{credential_id}
-POST   /v1/credentials/{credential_id}/rotate
-POST   /v1/credentials/{credential_id}/resubmit-secret
-POST   /v1/credentials/{credential_id}/revoke
-POST   /v1/credentials/{credential_id}/archive
-POST   /v1/credentials/{credential_id}/delete
+POST   /v1/projects/{project}/credentials
+GET    /v1/projects/{project}/credentials
+GET    /v1/projects/{project}/credentials/{credential_id}
+PATCH  /v1/projects/{project}/credentials/{credential_id}
+POST   /v1/projects/{project}/credentials/{credential_id}/rotate
+POST   /v1/projects/{project}/credentials/{credential_id}/resubmit-secret
+POST   /v1/projects/{project}/credentials/{credential_id}/revoke
+POST   /v1/projects/{project}/credentials/{credential_id}/archive
+POST   /v1/projects/{project}/credentials/{credential_id}/delete
 
-GET    /v1/operations/{operation_id}
+GET    /v1/projects/{project}/operations/{operation_id}
 ```
 
 ### Response Rules
@@ -508,7 +507,7 @@ that exist today: owner_id, credential_id, credential_kind, current_version,
 created_at. Remaining fields wait on their concepts:
 
 ```text
-workspace_id       (needs the Phase 0 owner boundary decision)
+workspace_id       (project id per ADR#0042)
 integration_id     (needs integration records)
 operation_id       (needs Phase 3 operation records)
 credential_version_id
@@ -624,7 +623,7 @@ requires:
 
 ```text
 RuntimeCredentialProjection (missing fields)
-  workspace_id
+  workspace_id       (project id per ADR#0042)
   allowed_hosts
   allowed_runtime_services
   injection_locations
@@ -1020,19 +1019,12 @@ cleanup
 
 ## Decisions Still Needed
 
-- Which owner boundary is canonical: organization, workspace, project, or
-  tenant?
-- Which database owns credential metadata?
-- What is the first OpenBao mount and path convention?
 - Which OpenBao auth method should each service use?
-- What revocation latency is required?
 - Which credential kinds ship in the first UI?
 - Which providers get first-class validation?
 - Which signed-key algorithm ships first?
-- Whether one-time display escrow is allowed at all.
 - What default idempotency TTL should be.
 - What default pending credential TTL should be.
-- What support roles can see during incidents.
 
 ## Definition Of Done
 
