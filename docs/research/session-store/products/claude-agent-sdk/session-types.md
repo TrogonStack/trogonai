@@ -57,8 +57,8 @@ it against the platform Session contract in this checkout.
   ownership precondition is currently unmet. Draft
   [ADR#0043](../../../../adr/0043-agent-instructions-ownership-and-shape.md) keeps
   instruction content and injection shape in runtime-owned settings.
-- The
-  [`v1alpha1` Session event package](../../../../../proto/trogonai/session/sessions/v1alpha1/events.proto)
+- The `v1alpha1` Session event package
+  (`proto/trogonai/session/sessions/v1alpha1/events.proto`)
   is real code in this checkout, but its own header says it depends on draft
   ADRs and cannot promote to `v1` until those decisions and prerequisites are
   settled.
@@ -356,7 +356,7 @@ or monitor ownership cannot silently become platform Session semantics.
 
 **Repository fact.** The current code has 57 Session proto files, 72 messages,
 19 enums, and 41 concrete arms in
-[`SessionEvent`](../../../../../proto/trogonai/session/sessions/v1alpha1/events.proto).
+`SessionEvent` (`proto/trogonai/session/sessions/v1alpha1/events.proto`).
 It has generated Rust exports, codecs, and local per-event semantic validation.
 `validate_session_event` checks only facts one event can prove about itself;
 cross-event joins and stream invariants are explicitly out of scope. Current
@@ -365,9 +365,9 @@ The catalog covers lifecycle, fork, rewind, compaction, conversation, tools,
 artifacts, files, execution attempts, delegation, operation ledger, privacy,
 system notices, todo state, and organization metadata.
 
-[`SessionStarted`](../../../../../proto/trogonai/session/sessions/v1alpha1/session_started.proto)
-stores one
-[`StoredSessionExecutionPlan`](../../../../../proto/trogonai/session/sessions/v1alpha1/execution_plan.proto),
+`SessionStarted` (`proto/trogonai/session/sessions/v1alpha1/session_started.proto`)
+stores one `StoredSessionExecutionPlan`
+(`proto/trogonai/session/sessions/v1alpha1/execution_plan.proto`),
 currently opaque canonical `plan_bytes` plus a digest, and a workspace
 reference. The concrete typed plan described by draft
 [ADR#0031](../../../../adr/0031-agent-implementation-and-session-plan.md) is not

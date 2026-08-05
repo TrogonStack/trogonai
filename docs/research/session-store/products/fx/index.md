@@ -148,8 +148,8 @@ binary's diagnostic strings; there is no exported type to quote.
 
 There is no delete verb in the CLI. `fx doctor` mentions `cleanup_candidate`
 / `cleanup_removed` [literal], and manual removal is the documented recovery
-step ("back up `~/.fx/sessions`, then inspect this session with `fx session
-<id> --json`") [literal].
+step ("back up `~/.fx/sessions`, then inspect this session with
+`fx session <id> --json`") [literal].
 
 ## Write and append path
 
