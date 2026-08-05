@@ -525,6 +525,51 @@ async fn a_refused_re_point_takes_the_conversation_record_with_it() {
     );
 }
 
+/// A lost claim is read back before it is yielded to, and that read can fail
+/// just as the writes around it can. The record this call wrote is unreachable
+/// either way, so it has to come back out: a binding holding bytes that are not
+/// a conversation id fails the read deterministically, where a KV outage would
+/// only fail it sometimes.
+#[tokio::test]
+async fn a_claim_that_cannot_be_read_back_takes_the_conversation_record_with_it() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let store = ChannelStore::ensure(&js, "unreadable").await.expect("ensure");
+
+    let endpoint = endpoint("999");
+    store
+        .bindings
+        .put(endpoint.kv_key(), "not a conversation id".into())
+        .await
+        .expect("write a binding nothing can decode");
+
+    let Err(error) = store
+        .create_conversation(&endpoint, &record(&principal("user-9")), &UuidV7Generator)
+        .await
+    else {
+        panic!("create must fail when the claim it lost cannot be read");
+    };
+
+    let ChannelStoreError::BindEndpoint {
+        conversation,
+        source: ReserveEndpointError::Follow(BoundConversationError::Decode(_)),
+        ..
+    } = error
+    else {
+        panic!("expected the unreadable claim to surface as a bind failure, got {error:?}");
+    };
+
+    assert!(
+        store
+            .conversations
+            .get(conversation.as_str())
+            .await
+            .expect("read the rolled back record")
+            .is_none(),
+        "a conversation nothing can reach must not survive the read that failed to follow its claim"
+    );
+}
+
 /// `ensure_is_idempotent_under_concurrent_creation` races two *identical*
 /// configs, and neither side ever takes this arm: `STREAM.CREATE` only
 /// errors when the stream that beat it has a different config, and an

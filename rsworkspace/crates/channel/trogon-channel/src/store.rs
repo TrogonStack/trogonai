@@ -57,9 +57,10 @@ pub enum ChannelStoreError {
     },
 }
 
-/// Why an endpoint could not be pointed at a new conversation. Two ways in,
-/// because an unbound endpoint is claimed with a create while one left pointing
-/// at a record that is gone is re-pointed with a compare-and-swap.
+/// Why an endpoint could not be pointed at a new conversation. Four ways in:
+/// an unbound endpoint is claimed with a create, one left pointing at a record
+/// that is gone is re-pointed with a compare-and-swap, and a lost claim has to
+/// be read and followed before either of those is decided.
 #[derive(Debug, thiserror::Error)]
 pub enum ReserveEndpointError {
     #[error(transparent)]
@@ -68,6 +69,34 @@ pub enum ReserveEndpointError {
     /// re-pointed the endpoint first.
     #[error(transparent)]
     Repoint(#[from] async_nats::jetstream::kv::UpdateError),
+    /// The claim that won could not be read back, so there is no telling whether
+    /// to yield to it or take it over.
+    #[error("the claim on the endpoint could not be read back: {0}")]
+    Inspect(#[from] async_nats::jetstream::kv::EntryError),
+    /// The claim was read but the conversation it leads to was not.
+    #[error(transparent)]
+    Follow(#[from] BoundConversationError),
+}
+
+/// Why the conversation an encoded binding leads to could not be read. Narrower
+/// than [`ChannelStoreError`] so that a reservation still holding an unbound
+/// record can carry the cause into [`ReserveEndpointError`] on its way out,
+/// rather than the two error types nesting inside one another.
+#[derive(Debug, thiserror::Error)]
+pub enum BoundConversationError {
+    #[error("KV read failed: {0}")]
+    Read(#[from] async_nats::jetstream::kv::EntryError),
+    #[error("stored record is not valid JSON: {0}")]
+    Decode(#[from] serde_json::Error),
+}
+
+impl From<BoundConversationError> for ChannelStoreError {
+    fn from(error: BoundConversationError) -> Self {
+        match error {
+            BoundConversationError::Read(source) => Self::Read(source),
+            BoundConversationError::Decode(source) => Self::Decode(source),
+        }
+    }
 }
 
 /// Which conversation an endpoint is bound to once
@@ -212,8 +241,9 @@ impl ChannelStore {
         &self,
         endpoint: &Endpoint,
     ) -> Result<Option<(ConversationId, ConversationRecord)>, ChannelStoreError> {
-        self.bound_conversation(self.bindings.get(endpoint.kv_key()).await?)
-            .await
+        Ok(self
+            .bound_conversation(self.bindings.get(endpoint.kv_key()).await?)
+            .await?)
     }
 
     /// The conversation an encoded binding leads to. An endpoint with no binding
@@ -223,7 +253,7 @@ impl ChannelStore {
     async fn bound_conversation(
         &self,
         binding: Option<impl AsRef<[u8]>>,
-    ) -> Result<Option<(ConversationId, ConversationRecord)>, ChannelStoreError> {
+    ) -> Result<Option<(ConversationId, ConversationRecord)>, BoundConversationError> {
         let Some(bytes) = binding else {
             return Ok(None);
         };
@@ -280,14 +310,27 @@ impl ChannelStore {
         // that is gone by the time it is read is claimed at revision zero, which
         // the server honours only while the key is still absent, so the race
         // that emptied it cannot be lost twice.
-        let claimed = self.bindings.entry(endpoint.kv_key()).await?;
+        //
+        // Both this read and the one that follows it unwind the record written
+        // above, for the same reason the write failures do: the id is minted per
+        // attempt, so a record left behind by a read that failed is one nothing
+        // can ever reach again.
+        let claimed = match self.bindings.entry(endpoint.kv_key()).await {
+            Ok(claimed) => claimed,
+            Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
+        };
         let revision = claimed.as_ref().map_or(0, |claim| claim.revision);
 
         // Only a claim that leads to a conversation is one to yield to. One that
         // leads nowhere is taken over below, and so is a claim that is gone by
         // the time it is read: revision zero says the key must still be absent,
         // so the race that emptied it cannot be lost twice.
-        if let Some((bound_id, bound_record)) = self.bound_conversation(claimed.map(|claim| claim.value)).await? {
+        let bound = match self.bound_conversation(claimed.map(|claim| claim.value)).await {
+            Ok(bound) => bound,
+            Err(source) => return Err(self.unwind(endpoint, id, source.into()).await),
+        };
+
+        if let Some((bound_id, bound_record)) = bound {
             return match self.conversations.delete(id.as_str()).await {
                 Ok(()) => Ok(EndpointBinding::AlreadyBound(bound_id, bound_record)),
                 Err(cleanup) => Err(ChannelStoreError::OrphanedConversation {
