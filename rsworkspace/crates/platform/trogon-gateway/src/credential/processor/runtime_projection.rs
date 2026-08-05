@@ -2,8 +2,9 @@
 
 use std::collections::BTreeMap;
 use std::error::Error;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_nats::jetstream::{self, context, kv};
 use buffa::Message as _;
@@ -1115,18 +1116,110 @@ fn merge_projection(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeCredentialCachePolicy {
+    ttl: Duration,
+    jitter: Duration,
+}
+
+impl RuntimeCredentialCachePolicy {
+    pub fn new(ttl: Duration, jitter: Duration) -> Result<Self, RuntimeCredentialCachePolicyError> {
+        if ttl.is_zero() {
+            return Err(RuntimeCredentialCachePolicyError::ZeroTtl);
+        }
+        if jitter > ttl {
+            return Err(RuntimeCredentialCachePolicyError::JitterExceedsTtl { ttl, jitter });
+        }
+        Ok(Self { ttl, jitter })
+    }
+
+    pub fn ttl(self) -> Duration {
+        self.ttl
+    }
+
+    pub fn jitter(self) -> Duration {
+        self.jitter
+    }
+}
+
+impl Default for RuntimeCredentialCachePolicy {
+    fn default() -> Self {
+        Self {
+            ttl: Duration::from_secs(300),
+            jitter: Duration::from_secs(30),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeCredentialCachePolicyError {
+    #[error("runtime credential cache ttl must be greater than zero")]
+    ZeroTtl,
+    #[error("runtime credential cache jitter {jitter:?} must not exceed ttl {ttl:?}")]
+    JitterExceedsTtl { ttl: Duration, jitter: Duration },
+}
+
+struct RuntimeCredentialCacheEntry {
+    material: SecretMaterial,
+    expires_at: Instant,
+}
+
 #[derive(Clone, Default)]
 pub struct RuntimeCredentialCache {
-    entries: Arc<Mutex<BTreeMap<CredentialRef, SecretMaterial>>>,
+    entries: Arc<Mutex<BTreeMap<CredentialRef, RuntimeCredentialCacheEntry>>>,
+    policy: RuntimeCredentialCachePolicy,
 }
 
 impl RuntimeCredentialCache {
+    pub fn with_policy(policy: RuntimeCredentialCachePolicy) -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(BTreeMap::new())),
+            policy,
+        }
+    }
+
     async fn get(&self, credential: &CredentialRef) -> Option<SecretMaterial> {
-        self.entries.lock().await.get(credential).cloned()
+        self.get_at(credential, Instant::now()).await
+    }
+
+    async fn get_at(&self, credential: &CredentialRef, now: Instant) -> Option<SecretMaterial> {
+        let mut entries = self.entries.lock().await;
+        match entries.get(credential) {
+            Some(entry) if entry.expires_at > now => Some(entry.material.clone()),
+            Some(_) => {
+                entries.remove(credential);
+                None
+            }
+            None => None,
+        }
     }
 
     async fn put(&self, credential: CredentialRef, material: SecretMaterial) {
-        self.entries.lock().await.insert(credential, material);
+        self.put_at(credential, material, Instant::now()).await;
+    }
+
+    async fn put_at(&self, credential: CredentialRef, material: SecretMaterial, now: Instant) {
+        let expires_at = now + self.expiry_offset(&credential);
+        self.entries
+            .lock()
+            .await
+            .insert(credential, RuntimeCredentialCacheEntry { material, expires_at });
+    }
+
+    fn expiry_offset(&self, credential: &CredentialRef) -> Duration {
+        self.policy.ttl.saturating_sub(self.key_jitter(credential))
+    }
+
+    fn key_jitter(&self, credential: &CredentialRef) -> Duration {
+        if self.policy.jitter.is_zero() {
+            return Duration::ZERO;
+        }
+        let mut hasher = DefaultHasher::new();
+        credential.to_string().hash(&mut hasher);
+        let hash = u128::from(hasher.finish());
+        let jitter_nanos = self.policy.jitter.as_nanos();
+        let offset_nanos = hash % jitter_nanos;
+        Duration::from_nanos(u64::try_from(offset_nanos).unwrap_or(u64::MAX))
     }
 
     pub async fn invalidate(&self, credential: &CredentialRef) {
@@ -1135,6 +1228,11 @@ impl RuntimeCredentialCache {
 
     pub async fn clear(&self) {
         self.entries.lock().await.clear();
+    }
+
+    #[cfg(test)]
+    async fn expires_at(&self, credential: &CredentialRef) -> Option<Instant> {
+        self.entries.lock().await.get(credential).map(|entry| entry.expires_at)
     }
 }
 
@@ -2070,5 +2168,94 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    fn cache_credential(id: &str) -> CredentialRef {
+        CredentialRef::new(
+            CredentialId::new(id).unwrap(),
+            CredentialVersion::initial(),
+            &CredentialScope::integration(owner_id(), SourceKind::Discord, integration_id()),
+            CredentialKind::BotToken,
+        )
+    }
+
+    fn cache_secret(value: &str) -> SecretMaterial {
+        SecretMaterial::Plaintext(SecretString::new(value).unwrap())
+    }
+
+    #[tokio::test]
+    async fn cache_returns_fresh_entry_within_ttl() {
+        let policy = RuntimeCredentialCachePolicy::new(Duration::from_secs(60), Duration::from_secs(5)).unwrap();
+        let cache = RuntimeCredentialCache::with_policy(policy);
+        let credential = cache_credential("credential-fresh");
+        let now = Instant::now();
+
+        cache.put_at(credential.clone(), cache_secret("token"), now).await;
+
+        let material = cache.get_at(&credential, now + Duration::from_secs(1)).await.unwrap();
+        assert_eq!(material.as_plaintext().unwrap().as_str(), "token");
+    }
+
+    #[tokio::test]
+    async fn cache_evicts_entry_past_its_jittered_deadline() {
+        let policy = RuntimeCredentialCachePolicy::new(Duration::from_secs(60), Duration::from_secs(5)).unwrap();
+        let cache = RuntimeCredentialCache::with_policy(policy);
+        let credential = cache_credential("credential-expiring");
+        let now = Instant::now();
+
+        cache.put_at(credential.clone(), cache_secret("token"), now).await;
+        let expires_at = cache.expires_at(&credential).await.unwrap();
+
+        assert!(
+            cache
+                .get_at(&credential, expires_at + Duration::from_nanos(1))
+                .await
+                .is_none()
+        );
+        assert!(cache.expires_at(&credential).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn cache_invalidate_removes_entry_explicitly() {
+        let cache = RuntimeCredentialCache::default();
+        let credential = cache_credential("credential-invalidate");
+
+        cache.put(credential.clone(), cache_secret("token")).await;
+        cache.invalidate(&credential).await;
+
+        assert!(cache.get(&credential).await.is_none());
+    }
+
+    #[test]
+    fn cache_policy_rejects_zero_ttl() {
+        assert!(matches!(
+            RuntimeCredentialCachePolicy::new(Duration::ZERO, Duration::ZERO),
+            Err(RuntimeCredentialCachePolicyError::ZeroTtl)
+        ));
+    }
+
+    #[test]
+    fn cache_policy_rejects_jitter_greater_than_ttl() {
+        assert!(matches!(
+            RuntimeCredentialCachePolicy::new(Duration::from_secs(10), Duration::from_secs(11)),
+            Err(RuntimeCredentialCachePolicyError::JitterExceedsTtl { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn cache_applies_deterministic_per_key_jitter_spread() {
+        let policy = RuntimeCredentialCachePolicy::new(Duration::from_secs(60), Duration::from_secs(10)).unwrap();
+        let cache = RuntimeCredentialCache::with_policy(policy);
+        let credential_a = cache_credential("credential-jitter-a");
+        let credential_b = cache_credential("credential-jitter-b");
+        let now = Instant::now();
+
+        cache.put_at(credential_a.clone(), cache_secret("token-a"), now).await;
+        cache.put_at(credential_b.clone(), cache_secret("token-b"), now).await;
+
+        let expires_a = cache.expires_at(&credential_a).await.unwrap();
+        let expires_b = cache.expires_at(&credential_b).await.unwrap();
+
+        assert_ne!(expires_a, expires_b);
     }
 }
