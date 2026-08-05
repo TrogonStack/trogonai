@@ -218,11 +218,11 @@ impl<'de> Deserialize<'de> for MimeType {
     }
 }
 
-/// The platform's handle for a file, redeemable for bytes only by the channel
-/// that issued it (e.g. a Telegram `file_id`). Constrained to an endpoint token
-/// because it is also a KV key: readiness for the fetch lives at this handle in
-/// `channel_media_{prefix}`, so a handle that is not a safe key has nowhere to
-/// report. See ADR#0044.
+/// The platform's handle for a file, redeemable for bytes only by the bot
+/// account that received it (e.g. a Telegram `file_id`). Constrained to an
+/// endpoint token because it is part of a KV key: readiness for the fetch lives
+/// in `channel_media_{prefix}`, so a handle that is not a safe key has nowhere
+/// to report. See ADR#0044.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct PlatformRef(SafeToken);
@@ -236,9 +236,14 @@ impl PlatformRef {
         self.0.as_str()
     }
 
-    /// KV key for this handle's readiness record in `channel_media_{prefix}`.
-    pub fn kv_key(&self) -> &str {
-        self.0.as_str()
+    /// KV key for this handle's readiness record in `channel_media_{prefix}`,
+    /// scoped by the endpoint that received it. Only the endpoint's channel and
+    /// account take part: they name the credential that can redeem the handle,
+    /// and a handle is meaningless to any other. The peer is left out because
+    /// the same file reaches the same account under one identity whichever chat
+    /// it arrived in.
+    pub fn kv_key(&self, endpoint: &Endpoint) -> String {
+        format!("{}.{}.{}", endpoint.channel(), endpoint.account(), self.0)
     }
 }
 

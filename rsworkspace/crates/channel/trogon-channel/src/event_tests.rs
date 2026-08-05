@@ -133,15 +133,35 @@ fn a_media_type_normalizes_the_subtype_without_touching_its_parameters() {
     );
 }
 
-/// The handle doubles as the readiness key in `channel_media_{prefix}`
+/// The handle is part of the readiness key in `channel_media_{prefix}`
 /// (ADR#0044), so it has to be safe as a KV key.
 #[test]
 fn a_platform_ref_must_be_usable_as_a_kv_key() {
     let handle = PlatformRef::new("AgACAgQAAx0-Ef_9").expect("valid");
-    assert_eq!(handle.kv_key(), "AgACAgQAAx0-Ef_9");
+    let endpoint = Endpoint::new("telegram", "mybot", "-1001234567890").expect("endpoint");
+    assert_eq!(handle.kv_key(&endpoint), "telegram.mybot.AgACAgQAAx0-Ef_9");
     assert!(PlatformRef::new("has space").is_err());
     assert!(PlatformRef::new("has.dot").is_err());
     assert!(PlatformRef::new("").is_err());
+}
+
+/// A Telegram `file_id` is issued per bot and only redeemable by the token that
+/// received it, so two accounts that report the same handle mean two different
+/// files. Keying readiness by the handle alone would let one account's record
+/// answer for the other's, and point redemption at a credential that cannot
+/// honor it. See ADR#0044.
+#[test]
+fn a_readiness_key_separates_two_accounts_that_report_the_same_handle() {
+    let handle = PlatformRef::new("AgACAgQAAx0-Ef_9").expect("valid");
+    let ours = Endpoint::new("telegram", "mybot", "77").expect("endpoint");
+    let theirs = Endpoint::new("telegram", "otherbot", "77").expect("endpoint");
+
+    assert_ne!(handle.kv_key(&ours), handle.kv_key(&theirs));
+
+    // The peer is deliberately absent: one account holds one identity for a
+    // file however many chats forward it.
+    let elsewhere = Endpoint::new("telegram", "mybot", "-1001234567890").expect("endpoint");
+    assert_eq!(handle.kv_key(&ours), handle.kv_key(&elsewhere));
 }
 
 /// Why `parse` carries no error arm for a numeric id: a platform that numbers
@@ -175,7 +195,7 @@ fn a_value_object_displays_as_the_scalar_it_wraps() {
 
     let handle = PlatformRef::new("file-abc").expect("handle");
     assert_eq!(handle.as_str(), "file-abc");
-    assert_eq!(handle.to_string(), handle.kv_key());
+    assert_eq!(handle.to_string(), "file-abc");
 }
 
 #[test]

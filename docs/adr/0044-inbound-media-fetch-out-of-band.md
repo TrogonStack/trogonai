@@ -83,7 +83,19 @@ A per-platform downloader (`channel-downloader-telegram` first) takes its own
 durable consumer on the same raw stream the bridge reads, redeems the platform
 handle with the bot token, and writes bytes through the existing
 `ObjectStorePut` in `trogon-nats`. It is size-capped, and the cap is its own
-configuration rather than the bridge's.
+configuration rather than the bridge's. For Telegram that cap is bounded from
+above by the platform: the public Bot API refuses `getFile` for anything over
+20 MB, so a larger configured cap only means something against a self-hosted Bot
+API server, which is what lifts the limit.
+
+Redemption is gated by the same identity check the bridge applies. The
+downloader resolves the message's endpoint against `channel_endpoints_{prefix}`
+and drops the update when that endpoint names no principal, before it calls
+`getFile` and before anything reaches `ObjectStorePut`. Reading the raw stream
+directly buys independence from the bridge, not exemption from its access
+control. Without this check an unlinked chat could spend our bot token and our
+object store by sending a file, and the bridge's later decision to drop the
+message would arrive after the work was already done.
 
 This is deliberately not a request/reply service. It is driven by the same
 stream as the bridge, so a fetch begins at ingestion whether or not any agent
@@ -95,16 +107,36 @@ immediately rather than at some later moment of the agent's choosing.
 An object store cannot answer "not yet." A `get` on a missing key returns
 not-found, which is indistinguishable from a permanent failure and from a dead
 downloader. Readiness therefore lives in its own JetStream KV bucket, keyed by
-the platform handle:
+the credential that received the handle together with the handle itself:
 
 ```text
 channel_media_{prefix}:
-  <platform_ref> -> { state: ready | failed, object_ref, mime, size, error }
+  {channel}.{account}.{platform_ref} ->
+    { state: ready | failed, object_ref, mime, size, error }
 ```
 
-Absence means in flight. That is unambiguous because any reader derives the key
-from a handle it parsed out of the same stream message the downloader is
-working on, so the reader already knows the file exists.
+The credential belongs in the key because a handle is not globally meaningful. A
+Telegram `file_id` is issued per bot and redeemable only by the token that
+received it, so the same string seen by two of our bot accounts denotes two
+different files, and the bucket is channel-neutral besides. A bare handle key
+would let one account's record answer for another's, and would point redemption
+at a credential that cannot honor it. Readers already have both tokens: they are
+the leading part of the endpoint on the event the attachment arrived with, and
+they are what selects the token used to redeem.
+
+Absence means not yet resolved, and it says nothing about whether work is under
+way. The record is absent before the downloader's durable has reached the
+message, while a download is running, and for as long as the downloader is down
+or behind. A reader cannot tell those apart and does not need to. What it needs
+is that absence is never permanent by accident, and two rules give it that.
+
+The downloader writes a `failed` record for every permanent error, and also on
+its last delivery attempt, which it recognizes from the delivery count JetStream
+puts on the message. A handle whose deliveries are exhausted therefore ends as a
+terminal record rather than as silence, since a consumer that has stopped
+redelivering will never speak again on its own. The reader's deadline is the
+backstop for the one case no consumer can cover, a downloader that never runs at
+all.
 
 Readers await readiness with a KV watch and a deadline, not a poll. A late
 reader observes current state directly with no replay concern, and a deadline
@@ -140,8 +172,17 @@ pay nothing.
 - Any component that redeems a platform handle holds that platform's
   credential; no credential-free component is ever handed a handle it is
   expected to resolve.
+- A handle is redeemed with the credential of the account that received it, and
+  is never keyed or cached in a way that lets one account's handle be resolved
+  by another's.
+- No handle is redeemed for an endpoint that resolves to no principal.
+  Authorization precedes credential use, in every component that holds a
+  credential.
 - Readiness is always observable as an explicit state. "Bytes absent from the
-  object store" is never interpreted as a lifecycle signal.
+  object store" is never interpreted as a lifecycle signal, and an absent
+  readiness record is never read as an assertion that a download is running.
+- Every handle a downloader stops working on leaves a terminal record. Giving up
+  is written down, not expressed by falling silent.
 - An inbound event never asserts the existence of bytes that have not been
   written.
 
@@ -160,7 +201,13 @@ pay nothing.
   store already provisions.
 - **Failure is legible.** A download that fails permanently is a `failed`
   record with a reason, distinguishable from one still in flight, so an agent
-  can be told the difference.
+  can be told the difference. The cost is that the downloader has to write that
+  record on the way out, including on its final delivery attempt, rather than
+  letting the consumer's own give-up be the ending.
+- **The endpoints bucket gains a second reader.** `channel_endpoints_{prefix}`
+  stays the bridge's to write, but the downloader reads it to authorize before
+  redeeming, so identity is one registry consulted by every component that acts
+  on a message rather than a check the bridge performs on everyone's behalf.
 - **The downloader can be restarted or backfilled independently.** Because it
   is a durable consumer of a retained raw stream rather than a request/reply
   service, a downloader that was down comes back and works through what it

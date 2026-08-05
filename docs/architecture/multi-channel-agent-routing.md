@@ -39,9 +39,13 @@ Telegram ─HTTP─▶ webhook validated, published verbatim   trogon-gateway
                  send_message, chunked at 4096           (same process)
 ```
 
-Two processes, and that is the whole topology. There is no subject between the
-bridge and the agent other than the one `acp-nats` already owns, and no subject
-between the bridge's halves, because it has no halves.
+Two processes, and that is the whole topology while the channel is text only.
+There is no subject between the bridge and the agent other than the one
+`acp-nats` already owns, and no subject between the bridge's halves, because it
+has no halves. Supporting media adds a third process, the downloader of
+[ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md), which takes its own
+durable on the same inbound stream and still introduces no subject between these
+two.
 
 **The two legs are not symmetric.** Inbound goes through the gateway, which owns
 the webhook and publishes verbatim. Outbound does not: the bridge holds a
@@ -210,11 +214,17 @@ slightly dishonest about them.
 
 ## State: JetStream KV buckets
 
-All stateful registries live in JetStream KV, owned exclusively by the bridge.
-Config files carry only wiring (NATS connection, agent registry). The admin
-surface for these buckets (CLI, config seeding, later GUI or MCP) is deliberately
-out of scope; KV is the source of truth and whatever tool mutates it is
-pluggable.
+The four conversational registries live in JetStream KV, owned exclusively by
+the bridge. Config files carry only wiring (NATS connection, agent registry).
+The admin surface for these buckets (CLI, config seeding, later GUI or MCP) is
+deliberately out of scope; KV is the source of truth and whatever tool mutates
+it is pluggable.
+
+"Owned exclusively" is a claim about these four, not about every bucket a
+channel deployment has. `channel_media_{prefix}` is a cross-component record:
+the downloader of [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md)
+writes readiness there and the bridge's download tool reads it, which is what
+makes it a handoff rather than a registry.
 
 | Bucket | Key | Value |
 | --- | --- | --- |
@@ -225,7 +235,12 @@ pluggable.
 
 Access control is identity: an endpoint that resolves to no principal is rejected
 at the bridge, which logs, acks, and drops. This replaces the per-channel
-allowlist concept with one channel-neutral mechanism.
+allowlist concept with one channel-neutral mechanism. The check belongs to the
+registry rather than to the bridge, so any other component that acts on a raw
+message applies it too: the media downloader of
+[ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md) reads
+`channel_endpoints_{prefix}` for exactly this and writes to none of these
+buckets.
 
 ## Channel-neutral types
 
@@ -272,11 +287,17 @@ converged on essentially this set.
 
 **Inbound media is fetched out of band** by a dedicated downloader on its own
 durable consumer of the raw stream, never by the gateway and never inline in a
-turn. The inbound event carries only `platform_ref`; readiness lives in a
-`channel_media_{prefix}` KV record that a reader awaits by watch, at the moment
-the agent opens the file. Outbound is not symmetric: `send_attachment` keeps its
-`object_ref`, because the agent produced that file and there is nothing to
-redeem. See [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md). The
+turn. The inbound event carries only `platform_ref`, which is meaningful only
+together with the `account` on its endpoint: a Telegram `file_id` is issued per
+bot and redeemable only by the token that received it. Readiness accordingly
+lives in a `channel_media_{prefix}` KV record keyed by the receiving `channel`
+and `account` together with the handle, which a reader awaits by watch at the
+moment the agent opens the file. The downloader authorizes the endpoint against
+`channel_endpoints_{prefix}` before it redeems anything, so an unlinked chat
+cannot reach the bot token by sending a file. Outbound is not symmetric:
+`send_attachment` keeps its `object_ref`, because the agent produced that file
+and there is nothing to redeem.
+See [ADR#0044](../adr/0044-inbound-media-fetch-out-of-band.md). The
 downloader is designed and not built; today media is dropped.
 
 ## Agent dispatch: the AgentPort trait
@@ -439,7 +460,8 @@ them change the topology above.
   takes pointers from any number of endpoints); what is missing is anything that
   creates the second pointer.
 - **The bot token lives in two processes**, the gateway for webhook registration
-  and the bridge for API calls. A generic gateway sink (NATS to HTTP-out,
+  and the bridge for API calls, and in a third once media support lands and the
+  downloader needs `getFile`. A generic gateway sink (NATS to HTTP-out,
   symmetric to its sources) would centralize outbound custody. It does not exist,
   and adding one is a gateway decision, not a channel one.
 - **One agent protocol.** `AgentPort` has a single implementation.
