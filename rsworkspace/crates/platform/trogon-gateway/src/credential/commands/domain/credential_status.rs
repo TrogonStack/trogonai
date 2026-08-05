@@ -7,6 +7,7 @@ pub enum CredentialStatus {
     Previous,
     Revoked,
     Expired,
+    Destroyed,
 }
 
 impl CredentialStatus {
@@ -17,11 +18,16 @@ impl CredentialStatus {
             Self::Previous => "previous",
             Self::Revoked => "revoked",
             Self::Expired => "expired",
+            Self::Destroyed => "destroyed",
         }
     }
 
     pub fn is_readable(self) -> bool {
         matches!(self, Self::Active | Self::Previous)
+    }
+
+    pub fn is_writable(self) -> bool {
+        matches!(self, Self::Active)
     }
 }
 

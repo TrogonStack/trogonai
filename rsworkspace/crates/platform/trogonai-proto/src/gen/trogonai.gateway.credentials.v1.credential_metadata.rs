@@ -10,6 +10,7 @@ pub enum CredentialStatus {
     CREDENTIAL_STATUS_PREVIOUS = 3i32,
     CREDENTIAL_STATUS_REVOKED = 4i32,
     CREDENTIAL_STATUS_EXPIRED = 5i32,
+    CREDENTIAL_STATUS_DESTROYED = 6i32,
 }
 impl CredentialStatus {
     ///Idiomatic alias for [`Self::CREDENTIAL_STATUS_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -30,6 +31,9 @@ impl CredentialStatus {
     ///Idiomatic alias for [`Self::CREDENTIAL_STATUS_EXPIRED`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const Expired: Self = Self::CREDENTIAL_STATUS_EXPIRED;
+    ///Idiomatic alias for [`Self::CREDENTIAL_STATUS_DESTROYED`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const Destroyed: Self = Self::CREDENTIAL_STATUS_DESTROYED;
 }
 impl ::core::default::Default for CredentialStatus {
     fn default() -> Self {
@@ -133,6 +137,7 @@ impl ::buffa::Enumeration for CredentialStatus {
             3i32 => ::core::option::Option::Some(Self::CREDENTIAL_STATUS_PREVIOUS),
             4i32 => ::core::option::Option::Some(Self::CREDENTIAL_STATUS_REVOKED),
             5i32 => ::core::option::Option::Some(Self::CREDENTIAL_STATUS_EXPIRED),
+            6i32 => ::core::option::Option::Some(Self::CREDENTIAL_STATUS_DESTROYED),
             _ => ::core::option::Option::None,
         }
     }
@@ -147,6 +152,7 @@ impl ::buffa::Enumeration for CredentialStatus {
             Self::CREDENTIAL_STATUS_PREVIOUS => "CREDENTIAL_STATUS_PREVIOUS",
             Self::CREDENTIAL_STATUS_REVOKED => "CREDENTIAL_STATUS_REVOKED",
             Self::CREDENTIAL_STATUS_EXPIRED => "CREDENTIAL_STATUS_EXPIRED",
+            Self::CREDENTIAL_STATUS_DESTROYED => "CREDENTIAL_STATUS_DESTROYED",
         }
     }
     fn from_proto_name(name: &str) -> ::core::option::Option<Self> {
@@ -169,6 +175,9 @@ impl ::buffa::Enumeration for CredentialStatus {
             "CREDENTIAL_STATUS_EXPIRED" => {
                 ::core::option::Option::Some(Self::CREDENTIAL_STATUS_EXPIRED)
             }
+            "CREDENTIAL_STATUS_DESTROYED" => {
+                ::core::option::Option::Some(Self::CREDENTIAL_STATUS_DESTROYED)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -180,6 +189,7 @@ impl ::buffa::Enumeration for CredentialStatus {
             Self::CREDENTIAL_STATUS_PREVIOUS,
             Self::CREDENTIAL_STATUS_REVOKED,
             Self::CREDENTIAL_STATUS_EXPIRED,
+            Self::CREDENTIAL_STATUS_DESTROYED,
         ]
     }
 }

@@ -3,7 +3,7 @@ use std::future::Future;
 
 use trogon_std::SecretString;
 
-use super::SecretMaterial;
+use super::{SecretDestroyReason, SecretMaterial};
 use crate::credential::commands::domain::{CredentialKind, CredentialMetadata, CredentialRef, CredentialScope};
 
 pub trait SecretStorePut: Send + Sync + Clone + 'static {
@@ -48,20 +48,12 @@ pub trait SecretStoreMetadata: Send + Sync + Clone + 'static {
     ) -> impl Future<Output = Result<CredentialMetadata, Self::Error>> + Send;
 }
 
-pub trait SecretStore:
-    SecretStorePut
-    + SecretStoreGet<Error = <Self as SecretStorePut>::Error>
-    + SecretStoreRotate<Error = <Self as SecretStorePut>::Error>
-    + SecretStoreRevoke<Error = <Self as SecretStorePut>::Error>
-    + SecretStoreMetadata<Error = <Self as SecretStorePut>::Error>
-{
-}
+pub trait SecretStoreDestroy: Send + Sync + Clone + 'static {
+    type Error: Error + Send + Sync;
 
-impl<T> SecretStore for T where
-    T: SecretStorePut
-        + SecretStoreGet<Error = <T as SecretStorePut>::Error>
-        + SecretStoreRotate<Error = <T as SecretStorePut>::Error>
-        + SecretStoreRevoke<Error = <T as SecretStorePut>::Error>
-        + SecretStoreMetadata<Error = <T as SecretStorePut>::Error>
-{
+    fn destroy(
+        &self,
+        credential: &CredentialRef,
+        reason: &SecretDestroyReason,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

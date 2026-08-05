@@ -6,12 +6,13 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use tracing::info;
 use trogon_std::{EmptySecretError, SecretString};
 use url::Url;
 
 use super::{
-    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
+    SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId,
@@ -347,7 +348,7 @@ impl SecretStoreRotate for OpenBaoSecretStore {
     async fn rotate(&self, credential: &CredentialRef, value: SecretString) -> Result<CredentialRef, Self::Error> {
         let metadata = self.metadata(credential).await?;
         let status = metadata.status();
-        if status != CredentialStatus::Active {
+        if !status.is_writable() {
             return Err(SecretStoreError::Unwritable {
                 credential: credential.clone(),
                 status,
@@ -391,6 +392,22 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
     }
 }
 
+impl SecretStoreDestroy for OpenBaoSecretStore {
+    type Error = SecretStoreError;
+
+    async fn destroy(&self, credential: &CredentialRef, reason: &SecretDestroyReason) -> Result<(), Self::Error> {
+        info!(credential = %credential, reason = %reason, "destroying credential material in OpenBao");
+
+        self.send_empty(
+            self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Destroy, credential)?))
+                .json(&json!({
+                    "versions": [credential.version().get()],
+                })),
+        )
+        .await
+    }
+}
+
 impl SecretStoreMetadata for OpenBaoSecretStore {
     type Error = SecretStoreError;
 
@@ -404,7 +421,9 @@ impl SecretStoreMetadata for OpenBaoSecretStore {
                 credential: credential.clone(),
             })?;
 
-        let status = if version.destroyed || !version.deletion_time.is_empty() {
+        let status = if version.destroyed {
+            CredentialStatus::Destroyed
+        } else if !version.deletion_time.is_empty() {
             CredentialStatus::Revoked
         } else if credential.version().get() == metadata.data.current_version {
             CredentialStatus::Active
@@ -456,6 +475,7 @@ impl OpenBaoSecretStore {
 enum OpenBaoEndpoint {
     Data,
     Delete,
+    Destroy,
     Metadata,
 }
 
@@ -464,6 +484,7 @@ impl OpenBaoEndpoint {
         match self {
             Self::Data => "data",
             Self::Delete => "delete",
+            Self::Destroy => "destroy",
             Self::Metadata => "metadata",
         }
     }
@@ -732,6 +753,41 @@ mod tests {
             store.metadata_path(&credential),
             "secret/metadata/trogonai/tenant-e2e/credentials/openbao%3Atenant-e2e%3Agithub%2Fcopy-in-out%3Awebhook_secret"
         );
+    }
+
+    #[tokio::test]
+    async fn openbao_testcontainer_destroys_credential_version() {
+        let server = OpenBaoServer::start().await;
+        let store = server.store();
+        let credential = assert_roundtrip(&store).await;
+
+        store
+            .destroy(
+                &credential,
+                &SecretDestroyReason::new("integration test cleanup").unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.get(&credential).await,
+            Err(SecretStoreError::Unreadable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+        assert_eq!(
+            store.metadata(&credential).await.unwrap().status(),
+            CredentialStatus::Destroyed
+        );
+
+        store
+            .destroy(
+                &credential,
+                &SecretDestroyReason::new("integration test cleanup").unwrap(),
+            )
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
