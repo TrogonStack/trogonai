@@ -16,6 +16,28 @@ The plan is grounded in:
 - `API_KEY.md` for Trogonai-issued API keys, verifier-only bearer keys,
   Coinbase-style signed keys, and Unkey-style management concepts.
 
+## Status
+
+This document now tracks only remaining work. The first implementation slice
+is already merged into `trogon-gateway` under `credential::` (event-sourced
+credential decider, command handler, runtime handler, recovery worker,
+checkpointed runtime projection refresh) and `secret_store::` (segregated
+store traits with static, in-memory, and OpenBao adapters), plus the internal
+admin management API under `/-/credentials` with scoped idempotency, the ten
+runtime-backed webhook routers, the Discord runtime bot token path, and the
+protobuf contracts under `proto/trogonai/gateway/credentials`. Completed work
+was removed from this file; the code and its tests are the reference for what
+exists.
+
+## Production Follow-Ups From The Implemented Slice
+
+```text
+decide whether management idempotency records move from NATS KV to the future
+control-plane database
+  -> tune snapshot frequency and retention after production stream metrics exist
+  -> write production OpenBao auth, HA, backup, cleanup, and alert runbooks
+```
+
 ## Direction
 
 Use this split:
@@ -174,6 +196,10 @@ They should not receive arbitrary OpenBao paths from callers.
 
 ## Phase 0: Finalize Buildable Specs
 
+Nothing in this phase has been produced yet. The source material lives in
+`SECRET_STORE.md` and `API_KEY.md`, both of which still carry their own open
+question lists.
+
 ### Deliverables
 
 - `CREDENTIAL_LIFECYCLE.md`
@@ -191,8 +217,11 @@ before implementation grows.
 - Owner boundary: workspace, organization, project, tenant, or user.
 - First credential metadata backend: Postgres, NATS KV, or existing control
   plane store.
-- First OpenBao path convention.
-- First OpenBao auth method per service.
+- First OpenBao path convention. The gateway prototype bakes in
+  `trogonai/{owner_id}/credentials/{credential_id}`; ratify or replace it as
+  the published convention.
+- First OpenBao auth method per service. The prototype uses a static dev
+  token; that is not a production answer.
 - First supported credential kinds.
 - First API keyspaces.
 - First signed-key algorithm.
@@ -209,49 +238,42 @@ before implementation grows.
 
 ## Phase 1: Domain Model And State Machines
 
-### Implement Value Objects
+The credential-scoped value objects and the version lifecycle decider already
+exist under `credential::commands::domain`. What remains is the broader domain
+model around them.
+
+### Implement Remaining Value Objects
 
 Define rich types instead of primitive strings:
 
 ```text
-OwnerId
+OwnerId          (canonical owner boundary, pending the Phase 0 decision;
+                  today only a credential-scoped CredentialOwnerId exists)
 WorkspaceId
 VaultId
-CredentialId
 CredentialVersionId
-CredentialRef
-CredentialKind
-CredentialSource
-CredentialFingerprint
-CredentialPath
-CredentialVersion
+CredentialPath   (today path building lives inside the OpenBao adapter)
 ApiKeyId
 ApiKeyspaceId
 ApiKeyKind
 IdentityId
 OperationId
-IdempotencyKey
-RequestFingerprint
 ```
 
-### Define Credential State Machines
+### Complete The Credential State Machines
 
-Minimum states:
+The decider currently covers pending/active/previous/revoked/expired version
+states with write, rotation, and revoke transitions. Remaining states:
 
 ```text
-CredentialVersionState
-  pending_secret_write
-  active
-  previous
-  secret_write_failed
+CredentialVersionState (additions)
   resubmission_required
   revocation_requested
-  revoked
   destroy_requested
   destroyed
   cleanup_failed
 
-CredentialState
+CredentialState (not built)
   draft
   ready
   failed
@@ -259,7 +281,7 @@ CredentialState
   archived
   deleted
 
-IntegrationState
+IntegrationState (not built)
   pending
   active
   failed
@@ -268,7 +290,7 @@ IntegrationState
   archived
   deleted
 
-OperationState
+OperationState (not built)
   accepted
   running
   succeeded
@@ -279,7 +301,7 @@ OperationState
 
 ### Define API Key State Machines
 
-Minimum states:
+Nothing exists for these yet:
 
 ```text
 ApiKeyState
@@ -303,535 +325,43 @@ SignedPublicKeyState
 - State transitions can be retried safely.
 - State transition tests cover success, conflict, and failure paths.
 
-### Current Implementation Slice
+## Phase 2: SecretStore Contract (Remaining)
 
-`trogon-gateway` now has a first scheduler-style credential lifecycle decider
-under `secret_store::credential_lifecycle`.
-
-This slice covers metadata-only lifecycle events:
+The trait split, static config adapter, in-memory adapter, and OpenBao adapter
+all exist and are tested. Two contract items remain:
 
 ```text
-WriteRequested
-WriteFailed
-Activated
-RotationRequested
-RotationFailed
-Rotated
-Revoked
+destroy(ref, reason)
+  -> not implemented in any adapter; revoke maps to the OpenBao KV v2
+     soft-delete endpoint only
+  -> add a destroyed terminal state and the permanent-destroy operation
+
+unified SecretStore trait
+  -> secret_store/traits.rs defines the plan's combined trait but nothing
+     uses it; either adopt it at the composition boundary or delete it so
+     the segregated traits are the single contract shape
 ```
-
-The decider intentionally does not write OpenBao and does not carry plaintext.
-OpenBao writes remain a trusted command-handler or saga step. The decider records
-the metadata facts before and after those side effects, using `CredentialRef`,
-`CredentialMetadata`, status, owner, source, and kind.
-
-The slice also implements a runtime event codec for the lifecycle event set and
-proves the command path through `trogon-decider-runtime::CommandExecution` with
-an in-memory stream store test. That test verifies:
-
-```text
-RequestCredentialWrite
-  -> NoStream append precondition
-
-ActivateCredentialWrite
-  -> replay lifecycle events
-  -> At(position) append precondition
-```
-
-The write path now has a first command-handler layer under
-`secret_store::credential_lifecycle_handler`. It performs the immediate saga for
-new credential material:
-
-```text
-PutCredential
-  -> append WriteRequested
-  -> write secret material to SecretStore
-  -> read store metadata
-  -> append Activated
-```
-
-If the `SecretStore` write fails, the handler appends `WriteFailed` with a
-bounded failure reason and still keeps the raw submitted secret out of the event
-stream. If the activation append fails after the secret-store write succeeds,
-a retry can observe the existing `PendingWrite` state, repeat the side effect
-with the caller-resubmitted plaintext, and append `Activated`. The handler also
-has a recovery command that reads existing store metadata and appends the
-missing `Activated` event without needing the original plaintext again.
-
-The same handler also covers rotation and revoke operations:
-
-```text
-RotateCredential
-  -> append RotationRequested
-  -> rotate secret material in SecretStore
-  -> read rotated metadata
-  -> append Rotated
-
-RevokeStoredCredential
-  -> revoke secret material in SecretStore
-  -> append Revoked
-```
-
-If the rotation side effect fails, the decider records `RotationFailed` and
-returns the lifecycle state to the active credential so the rotation can be
-retried. Revoke writes the backend first because an event that says revoked
-while the secret is still usable would be the more dangerous failure. A revoke
-append failure can be retried because the OpenBao-style revoke operation is
-idempotent for an existing logical credential.
-If the rotation side effect succeeds but the `Rotated` append fails, the handler
-can recover by reading the rotated credential metadata and appending the missing
-`Rotated` event from the current `RotationPending` state.
-The handler also exposes a recovery planner that converts a replayed
-`PendingWrite` or `RotationPending` state into the appropriate recovery command.
-For pending writes, it reconstructs the expected `CredentialRef` from the
-deterministic OpenBao credential id, parsing from the right side of the id so
-owner ids that contain colons remain valid.
-
-Successful handler operations now return a `CredentialLifecycleHandlerOutcome`
-with both the lifecycle state and the appended stream position. That gives the
-future management API and workers the same position-aware boundary used by the
-scheduler, without forcing them to infer event positions from side effects.
-`CredentialLifecycleRuntimeHandler` composes that lifecycle handler with
-`RuntimeCredentialRegistry`: after a successful command append, it applies the
-returned lifecycle state to runtime projections at the returned stream position.
-This is the intended boundary for the credential management API because it keeps
-the event-sourced write path and runtime state update in one application
-service.
-
-The gateway also provisions the NATS event stream, subject resolver, event
-store, snapshot KV bucket, runtime projection checkpoint KV bucket, and recovery
-worker checkpoint KV bucket needed by the durable lifecycle store:
-
-```text
-GATEWAY_CREDENTIAL_LIFECYCLE_EVENTS
-  -> gateway.credentials.lifecycle.events.v1.>
-  -> allow_atomic_publish = true
-
-GATEWAY_CREDENTIAL_LIFECYCLE_SNAPSHOTS
-  -> history = 1
-  -> max_age = 0
-
-GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS
-  -> history = 1
-  -> max_age = 0
-
-GATEWAY_CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINTS
-  -> history = 1
-  -> max_age = 0
-```
-
-Gateway credential contracts now use Protocol Buffers rather than ad hoc JSON
-for durable payloads owned by Trogonai. The wire contract lives under
-`proto/trogonai/gateway/credentials/v1` and is exposed through `trogonai-proto`
-as `trogonai.gateway.credentials.v1`.
-
-The current proto package contains:
-
-- `commands.proto` for credential management command request and response
-  payloads;
-- `events.proto` for credential lifecycle event payloads;
-- `idempotency.proto` for management idempotency KV records;
-- `projection.proto` for runtime projection checkpoint records;
-- `state.proto` for metadata-only credential lifecycle state snapshots;
-- `types.proto` for shared credential refs, statuses, sources, credential
-  kinds, and storage backends;
-- `worker.proto` for recovery worker checkpoint records.
-
-The Rust decider still uses rich domain value objects; protobuf is the durable
-contract at the event-store, command, and KV payload boundaries. The existing
-HTTP JSON routes remain an adapter over that domain contract so current route
-behavior does not change. Lifecycle event payloads preserve the credential
-scope key, so integration credentials like
-`openbao:tenant-1:github/primary:webhook_secret` can round-trip through the event
-log without flattening to source scope. OpenBao-generated credential ids are now
-owner-scoped because lifecycle streams are keyed by credential id. That prevents
-two owners with the same source integration id from competing on one event
-stream. OpenBao rotation now preserves that same scope when it returns the next
-credential version, so rotated integration credentials still project back to the
-same runtime integration.
-Credential lifecycle commands now use the same scheduler-style snapshot boundary
-as the scheduler deciders: command execution reads lifecycle snapshots before
-replay and writes metadata-only `CredentialLifecycleStateSnapshot` payloads on a
-fixed 32-event frequency. The snapshot payload includes lifecycle refs,
-fingerprints, metadata, failure reasons, and revocation facts, but never
-plaintext credential material.
-`runtime_projection` can now build an active runtime credential projection from
-a replayed lifecycle state and use that projection to resolve material from the
-secret store.
-
-Runtime projection refresh can rebuild the in-memory projection repository from
-persisted lifecycle stream events, and gateway startup now persists a projection
-checkpoint in `GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS`. The first
-refresh scans from sequence 1. Later refreshes scan from the checkpoint cursor,
-group decoded raw events by credential id, reload each changed aggregate from
-the lifecycle event store, replay that aggregate through the decider evolve
-function, and apply only changed projection states. The checkpoint advances only
-after refresh succeeds. The projection repository and credential cache are now
-carried together by `RuntimeCredentialRegistry`, which can create resolvers that
-share the same cache cleared by lifecycle refresh. Active states upsert runtime
-credentials, revoked credentials remove only that credential kind, and affected
-cache entries are invalidated. Runtime projection keys now support both
-integration scope, such as `github/primary`, and source scope, such as
-`discord`.
-
-GitHub, GitLab, incident.io, Linear, Microsoft Graph, Sentry, Slack, and
-Telegram now have
-runtime-backed webhook route variants. The existing static-config routers remain
-available for current deployments, but `github::runtime_router` verifies the
-webhook signature by resolving `CredentialKind::WebhookSecret` from
-`RuntimeCredentialRegistry`, `gitlab::runtime_router` verifies the GitLab
-standard webhook signature by resolving `CredentialKind::SigningToken`,
-`incidentio::runtime_router` verifies the incident.io standard webhook
-signature by resolving `CredentialKind::SigningSecret`,
-`linear::runtime_router` verifies the Linear webhook signature by resolving
-`CredentialKind::WebhookSecret`, `microsoft_graph::runtime_router` verifies
-Microsoft Graph notification `clientState` by resolving
-`CredentialKind::ClientState`,
-`sentry::runtime_router` verifies the Sentry webhook signature by resolving
-`CredentialKind::ClientSecret`, `slack::runtime_router` verifies the Slack
-request signature by resolving `CredentialKind::SigningSecret`, and
-`telegram::runtime_router` verifies the Telegram webhook secret token by
-resolving `CredentialKind::WebhookSecret`, `twitter::runtime_router` signs CRC
-responses and verifies webhook signatures by resolving
-`CredentialKind::ConsumerSecret`, and `notion::runtime_router` verifies webhook
-signatures by resolving `CredentialKind::VerificationToken` from that registry.
-The Discord gateway runner can resolve a source-scoped
-`CredentialKind::BotToken` from the same registry before opening the WebSocket
-connection.
-`source_plugin` and `http` expose a mounting path that can swap GitHub, GitLab,
-incident.io, Linear, Microsoft Graph, Notion, Sentry, Slack, Telegram, and
-Twitter/X independently to
-runtime-backed routers while leaving the other sources on their current
-static-config paths. Gateway startup
-can mount these routes with `TROGON_GATEWAY_ENABLE_RUNTIME_GITHUB_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_GITLAB_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_INCIDENTIO_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_LINEAR_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_MICROSOFT_GRAPH_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_NOTION_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_SENTRY_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_SLACK_CREDENTIALS`,
-`TROGON_GATEWAY_ENABLE_RUNTIME_TELEGRAM_CREDENTIALS`, and
-`TROGON_GATEWAY_ENABLE_RUNTIME_TWITTER_CREDENTIALS`; these modes require
-`OPENBAO_ADDR` and `OPENBAO_TOKEN` so the resolver can read active credential
-refs from OpenBao on cache miss.
-Discord gateway runtime mode is enabled with
-`TROGON_GATEWAY_ENABLE_RUNTIME_DISCORD_CREDENTIALS` and uses the same OpenBao
-environment.
-
-The gateway now has a first internal credential management command API under
-`/-/credentials`. It is disabled unless the operator sets
-`TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN`; when enabled it also
-requires `OPENBAO_ADDR` and `OPENBAO_TOKEN`. The API is intentionally small and
-currently supports Discord bot tokens, GitHub webhook secrets, incident.io
-signing secrets, Linear webhook secrets, GitLab signing tokens, Microsoft Graph
-client states, Notion verification tokens, Sentry client secrets, Slack signing
-secrets, Telegram webhook secrets, and Twitter/X consumer secrets:
-
-```text
-PUT /-/credentials/discord/bot-token
-  -> PutCredential
-
-POST /-/credentials/discord/bot-token/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/discord/bot-token
-  -> RevokeStoredCredential
-
-PUT /-/credentials/github/{integration_id}/webhook-secret
-  -> PutCredential
-
-POST /-/credentials/github/{integration_id}/webhook-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/github/{integration_id}/webhook-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/gitlab/{integration_id}/signing-token
-  -> PutCredential
-
-POST /-/credentials/gitlab/{integration_id}/signing-token/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/gitlab/{integration_id}/signing-token
-  -> RevokeStoredCredential
-
-PUT /-/credentials/incidentio/{integration_id}/signing-secret
-  -> PutCredential
-
-POST /-/credentials/incidentio/{integration_id}/signing-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/incidentio/{integration_id}/signing-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/linear/{integration_id}/webhook-secret
-  -> PutCredential
-
-POST /-/credentials/linear/{integration_id}/webhook-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/linear/{integration_id}/webhook-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/microsoft-graph/{integration_id}/client-state
-  -> PutCredential
-
-POST /-/credentials/microsoft-graph/{integration_id}/client-state/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/microsoft-graph/{integration_id}/client-state
-  -> RevokeStoredCredential
-
-PUT /-/credentials/notion/{integration_id}/verification-token
-  -> PutCredential
-
-POST /-/credentials/notion/{integration_id}/verification-token/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/notion/{integration_id}/verification-token
-  -> RevokeStoredCredential
-
-PUT /-/credentials/sentry/{integration_id}/client-secret
-  -> PutCredential
-
-POST /-/credentials/sentry/{integration_id}/client-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/sentry/{integration_id}/client-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/slack/{integration_id}/signing-secret
-  -> PutCredential
-
-POST /-/credentials/slack/{integration_id}/signing-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/slack/{integration_id}/signing-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/telegram/{integration_id}/webhook-secret
-  -> PutCredential
-
-POST /-/credentials/telegram/{integration_id}/webhook-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/telegram/{integration_id}/webhook-secret
-  -> RevokeStoredCredential
-
-PUT /-/credentials/twitter/{integration_id}/consumer-secret
-  -> PutCredential
-
-POST /-/credentials/twitter/{integration_id}/consumer-secret/rotations
-  -> RotateCredential
-
-DELETE /-/credentials/twitter/{integration_id}/consumer-secret
-  -> RevokeStoredCredential
-
-GET /-/credentials/recovery/status
-  -> read credential lifecycle recovery worker checkpoint status
-```
-
-Those routes translate HTTP input into credential value objects and call
-`CredentialLifecycleRuntimeHandler`; they do not write OpenBao directly and they
-do not append lifecycle events directly. Responses include credential refs,
-lifecycle state, and stream position, but never echo plaintext secret material.
-Successful commands update runtime projections immediately through the same
-registry used by the runtime Discord gateway runner and the GitHub, GitLab,
-incident.io, Linear, Microsoft Graph, Notion, Sentry, Slack, Telegram, and
-Twitter/X webhook resolvers.
-The recovery status route is read-only and returns only checkpoint metadata:
-last scanned raw stream sequence, next scan sequence, consecutive failure count,
-first failure time, retry-after time, retry-delay state, and stuck-recovery
-state. It uses the same admin token boundary as the command routes and does not
-return secret material, OpenBao paths, lifecycle event payloads, or idempotency
-records.
-The recovery worker also records OpenTelemetry counters under the
-`trogon-gateway` meter:
-
-```text
-gateway.credential_lifecycle.recovery.passes
-  outcome = idle | advanced | recovered | failed_recovery | retry_delayed | stuck | error
-
-gateway.credential_lifecycle.recovery.errors
-  reason = worker_error
-
-gateway.credential_lifecycle.recovery.scanned_events
-
-gateway.credential_lifecycle.recovery.recoveries
-  status = planned | recovered | failed
-  kind = all | write | rotation
-
-gateway.credential_lifecycle.recovery.stuck_reports
-```
-
-The first alertable conditions should be:
-
-```text
-stuck_reports increases
-  -> page or route to the operator owning OpenBao and lifecycle recovery
-
-failed_recovery passes continue increasing while checkpoint_advanced_to stays absent
-  -> investigate activation append failures or OpenBao metadata reads
-
-retry_delayed remains true longer than the stuck-after policy
-  -> use /-/credentials/recovery/status to confirm failure age and retry window
-```
-
-The management API now requires `Idempotency-Key` for create, rotate, and
-revoke commands. The key is scoped by owner, command namespace, and target
-credential id. The gateway computes an HMAC request fingerprint while the secret
-is still in memory, stores only metadata-only response snapshots, replays the
-same snapshot for an identical retry, and returns an idempotency conflict when
-the same scoped key is reused with a different command fingerprint. The runtime
-implementation persists those records as protobuf-encoded values in a NATS KV
-bucket so retries converge across gateway restarts and replicas:
-
-```text
-GATEWAY_CREDENTIAL_MANAGEMENT_IDEMPOTENCY
-  -> history = 1
-  -> max_age = 24h
-```
-
-If a command fails before completion, the durable NATS KV ledger deletes the
-in-progress record by revision so the same logical retry can execute again.
-Completed records are kept until TTL and replay the original metadata-only
-response. This prevents a transient handler failure from pinning a user action
-in `idempotency request is already in progress` until the bucket TTL expires.
-
-This keeps client retries from appending duplicate lifecycle commands while
-preserving the plaintext boundary.
-
-The credential lifecycle recovery worker now persists a durable NATS KV cursor
-before scanning the lifecycle event stream from the next raw stream sequence.
-The checkpoint also carries `consecutive_failure_count`,
-`first_failure_unix_seconds`, and `retry_after_unix_seconds`, so failure pacing
-survives gateway restarts and multiple replicas. Each scan groups decoded events
-by the credential id carried in the event payload, reloads each changed
-aggregate from the lifecycle event store, replays it into decider state, and
-invokes the existing write or rotation activation recovery command for pending
-states. This matters because a raw JetStream scan sees the hashed NATS subject,
-not the domain stream id. The checkpoint only advances after planned recoveries
-finish without failures. Failed activation keeps the raw stream cursor pinned,
-saves bounded retry/backoff state, and reports a stuck recovery after the
-failure age crosses the worker policy threshold. That retries without requiring
-plaintext from the DB, outbox, or client and avoids hammering OpenBao every
-worker interval. The worker is spawned with the credential management OpenBao
-path and updates the same runtime projection registry used by gateway
-credential resolution.
-
-The runtime credential projection now has its own continuous checkpointed
-refresh worker. Gateway startup still refreshes the in-memory projection before
-mounting runtime credential resolvers, then the worker keeps scanning from the
-same `GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS` cursor so later
-lifecycle events from this gateway, another replica, or a provider callback can
-be applied without restarting the process. The worker advances the cursor only
-after the projection refresh succeeds.
-
-The operator enablement flow is now concrete:
-
-```text
-start NATS and OpenBao
-  -> set OPENBAO_ADDR and OPENBAO_TOKEN
-  -> set TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN
-  -> enable the source runtime flag for any source that should resolve from OpenBao
-  -> create, rotate, or revoke with /-/credentials plus Idempotency-Key
-  -> gateway writes lifecycle events through CredentialLifecycleRuntimeHandler
-  -> handler applies the returned decider state to RuntimeCredentialRegistry
-  -> runtime source resolver reads active CredentialRef from OpenBao on cache miss
-  -> recovery worker and projection worker keep later replicas convergent
-```
-
-Local compose documentation in
-`devops/docker/compose/services/trogon-gateway/README.md` now shows the
-copy-in and copy-out OpenBao smoke test, the Testcontainers adapter test, the
-Testcontainers lifecycle-runtime E2E test, and example management API commands
-with `x-trogon-admin-token` plus scoped `Idempotency-Key` headers.
-The compose stack was also verified with `nats://nats:4222`, local OpenBao,
-the gateway management API, and a real GitHub webhook-secret flow:
-
-```text
-PUT /-/credentials/github/compose-smoke-2/webhook-secret
-  -> active CredentialRef v1
-  -> OpenBao CLI reads copy-this-value-in-and-out
-
-POST /-/credentials/github/compose-smoke-2/webhook-secret/rotations
-  -> active CredentialRef v2
-  -> OpenBao CLI reads rotated-copy-this-value-in-and-out at version 2
-
-DELETE /-/credentials/github/compose-smoke-2/webhook-secret
-  -> revoked CredentialRef v2
-  -> OpenBao version 2 returns null data with deletion_time set
-```
-
-The real OpenBao lifecycle E2E is:
-
-```text
-mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_lifecycle_and_resolves_precise_value
-```
-
-It starts OpenBao with Testcontainers, writes `copy-this-value-in-and-out`
-through `CredentialLifecycleRuntimeHandler`, resolves the value through
-`RuntimeCredentialRegistry`, rotates to
-`rotated-copy-this-value-in-and-out`, revokes the credential, and verifies that
-the lifecycle event payloads do not contain either plaintext value.
-
-The remaining event-sourcing work is production orchestration:
-
-```text
-decide whether management idempotency records move from NATS KV to the future control-plane database
-  -> tune lifecycle snapshot frequency and retention after production stream metrics exist
-  -> write production OpenBao auth, HA, backup, cleanup, and alert runbooks
-```
-
-## Phase 2: SecretStore Contract And Static Adapter
-
-### Work
-
-- Keep current TOML/env behavior.
-- Introduce the `SecretStore` trait around existing source hydration.
-- Add a static config adapter for current resolved secrets.
-- Add an in-memory test adapter.
-- Keep source handlers receiving typed secrets.
-
-### Contract Shape
-
-```text
-SecretStore
-  write(ref, secret, metadata)
-  read(ref, purpose)
-  revoke(ref, reason)
-  destroy(ref, reason)
-  metadata(ref)
-```
-
-The exact names can follow the existing Rust style, but the domain separation
-should stay intact:
-
-```text
-secret values
-  -> only through ports/adapters
-
-domain records
-  -> refs, metadata, status, policies
-```
-
-### Acceptance Criteria
-
-- Existing gateway config behavior still works.
-- Static config adapter passes current tests.
-- In-memory adapter supports deterministic unit tests.
-- No source handler needs to know about OpenBao.
 
 ## Phase 3: Persistence And Idempotent Operations
+
+Scoped idempotency for create, rotate, and revoke already works through a
+protobuf NATS KV ledger in the gateway. The remaining work is the persistence
+model the plan actually calls for:
 
 ### Work
 
 - Add persistence for vaults, credentials, versions, operations, idempotency
-  records, and audit facts.
-- Add scoped idempotency for every write command.
-- Add pending-operation caps.
-- Add TTL handling for pending operations.
+  records, and audit facts. None of these exist outside the event stream; the
+  gateway has no database dependency and no vault, operation, or audit-fact
+  concept at all.
+- Add pending-operation caps. The only cap today is the incidental
+  one-pending-write-per-credential rule from the aggregate design.
+- Add TTL handling for pending operations. Today the only expiries are the
+  blanket 24h idempotency bucket age and the recovery worker's stuck window.
+- Extend the idempotency record to the full contract shape below; the current
+  KV record carries only fingerprint, status, and response.
+- Decide whether idempotency records stay in NATS KV or move to the
+  control-plane database.
 
 ### Idempotency Contract
 
@@ -888,6 +418,11 @@ different owner + same key
 - Response snapshots never contain raw secrets or one-time key material.
 
 ## Phase 4: Credential Management API
+
+Nothing public exists yet. The only surface today is the internal
+admin-token-gated per-source API under `/-/credentials`; the vault-shaped
+public API below is unbuilt, and there is no vault, operation, or
+resubmit-secret concept behind it.
 
 ### Endpoints
 
@@ -964,27 +499,20 @@ cleanup_pending
 - If OpenBao has the value, reconciliation can continue without user
   resubmission.
 
-## Phase 5: OpenBao Adapter
+## Phase 5: OpenBao Hardening (Remaining)
+
+The OpenBao adapter exists behind the store traits and has a Testcontainers
+round-trip test. The operational contract around it does not exist:
 
 ### Work
 
-- Add OpenBao adapter behind `SecretStore`.
-- Define path conventions.
-- Define metadata conventions.
-- Define service auth methods.
+- Ratify the path convention as a published decision (see Phase 0). External
+  callers must never provide arbitrary OpenBao paths.
+- Write non-secret metadata alongside every secret. Today only the raw value
+  is posted.
+- Define and configure service auth methods. Today everything uses a static
+  dev root token.
 - Define policies.
-- Add integration tests with a local OpenBao instance if practical.
-
-### Path Convention
-
-Initial convention:
-
-```text
-kv/trogonai/{owner_id}/credentials/{credential_id}/versions/{version_id}
-```
-
-The exact mount can change, but it must be generated from validated domain
-values. External callers must never provide arbitrary OpenBao paths.
 
 ### Metadata Convention
 
@@ -1013,6 +541,8 @@ audit_read
 break_glass_admin
 ```
 
+No policy files exist anywhere in the repo yet (no HCL, no Terraform).
+
 ### Acceptance Criteria
 
 - Control plane can write credential material.
@@ -1022,6 +552,12 @@ break_glass_admin
 - OpenBao paths are deterministic and reconcilable.
 
 ## Phase 6: Saga, Cleanup, And Reconciliation
+
+The gateway handler already performs the immediate write/rotate/revoke saga
+against OpenBao with a recovery worker for stuck activations. The plan-level
+saga with a database intent, an outbox, and split cleanup is unbuilt: there is
+no outbox anywhere, no resubmission flow, no orphan cleanup, no tombstones,
+and revoke currently deletes from OpenBao synchronously in the same request.
 
 ### Create Saga
 
@@ -1066,15 +602,15 @@ tombstone retention
 
 ### Reconciliation Jobs
 
+DB -> Gateway convergence already exists through the checkpointed projection
+refresh worker. The other three jobs are unbuilt:
+
 ```text
 DB -> OpenBao
   -> expected secret exists and has expected metadata
 
 OpenBao -> DB
   -> every managed secret has a DB owner or becomes orphan cleanup
-
-DB -> Gateway
-  -> active projection version reached gateway
 
 Provider -> DB
   -> provider-side revocation or disconnect reflected when possible
@@ -1088,44 +624,43 @@ Provider -> DB
 - Cleanup is idempotent.
 - Runtime safety does not depend on physical cleanup completing immediately.
 
-## Phase 7: Runtime Projection And Cache
+## Phase 7: Runtime Projection And Cache (Remaining)
+
+The projection, its checkpointed refresh, event-driven invalidation,
+per-`CredentialRef` versioning, and fail-closed behavior on revoked or
+disabled credentials all exist. What remains:
 
 ### Projection Shape
 
+Extend the current per-integration projection with the policy fields the plan
+requires:
+
 ```text
-RuntimeCredentialProjection
-  owner_id
+RuntimeCredentialProjection (missing fields)
   workspace_id
-  integration_id
-  credential_ref
-  credential_kind
-  credential_version
-  state
   allowed_hosts
   allowed_runtime_services
   injection_locations
   cache_policy
-  updated_at
 ```
 
 ### Cache Rules
 
-- Cache by `CredentialRef` and version.
-- Add TTL and jitter.
-- Invalidate on outbox projection event.
-- Refresh on reconnect.
-- Fail closed on revoked or disabled state.
+- Add TTL and jitter. Today the cache is a plain map invalidated only by
+  explicit events and clears.
+- Invalidate on outbox projection event once the outbox exists.
 - Decide fallback behavior for OpenBao outage per credential kind.
 
 ### Acceptance Criteria
 
-- Gateway does not read OpenBao on every webhook request.
-- Revocation reaches gateway within the target latency.
+- Revocation reaches gateway within the target latency, and that latency is
+  measured.
 - Cache miss behavior is observable.
-- Cache entries are versioned so rotation cannot reuse stale values silently.
-- Projection refresh is idempotent.
 
 ## Phase 8: API Key Platform
+
+Nothing is implemented; `API_KEY.md` is design-only and no bearer key, signed
+key, keyspace, or `ApiPrincipal` code exists anywhere in the repo.
 
 ### Bearer Keys
 
@@ -1190,6 +725,11 @@ ApiPrincipal
 - Rate limits can attach to keys, identities, owners, or routes.
 
 ## Phase 9: UI And Client Experience
+
+Nothing is implemented. The console app is a single-route scaffold with no
+data layer, and the credentials proto packages define no RPC services a
+browser client could call, so this phase also depends on defining that public
+API surface (Phase 4).
 
 ### Credential Vault List
 
@@ -1260,6 +800,10 @@ lost one-time API key response
 
 ## Phase 10: Operations And Runbooks
 
+None of these exist. Only the local dev compose README is written, and no
+alert or monitor definitions exist for the OTel counters the gateway already
+emits.
+
 ### Required Runbooks
 
 - OpenBao dev setup.
@@ -1289,6 +833,20 @@ Alert on:
 - suspicious API-key verification failures;
 - signed-request replay attempts.
 
+The recovery worker counters under `gateway.credential.recovery.*` are the
+first signals to wire up:
+
+```text
+stuck_reports increases
+  -> page or route to the operator owning OpenBao and lifecycle recovery
+
+failed_recovery passes continue increasing while the checkpoint stays pinned
+  -> investigate activation append failures or OpenBao metadata reads
+
+retry_delayed remains true longer than the stuck-after policy
+  -> use /-/credentials/recovery/status to confirm failure age and retry window
+```
+
 ### Acceptance Criteria
 
 - Restore drill proves OpenBao and DB can be reconciled.
@@ -1296,61 +854,52 @@ Alert on:
 - Break-glass access is audited.
 - Runbooks explain customer-visible impact and recovery.
 
-## Phase 11: Testing Strategy
+## Phase 11: Testing Strategy (Remaining)
+
+The implemented slice already carries unit tests for value objects, state
+transitions, and idempotency conflicts, plus integration tests for the
+static, in-memory, and OpenBao adapters, projection refresh, and cache
+invalidation. The remaining categories:
 
 ### Unit Tests
 
-- value object validation;
-- state transitions;
-- idempotency conflict behavior;
-- verifier digest construction;
-- signed-request verification;
-- delivery policy validation;
-- allowed-host matching.
+- verifier digest construction (blocked on Phase 8);
+- signed-request verification (blocked on Phase 8);
+- delivery policy validation (blocked on Phase 7 projection fields);
+- allowed-host matching (blocked on Phase 7 projection fields).
 
 ### Integration Tests
 
-- static config adapter;
-- in-memory adapter;
-- OpenBao adapter;
-- create saga;
-- rotation saga;
-- cleanup worker;
-- runtime projection refresh;
-- gateway cache invalidation.
+- create saga with DB intent and outbox (blocked on Phase 6);
+- cleanup worker (does not exist yet; the recovery worker covers stuck
+  activations, not orphaned-secret cleanup).
 
 ### Failure Injection Tests
 
-Cover:
+Still uncovered:
 
 ```text
 DB intent write fails
-process crashes after DB intent
-OpenBao write fails
 OpenBao write outcome unknown
-OpenBao write succeeds but DB activation fails
 DB activation succeeds but outbox publish fails
-gateway misses event
 cleanup worker fails
 provider revocation fails
-client retries create repeatedly
-client reuses idempotency key with different request
 client loses one-time API key response
 ```
 
 ### Security Tests
 
-- no plaintext in API responses after creation;
+- no plaintext in outbox (blocked on Phase 6 outbox);
 - no plaintext in logs;
 - no plaintext in traces;
 - no plaintext in metrics;
-- no plaintext in outbox;
 - denied host cannot be bypassed;
 - unauthorized service identity cannot resolve credentials;
-- revoked credential fails closed;
 - signed request replay is rejected.
 
 ### Load Tests
+
+None exist yet:
 
 - gateway cache hit rate;
 - gateway cache miss pressure on OpenBao;
@@ -1361,27 +910,17 @@ client loses one-time API key response
 
 ## Milestone Order
 
-### Milestone 1: Internal Contract
+Milestone 1 (internal contract: credential-scoped value objects, store
+traits, static and in-memory adapters, preserved gateway behavior) is complete
+and removed. The broader value objects still owed are listed in Phase 1.
 
-- Value objects.
-- `SecretStore` trait.
-- Static config adapter.
-- In-memory adapter.
-- Current gateway behavior preserved.
-
-Exit criteria:
-
-- existing gateway tests pass;
-- source config hydration uses the resolver boundary;
-- no OpenBao dependency yet.
-
-### Milestone 2: Credential Metadata And Operations
+### Milestone 2: Credential Metadata And Operations (Remaining)
 
 - DB metadata model.
 - operation records;
-- idempotency records;
-- credential state machine;
-- management API skeleton.
+- full idempotency record shape (KV ledger exists for the current commands);
+- credential/integration/operation state machines;
+- public management API skeleton.
 
 Exit criteria:
 
@@ -1389,12 +928,13 @@ Exit criteria:
 - retries converge on one operation;
 - pending-operation caps exist.
 
-### Milestone 3: OpenBao Write Path
+### Milestone 3: OpenBao Write Path (Remaining)
 
-- OpenBao adapter.
-- create saga.
-- rotation saga.
-- reconciliation for create failures.
+The OpenBao adapter, immediate create/rotate saga, and create-failure recovery
+already exist. Remaining:
+
+- create saga with DB intent and outbox;
+- failure injection for every create midway point.
 
 Exit criteria:
 
@@ -1402,18 +942,12 @@ Exit criteria:
 - DB only stores refs and metadata;
 - failure injection covers every create midway point.
 
-### Milestone 4: Runtime Delivery
+### Milestone 4: Runtime Delivery (Remaining)
 
-- runtime projection;
-- gateway cache;
-- cache invalidation;
-- revocation semantics.
+Projection, cache, invalidation, and fail-closed revocation exist. Remaining:
 
-Exit criteria:
-
-- gateway resolves active refs only;
-- revoked credentials fail closed;
-- gateway does not call OpenBao on every request.
+- cache TTL and jitter;
+- revocation latency measured against a target.
 
 ### Milestone 5: Product UI
 
