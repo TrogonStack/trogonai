@@ -665,9 +665,11 @@ Rules:
 - client-generated key pairs only; the platform never holds private keys;
 - Ed25519 default, ES256 accepted (ADR#0046);
 - DB stores public key and fingerprint;
-- signed token binds method, host, path, time, and nonce;
-- replay cache and bounded clock-skew tolerance on the platform side;
-- root/management keyspaces are signed-only.
+- single-use tokens with full binding per ADR#0047: transport-mapped
+  target (HTTP method/host/path or NATS subject), payload digest, iat/exp
+  within a 2 minute ceiling, jti replay store, server-nonce escalation;
+- verification fails closed when the replay store is unavailable;
+- root/management keyspaces are signed-only and demand server nonces.
 
 ### Bearer Keys
 
