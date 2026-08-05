@@ -77,6 +77,19 @@ it to the runtime, and reconciling them is its own decision.
 - [ModelAccessGrant](./modelaccessgrant)
 - [Model access service](./model-access-service)
 
+## Channels and conversations
+
+How a human on a messaging platform reaches an agent. The full narrative lives in
+[Multi-Channel Agent Routing](../architecture/multi-channel-agent-routing.md);
+these entries are the quick reference. Telegram is the only channel implemented
+today, and the vocabulary is deliberately channel-neutral ahead of the second.
+
+- [Channel](./channel)
+- [Endpoint](./endpoint)
+- [Principal](./principal)
+- [Conversation](./conversation)
+- [Binding](./binding)
+
 ## Messaging and storage infrastructure
 
 - [NATS](./nats)

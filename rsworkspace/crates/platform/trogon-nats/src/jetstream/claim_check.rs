@@ -12,7 +12,8 @@ use crate::constants::{
     PROTOCOL_OVERHEAD,
 };
 
-use super::object_store::{ObjectStoreGet, ObjectStorePut};
+use super::claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
+use super::object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 use super::publish::PublishOutcome;
 use super::traits::JetStreamPublisher;
 
@@ -73,21 +74,100 @@ pub async fn resolve_claim<S: ObjectStoreGet>(
     Ok(Bytes::from(buf))
 }
 
+/// The consumer half of a claim check: an object store bound to the bucket the
+/// publisher was configured to write.
+///
+/// [`resolve_claim`] takes an already-bound store and cannot tell whether it is
+/// the right one, so a consumer pointed at the wrong bucket reports every claim
+/// as a missing object. Checking the [`HEADER_CLAIM_BUCKET`] the publisher
+/// already sends turns that misconfiguration into its own error, which is only
+/// worth anything if the name checked against is the name actually opened:
+/// hence a [`ClaimBucketBinding`] rather than a store and a name.
+#[derive(Debug, Clone)]
+pub struct ClaimResolver<S> {
+    store: S,
+    bucket: ClaimBucket,
+}
+
+impl<S: ObjectStoreGet> ClaimResolver<S> {
+    pub fn new(binding: ClaimBucketBinding<S>) -> Self {
+        let (store, bucket) = binding.into_parts();
+        Self { store, bucket }
+    }
+
+    pub fn bucket(&self) -> &ClaimBucket {
+        &self.bucket
+    }
+
+    /// The body a consumer should act on: `payload` itself when the message
+    /// carries one, or the stored object when the payload was offloaded.
+    /// Headers are optional because that is how a subscription hands them over,
+    /// and a message without headers is never a claim.
+    pub async fn resolve(
+        &self,
+        headers: Option<&HeaderMap>,
+        payload: Bytes,
+    ) -> Result<Bytes, ClaimResolveError<S::Error>> {
+        let Some(headers) = headers else {
+            return Ok(payload);
+        };
+        if !is_claim(headers) {
+            return Ok(payload);
+        }
+        if let Some(header) = headers.get(HEADER_CLAIM_BUCKET) {
+            let header = ClaimBucketHeader::new(header.as_str());
+            let named = match header.parse() {
+                Ok(named) => named,
+                Err(source) => return Err(ClaimResolveError::UnnamableBucket { named: header, source }),
+            };
+            if named != self.bucket {
+                return Err(ClaimResolveError::BucketMismatch {
+                    expected: self.bucket.clone(),
+                    named,
+                });
+            }
+        }
+        resolve_claim(headers, payload, &self.store).await
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClaimResolveError<E> {
     #[error("claim message missing {} header", HEADER_CLAIM_KEY)]
     MissingKey,
+    /// A claim written to a bucket this consumer does not read: both names are
+    /// bucket names, they are simply not the same one.
+    #[error("claim names bucket {named} but this consumer reads {expected}")]
+    BucketMismatch { expected: ClaimBucket, named: ClaimBucket },
+    /// The header carried a value that is not a legal bucket name, so there is
+    /// nothing to compare against the bucket this consumer opened. Kept apart from a
+    /// mismatch because it says something different: a publisher naming a real
+    /// but foreign bucket is a deployment pointed the wrong way, whereas a name
+    /// no NATS server would accept is a corrupted or forged header.
+    #[error("claim names {named:?}, which is not a bucket name: {source}")]
+    UnnamableBucket {
+        named: ClaimBucketHeader,
+        #[source]
+        source: ClaimBucketError,
+    },
     #[error("failed to resolve claim from object store: {0}")]
     StoreFailed(#[source] E),
     #[error("failed to read claim payload: {0}")]
     ReadFailed(#[from] std::io::Error),
 }
 
+/// The producing half of a claim check: a store to offload oversized bodies
+/// into, and the bucket name every claim it publishes carries.
+///
+/// The two arrive as a [`ClaimBucketBinding`] for the same reason the consumer
+/// takes one. Here the name is not checked but asserted, so a store and a name
+/// passed separately could put the body in one bucket and send consumers to
+/// another, which no test of either half on its own would catch.
 #[derive(Clone)]
 pub struct ClaimCheckPublisher<P, S> {
     publisher: P,
     store: S,
-    bucket_name: String,
+    bucket: ClaimBucket,
     max_payload: Arc<dyn MaxPayloadLimit>,
 }
 
@@ -96,17 +176,18 @@ impl<P: fmt::Debug, S: fmt::Debug> fmt::Debug for ClaimCheckPublisher<P, S> {
         f.debug_struct("ClaimCheckPublisher")
             .field("publisher", &self.publisher)
             .field("store", &self.store)
-            .field("bucket_name", &self.bucket_name)
+            .field("bucket", &self.bucket)
             .finish_non_exhaustive()
     }
 }
 
 impl<P, S> ClaimCheckPublisher<P, S> {
-    pub fn new<M: MaxPayloadLimit>(publisher: P, store: S, bucket_name: String, max_payload: M) -> Self {
+    pub fn new<M: MaxPayloadLimit>(publisher: P, binding: ClaimBucketBinding<S>, max_payload: M) -> Self {
+        let (store, bucket) = binding.into_parts();
         Self {
             publisher,
             store,
-            bucket_name,
+            bucket,
             max_payload: Arc::new(max_payload),
         }
     }
@@ -189,7 +270,7 @@ impl<P: JetStreamPublisher, S: ObjectStorePut> ClaimCheckPublisher<P, S> {
 
         let mut claim_headers = headers;
         claim_headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
-        claim_headers.insert(HEADER_CLAIM_BUCKET, self.bucket_name.as_str());
+        claim_headers.insert(HEADER_CLAIM_BUCKET, self.bucket.as_str());
         claim_headers.insert(HEADER_CLAIM_KEY, key.as_str());
 
         super::publish::publish_event(&self.publisher, subject, claim_headers, Bytes::new(), ack_timeout).await

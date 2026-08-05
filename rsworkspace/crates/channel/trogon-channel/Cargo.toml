@@ -1,0 +1,23 @@
+[package]
+name = "trogon-channel"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+trogon-nats = { workspace = true }
+trogon-std = { workspace = true, features = ["uuid"] }
+
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+uuid = { workspace = true }

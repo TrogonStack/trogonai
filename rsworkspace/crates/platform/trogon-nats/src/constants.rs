@@ -20,6 +20,11 @@ pub const HEADER_CLAIM_CHECK: &str = "Trogon-Claim-Check";
 pub const HEADER_CLAIM_BUCKET: &str = "Trogon-Claim-Bucket";
 pub const HEADER_CLAIM_KEY: &str = "Trogon-Claim-Key";
 
+/// Bucket a claim check writes to and reads from when nothing overrides it.
+/// Whoever publishes and whoever consumes must name the same bucket, so the
+/// default belongs to the protocol rather than to either side of it.
+pub const DEFAULT_CLAIM_BUCKET: &str = "trogon-claims";
+
 pub(crate) const CLAIM_CHECK_VERSION: &str = "v1";
 pub(crate) const PROTOCOL_OVERHEAD: usize = 8 * 1024;
 pub(crate) const CLAIM_HEADER_PREFIX: &str = "Trogon-Claim-";

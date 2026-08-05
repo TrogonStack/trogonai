@@ -1,9 +1,11 @@
+pub mod claim_bucket;
 pub mod claim_check;
 pub mod claim_retention;
 #[cfg(not(coverage))]
 pub mod client;
 pub mod create_conflicts;
 pub mod message;
+pub mod not_found;
 pub mod object_store;
 pub mod publish;
 pub mod stream_max_age;
@@ -12,19 +14,23 @@ pub mod traits;
 #[cfg(any(test, feature = "test-support"))]
 pub mod mocks;
 
-pub use crate::constants::{HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY};
-pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, MaxPayload, is_claim, resolve_claim};
+pub use crate::constants::{DEFAULT_CLAIM_BUCKET, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY};
+pub use claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
+pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, ClaimResolver, MaxPayload, is_claim, resolve_claim};
 pub use claim_retention::ClaimRetention;
 #[cfg(not(coverage))]
 pub use client::{
     ConsumerError, GetStreamError, MessagesError, NatsJetStreamClient, NatsJetStreamConsumer, PublishAckFuture,
     PublishError, StreamError,
 };
-pub use create_conflicts::{is_create_key_value_already_exists, is_create_stream_already_exists};
+pub use create_conflicts::{
+    is_create_key_already_exists, is_create_key_value_already_exists, is_create_stream_already_exists,
+};
 pub use message::{JsAck, JsAckWith, JsDispatchMessage, JsDoubleAck, JsDoubleAckWith, JsMessageRef, JsRequestMessage};
+pub use not_found::{is_get_key_value_not_found, is_get_stream_not_found};
 #[cfg(not(coverage))]
 pub use object_store::NatsObjectStore;
-pub use object_store::{ObjectStoreGet, ObjectStorePut};
+pub use object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
 pub use traits::{

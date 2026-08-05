@@ -47,6 +47,8 @@ trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
+trogon-channel = { path = "crates/channel/trogon-channel" }
+channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
@@ -101,6 +103,9 @@ tower-http = { version = "=0.7.0", features = ["trace"] }
 
 # Database
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
+
+# Telegram
+teloxide = { version = "=0.14.1", default-features = false, features = ["macros", "webhooks-axum", "rustls"] }
 
 # Serialization
 confique = { version = "=0.4.0", features = ["toml"] }

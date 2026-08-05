@@ -6,6 +6,7 @@ use axum::http::{Request, StatusCode};
 use hmac::{KeyInit, Mac};
 use std::io::Write;
 use tower::ServiceExt;
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
 
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
@@ -13,8 +14,7 @@ type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
         publisher,
-        MockObjectStore::new(),
-        "test-bucket".to_string(),
+        ClaimBucketBinding::for_test(MockObjectStore::new(), ClaimBucket::default()),
         MaxPayload::from_server_limit(usize::MAX),
     )
 }

@@ -24,9 +24,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 
 #[cfg(not(coverage))]
-use crate::constants::{
-    CLAIM_CHECK_BUCKET, CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL,
-};
+use crate::constants::{CLAIM_CHECK_TTL_GRACE, NATS_CONNECT_TIMEOUT, NATS_SERVER_INFO_POLL_INTERVAL};
 #[cfg(not(coverage))]
 use anyhow::Context;
 #[cfg(not(coverage))]
@@ -34,7 +32,9 @@ use tokio::task::JoinSet;
 #[cfg(not(coverage))]
 use tracing::{error, info};
 #[cfg(not(coverage))]
-use trogon_nats::jetstream::{ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore};
+use trogon_nats::jetstream::{
+    ClaimBucket, ClaimCheckPublisher, ClaimRetention, MaxPayload, NatsJetStreamClient, NatsObjectStore,
+};
 #[cfg(not(coverage))]
 use trogon_nats::{connect, wait_for_server_info};
 #[cfg(not(coverage))]
@@ -98,8 +98,8 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
         .max_stream_max_age()
         .map(|stream_max_age| ClaimRetention::tracking(stream_max_age, CLAIM_CHECK_TTL_GRACE))
         .unwrap_or(ClaimRetention::EventSourced);
-    let object_store =
-        NatsObjectStore::provision_claim_bucket(&js_context, CLAIM_CHECK_BUCKET, claim_retention).await?;
+    let claim_binding =
+        NatsObjectStore::provision_claim_bucket(&js_context, ClaimBucket::default(), claim_retention).await?;
     let client = NatsJetStreamClient::new(js_context);
 
     streams::provision(&client, &resolved).await?;
@@ -138,12 +138,7 @@ async fn serve(resolved: config::ResolvedConfig) -> anyhow::Result<()> {
     let port = resolved.http_server.port;
     let mut join_set: JoinSet<SourceResult> = JoinSet::new();
 
-    let publisher = ClaimCheckPublisher::new(
-        client.clone(),
-        object_store.clone(),
-        CLAIM_CHECK_BUCKET.to_string(),
-        nats.clone(),
-    );
+    let publisher = ClaimCheckPublisher::new(client.clone(), claim_binding, nats.clone());
 
     {
         if let Some(ref cfg) = resolved.discord {

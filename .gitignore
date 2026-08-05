@@ -26,6 +26,8 @@ docs/.vitepress/cache
 mise.local.toml
 
 # Docker
+compose.override.yml
+compose.override.yaml
 docker-compose.override.yml
 
 # IDE
@@ -33,10 +35,14 @@ docker-compose.override.yml
 .vscode/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
 
 # trogonai internal
 .trogonai/
@@ -49,6 +55,9 @@ coverage.xml
 coverage-*.xml
 *.profraw
 *.profdata
+
+# NATS
+*.creds
 
 # Misc
 tmp

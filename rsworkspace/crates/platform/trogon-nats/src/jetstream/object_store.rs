@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use tokio::io::AsyncRead;
 
+use super::claim_bucket::ClaimBucket;
+
 #[cfg(not(coverage))]
 use async_nats::jetstream::context::CreateKeyValueErrorKind;
 
@@ -31,6 +33,33 @@ fn widened_max_age(current: Duration, desired: Duration) -> Option<Duration> {
         Some(desired)
     } else {
         None
+    }
+}
+
+/// An object-store handle together with the claim bucket it was opened on.
+///
+/// A handle cannot be asked which bucket it reads, so the two have to travel as
+/// one. Outside tests the only way to get a binding is to open the bucket, which
+/// is what stops a consumer from validating one bucket while reading another.
+pub struct ClaimBucketBinding<S> {
+    store: S,
+    bucket: ClaimBucket,
+}
+
+impl<S> ClaimBucketBinding<S> {
+    pub fn bucket(&self) -> &ClaimBucket {
+        &self.bucket
+    }
+
+    pub(crate) fn into_parts(self) -> (S, ClaimBucket) {
+        (self.store, self.bucket)
+    }
+
+    /// Pair a store with a bucket name directly, for tests that redeem claims
+    /// from a fake store and so have no bucket to open.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_test(store: S, bucket: ClaimBucket) -> Self {
+        Self { store, bucket }
     }
 }
 
@@ -91,6 +120,28 @@ impl NatsObjectStore {
         }
     }
 
+    /// Open an existing claim bucket without creating it or touching its
+    /// retention. A consumer redeeming claims reads a bucket whose lifecycle
+    /// belongs to the publisher that fills it, so creating one here would only
+    /// hide the fact that the publisher never ran.
+    ///
+    /// The bucket comes back bound to the handle, because the name is what a
+    /// consumer checks incoming claims against and a handle it does not match is
+    /// worse than no handle at all.
+    pub async fn bind_claim_bucket(
+        js: &async_nats::jetstream::Context,
+        bucket: ClaimBucket,
+    ) -> Result<ClaimBucketBinding<Self>, ProvisionObjectStoreError> {
+        let store = js
+            .get_object_store(bucket.as_str())
+            .await
+            .map_err(ProvisionObjectStoreError::Get)?;
+        Ok(ClaimBucketBinding {
+            store: Self { store },
+            bucket,
+        })
+    }
+
     /// Provision a bucket that backs claim-check payloads, sizing its `max_age`
     /// from [`ClaimRetention`] so the object always outlives the messages that
     /// reference it. Callers cannot forget the retention or let it drift from
@@ -103,24 +154,26 @@ impl NatsObjectStore {
     /// shrinks the bucket: source streams do not shrink their own retention, so
     /// a lowered config must not expire claims that older, still-deliverable
     /// messages reference.
+    ///
+    /// The bucket comes back bound to the handle, so a publisher stamps claims
+    /// with the bucket it actually wrote them to.
     pub async fn provision_claim_bucket(
         js: &async_nats::jetstream::Context,
-        bucket: impl Into<String>,
+        bucket: ClaimBucket,
         retention: super::claim_retention::ClaimRetention,
-    ) -> Result<Self, ProvisionObjectStoreError> {
-        let bucket = bucket.into();
+    ) -> Result<ClaimBucketBinding<Self>, ProvisionObjectStoreError> {
         let max_age = retention.bucket_max_age();
         let store = Self::provision(
             js,
             async_nats::jetstream::object_store::Config {
-                bucket: bucket.clone(),
+                bucket: bucket.as_str().to_string(),
                 max_age,
                 ..Default::default()
             },
         )
         .await?;
-        reconcile_bucket_max_age(js, &bucket, max_age).await?;
-        Ok(store)
+        reconcile_bucket_max_age(js, bucket.as_str(), max_age).await?;
+        Ok(ClaimBucketBinding { store, bucket })
     }
 }
 
