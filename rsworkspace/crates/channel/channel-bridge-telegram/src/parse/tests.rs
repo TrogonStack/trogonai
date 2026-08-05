@@ -1,5 +1,9 @@
 use super::*;
 
+fn account() -> ChannelAccount {
+    ChannelAccount::new("telegram", "mybot").expect("valid account")
+}
+
 /// The bridge parses updates the same way the pipeline does: bytes off the
 /// wire, not a pre-built `serde_json::Value`. `teloxide`'s nested
 /// `flatten`/`untagged` types round-trip through the streaming deserializer
@@ -40,30 +44,20 @@ fn an_edited_message_update_yields_no_inbound_event() {
     }));
 
     let triggers = CommandTriggers::default();
-    assert!(inbound_event(&update, "mybot", &triggers).is_none());
+    assert!(inbound_event(&update, &account(), &triggers).is_none());
 }
 
-/// A chat id is always digits or a leading `-`, so `Endpoint::new` can never
-/// reject the peer token built from one; the only way to reach this arm is a
-/// misconfigured `bot_account`, which is what this pins.
+/// A group chat is numbered negatively, and that minus sign has to survive into
+/// the endpoint: a peer token is what the principal lookup is keyed by, so a
+/// mangled one authorizes nobody.
 #[test]
-fn an_unsafe_bot_account_drops_the_update_instead_of_panicking() {
-    let update = message_update(42, 42, "hello");
+fn a_group_chats_negative_id_reaches_the_endpoint_intact() {
+    let update = message_update(-1_001_234_567_890, 42, "hello");
     let triggers = CommandTriggers::default();
-    assert!(inbound_event(&update, "bad bot", &triggers).is_none());
-}
+    let event = inbound_event(&update, &account(), &triggers).expect("event");
 
-/// An unsafe sender id can no longer reach this function: `PlatformUserId`
-/// refuses to hold one, so the only token left that can spoil the endpoint is
-/// the account the bridge was configured with.
-#[test]
-fn sender_endpoint_returns_none_for_an_unsafe_bot_account() {
-    let sender = Sender {
-        platform_user_id: PlatformUserId::new("42").expect("valid id"),
-        display_name: "Test".to_string(),
-    };
-    assert!(sender_endpoint("bad bot", &sender).is_none());
-    assert!(sender_endpoint("mybot", &sender).is_some());
+    assert_eq!(event.endpoint.peer(), "-1001234567890");
+    assert_eq!(event.endpoint.kv_key(), "telegram.mybot.-1001234567890");
 }
 
 /// The whole reason `sender_endpoint` exists: a group chat is one endpoint
@@ -73,9 +67,9 @@ fn sender_endpoint_returns_none_for_an_unsafe_bot_account() {
 fn sender_endpoint_peer_is_the_sender_not_the_chat() {
     let update = message_update(999, 42, "hello");
     let triggers = CommandTriggers::default();
-    let event = inbound_event(&update, "mybot", &triggers).expect("event");
+    let event = inbound_event(&update, &account(), &triggers).expect("event");
 
-    let endpoint = sender_endpoint("mybot", &event.sender).expect("endpoint");
+    let endpoint = sender_endpoint(&account(), &event.sender);
     assert_eq!(endpoint.peer(), "42");
     assert_ne!(endpoint.peer(), event.endpoint.peer());
 }

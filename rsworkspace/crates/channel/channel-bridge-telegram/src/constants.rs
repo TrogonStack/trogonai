@@ -1,3 +1,8 @@
+/// The channel token of every endpoint this bridge builds. It is the first
+/// component of a KV key other channels' bridges write beside, so it names the
+/// platform and nothing about this process.
+pub const CHANNEL: &str = "telegram";
+
 /// Durable consumer identity on the inbound stream. JetStream keys the ack
 /// floor by this string, so it is deployment state rather than a build
 /// artifact name: a literal here means a future crate rename cannot silently

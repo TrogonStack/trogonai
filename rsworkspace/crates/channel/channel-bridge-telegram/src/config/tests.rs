@@ -85,8 +85,8 @@ fn blank_optional_variables_fall_back_to_their_defaults() {
     let config = BridgeConfig::from_env(&env).expect("config");
     assert_eq!(config.channel_prefix, "prod");
     assert_eq!(config.inbound_stream, "TELEGRAM");
-    assert_eq!(config.bot_account, "bot");
-    assert_eq!(config.agent_id, "default");
+    assert_eq!(config.account.account(), "bot");
+    assert_eq!(config.agent_id.as_str(), "default");
     assert_eq!(config.agent_cwd, std::env::temp_dir());
     assert!(config.seed_users.is_empty());
 }
@@ -134,9 +134,8 @@ fn a_seed_list_with_an_unparseable_id_fails_and_names_it() {
     );
 }
 
-/// The trigger list and the ACP prefix are the other two values a deployment can
-/// get wrong, and each has to be refused as itself: an operator reading a boot
-/// failure is being told which variable to go and edit.
+/// Every value a deployment can get wrong has to be refused as itself: an
+/// operator reading a boot failure is being told which variable to go and edit.
 #[test]
 fn each_unusable_value_is_refused_as_the_variable_it_came_from() {
     let env = InMemoryEnv::new();
@@ -156,6 +155,41 @@ fn each_unusable_value_is_refused_as_the_variable_it_came_from() {
     ));
 }
 
+/// The account and the agent id become endpoint tokens, and both are values a
+/// person plausibly mistypes: Telegram displays the account as `@mybot`, and a
+/// dotted name reads like a hostname. Neither may be discovered later. An
+/// account that is not a token can name no endpoint, so the bridge would read
+/// every update, find no principal, ack it, and answer nobody; an agent id that
+/// is not a token would fail on the first message of every conversation.
+#[test]
+fn an_account_or_agent_id_that_cannot_be_a_token_stops_the_boot() {
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set("TELEGRAM_BOT_ACCOUNT", "@mybot");
+    let error = rejection(&env);
+    assert!(
+        matches!(
+            error,
+            BridgeConfigError::BotAccount(EndpointError::InvalidCharacter('@'))
+        ),
+        "the account must be refused as the account: {error}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "TELEGRAM_BOT_ACCOUNT is not usable as the account half of an endpoint"
+    );
+
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set("CHANNEL_AGENT_ID", "my.agent");
+    let error = rejection(&env);
+    assert!(
+        matches!(error, BridgeConfigError::AgentId(EndpointError::InvalidCharacter('.'))),
+        "the agent id must be refused as the agent id: {error}"
+    );
+    assert_eq!(error.to_string(), "CHANNEL_AGENT_ID is not a usable agent id");
+}
+
 #[test]
 fn set_variables_are_read_and_trimmed() {
     let env = InMemoryEnv::new();
@@ -170,8 +204,8 @@ fn set_variables_are_read_and_trimmed() {
     let config = BridgeConfig::from_env(&env).expect("config");
     assert_eq!(config.channel_prefix, "staging");
     assert_eq!(config.inbound_stream, "TG");
-    assert_eq!(config.bot_account, "mybot");
-    assert_eq!(config.agent_id, "coder");
+    assert_eq!(config.account.account(), "mybot");
+    assert_eq!(config.agent_id.as_str(), "coder");
     assert_eq!(config.agent_cwd, PathBuf::from("/workspace"));
     assert_eq!(config.seed_users, vec![42, 43]);
 }

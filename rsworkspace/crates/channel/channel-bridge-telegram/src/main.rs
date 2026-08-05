@@ -43,7 +43,7 @@ use {
     teloxide::Bot,
     tracing::{error, info, warn},
     trogon_channel::store::PrincipalRecord,
-    trogon_channel::{ChannelStore, Endpoint, PrincipalId},
+    trogon_channel::{ChannelStore, PrincipalId, SafeToken},
     trogon_nats::jetstream::{ClaimResolver, NatsObjectStore},
     trogon_std::UuidV7Generator,
     trogon_std::env::SystemEnv,
@@ -129,8 +129,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(not(coverage))]
 async fn seed_principals(store: &ChannelStore, config: &BridgeConfig) -> anyhow::Result<()> {
     for user in &config.seed_users {
-        let principal = PrincipalId::new(format!("telegram-{user}"))?;
-        let endpoint = Endpoint::new("telegram", &config.bot_account, user.to_string())?;
+        let principal = PrincipalId::new(format!("{}-{user}", constants::CHANNEL))?;
+        let endpoint = config.account.endpoint_for(&SafeToken::from(*user));
         store
             .link_endpoint(&principal, &PrincipalRecord { display_name: None }, &endpoint)
             .await?;
@@ -195,7 +195,7 @@ async fn run(
         renderer: renderer.as_ref(),
         outbound: &telegram,
         claims: &claims,
-        bot_account: &config.bot_account,
+        account: &config.account,
         agent_id: &config.agent_id,
         triggers: &config.command_triggers,
         ids: &UuidV7Generator,

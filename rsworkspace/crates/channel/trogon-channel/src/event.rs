@@ -41,6 +41,13 @@ impl PlatformUserId {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// The id as the endpoint token it already is. Authorizing a sender means
+    /// building its endpoint, and handing that builder the validated token
+    /// rather than a string is what leaves it with no failure to report.
+    pub fn token(&self) -> &SafeToken {
+        &self.0
+    }
 }
 
 /// A platform that numbers its users hands the id over as an integer, and every

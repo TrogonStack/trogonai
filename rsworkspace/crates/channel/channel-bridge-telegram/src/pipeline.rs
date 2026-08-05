@@ -7,8 +7,8 @@ use crate::parse;
 use crate::render::{TelegramRenderClient, chunk_text};
 use tracing::{info, warn};
 use trogon_channel::{
-    AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelStore, ChannelStoreError, Command, CommandTriggers,
-    ConversationId, ConversationRecord, EndpointError, InboundEvent, ReleaseReason,
+    AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelAccount, ChannelStore, ChannelStoreError, Command,
+    CommandTriggers, ConversationId, ConversationRecord, InboundEvent, ReleaseReason,
 };
 use trogon_nats::jetstream::{ClaimResolveError, ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
@@ -19,8 +19,8 @@ pub struct Pipeline<'a, P, O, G, S> {
     pub renderer: &'a TelegramRenderClient,
     pub outbound: &'a O,
     pub claims: &'a ClaimResolver<S>,
-    pub bot_account: &'a str,
-    pub agent_id: &'a str,
+    pub account: &'a ChannelAccount,
+    pub agent_id: &'a AgentId,
     pub triggers: &'a CommandTriggers,
     pub ids: &'a G,
 }
@@ -42,8 +42,6 @@ where
     Store(#[from] ChannelStoreError),
     #[error("telegram peer is not an i64 chat id")]
     PeerNotChatId(#[source] std::num::ParseIntError),
-    #[error(transparent)]
-    AgentId(#[from] EndpointError),
     #[error("failed to create an agent session")]
     CreateSession(#[source] PE),
     #[error("prompt failed on session {session}")]
@@ -90,9 +88,7 @@ where
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
     async fn sender_is_authorized(&self, event: &InboundEvent) -> Result<bool, ChannelStoreError> {
-        let Some(endpoint) = parse::sender_endpoint(self.bot_account, &event.sender) else {
-            return Ok(false);
-        };
+        let endpoint = parse::sender_endpoint(self.account, &event.sender);
         Ok(self.store.principal_for(&endpoint).await?.is_some())
     }
 
@@ -151,7 +147,7 @@ where
             }
         };
 
-        let Some(event) = parse::inbound_event(&update, self.bot_account, self.triggers) else {
+        let Some(event) = parse::inbound_event(&update, self.account, self.triggers) else {
             return ack(msg).await;
         };
 
@@ -174,7 +170,7 @@ where
                 // configured agent. Sticky from here on.
                 let record = ConversationRecord {
                     principal: principal.clone(),
-                    agent_id: AgentId::new(self.agent_id)?,
+                    agent_id: self.agent_id.clone(),
                     current_session: None,
                     created_at: now,
                     last_activity_at: now,

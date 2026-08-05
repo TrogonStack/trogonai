@@ -13,6 +13,12 @@ fn a_platform_user_id_must_be_an_endpoint_token() {
         EndpointError::InvalidCharacter('.')
     );
     assert_eq!(PlatformUserId::new("").unwrap_err(), EndpointError::Empty);
+    // And it hands that token over, so building the sender's endpoint re-checks
+    // nothing.
+    assert_eq!(
+        PlatformUserId::new("42").expect("valid").token(),
+        &SafeToken::new("42").expect("valid")
+    );
 }
 
 /// The point of the type: channel-provided JSON cannot produce an id the

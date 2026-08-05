@@ -87,6 +87,45 @@ impl std::fmt::Display for Endpoint {
     }
 }
 
+/// The half of an endpoint a bridge process is: the channel it speaks for and
+/// the account it speaks as. Both come from the deployment, so both are checked
+/// once here, which leaves [`ChannelAccount::endpoint_for`] with nothing left to
+/// reject.
+///
+/// This exists because the alternative validated them per message, which is the
+/// wrong moment to find out. A bridge configured with an account that is not a
+/// token started, read every update, failed to name an endpoint for any of them,
+/// and acked them all: an operator saw a healthy process answering nobody.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelAccount {
+    channel: SafeToken,
+    account: SafeToken,
+}
+
+impl ChannelAccount {
+    pub fn new(channel: impl Into<String>, account: impl Into<String>) -> Result<Self, EndpointError> {
+        Ok(Self {
+            channel: SafeToken::new(channel)?,
+            account: SafeToken::new(account)?,
+        })
+    }
+
+    /// The account token, for the platform-facing uses that are not endpoints:
+    /// a Telegram command may be addressed as `/new@account`.
+    pub fn account(&self) -> &str {
+        self.account.as_str()
+    }
+
+    /// Where one peer on this account is reached.
+    pub fn endpoint_for(&self, peer: &SafeToken) -> Endpoint {
+        Endpoint {
+            channel: self.channel.clone(),
+            account: self.account.clone(),
+            peer: peer.clone(),
+        }
+    }
+}
+
 /// The human behind one or more endpoints. Cross-channel by design: linking a
 /// Telegram user and a Discord user to the same principal is what lets one
 /// conversation continue across channels.

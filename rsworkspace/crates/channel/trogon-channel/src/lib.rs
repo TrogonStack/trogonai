@@ -34,7 +34,7 @@ pub use command::{Command, CommandTriggers, ParsedText};
 pub use command_trigger::{CommandTrigger, CommandTriggerError};
 pub use command_trigger_input::CommandTriggerInput;
 pub use conversation::{AgentId, ConversationId, ConversationRecord};
-pub use endpoint::{Endpoint, EndpointError, PrincipalId};
+pub use endpoint::{ChannelAccount, Endpoint, EndpointError, PrincipalId};
 pub use event::{
     Attachment, AttachmentKind, EventFieldError, InboundEvent, MediaTypeError, MessageRef, MimeType, PlatformRef,
     PlatformUserId, Sender,

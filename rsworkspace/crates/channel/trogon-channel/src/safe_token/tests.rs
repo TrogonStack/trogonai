@@ -27,6 +27,14 @@ fn a_numeric_id_is_a_token_without_being_checked() {
         SafeToken::from(42_u64),
         SafeToken::new("42").expect("the checked path agrees")
     );
+    // A Telegram group chat is numbered negatively, which is the reason the
+    // signed conversion exists at all.
+    assert_eq!(SafeToken::from(-1_001_234_567_890_i64).as_str(), "-1001234567890");
+    assert_eq!(SafeToken::from(i64::MIN).as_str(), i64::MIN.to_string());
+    assert_eq!(
+        SafeToken::from(-42_i64),
+        SafeToken::new("-42").expect("the checked path agrees")
+    );
 }
 
 #[test]

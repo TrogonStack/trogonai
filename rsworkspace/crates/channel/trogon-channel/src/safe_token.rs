@@ -52,6 +52,15 @@ impl From<u64> for SafeToken {
     }
 }
 
+/// Some of that numbering is signed: a Telegram group chat id is negative, and
+/// `-` is in the allowed set, so a signed integer is a token for the same reason
+/// an unsigned one is.
+impl From<i64> for SafeToken {
+    fn from(value: i64) -> Self {
+        Self(value.to_string())
+    }
+}
+
 impl std::fmt::Display for SafeToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)

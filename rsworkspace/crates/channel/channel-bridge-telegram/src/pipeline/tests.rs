@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
-    AgentPortError, AgentSessionId, Endpoint, InboundEvent, MessageRef, PlatformUserId, PrincipalId, PromptOutcome,
-    ReleaseReason, ReleaseStep, Sender, SessionRelease,
+    AgentPortError, AgentSessionId, ChannelAccount, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseReason,
+    ReleaseStep, SessionRelease,
 };
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, MockObjectStore};
 use trogon_nats::test_support::JetStreamTestServer;
@@ -20,6 +20,16 @@ use trogon_std::UuidV7Generator;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
 };
+
+/// What the bridge is configured as, in the form the config hands over: checked
+/// once, so nothing downstream can be handed an account that is not a token.
+fn bridge_account() -> ChannelAccount {
+    ChannelAccount::new("telegram", "mybot").expect("valid account")
+}
+
+fn configured_agent() -> AgentId {
+    AgentId::new("default").expect("valid agent id")
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake agent failure (session_lost={session_lost})")]
@@ -363,6 +373,8 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
@@ -370,8 +382,8 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -504,14 +516,16 @@ async fn pipeline_redeems_a_claim_checked_update() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let pipeline = Pipeline {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -597,14 +611,16 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let pipeline = Pipeline {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -674,6 +690,8 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
@@ -681,8 +699,8 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -841,6 +859,8 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
@@ -848,8 +868,8 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -963,6 +983,8 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
@@ -970,8 +992,8 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };
@@ -1006,34 +1028,6 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
     // The refused command left the group's conversation intact: the sender was
     // not authorized for the command, which says nothing about the chat.
     assert!(store.conversation_for(&group).await.expect("kv read").is_some());
-
-    // A bot account that is not an endpoint token can build no sender endpoint
-    // at all, so it authorizes nobody rather than authorizing everybody. Only
-    // reachable by calling in directly: `parse::inbound_event` rejects the same
-    // account earlier, so no update can carry a message this far.
-    let misconfigured = Pipeline {
-        bot_account: "my bot",
-        ..pipeline
-    };
-    let event = InboundEvent {
-        endpoint: endpoint.clone(),
-        sender: Sender {
-            platform_user_id: PlatformUserId::new("42").expect("id"),
-            display_name: "Test".to_string(),
-        },
-        text: None,
-        command: Some(Command::NewSession),
-        attachments: Vec::new(),
-        message_ref: MessageRef::new("1").expect("message ref"),
-        occurred_at: 1_700_000_000,
-    };
-    assert!(
-        !misconfigured
-            .sender_is_authorized(&event)
-            .await
-            .expect("the store is readable; only the endpoint cannot be built"),
-        "a sender whose endpoint cannot be built must not be authorized"
-    );
 
     let info = settled_consumer_info(&stream, "bridge-test", 0).await;
     assert_eq!(info.num_ack_pending, 0);
@@ -1091,6 +1085,8 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
     let claims = unclaimed_resolver();
     let pipeline = Pipeline {
         store: &store,
@@ -1098,8 +1094,8 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
         renderer: renderer.as_ref(),
         outbound: &outbound,
         claims: &claims,
-        bot_account: "mybot",
-        agent_id: "default",
+        account: &account,
+        agent_id: &agent_id,
         triggers: &triggers,
         ids: &UuidV7Generator,
     };

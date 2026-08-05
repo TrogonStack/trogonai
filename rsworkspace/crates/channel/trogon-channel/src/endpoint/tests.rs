@@ -47,6 +47,37 @@ fn endpoint_deserialize_rejects_an_unsafe_token() {
     assert_eq!(err.classify(), serde_json::error::Category::Data, "{err}");
 }
 
+/// The point of the type: the account is checked once, and every endpoint built
+/// afterwards is built without a failure case to handle.
+#[test]
+fn a_channel_account_builds_the_endpoint_of_any_peer() {
+    let account = ChannelAccount::new("telegram", "mybot").expect("valid");
+    assert_eq!(account.account(), "mybot");
+    assert_eq!(
+        account.endpoint_for(&SafeToken::from(-1_001_234_567_890_i64)),
+        Endpoint::new("telegram", "mybot", "-1001234567890").expect("valid")
+    );
+    assert_eq!(
+        account.endpoint_for(&SafeToken::from(42_u64)).kv_key(),
+        "telegram.mybot.42"
+    );
+}
+
+/// A bridge reads these from its environment, so the rejection has to happen at
+/// construction; that is the whole reason the type exists.
+#[test]
+fn a_channel_account_refuses_a_token_no_endpoint_could_carry() {
+    assert_eq!(
+        ChannelAccount::new("telegram", "my bot").unwrap_err(),
+        EndpointError::InvalidCharacter(' ')
+    );
+    assert_eq!(ChannelAccount::new("telegram", "").unwrap_err(), EndpointError::Empty);
+    assert_eq!(
+        ChannelAccount::new("tele.gram", "mybot").unwrap_err(),
+        EndpointError::InvalidCharacter('.')
+    );
+}
+
 #[test]
 fn principal_id_rejects_an_empty_id() {
     let err = PrincipalId::new("").unwrap_err();
