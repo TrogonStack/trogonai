@@ -196,11 +196,11 @@ They should not receive arbitrary OpenBao paths from callers.
 
 ## Phase 0: Finalize Buildable Specs
 
-Nothing in this phase has been produced yet. The source material lives in
-`SECRET_STORE.md` and `API_KEY.md`, both of which still carry their own open
-question lists.
-
-### Deliverables
+All six deliverables are drafted as sections of
+`CREDENTIAL_PLATFORM_SPEC.md`, grounded against the shipped gateway code and
+carrying every open question inline as a DECISION NEEDED block with a
+recommendation. The phase completes when those decisions are ratified and
+the sections split into their own files:
 
 - `CREDENTIAL_LIFECYCLE.md`
 - `API_CONTRACTS.md`
@@ -208,9 +208,6 @@ question lists.
 - `OPENBAO_OPERATIONS.md`
 - `RUNTIME_PROJECTION.md`
 - `UI_ACCEPTANCE.md`
-
-These can begin as sections in one file, but they should become separate files
-before implementation grows.
 
 ### Required Decisions
 
@@ -935,10 +932,11 @@ Exit criteria:
 
 ### Milestone 4: Runtime Delivery (Remaining)
 
-Projection, cache with TTL and jitter, invalidation, and fail-closed
-revocation exist. Remaining:
+Projection, cache with TTL and jitter, invalidation, fail-closed
+revocation, and the revocation-to-invalidation latency measurement
+(`gateway.credential.revocation.latency`) exist. Remaining:
 
-- revocation latency measured against a target.
+- ratify the latency target and alert on the measurement.
 
 ### Milestone 5: Product UI
 
