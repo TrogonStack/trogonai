@@ -139,8 +139,8 @@ pub enum ClaimResolveError<E> {
     /// bucket names, they are simply not the same one.
     #[error("claim names bucket {named} but this consumer reads {expected}")]
     BucketMismatch { expected: ClaimBucket, named: ClaimBucket },
-    /// The header did not carry a bucket name at all, so there is nothing to
-    /// compare against the bucket this consumer opened. Kept apart from a
+    /// The header carried a value that is not a legal bucket name, so there is
+    /// nothing to compare against the bucket this consumer opened. Kept apart from a
     /// mismatch because it says something different: a publisher naming a real
     /// but foreign bucket is a deployment pointed the wrong way, whereas a name
     /// no NATS server would accept is a corrupted or forged header.
