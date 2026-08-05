@@ -2287,20 +2287,24 @@ mise exec -- git diff --check
 ```
 
 The event-sourcing slice now owns protobuf contracts under
-`proto/trogonai/gateway/credentials/v1`:
+`proto/trogonai/gateway/credentials`, split by storage layer:
 
-- `commands.proto` defines the create, rotate, revoke request payloads and the
-  metadata-only command response shape.
-- `events.proto` defines the credential lifecycle event payloads used by the
-  event store.
-- `idempotency.proto` defines the NATS KV idempotency record used for safe
-  retries.
-- `projection.proto` defines the NATS KV runtime projection checkpoint used to
-  avoid full startup replay after the first successful refresh.
-- `state.proto` defines metadata-only credential lifecycle state snapshots used
-  by command execution replay.
-- `types.proto` defines shared credential refs, source kinds, credential kinds,
-  statuses, and storage backends.
+- `commands/v1/commands.proto` defines the create, rotate, revoke request
+  payloads and the metadata-only command response shape.
+- `v1/events.proto` defines the credential lifecycle event payloads used by
+  the event store, with one file per event payload alongside it.
+- `idempotency/v1/idempotency.proto` defines the NATS KV idempotency record
+  used for safe retries.
+- `checkpoints/v1/projection.proto` defines the NATS KV runtime projection
+  checkpoint used to avoid full startup replay after the first successful
+  refresh, and `checkpoints/v1/worker.proto` defines the recovery worker
+  checkpoint.
+- `state/v1/state.proto` defines metadata-only credential lifecycle state
+  snapshots used by command execution replay.
+- `credential_ref.proto` and `credential_metadata.proto` define credential
+  refs, source kinds, credential kinds, statuses, and storage backends; each
+  storage layer keeps its own copy (`v1/` for events, `state/v1/` for
+  snapshots) so layer contracts stay independent.
 
 The HTTP management API still accepts and returns the existing snake_case JSON
 adapter shape. That preserves current route behavior while the protobuf package
