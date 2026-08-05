@@ -3,6 +3,9 @@
 include!("trogonai.gateway.credentials.v1.credential_ref.rs");
 include!("trogonai.gateway.credentials.v1.credential_metadata.rs");
 include!("trogonai.gateway.credentials.v1.credential_activated.rs");
+include!("trogonai.gateway.credentials.v1.credential_destroy_failed.rs");
+include!("trogonai.gateway.credentials.v1.credential_destroy_requested.rs");
+include!("trogonai.gateway.credentials.v1.credential_destroyed.rs");
 include!("trogonai.gateway.credentials.v1.credential_revoked.rs");
 include!("trogonai.gateway.credentials.v1.credential_rotated.rs");
 include!("trogonai.gateway.credentials.v1.credential_rotation_failed.rs");
@@ -30,6 +33,11 @@ pub mod __buffa {
         include!("trogonai.gateway.credentials.v1.credential_ref.__view.rs");
         include!("trogonai.gateway.credentials.v1.credential_metadata.__view.rs");
         include!("trogonai.gateway.credentials.v1.credential_activated.__view.rs");
+        include!("trogonai.gateway.credentials.v1.credential_destroy_failed.__view.rs");
+        include!(
+            "trogonai.gateway.credentials.v1.credential_destroy_requested.__view.rs"
+        );
+        include!("trogonai.gateway.credentials.v1.credential_destroyed.__view.rs");
         include!("trogonai.gateway.credentials.v1.credential_revoked.__view.rs");
         include!("trogonai.gateway.credentials.v1.credential_rotated.__view.rs");
         include!("trogonai.gateway.credentials.v1.credential_rotation_failed.__view.rs");
@@ -55,6 +63,9 @@ pub mod __buffa {
         reg.register_json_any(super::__CREDENTIAL_REF_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_METADATA_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_ACTIVATED_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_DESTROY_FAILED_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_DESTROY_REQUESTED_JSON_ANY);
+        reg.register_json_any(super::__CREDENTIAL_DESTROYED_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_REVOKED_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_ROTATED_JSON_ANY);
         reg.register_json_any(super::__CREDENTIAL_ROTATION_FAILED_JSON_ANY);
@@ -76,6 +87,18 @@ pub use self::__buffa::view::CredentialMetadataOwnedView;
 pub use self::__buffa::view::CredentialActivatedView;
 #[doc(inline)]
 pub use self::__buffa::view::CredentialActivatedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyFailedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyFailedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyRequestedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyRequestedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyedView;
+#[doc(inline)]
+pub use self::__buffa::view::CredentialDestroyedOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::CredentialRevokedView;
 #[doc(inline)]

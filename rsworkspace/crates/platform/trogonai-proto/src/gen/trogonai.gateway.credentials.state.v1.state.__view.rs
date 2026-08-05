@@ -220,6 +220,99 @@ impl<'a> ::buffa::MessageView<'a> for CredentialStateSnapshotView<'a> {
                     );
                 }
             }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                        ref mut existing,
+                    ),
+                ) = view.state
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.state = Some(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::DestroyRequestedCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                        ref mut existing,
+                    ),
+                ) = view.state
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.state = Some(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::DestroyedCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
+                        ref mut existing,
+                    ),
+                ) = view.state
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.state = Some(
+                        super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::CleanupFailedCredentialStateView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -304,6 +397,33 @@ impl<'a> ::buffa::MessageView<'a> for CredentialStateSnapshotView<'a> {
                                     ),
                                 )
                             }
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_state_snapshot::State::Destroyed(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_state_snapshot::State::CleanupFailed(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
                         },
                     )
                 }
@@ -372,6 +492,36 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialStateSnapshotView<'a> {
                             + inner;
                 }
                 super::super::__buffa::view::oneof::credential_state_snapshot::State::Revoked(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -455,6 +605,36 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialStateSnapshotView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        7u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        8u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        9u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
             }
         }
     }
@@ -508,6 +688,21 @@ impl<'__a> ::serde::Serialize for CredentialStateSnapshotView<'__a> {
                     v,
                 ) => {
                     __map.serialize_entry("revoked", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::DestroyRequested(
+                    v,
+                ) => {
+                    __map.serialize_entry("destroyRequested", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::Destroyed(
+                    v,
+                ) => {
+                    __map.serialize_entry("destroyed", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_state_snapshot::State::CleanupFailed(
+                    v,
+                ) => {
+                    __map.serialize_entry("cleanupFailed", v)?;
                 }
             }
         }
@@ -2422,6 +2617,949 @@ impl ::buffa::HasMessageView for super::super::RevokedCredentialState {
     type ViewHandle = RevokedCredentialStateOwnedView;
 }
 impl ::serde::Serialize for RevokedCredentialStateOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct DestroyRequestedCredentialStateView<'a> {
+    /// Field 1: `credential_ref`
+    pub credential_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialRefView<'a>,
+    >,
+    /// Field 2: `reason`
+    pub reason: &'a str,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> DestroyRequestedCredentialStateView<'a> {
+    /**Whether required field `credential_ref` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_credential_ref(&self) -> bool {
+        self.credential_ref.is_set()
+    }
+    /**Whether required field `reason` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_reason(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for DestroyRequestedCredentialStateView<'a> {
+    type Owned = super::super::DestroyRequestedCredentialState;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.credential_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.credential_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.reason = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::DestroyRequestedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<
+        super::super::DestroyRequestedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::DestroyRequestedCredentialState {
+            credential_ref: match self.credential_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CredentialRef,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            reason: self.reason.to_string(),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for DestroyRequestedCredentialStateView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.reason) as u32;
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for DestroyRequestedCredentialStateView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            if let ::core::option::Option::Some(__v) = self.credential_ref.as_option() {
+                __map.serialize_entry("credentialRef", __v)?;
+            }
+        }
+        {
+            __map.serialize_entry("reason", self.reason)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for DestroyRequestedCredentialStateView<'a> {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "DestroyRequestedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+}
+::buffa::impl_default_view_instance!(DestroyRequestedCredentialStateView);
+::buffa::impl_view_reborrow!(DestroyRequestedCredentialStateView);
+/** Self-contained, `'static` owned view of a `DestroyRequestedCredentialState` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`DestroyRequestedCredentialStateView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`DestroyRequestedCredentialStateView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct DestroyRequestedCredentialStateOwnedView(
+    ::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>>,
+);
+impl DestroyRequestedCredentialStateOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyRequestedCredentialStateOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyRequestedCredentialStateOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::DestroyRequestedCredentialState,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyRequestedCredentialStateOwnedView(
+                ::buffa::OwnedView::from_owned(msg)?,
+            ),
+        )
+    }
+    /// Borrow the full [`DestroyRequestedCredentialStateView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &DestroyRequestedCredentialStateView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::DestroyRequestedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Field 1: `credential_ref`
+    #[must_use]
+    pub fn credential_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+        &self.0.reborrow().credential_ref
+    }
+    /// Field 2: `reason`
+    #[must_use]
+    pub fn reason(&self) -> &'_ str {
+        self.0.reborrow().reason
+    }
+}
+impl ::core::convert::From<
+    ::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>>,
+> for DestroyRequestedCredentialStateOwnedView {
+    fn from(
+        inner: ::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>>,
+    ) -> Self {
+        DestroyRequestedCredentialStateOwnedView(inner)
+    }
+}
+impl ::core::convert::From<DestroyRequestedCredentialStateOwnedView>
+for ::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>> {
+    fn from(wrapper: DestroyRequestedCredentialStateOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<
+    ::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>>,
+> for DestroyRequestedCredentialStateOwnedView {
+    fn as_ref(
+        &self,
+    ) -> &::buffa::OwnedView<DestroyRequestedCredentialStateView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::DestroyRequestedCredentialState {
+    type View<'a> = DestroyRequestedCredentialStateView<'a>;
+    type ViewHandle = DestroyRequestedCredentialStateOwnedView;
+}
+impl ::serde::Serialize for DestroyRequestedCredentialStateOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct DestroyedCredentialStateView<'a> {
+    /// Field 1: `credential_ref`
+    pub credential_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialRefView<'a>,
+    >,
+}
+impl<'a> DestroyedCredentialStateView<'a> {
+    /**Whether required field `credential_ref` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_credential_ref(&self) -> bool {
+        self.credential_ref.is_set()
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for DestroyedCredentialStateView<'a> {
+    type Owned = super::super::DestroyedCredentialState;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.credential_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.credential_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::DestroyedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<
+        super::super::DestroyedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::DestroyedCredentialState {
+            credential_ref: match self.credential_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CredentialRef,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for DestroyedCredentialStateView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for DestroyedCredentialStateView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            if let ::core::option::Option::Some(__v) = self.credential_ref.as_option() {
+                __map.serialize_entry("credentialRef", __v)?;
+            }
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for DestroyedCredentialStateView<'a> {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "DestroyedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+}
+::buffa::impl_default_view_instance!(DestroyedCredentialStateView);
+::buffa::impl_view_reborrow!(DestroyedCredentialStateView);
+/** Self-contained, `'static` owned view of a `DestroyedCredentialState` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`DestroyedCredentialStateView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`DestroyedCredentialStateView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct DestroyedCredentialStateOwnedView(
+    ::buffa::OwnedView<DestroyedCredentialStateView<'static>>,
+);
+impl DestroyedCredentialStateOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyedCredentialStateOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyedCredentialStateOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::DestroyedCredentialState,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            DestroyedCredentialStateOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`DestroyedCredentialStateView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &DestroyedCredentialStateView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::DestroyedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Field 1: `credential_ref`
+    #[must_use]
+    pub fn credential_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+        &self.0.reborrow().credential_ref
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<DestroyedCredentialStateView<'static>>>
+for DestroyedCredentialStateOwnedView {
+    fn from(inner: ::buffa::OwnedView<DestroyedCredentialStateView<'static>>) -> Self {
+        DestroyedCredentialStateOwnedView(inner)
+    }
+}
+impl ::core::convert::From<DestroyedCredentialStateOwnedView>
+for ::buffa::OwnedView<DestroyedCredentialStateView<'static>> {
+    fn from(wrapper: DestroyedCredentialStateOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<::buffa::OwnedView<DestroyedCredentialStateView<'static>>>
+for DestroyedCredentialStateOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<DestroyedCredentialStateView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::DestroyedCredentialState {
+    type View<'a> = DestroyedCredentialStateView<'a>;
+    type ViewHandle = DestroyedCredentialStateOwnedView;
+}
+impl ::serde::Serialize for DestroyedCredentialStateOwnedView {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        ::serde::Serialize::serialize(&self.0, __s)
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct CleanupFailedCredentialStateView<'a> {
+    /// Field 1: `credential_ref`
+    pub credential_ref: ::buffa::MessageFieldView<
+        super::super::__buffa::view::CredentialRefView<'a>,
+    >,
+    /// Field 2: `reason`
+    pub reason: &'a str,
+    #[doc(hidden)]
+    pub __buffa_required_seen_0: u64,
+}
+impl<'a> CleanupFailedCredentialStateView<'a> {
+    /**Whether required field `credential_ref` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_credential_ref(&self) -> bool {
+        self.credential_ref.is_set()
+    }
+    /**Whether required field `reason` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_reason(&self) -> bool {
+        self.__buffa_required_seen_0 & 1u64 != 0
+    }
+}
+impl<'a> ::buffa::MessageView<'a> for CleanupFailedCredentialStateView<'a> {
+    type Owned = super::super::CleanupFailedCredentialState;
+    fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        <Self as ::buffa::MessageView>::decode_view_ctx(
+            buf,
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+        )
+    }
+    fn decode_view_with_ctx(
+        buf: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        <Self as ::buffa::MessageView>::decode_view_ctx(buf, ctx)
+    }
+    fn merge_view_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        cur: &'a [u8],
+        _before_tag: &'a [u8],
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<&'a [u8], ::buffa::DecodeError> {
+        let _ = ctx;
+        #[allow(unused_variables)]
+        let view = self;
+        let mut cur = cur;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.credential_ref.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.credential_ref = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::CredentialRefView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.reason = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 1u64;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(cur)
+    }
+    fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::CleanupFailedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> ::core::result::Result<
+        super::super::CleanupFailedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        #[allow(unused_imports)]
+        use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
+        ::core::result::Result::Ok(super::super::CleanupFailedCredentialState {
+            credential_ref: match self.credential_ref.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::CredentialRef,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            reason: self.reason.to_string(),
+            ..::core::default::Default::default()
+        })
+    }
+}
+impl<'a> ::buffa::ViewEncode<'a> for CleanupFailedCredentialStateView<'a> {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.reason) as u32;
+        size
+    }
+    #[allow(clippy::needless_borrow)]
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+    }
+}
+/// Serializes this view as protobuf JSON.
+///
+/// Implicit-presence fields with default values are omitted, `required`
+/// fields are always emitted, explicit-presence (`optional`) fields are
+/// emitted only when set, bytes fields are base64-encoded, and enum
+/// values are their proto name strings.
+///
+/// This impl uses `serialize_map(None)` because the number of emitted
+/// fields depends on default-omission rules; serializers that require
+/// known map lengths (e.g. `bincode`) will return a runtime error.
+/// Use the owned message type for those formats.
+impl<'__a> ::serde::Serialize for CleanupFailedCredentialStateView<'__a> {
+    fn serialize<__S: ::serde::Serializer>(
+        &self,
+        __s: __S,
+    ) -> ::core::result::Result<__S::Ok, __S::Error> {
+        use ::serde::ser::SerializeMap as _;
+        let mut __map = __s.serialize_map(::core::option::Option::None)?;
+        {
+            if let ::core::option::Option::Some(__v) = self.credential_ref.as_option() {
+                __map.serialize_entry("credentialRef", __v)?;
+            }
+        }
+        {
+            __map.serialize_entry("reason", self.reason)?;
+        }
+        __map.end()
+    }
+}
+impl<'a> ::buffa::MessageName for CleanupFailedCredentialStateView<'a> {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "CleanupFailedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+}
+::buffa::impl_default_view_instance!(CleanupFailedCredentialStateView);
+::buffa::impl_view_reborrow!(CleanupFailedCredentialStateView);
+/** Self-contained, `'static` owned view of a `CleanupFailedCredentialState` message.
+
+ Wraps [`::buffa::OwnedView`]`<`[`CleanupFailedCredentialStateView`]`<'static>>`: the decoded view and the [`::buffa::bytes::Bytes`] buffer it borrows from travel together, so the handle is `'static` and `Send + Sync` — suitable for async handlers, spawned tasks, and anywhere a `'static` bound is required.
+
+ Field accessors return borrows tied to `&self`. Use [`Self::view`] to get the full [`CleanupFailedCredentialStateView`] when you need struct patterns, iteration helpers, or to pass the view to lifetime-parameterised code.*/
+#[derive(Clone, Debug)]
+pub struct CleanupFailedCredentialStateOwnedView(
+    ::buffa::OwnedView<CleanupFailedCredentialStateView<'static>>,
+);
+impl CleanupFailedCredentialStateOwnedView {
+    /// Decode an owned view from a [`::buffa::bytes::Bytes`] buffer.
+    ///
+    /// The view borrows directly from the buffer's data; the buffer is
+    /// retained inside the returned handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer contains invalid
+    /// protobuf data.
+    pub fn decode(
+        bytes: ::buffa::bytes::Bytes,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            CleanupFailedCredentialStateOwnedView(::buffa::OwnedView::decode(bytes)?),
+        )
+    }
+    /// Decode with custom [`::buffa::DecodeOptions`] (recursion limit,
+    /// max message size).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the buffer is invalid or
+    /// exceeds the configured limits.
+    pub fn decode_with_options(
+        bytes: ::buffa::bytes::Bytes,
+        opts: &::buffa::DecodeOptions,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            CleanupFailedCredentialStateOwnedView(
+                ::buffa::OwnedView::decode_with_options(bytes, opts)?,
+            ),
+        )
+    }
+    /// Build from an owned message via an encode → decode round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`::buffa::DecodeError`] if the re-encoded bytes are
+    /// somehow invalid (should not happen for well-formed messages).
+    pub fn from_owned(
+        msg: &super::super::CleanupFailedCredentialState,
+    ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
+        ::core::result::Result::Ok(
+            CleanupFailedCredentialStateOwnedView(::buffa::OwnedView::from_owned(msg)?),
+        )
+    }
+    /// Borrow the full [`CleanupFailedCredentialStateView`] with its lifetime tied to `&self`.
+    #[must_use]
+    pub fn view(&self) -> &CleanupFailedCredentialStateView<'_> {
+        self.0.reborrow()
+    }
+    /// Convert to the owned message type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-materializing preserved unknown fields
+    /// fails (e.g. the unknown-field limit is exceeded).
+    pub fn to_owned_message(
+        &self,
+    ) -> ::core::result::Result<
+        super::super::CleanupFailedCredentialState,
+        ::buffa::DecodeError,
+    > {
+        self.0.to_owned_message()
+    }
+    /// The underlying bytes buffer.
+    #[must_use]
+    pub fn bytes(&self) -> &::buffa::bytes::Bytes {
+        self.0.bytes()
+    }
+    /// Consume the handle, returning the underlying bytes buffer.
+    #[must_use]
+    pub fn into_bytes(self) -> ::buffa::bytes::Bytes {
+        self.0.into_bytes()
+    }
+    /// Field 1: `credential_ref`
+    #[must_use]
+    pub fn credential_ref(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CredentialRefView<'_>> {
+        &self.0.reborrow().credential_ref
+    }
+    /// Field 2: `reason`
+    #[must_use]
+    pub fn reason(&self) -> &'_ str {
+        self.0.reborrow().reason
+    }
+}
+impl ::core::convert::From<::buffa::OwnedView<CleanupFailedCredentialStateView<'static>>>
+for CleanupFailedCredentialStateOwnedView {
+    fn from(
+        inner: ::buffa::OwnedView<CleanupFailedCredentialStateView<'static>>,
+    ) -> Self {
+        CleanupFailedCredentialStateOwnedView(inner)
+    }
+}
+impl ::core::convert::From<CleanupFailedCredentialStateOwnedView>
+for ::buffa::OwnedView<CleanupFailedCredentialStateView<'static>> {
+    fn from(wrapper: CleanupFailedCredentialStateOwnedView) -> Self {
+        wrapper.0
+    }
+}
+impl ::core::convert::AsRef<
+    ::buffa::OwnedView<CleanupFailedCredentialStateView<'static>>,
+> for CleanupFailedCredentialStateOwnedView {
+    fn as_ref(&self) -> &::buffa::OwnedView<CleanupFailedCredentialStateView<'static>> {
+        &self.0
+    }
+}
+impl ::buffa::HasMessageView for super::super::CleanupFailedCredentialState {
+    type View<'a> = CleanupFailedCredentialStateView<'a>;
+    type ViewHandle = CleanupFailedCredentialStateOwnedView;
+}
+impl ::serde::Serialize for CleanupFailedCredentialStateOwnedView {
     fn serialize<__S: ::serde::Serializer>(
         &self,
         __s: __S,

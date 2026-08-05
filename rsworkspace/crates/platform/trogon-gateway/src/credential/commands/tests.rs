@@ -13,8 +13,9 @@ use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateS
 
 use super::super::proto::{
     CredentialProtoDecodeError, activated_to_proto, decode_active_state, decode_credential_metadata,
-    decode_message_field, revoked_to_proto, rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto,
-    write_failed_to_proto, write_requested_to_proto,
+    decode_message_field, destroy_failed_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto,
+    rotated_to_proto, rotation_failed_to_proto, rotation_requested_to_proto, write_failed_to_proto,
+    write_requested_to_proto,
 };
 use super::domain::{
     CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
@@ -23,9 +24,11 @@ use super::domain::{
 use super::snapshot::CREDENTIAL_SNAPSHOT_POLICY;
 use super::state::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};
 use super::{
-    ActivateCredentialRotation, ActivateCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
-    RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,
+    ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
+    RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
+    RequestCredentialWrite, RevokeCredential,
 };
+use crate::secret_store::SecretDestroyReason;
 
 #[derive(Debug, thiserror::Error)]
 #[error("credential test stream store rejected the append")]
@@ -204,6 +207,32 @@ fn revoked(version: u64) -> proto::CredentialEvent {
     }
 }
 
+fn destroy_reason() -> SecretDestroyReason {
+    SecretDestroyReason::new("credential lifecycle cleanup").unwrap()
+}
+
+fn destroy_failure_reason() -> CredentialFailureReason {
+    CredentialFailureReason::new("openbao destroy failed").unwrap()
+}
+
+fn destroy_requested(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(destroy_requested_to_proto(&credential_ref(version), &destroy_reason()).into()),
+    }
+}
+
+fn destroyed(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(destroyed_to_proto(&credential_ref(version)).into()),
+    }
+}
+
+fn destroy_failed(version: u64) -> proto::CredentialEvent {
+    proto::CredentialEvent {
+        event: Some(destroy_failed_to_proto(&credential_ref(version), &destroy_failure_reason()).into()),
+    }
+}
+
 fn request_write() -> RequestCredentialWrite {
     RequestCredentialWrite::new(
         credential_id(),
@@ -253,6 +282,18 @@ fn snapshot_policy_uses_scheduler_frequency_pattern() {
         <RevokeCredential as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
         CREDENTIAL_SNAPSHOT_POLICY
     );
+    assert_eq!(
+        <RequestCredentialDestroy as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
+        CREDENTIAL_SNAPSHOT_POLICY
+    );
+    assert_eq!(
+        <CompleteCredentialDestroy as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
+        CREDENTIAL_SNAPSHOT_POLICY
+    );
+    assert_eq!(
+        <RecordCredentialDestroyFailure as CommandSnapshotPolicy>::SNAPSHOT_POLICY,
+        CREDENTIAL_SNAPSHOT_POLICY
+    );
 }
 
 #[test]
@@ -270,6 +311,42 @@ fn state_snapshot_round_trips_active_state() {
 #[test]
 fn state_snapshot_round_trips_pending_write_state() {
     let state = rebuild_state_from_events([write_requested()]);
+
+    let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
+    let decoded =
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded))
+            .unwrap();
+
+    assert_eq!(decoded, state);
+}
+
+#[test]
+fn state_snapshot_round_trips_destroyed_state() {
+    let state = rebuild_state_from_events([
+        write_requested(),
+        activated(1),
+        revoked(1),
+        destroy_requested(1),
+        destroyed(1),
+    ]);
+
+    let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
+    let decoded =
+        <state_v1::CredentialStateSnapshot as SnapshotPayloadDecode>::decode(SnapshotPayloadData::new(&encoded))
+            .unwrap();
+
+    assert_eq!(decoded, state);
+}
+
+#[test]
+fn state_snapshot_round_trips_cleanup_failed_state() {
+    let state = rebuild_state_from_events([
+        write_requested(),
+        activated(1),
+        revoked(1),
+        destroy_requested(1),
+        destroy_failed(1),
+    ]);
 
     let encoded = SnapshotPayloadEncode::encode(&state).unwrap();
     let decoded =
@@ -389,6 +466,128 @@ fn given_when_then_revokes_active_credential() {
 }
 
 #[test]
+fn given_when_then_requests_destroy_for_revoked_credential() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then([destroy_requested(1)]);
+}
+
+#[test]
+fn given_when_then_rejects_destroy_for_active_credential() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then_error(CredentialDecideError::CredentialNotRevokedOrExpired {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_destroy_for_pending_credential() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then_error(CredentialDecideError::CredentialNotRevokedOrExpired {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_duplicate_destroy_request() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then_error(CredentialDecideError::CredentialDestroyAlreadyRequested {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_rejects_destroy_when_already_destroyed() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .given([destroyed(1)])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then_error(CredentialDecideError::CredentialAlreadyDestroyed {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_allows_destroy_retry_after_cleanup_failure() {
+    TestCase::<RequestCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .given([destroy_failed(1)])
+        .when(RequestCredentialDestroy::new(credential_ref(1), destroy_reason()))
+        .then([destroy_requested(1)]);
+}
+
+#[test]
+fn given_when_then_completes_destroy_for_pending_destroy_request() {
+    TestCase::<CompleteCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .when(CompleteCredentialDestroy::new(credential_ref(1)))
+        .then([destroyed(1)]);
+}
+
+#[test]
+fn given_when_then_rejects_completion_without_pending_destroy_request() {
+    TestCase::<CompleteCredentialDestroy>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .when(CompleteCredentialDestroy::new(credential_ref(1)))
+        .then_error(CredentialDecideError::CredentialDestroyNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
+fn given_when_then_records_pending_destroy_failure() {
+    TestCase::<RecordCredentialDestroyFailure>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .given([destroy_requested(1)])
+        .when(RecordCredentialDestroyFailure::new(
+            credential_ref(1),
+            destroy_failure_reason(),
+        ))
+        .then([destroy_failed(1)]);
+}
+
+#[test]
+fn given_when_then_rejects_destroy_failure_without_pending_destroy_request() {
+    TestCase::<RecordCredentialDestroyFailure>::new()
+        .given([write_requested()])
+        .given([activated(1)])
+        .given([revoked(1)])
+        .when(RecordCredentialDestroyFailure::new(
+            credential_ref(1),
+            destroy_failure_reason(),
+        ))
+        .then_error(CredentialDecideError::CredentialDestroyNotPending {
+            credential_id: credential_id(),
+        });
+}
+
+#[test]
 fn rebuild_state_from_events_active_rotated_state() {
     let state = [write_requested(), activated(1), rotation_requested(1), rotated(1, 2)]
         .into_iter()
@@ -413,6 +612,9 @@ fn event_codec_round_trips_all_events() {
         rotation_failed(1),
         rotated(1, 2),
         revoked(2),
+        destroy_requested(2),
+        destroyed(2),
+        destroy_failed(2),
     ] {
         let event_type = event.event_type().unwrap();
         let payload = EventEncode::encode(&event).unwrap();

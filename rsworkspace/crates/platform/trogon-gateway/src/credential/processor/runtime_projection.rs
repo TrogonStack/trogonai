@@ -31,9 +31,10 @@ use trogonai_proto::gateway::credentials::{
 use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
 use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_message_field,
-    decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested,
-    decode_write_failed, decode_write_requested,
+    CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_destroy_failed,
+    decode_destroy_requested, decode_destroyed, decode_destroyed_state, decode_message_field, decode_revoked,
+    decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested, decode_write_failed,
+    decode_write_requested,
 };
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::{SecretMaterial, SecretStoreError, SecretStoreGet};
@@ -241,7 +242,10 @@ impl RuntimeIntegrationProjection {
                 CredentialStateSnapshotCase::Missing(_)
                 | CredentialStateSnapshotCase::PendingWrite(_)
                 | CredentialStateSnapshotCase::WriteFailed(_)
-                | CredentialStateSnapshotCase::Revoked(_),
+                | CredentialStateSnapshotCase::Revoked(_)
+                | CredentialStateSnapshotCase::DestroyRequested(_)
+                | CredentialStateSnapshotCase::Destroyed(_)
+                | CredentialStateSnapshotCase::CleanupFailed(_),
             ) => Ok(None),
         }
     }
@@ -857,6 +861,12 @@ impl RuntimeCredentialRegistry {
                 .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
             self.remove_credential_ref(&credential_ref).await?;
         }
+
+        if let Some(CredentialStateSnapshotCase::Destroyed(destroyed)) = state.state.as_ref() {
+            let credential_ref = decode_destroyed_state(destroyed)
+                .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+            self.remove_credential_ref(&credential_ref).await?;
+        }
         Ok(())
     }
 
@@ -1118,6 +1128,15 @@ async fn apply_state_to_projection(
             runtime_projection_metrics().record_revocation_latency(recorded_at);
         }
     }
+
+    if let Some(CredentialStateSnapshotCase::Destroyed(destroyed)) = state.state.as_ref() {
+        let credential_ref = decode_destroyed_state(destroyed)
+            .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+        cache.invalidate(&credential_ref).await;
+        let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
+            .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
+        projections.remove_credential(&key, credential_ref.kind()).await;
+    }
     Ok(())
 }
 
@@ -1136,6 +1155,9 @@ fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, Cred
         CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
         CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
         CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
+        CredentialEventCase::DestroyRequested(inner) => Ok(decode_destroy_requested(inner)?.0.id().clone()),
+        CredentialEventCase::Destroyed(inner) => Ok(decode_destroyed(inner)?.id().clone()),
+        CredentialEventCase::DestroyFailed(inner) => Ok(decode_destroy_failed(inner)?.0.id().clone()),
     }
 }
 
@@ -1410,9 +1432,12 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::credential::commands::domain::{CredentialScope, CredentialVersion};
-    use crate::credential::proto::{activated_to_proto, revoked_to_proto, write_requested_to_proto};
+    use crate::credential::proto::{
+        activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
+    };
     use crate::secret_store::{
-        MockOpenBaoSecretStore, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+        MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
+        SecretStoreRevoke, SecretStoreRotate,
     };
     use chrono::Utc;
     use trogon_decider_nats::{StreamSubject, append_stream};
@@ -2059,6 +2084,77 @@ mod tests {
         )
         .unwrap();
         registry.apply_state(&revoked_state, position(3)).await.unwrap();
+
+        assert!(matches!(
+            resolver.resolve(&key(), CredentialKind::BotToken).await,
+            Err(RuntimeCredentialError::IntegrationNotFound { .. })
+        ));
+
+        registry
+            .projections()
+            .upsert(projection(RuntimeIntegrationStatus::Active, credential))
+            .await;
+        assert!(matches!(
+            resolver.resolve(&key(), CredentialKind::BotToken).await,
+            Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn registry_applies_destroyed_state_incrementally_and_invalidates_cache() {
+        let store = MockOpenBaoSecretStore::default();
+        let credential = put_bot_token(&store, "Bot token").await;
+        let metadata = store.metadata(&credential).await.unwrap();
+        let registry = RuntimeCredentialRegistry::default();
+        let resolver = registry.resolver(store.clone());
+        let active_state = build_state([
+            write_requested(&credential),
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
+        ]);
+        registry.apply_state(&active_state, position(2)).await.unwrap();
+        assert_eq!(
+            resolver
+                .resolve_plaintext(&key(), CredentialKind::BotToken)
+                .await
+                .unwrap()
+                .as_str(),
+            "Bot token"
+        );
+
+        store.revoke(&credential).await.unwrap();
+        let revoked_state = evolve(
+            active_state,
+            &v1::CredentialEvent {
+                event: Some(revoked_to_proto(&credential).into()),
+            },
+        )
+        .unwrap();
+        registry.apply_state(&revoked_state, position(3)).await.unwrap();
+
+        let reason = SecretDestroyReason::new("credential lifecycle cleanup").unwrap();
+        let destroy_requested_state = evolve(
+            revoked_state,
+            &v1::CredentialEvent {
+                event: Some(destroy_requested_to_proto(&credential, &reason).into()),
+            },
+        )
+        .unwrap();
+        registry
+            .apply_state(&destroy_requested_state, position(4))
+            .await
+            .unwrap();
+
+        store.destroy(&credential, &reason).await.unwrap();
+        let destroyed_state = evolve(
+            destroy_requested_state,
+            &v1::CredentialEvent {
+                event: Some(destroyed_to_proto(&credential).into()),
+            },
+        )
+        .unwrap();
+        registry.apply_state(&destroyed_state, position(5)).await.unwrap();
 
         assert!(matches!(
             resolver.resolve(&key(), CredentialKind::BotToken).await,

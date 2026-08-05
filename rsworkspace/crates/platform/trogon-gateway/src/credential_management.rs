@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use tracing::warn;
-use trogon_decider_runtime::{SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
+use trogon_decider_runtime::{CommandError, SnapshotRead, SnapshotWrite, StreamAppend, StreamPosition, StreamRead};
 use trogon_std::SecretString;
 use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1};
 
@@ -20,11 +20,15 @@ use crate::credential::commands::domain::{
     CredentialKind, CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
 };
 use crate::credential::handler::{
-    CredentialRuntimeHandler, CredentialRuntimeHandlerError, PutCredential, RevokeStoredCredential, RotateCredential,
+    CredentialHandlerError, CredentialRuntimeHandler, CredentialRuntimeHandlerError, DestroyStoredCredential,
+    PutCredential, RevokeStoredCredential, RotateCredential,
 };
 use crate::credential::processor::recovery_worker::{CredentialRecoveryCheckpointStore, CredentialRecoveryPolicy};
 use crate::credential::processor::runtime_projection::RuntimeCredentialRegistry;
-use crate::credential::proto::{decode_active_state, decode_message_field, decode_revoked_state};
+use crate::credential::proto::{
+    decode_active_state, decode_cleanup_failed_state, decode_destroy_requested_state, decode_destroyed_state,
+    decode_message_field, decode_revoked_state,
+};
 #[cfg(test)]
 use crate::credential_management_idempotency::CredentialCommandInMemoryIdempotencyLedger;
 use crate::credential_management_idempotency::{
@@ -33,7 +37,8 @@ use crate::credential_management_idempotency::{
 };
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 use crate::secret_store::{
-    SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreError, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
+    SecretStoreRotate,
 };
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -137,6 +142,7 @@ where
     Secrets: SecretStorePut<Error = SecretStoreError>
         + SecretStoreRotate<Error = SecretStoreError>
         + SecretStoreRevoke<Error = SecretStoreError>
+        + SecretStoreDestroy<Error = SecretStoreError>
         + SecretStoreMetadata<Error = SecretStoreError>
         + Clone
         + Send
@@ -161,6 +167,10 @@ where
             post(rotate_discord_bot_token::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/discord/bot-token/destructions",
+            post(destroy_discord_bot_token::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/github/{integration_id}/webhook-secret",
             put(put_github_webhook_secret::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_github_webhook_secret::<EventStore, Secrets, Idempotency>),
@@ -168,6 +178,10 @@ where
         .route(
             "/github/{integration_id}/webhook-secret/rotations",
             post(rotate_github_webhook_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/github/{integration_id}/webhook-secret/destructions",
+            post(destroy_github_webhook_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/gitlab/{integration_id}/signing-token",
@@ -179,6 +193,10 @@ where
             post(rotate_gitlab_signing_token::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/gitlab/{integration_id}/signing-token/destructions",
+            post(destroy_gitlab_signing_token::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/incidentio/{integration_id}/signing-secret",
             put(put_incidentio_signing_secret::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_incidentio_signing_secret::<EventStore, Secrets, Idempotency>),
@@ -186,6 +204,10 @@ where
         .route(
             "/incidentio/{integration_id}/signing-secret/rotations",
             post(rotate_incidentio_signing_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/incidentio/{integration_id}/signing-secret/destructions",
+            post(destroy_incidentio_signing_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/linear/{integration_id}/webhook-secret",
@@ -197,6 +219,10 @@ where
             post(rotate_linear_webhook_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/linear/{integration_id}/webhook-secret/destructions",
+            post(destroy_linear_webhook_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/microsoft-graph/{integration_id}/client-state",
             put(put_microsoft_graph_client_state::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_microsoft_graph_client_state::<EventStore, Secrets, Idempotency>),
@@ -204,6 +230,10 @@ where
         .route(
             "/microsoft-graph/{integration_id}/client-state/rotations",
             post(rotate_microsoft_graph_client_state::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/microsoft-graph/{integration_id}/client-state/destructions",
+            post(destroy_microsoft_graph_client_state::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/notion/{integration_id}/verification-token",
@@ -215,6 +245,10 @@ where
             post(rotate_notion_verification_token::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/notion/{integration_id}/verification-token/destructions",
+            post(destroy_notion_verification_token::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/sentry/{integration_id}/client-secret",
             put(put_sentry_client_secret::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_sentry_client_secret::<EventStore, Secrets, Idempotency>),
@@ -222,6 +256,10 @@ where
         .route(
             "/sentry/{integration_id}/client-secret/rotations",
             post(rotate_sentry_client_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/sentry/{integration_id}/client-secret/destructions",
+            post(destroy_sentry_client_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
             "/slack/{integration_id}/signing-secret",
@@ -233,6 +271,10 @@ where
             post(rotate_slack_signing_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/slack/{integration_id}/signing-secret/destructions",
+            post(destroy_slack_signing_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/telegram/{integration_id}/webhook-secret",
             put(put_telegram_webhook_secret::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_telegram_webhook_secret::<EventStore, Secrets, Idempotency>),
@@ -242,6 +284,10 @@ where
             post(rotate_telegram_webhook_secret::<EventStore, Secrets, Idempotency>),
         )
         .route(
+            "/telegram/{integration_id}/webhook-secret/destructions",
+            post(destroy_telegram_webhook_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
             "/twitter/{integration_id}/consumer-secret",
             put(put_twitter_consumer_secret::<EventStore, Secrets, Idempotency>)
                 .delete(revoke_twitter_consumer_secret::<EventStore, Secrets, Idempotency>),
@@ -249,6 +295,10 @@ where
         .route(
             "/twitter/{integration_id}/consumer-secret/rotations",
             post(rotate_twitter_consumer_secret::<EventStore, Secrets, Idempotency>),
+        )
+        .route(
+            "/twitter/{integration_id}/consumer-secret/destructions",
+            post(destroy_twitter_consumer_secret::<EventStore, Secrets, Idempotency>),
         )
         .with_state(state)
 }
@@ -286,6 +336,7 @@ where
     Secrets: SecretStorePut<Error = SecretStoreError>
         + SecretStoreRotate<Error = SecretStoreError>
         + SecretStoreRevoke<Error = SecretStoreError>
+        + SecretStoreDestroy<Error = SecretStoreError>
         + SecretStoreMetadata<Error = SecretStoreError>
         + Clone
         + Send
@@ -1091,6 +1142,389 @@ where
     Ok(Json(response))
 }
 
+async fn destroy_discord_bot_token<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_source_credential_secret(state, headers, request, DISCORD_BOT_TOKEN).await
+}
+
+async fn destroy_github_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, GITHUB_WEBHOOK_SECRET).await
+}
+
+async fn destroy_gitlab_signing_token<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, GITLAB_SIGNING_TOKEN).await
+}
+
+async fn destroy_incidentio_signing_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, INCIDENTIO_SIGNING_SECRET).await
+}
+
+async fn destroy_slack_signing_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, SLACK_SIGNING_SECRET).await
+}
+
+async fn destroy_linear_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, LINEAR_WEBHOOK_SECRET).await
+}
+
+async fn destroy_microsoft_graph_client_state<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, MICROSOFT_GRAPH_CLIENT_STATE).await
+}
+
+async fn destroy_sentry_client_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, SENTRY_CLIENT_SECRET).await
+}
+
+async fn destroy_notion_verification_token<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, NOTION_VERIFICATION_TOKEN).await
+}
+
+async fn destroy_telegram_webhook_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, TELEGRAM_WEBHOOK_SECRET).await
+}
+
+async fn destroy_twitter_consumer_secret<EventStore, Secrets, Idempotency>(
+    State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
+    Path(path): Path<ManagedCredentialPath>,
+    headers: HeaderMap,
+    Json(request): Json<DestroyCredentialSecretRequest>,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    destroy_credential_secret(state, path, headers, request, TWITTER_CONSUMER_SECRET).await
+}
+
+async fn destroy_credential_secret<EventStore, Secrets, Idempotency>(
+    state: CredentialManagementState<EventStore, Secrets, Idempotency>,
+    path: ManagedCredentialPath,
+    headers: HeaderMap,
+    request: DestroyCredentialSecretRequest,
+    target: ManagedCredentialTarget,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    let scope = integration_credential_scope(request.owner_id, path.integration_id, target.source)?;
+    destroy_scoped_credential_secret(state, scope, headers, request.version, request.reason, target).await
+}
+
+async fn destroy_source_credential_secret<EventStore, Secrets, Idempotency>(
+    state: CredentialManagementState<EventStore, Secrets, Idempotency>,
+    headers: HeaderMap,
+    request: DestroyCredentialSecretRequest,
+    target: ManagedCredentialTarget,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    let scope = source_credential_scope(request.owner_id, target.source)?;
+    destroy_scoped_credential_secret(state, scope, headers, request.version, request.reason, target).await
+}
+
+async fn destroy_scoped_credential_secret<EventStore, Secrets, Idempotency>(
+    state: CredentialManagementState<EventStore, Secrets, Idempotency>,
+    scope: CredentialScope,
+    headers: HeaderMap,
+    request_version: u64,
+    reason: String,
+    target: ManagedCredentialTarget,
+) -> Result<Json<CredentialCommandResponse>, CredentialManagementHttpError>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
+    <EventStore as StreamAppend<str>>::Error: Error + Send + Sync + 'static,
+    Secrets: SecretStoreDestroy<Error = SecretStoreError>,
+    Idempotency: CredentialCommandIdempotencyStore,
+{
+    authorize(&headers, &state.admin_token)?;
+    let idempotency_key = idempotency_key_from_headers(&headers)?;
+    let credential_ref = credential_ref_from_request(&scope, target.kind, request_version)?;
+    let scope_key = scope.scope_key();
+    let version = request_version.to_string();
+    let fingerprint = request_fingerprint(
+        &state.admin_token,
+        &[
+            CommandNamespace::Destroy.as_str(),
+            scope.owner_id().as_str(),
+            scope_key.as_str(),
+            credential_ref.id().as_str(),
+            version.as_str(),
+            target.kind.as_str(),
+            reason.as_str(),
+        ],
+    )?;
+    let idempotency_scope = IdempotencyScope::new(
+        scope.owner_id().as_str(),
+        CommandNamespace::Destroy.as_str(),
+        credential_ref.id().as_str(),
+        idempotency_key,
+    );
+    match state
+        .idempotency
+        .begin(idempotency_scope.clone(), fingerprint)
+        .await
+        .map_err(CredentialManagementHttpError::idempotency_store)?
+    {
+        IdempotencyDecision::Replay(response) => return Ok(Json(response)),
+        IdempotencyDecision::Execute => {}
+        IdempotencyDecision::Conflict => return Err(CredentialManagementHttpError::IdempotencyConflict),
+        IdempotencyDecision::InProgress => return Err(CredentialManagementHttpError::IdempotencyInProgress),
+    }
+    let reason = SecretDestroyReason::new(reason).map_err(CredentialManagementHttpError::invalid_input)?;
+    let command = DestroyStoredCredential::new(credential_ref, reason);
+
+    let outcome = match state.handler.destroy(command).await {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            state.abandon_idempotency(&idempotency_scope).await;
+            return Err(CredentialManagementHttpError::destroy_command_failed(error));
+        }
+    };
+
+    let response = match command_response(outcome.stream_position(), outcome.into_state()) {
+        Ok(response) => response,
+        Err(error) => {
+            state.abandon_idempotency(&idempotency_scope).await;
+            return Err(error);
+        }
+    };
+    state
+        .idempotency
+        .complete(&idempotency_scope, response.clone())
+        .await
+        .map_err(CredentialManagementHttpError::idempotency_store)?;
+    Ok(Json(response))
+}
+
 async fn revoke_discord_bot_token<EventStore, Secrets, Idempotency>(
     State(state): State<CredentialManagementState<EventStore, Secrets, Idempotency>>,
     headers: HeaderMap,
@@ -1487,6 +1921,7 @@ enum CommandNamespace {
     Create,
     Rotate,
     Revoke,
+    Destroy,
 }
 
 impl CommandNamespace {
@@ -1495,6 +1930,7 @@ impl CommandNamespace {
             Self::Create => "credential.create",
             Self::Rotate => "credential.rotate",
             Self::Revoke => "credential.revoke",
+            Self::Destroy => "credential.destroy",
         }
     }
 }
@@ -1521,6 +1957,13 @@ struct RotateCredentialSecretRequest {
 struct RevokeCredentialSecretRequest {
     owner_id: String,
     version: u64,
+}
+
+#[derive(Deserialize)]
+struct DestroyCredentialSecretRequest {
+    owner_id: String,
+    version: u64,
+    reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1567,6 +2010,7 @@ enum CredentialManagementHttpError {
     RecoveryCheckpoint(String),
     InvalidInput(String),
     CommandFailed(String),
+    DestroyRejected(String),
     UnexpectedCredentialState(&'static str),
     InvalidState(String),
 }
@@ -1591,6 +2035,27 @@ impl CredentialManagementHttpError {
     {
         warn!(error = %error, "credential management command failed");
         Self::CommandFailed(error.to_string())
+    }
+
+    fn destroy_command_failed<SnapshotReadError, ReadError, AppendError>(
+        error: CredentialRuntimeHandlerError<SecretStoreError, SnapshotReadError, ReadError, AppendError>,
+    ) -> Self
+    where
+        SnapshotReadError: Error + Send + Sync + 'static,
+        ReadError: Error + Send + Sync + 'static,
+        AppendError: Error + Send + Sync + 'static,
+    {
+        if let CredentialRuntimeHandlerError::Command {
+            source:
+                CredentialHandlerError::RequestDestroy {
+                    source: CommandError::Decide(decide_error),
+                },
+        } = &error
+        {
+            warn!(error = %decide_error, "credential destroy request rejected");
+            return Self::DestroyRejected(decide_error.to_string());
+        }
+        Self::command_failed(error)
     }
 
     fn idempotency_store(error: CredentialCommandIdempotencyStoreError) -> Self {
@@ -1638,6 +2103,10 @@ impl IntoResponse for CredentialManagementHttpError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "credential management request failed",
                 )
+            }
+            Self::DestroyRejected(error) => {
+                warn!(error = %error, "credential destroy request rejected");
+                (StatusCode::CONFLICT, "credential destroy request rejected")
             }
             Self::UnexpectedCredentialState(state) => {
                 warn!(state, "credential management command returned an unexpected state");
@@ -1741,6 +2210,33 @@ fn command_response(
             let credential_ref = decode_revoked_state(revoked).map_err(CredentialManagementHttpError::invalid_state)?;
             Ok(CredentialCommandResponse {
                 state: "revoked".to_string(),
+                stream_position: stream_position.as_u64(),
+                credential_ref: credential_ref_response(&credential_ref, CredentialStatus::Revoked),
+            })
+        }
+        Some(CredentialStateSnapshotCase::DestroyRequested(pending)) => {
+            let (credential_ref, _reason) =
+                decode_destroy_requested_state(pending).map_err(CredentialManagementHttpError::invalid_state)?;
+            Ok(CredentialCommandResponse {
+                state: "destroy_requested".to_string(),
+                stream_position: stream_position.as_u64(),
+                credential_ref: credential_ref_response(&credential_ref, CredentialStatus::Revoked),
+            })
+        }
+        Some(CredentialStateSnapshotCase::Destroyed(destroyed)) => {
+            let credential_ref =
+                decode_destroyed_state(destroyed).map_err(CredentialManagementHttpError::invalid_state)?;
+            Ok(CredentialCommandResponse {
+                state: "destroyed".to_string(),
+                stream_position: stream_position.as_u64(),
+                credential_ref: credential_ref_response(&credential_ref, CredentialStatus::Destroyed),
+            })
+        }
+        Some(CredentialStateSnapshotCase::CleanupFailed(cleanup_failed)) => {
+            let (credential_ref, _reason) =
+                decode_cleanup_failed_state(cleanup_failed).map_err(CredentialManagementHttpError::invalid_state)?;
+            Ok(CredentialCommandResponse {
+                state: "cleanup_failed".to_string(),
                 stream_position: stream_position.as_u64(),
                 credential_ref: credential_ref_response(&credential_ref, CredentialStatus::Revoked),
             })
@@ -3316,6 +3812,220 @@ mod tests {
             Err(RuntimeCredentialError::IntegrationNotFound { .. })
         ));
         assert_eq!(events.decoded_events().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn destroy_completes_lifecycle_after_revoke() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events.clone(), secrets.clone(), registry.clone());
+
+        app.clone()
+            .oneshot(request(
+                Method::PUT,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+        app.clone()
+            .oneshot(request(
+                Method::DELETE,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","version":1}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(request(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["state"], "destroyed");
+        assert_eq!(body["credential_ref"]["status"], "destroyed");
+        assert!(matches!(
+            resolved_plaintext(&registry, secrets).await,
+            Err(RuntimeCredentialError::IntegrationNotFound { .. })
+        ));
+        assert_eq!(events.decoded_events().await.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn destroy_rejects_missing_admin_token_before_mutating_state() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events.clone(), secrets, registry);
+
+        let response = app
+            .oneshot(request(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+                None,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(events.decoded_events().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn destroy_rejects_active_credential_with_conflict() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events.clone(), secrets, registry);
+
+        app.clone()
+            .oneshot(request(
+                Method::PUT,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(request(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = response_json(response).await;
+        assert_eq!(body["error"], "credential destroy request rejected");
+        assert_eq!(events.decoded_events().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn destroy_replay_returns_same_response_without_new_credential_events() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events.clone(), secrets, registry);
+
+        app.clone()
+            .oneshot(request(
+                Method::PUT,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+        app.clone()
+            .oneshot(request(
+                Method::DELETE,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","version":1}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        let body = r#"{"owner_id":"tenant-1","version":1,"reason":"credential lifecycle cleanup"}"#;
+        let first = app
+            .clone()
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                body,
+                Some("admin-token"),
+                Some("same-logical-action"),
+            ))
+            .await
+            .unwrap();
+        let first_status = first.status();
+        let first_body = response_json(first).await;
+        let second = app
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                body,
+                Some("admin-token"),
+                Some("same-logical-action"),
+            ))
+            .await
+            .unwrap();
+        let second_status = second.status();
+        let second_body = response_json(second).await;
+
+        assert_eq!(first_status, StatusCode::OK);
+        assert_eq!(second_status, StatusCode::OK);
+        assert_eq!(second_body, first_body);
+        assert_eq!(events.decoded_events().await.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn destroy_rejects_same_idempotency_scope_with_different_fingerprint() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events.clone(), secrets.clone(), registry.clone());
+
+        app.clone()
+            .oneshot(request(
+                Method::PUT,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+        app.clone()
+            .oneshot(request(
+                Method::DELETE,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","version":1}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap();
+
+        app.clone()
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":"first reason"}"#,
+                Some("admin-token"),
+                Some("conflicting-destroy"),
+            ))
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(request_with_idempotency(
+                Method::POST,
+                "/github/primary/webhook-secret/destructions",
+                r#"{"owner_id":"tenant-1","version":1,"reason":"second reason"}"#,
+                Some("admin-token"),
+                Some("conflicting-destroy"),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = response_json(response).await;
+        assert_eq!(body["error"], "idempotency conflict");
+        assert_eq!(events.decoded_events().await.len(), 5);
     }
 
     #[tokio::test]

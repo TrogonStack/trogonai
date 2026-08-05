@@ -42,5 +42,26 @@ pub mod credential_state_snapshot {
                 super::super::super::super::__buffa::view::RevokedCredentialStateView<'a>,
             >,
         ),
+        DestroyRequested(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::DestroyRequestedCredentialStateView<
+                    'a,
+                >,
+            >,
+        ),
+        Destroyed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::DestroyedCredentialStateView<
+                    'a,
+                >,
+            >,
+        ),
+        CleanupFailed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::CleanupFailedCredentialStateView<
+                    'a,
+                >,
+            >,
+        ),
     }
 }

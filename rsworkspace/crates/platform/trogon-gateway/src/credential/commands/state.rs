@@ -1,10 +1,13 @@
 use trogonai_proto::gateway::credentials::{CredentialEventCase, CredentialStateSnapshotCase, state_v1, v1};
 
 use super::super::proto::{
-    CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, decode_active_state,
-    decode_credential_metadata, decode_message_field, decode_pending_write_state, decode_revoked, decode_rotated,
-    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
-    pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state, write_failed_to_proto_state,
+    CredentialProtoDecodeError, active_credential_ref, active_state_to_proto, cleanup_failed_to_proto_state,
+    decode_active_state, decode_cleanup_failed_state, decode_credential_metadata, decode_destroy_failed,
+    decode_destroy_requested, decode_destroy_requested_state, decode_destroyed, decode_message_field,
+    decode_pending_write_state, decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed,
+    decode_rotation_requested, decode_write_failed, decode_write_requested, destroy_requested_to_proto_state,
+    destroyed_to_proto_state, pending_write_to_proto_state, revoked_to_proto_state, rotation_pending_to_proto_state,
+    write_failed_to_proto_state,
 };
 use super::domain::{
     CredentialId, CredentialKind, CredentialMetadata, CredentialOwnerId, CredentialRef, CredentialStatus, SourceKind,
@@ -34,6 +37,14 @@ pub enum CredentialDecideError {
     CredentialRotationAlreadyPending { credential_id: CredentialId },
     #[error("credential '{credential_id}' rotation is not pending")]
     CredentialRotationNotPending { credential_id: CredentialId },
+    #[error("credential '{credential_id}' is not revoked or expired")]
+    CredentialNotRevokedOrExpired { credential_id: CredentialId },
+    #[error("credential '{credential_id}' destroy is already requested")]
+    CredentialDestroyAlreadyRequested { credential_id: CredentialId },
+    #[error("credential '{credential_id}' destroy is not pending")]
+    CredentialDestroyNotPending { credential_id: CredentialId },
+    #[error("credential '{credential_id}' was already destroyed")]
+    CredentialAlreadyDestroyed { credential_id: CredentialId },
     #[error("credential ref does not match credential stream: expected '{expected}', got '{actual}'")]
     CredentialRefMismatch {
         expected: CredentialId,
@@ -67,6 +78,12 @@ pub enum CredentialEvolveError {
     RotatedWithoutPendingRotation,
     #[error("credential was revoked without an active credential")]
     RevokedWithoutActiveCredential,
+    #[error("credential destroy was requested without a revoked or cleanup-failed credential")]
+    DestroyRequestedWithoutRevokedOrCleanupFailedCredential,
+    #[error("credential was destroyed without a pending destroy request")]
+    DestroyedWithoutDestroyRequestedCredential,
+    #[error("credential destroy failure was recorded without a pending destroy request")]
+    DestroyFailedWithoutDestroyRequestedCredential,
     #[error("event credential ref does not match credential stream: expected '{expected}', got '{actual}'")]
     CredentialRefMismatch {
         expected: CredentialId,
@@ -168,6 +185,39 @@ pub fn evolve(
                 revoked_to_proto_state(&event_ref).into()
             }
             _ => return Err(CredentialEvolveError::RevokedWithoutActiveCredential),
+        },
+        CredentialEventCase::DestroyRequested(inner) => match current {
+            CredentialStateSnapshotCase::Revoked(revoked) => {
+                let current_ref = decode_revoked_state(revoked)?;
+                let (event_ref, reason) = decode_destroy_requested(inner)?;
+                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                destroy_requested_to_proto_state(&event_ref, &reason).into()
+            }
+            CredentialStateSnapshotCase::CleanupFailed(cleanup_failed) => {
+                let (current_ref, _) = decode_cleanup_failed_state(cleanup_failed)?;
+                let (event_ref, reason) = decode_destroy_requested(inner)?;
+                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                destroy_requested_to_proto_state(&event_ref, &reason).into()
+            }
+            _ => return Err(CredentialEvolveError::DestroyRequestedWithoutRevokedOrCleanupFailedCredential),
+        },
+        CredentialEventCase::Destroyed(inner) => match current {
+            CredentialStateSnapshotCase::DestroyRequested(pending) => {
+                let (current_ref, _) = decode_destroy_requested_state(pending)?;
+                let event_ref = decode_destroyed(inner)?;
+                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                destroyed_to_proto_state(&event_ref).into()
+            }
+            _ => return Err(CredentialEvolveError::DestroyedWithoutDestroyRequestedCredential),
+        },
+        CredentialEventCase::DestroyFailed(inner) => match current {
+            CredentialStateSnapshotCase::DestroyRequested(pending) => {
+                let (current_ref, _) = decode_destroy_requested_state(pending)?;
+                let (event_ref, reason) = decode_destroy_failed(inner)?;
+                validate_same_ref_for_evolve(&current_ref, &event_ref)?;
+                cleanup_failed_to_proto_state(&event_ref, &reason).into()
+            }
+            _ => return Err(CredentialEvolveError::DestroyFailedWithoutDestroyRequestedCredential),
         },
     };
 
