@@ -802,7 +802,9 @@ emits.
 
 - OpenBao dev setup.
 - OpenBao production HA setup.
-- Unseal and key custody.
+- Unseal and key custody (cloud KMS auto-unseal is mandatory in
+  production per ADR#0048; Shamir only under the restricted-network
+  exception, recovery keys break-glass only).
 - Backup and restore.
 - Audit log export and review.
 - Secret leak response.
