@@ -11,8 +11,12 @@ import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 // restored via ExecutionAttemptStarted.restored_checkpoint, where it is
 // deliberately embedded rather than referenced: it is attempt evidence of
 // exactly what was restored, digest-verified, and now joined unambiguously to
-// its producing event via checkpoint_id. The validator requires
-// session_execution_plan_digest to match the session's own plan digest.
+// its producing event via checkpoint_id. Per-event validation requires a
+// restored checkpoint's plan digest to match its ExecutionAttemptStarted plan
+// digest; the aggregate binds that digest to the session's stored plan.
+// Admission additionally verifies the supervisor capture attestation and the
+// effective-history digest (ADR#0031 §3) before CheckpointProduced is
+// recorded, and restoration re-verifies the same proof before trusting bytes.
 message Checkpoint {
   // Locator for the checkpoint artifact stored out of line.
   string reference = 1 [features.field_presence = LEGACY_REQUIRED];
@@ -34,4 +38,16 @@ message Checkpoint {
   // Digest of the session's StoredSessionExecutionPlan at checkpoint time;
   // validated against the session's plan digest before restore.
   Digest session_execution_plan_digest = 8 [features.field_presence = LEGACY_REQUIRED];
+  // Locator for the capture attestation stored out of line: the producing
+  // attempt's platform-controlled supervisor binds the artifact, attempt,
+  // plan digest, covers_through, and effective_history_digest under that
+  // attempt's confirmation key (ADR#0031 §3).
+  string capture_attestation_ref = 9 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the capture attestation bytes, verified at admission and
+  // re-verified before restore.
+  Digest capture_attestation_digest = 10 [features.field_presence = LEGACY_REQUIRED];
+  // Digest over the harness-relevant effective session facts, in fold order,
+  // through covers_through; admission recomputes it from authoritative
+  // history and requires equality with the attested value (ADR#0031 §3).
+  Digest effective_history_digest = 11 [features.field_presence = LEGACY_REQUIRED];
 }

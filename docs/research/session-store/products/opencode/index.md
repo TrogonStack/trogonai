@@ -1,7 +1,7 @@
 # OpenCode: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of the `anomalyco/opencode` fork
 (`git@github.com:anomalyco/opencode.git`) on branch `dev` at commit
 `62e4641235d7847dadc60da37cca8a023dd54fc1` (committed 2026-07-23). Every
@@ -170,11 +170,11 @@ export interface Interface {
 }
 ```
 
-`PublishOptions` includes a **`commit(seq)` hook** — "Local operational
+`PublishOptions` includes a **`commit(seq)` hook** -- "Local operational
 projection committed atomically with a new durable event"
 (`packages/core/src/event.ts:118-124`). `publish` appends one event (assigning
 the next `seq`), runs registered projectors, runs the commit hook, and writes the
-row — all inside one transaction (see next section). `project(definition,
+row -- all inside one transaction (see next section). `project(definition,
 projector)` registers a synchronous projector that runs inside that transaction.
 `durable({aggregateID, after})` is a resumable historical-then-live stream of one
 aggregate's events. `replay`/`replayAll` are idempotent re-application (used for
@@ -208,32 +208,32 @@ operational contract the server and tools actually use
 (`packages/core/src/session.ts:113-180`). Its operations (verbatim signatures in
 that block):
 
-- `create(input) -> Info` — mints a session id, resolves/creates the project row,
+- `create(input) -> Info` -- mints a session id, resolves/creates the project row,
   and publishes a `session.created` event; idempotent by id
   (`session.ts:208-262`).
 - `get(sessionID) -> Info | NotFoundError` (`session.ts:263-267`).
-- `list(input?) -> Info[]` — keyset-paginated SQL over `session`
+- `list(input?) -> Info[]` -- keyset-paginated SQL over `session`
   (`session.ts:268-303`).
-- `messages({sessionID, limit?, order?, cursor?}) -> Message[]` — seq-ordered,
+- `messages({sessionID, limit?, order?, cursor?}) -> Message[]` -- seq-ordered,
   cursor-paginated read of the `session_message` projection
   (`session.ts:304-337`).
 - `message({sessionID, messageID}) -> Message | undefined` (`session.ts:338-341`).
-- `context(sessionID) -> Message[]` — the model-visible context (compaction- and
+- `context(sessionID) -> Message[]` -- the model-visible context (compaction- and
   epoch-aware fold, see Read/resume) (`session.ts:342-345`).
-- `events({sessionID, after?}) -> Stream<DurableEvent>` — live durable tail of the
+- `events({sessionID, after?}) -> Stream<DurableEvent>` -- live durable tail of the
   session's log (`session.ts:346-351`).
-- `history({sessionID, after?, limit}) -> {events, hasMore}` — paged raw event
+- `history({sessionID, after?, limit}) -> {events, hasMore}` -- paged raw event
   history (`session.ts:352-359`).
-- `switchAgent` / `switchModel` — publish the corresponding events
+- `switchAgent` / `switchModel` -- publish the corresponding events
   (`session.ts:393-416`).
-- `prompt({id?, sessionID, prompt, delivery?, resume?}) -> Admitted` — admits a
+- `prompt({id?, sessionID, prompt, delivery?, resume?}) -> Admitted` -- admits a
   user prompt into the input queue and (unless `resume:false`) wakes execution
   (`session.ts:360-386`).
-- `shell` / `skill` / `compact` / `wait` — currently return
+- `shell` / `skill` / `compact` / `wait` -- currently return
   `OperationUnavailableError` in this build (`session.ts:387-424`).
-- `resume(sessionID)` / `interrupt(sessionID)` / `active` — execution control
+- `resume(sessionID)` / `interrupt(sessionID)` / `active` -- execution control
   (`session.ts:425-432`).
-- `revert.stage` / `revert.clear` / `revert.commit` — retroactive rewind
+- `revert.stage` / `revert.clear` / `revert.commit` -- retroactive rewind
   (`session.ts:433-453`).
 
 Notably, **there is no `delete` on the v2 `SessionV2.Service`** (the interface
@@ -266,10 +266,10 @@ legacy `session.deleted` event (`projector.ts:259-261`) and the raw
   (`packages/core/src/database/database.ts:27-31`). There is no temp-file-and-
   rename; durability is SQLite's. (The **legacy** store instead uses per-file
   JSON writes guarded by an in-process reentrant read/write lock per key,
-  `packages/opencode/src/storage/storage.ts:218-299` — no fsync/rename dance
+  `packages/opencode/src/storage/storage.ts:218-299` -- no fsync/rename dance
   either.)
 - **Concurrency / OCC**: append uses an **implicit optimistic-concurrency guard**.
-  On a normal publish there is no caller-supplied expected version — `seq` is
+  On a normal publish there is no caller-supplied expected version -- `seq` is
   just `latest + 1`, and the unique `(aggregate_id, seq)` index makes a concurrent
   double-append fail. On **replay** the caller *does* pass an expected `seq`, and
   the store enforces `seq === latest + 1`, dying with a "Sequence mismatch" if not
@@ -348,7 +348,7 @@ legacy `session.deleted` event (`projector.ts:259-261`) and the raw
   (`packages/core/src/session/sql.ts:22-60`). Token/cost totals are incremented
   transactionally as step/part events project (`applyUsage`,
   `packages/core/src/session/projector.ts:90-110`, `312-329`), and reversed with
-  `sign = -1` when a message/part is removed — so the denormalized totals stay
+  `sign = -1` when a message/part is removed -- so the denormalized totals stay
   consistent with the log by construction.
 - **Search**: there is **no FTS or vector subsystem**. `list`'s `search` is a
   `LIKE '%...%'` filter over `session.title` only
@@ -364,12 +364,12 @@ There are two layered structures: the **durable event** (what is stored) and the
   `metadata`, optional `location`, a per-type `data` struct, and a `durable`
   descriptor `{ aggregateID, seq, version }`. Every durable session event shares a
   `Base` of `{ timestamp, sessionID }` (`packages/schema/src/session-event.ts:27-30`).
-  The event catalog is large and fine-grained — agent/model switch, moved,
+  The event catalog is large and fine-grained -- agent/model switch, moved,
   prompted/prompt.admitted, context.updated, synthetic, shell start/end, step
   start/end/failed, text start/delta/end, reasoning start/delta/end, tool
   input/called/progress/success/failed, retried, compaction start/delta/end, and
   revert staged/cleared/committed (`session-event.ts:54-512`). **Stream-fragment
-  events (`*.delta`) are deliberately non-durable** — only the `*.ended`
+  events (`*.delta`) are deliberately non-durable** -- only the `*.ended`
   full-value boundary is replayable (`session-event.ts:209-210`, `247`, `291`);
   the `DurableDefinitions` inventory excludes the deltas (`session-event.ts:448-477`
   vs the full `Definitions` `479-512`).
@@ -396,7 +396,7 @@ There are two layered structures: the **durable event** (what is stored) and the
   settlement events (`Step.Ended`, `Step.Failed`) are `version: 2`
   (`session-event.ts:44-49`, `162-194`). The durable manifest is a map keyed by
   versioned type (`packages/schema/src/event.ts:105-113`), and the read path
-  decodes by looking the definition up by versioned type — so **multiple event
+  decodes by looking the definition up by versioned type -- so **multiple event
   versions can coexist in the log**. This is a genuine schema-version ratchet at
   the event level, complementing additive schema defaults.
 - **DB schema migrations** for the projections are a forward-only, generated set
@@ -439,7 +439,7 @@ There are two layered structures: the **durable event** (what is stored) and the
   (`packages/core/src/session/revert.ts:60-96`); `revert.clear` restores and
   publishes `revert.cleared` (`revert.ts:98-111`); `revert.commit` publishes
   `revert.committed { messageID }` (`revert.ts:113-121`). The **committed**
-  projector then physically **truncates the projections** — deletes
+  projector then physically **truncates the projections** -- deletes
   `session_message` rows with `seq > boundary.seq`, deletes later `session_input`
   rows, clears `revert`, and resets the context epoch
   (`packages/core/src/session/projector.ts:415-454`). The underlying `event` rows
@@ -476,7 +476,7 @@ There are two layered structures: the **durable event** (what is stored) and the
   logic exists in the tooling (`task.ts:107-110` walks `current.parentID`).
 - **Delete/cascade**: within the DB, `session` rows do **not** cascade on
   `parent_id` (only `project_id` cascades, `session/sql.ts:26-30`), so deleting a
-  parent session row does not delete children — they would orphan with a dangling
+  parent session row does not delete children -- they would orphan with a dangling
   `parent_id` (matching T3's behavior). Nesting bounds live in the tool/agent
   layer, not the store schema (not enumerated here; see Open questions).
 
@@ -491,7 +491,7 @@ There are two layered structures: the **durable event** (what is stored) and the
   `db.delete(SessionTable)`, which **cascades** to `message`/`part`/
   `session_message`/`session_input`/`session_context_epoch`/`todo` via
   `onDelete: "cascade"` foreign keys (`packages/core/src/session/projector.ts:259-261`,
-  `session/sql.ts:72-176`) — but the `event` rows for that aggregate remain;
+  `session/sql.ts:72-176`) -- but the `event` rows for that aggregate remain;
   (2) `EventV2.remove(aggregateID)` transactionally deletes both `event_sequence`
   and `event` rows for the aggregate (`packages/core/src/event.ts:514-523`), which
   is the only path that physically erases the log. So "delete the projection" and
@@ -556,12 +556,12 @@ same transaction as the append.** What it adds beyond T3:
   `strictOwner`, SSE sync loop, `steal`, `history` back-fill) is the most
   transferable idea here and the piece T3 lacked. It demonstrates that an
   append-only per-aggregate log can be **synchronized across hosts by replaying
-  events with an ownership guard**, no shared filesystem — directly relevant to a
+  events with an ownership guard**, no shared filesystem -- directly relevant to a
   multi-host Session Store.
 - **Durable events are the full-value boundaries; stream deltas are non-durable.**
   Only `*.ended` events (full text/reasoning/tool-input values) are replayable;
   `*.delta` fragments are live-only (`session-event.ts:209-210`, `448-477`). This
-  keeps the log compact and replay deterministic — a good rule for our event
+  keeps the log compact and replay deterministic -- a good rule for our event
   taxonomy (persist settled facts, stream the in-between).
 - **Explicit per-event `version` with versioned stored type**
   (`packages/schema/src/event.ts:118`, `packages/core/src/event.ts:343`) lets
@@ -571,12 +571,12 @@ same transaction as the append.** What it adds beyond T3:
 - **Rewind as an appended marker re-applied at replay** (`revert.committed`
   truncating projections while the log keeps every event,
   `projector.ts:415-454`) validates our append-only rewind model.
-- **Cautions**: (1) **No retention / log truncation / snapshotting** — the log
+- **Cautions**: (1) **No retention / log truncation / snapshotting** -- the log
   grows unbounded and projection rebuild is a full per-aggregate replay; our
   design needs the snapshot/retention story theirs lacks. (2) **Two live models in
   one tree** (filesystem JSON vs event-sourced SQLite) is a migration-cost signal:
   a clean cutover and a legacy-ingest path (as their v1-event projector shows) are
-  worth planning up front. (3) **Delete is ambiguous** — deleting the projection
+  worth planning up front. (3) **Delete is ambiguous** -- deleting the projection
   (cascade) leaves the log intact, and only `EventV2.remove` erases the log; we
   must decide deliberately whether "delete" means "forget the view" or "erase the
   facts," especially given the privacy implications of an indefinitely retained

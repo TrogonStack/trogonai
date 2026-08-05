@@ -1,7 +1,7 @@
 # Research Prompt: how {PRODUCT} stores and resumes sessions
 
 Reusable prompt for the session-store study. Run once per product. Output
-goes into `docs/research/session-store/products/{slug}.md`, following the
+goes into `docs/research/session-store/products/{slug}/index.md`, following the
 section skeleton below. Add the dossier to `index.md` when done.
 
 ## Task
@@ -102,6 +102,18 @@ to the durable session.
   wrapper (timestamps, method/kind tags, ids), the payload shape, how message
   types are distinguished, and how entries link into a chain or thread
   (parent/uuid references, ordering fields). Quote the type definitions.
+- **An envelope is not the payload.** If the entry type inherits its content
+  field from a base class, or carries the message in a generic `params`, `data`,
+  or `content` field, open that type too and quote it. Quoting only the
+  wrapper's own declared fields satisfies "quote the type definitions" while
+  leaving the actual message undocumented, and two dossiers here did exactly
+  that: Google ADK's records every field `Event` declares but never opens its
+  superclass, where the payload lives (`content: Optional[types.Content]`,
+  `src/google/adk/models/llm_response.py:62`), and Grok Build's names
+  `SessionUpdateEnvelope{timestamp, method, params}` as the source-of-truth log
+  line without ever opening `params` or the `ConversationItem` in the cache it
+  derives. In both cases the envelope is the easy half and the payload is the
+  half a reader needs.
 - Is the entry opaque to the store (persisted and returned verbatim) or does
   the store parse and interpret it? What field, if any, does the store rely on
   for identity/dedup?
@@ -166,21 +178,38 @@ to the durable session.
    schemas, on-disk layouts, official repos. Secondary sources only to
    triangulate. When the source is a repository, pin the exact commit and cite
    `path:line` for each claim.
-2. Capture each exact quote as a checked-in source excerpt. Record its direct
+2. **Cite repo-root-relative paths, not bare filenames.** Write
+   `crates/agent/src/db.rs:671`, not `db.rs:671`. Large trees hold many files
+   with the same basename (Zed has three `db.rs` and three `migrations.rs`;
+   Pi has ten `types.ts`), and a bare basename cannot be mechanically resolved
+   by a later auditor, which is exactly when the citation matters most. A
+   short form is acceptable only for repeat references within the same section
+   *after* the full path has appeared there, and only when that basename is
+   unique in the tree. Prefer the `:123` bare-line form for repeats within a
+   section that has already named one file.
+3. Capture each exact quote as a checked-in source excerpt. Record its direct
    URL or repo `path:line`, document section or repository symbol, source
    version or commit when available, and retrieval date. Also record an
    archive or snapshot URL when one exists and a content digest when the source
    publishes or permits one. These evidence records must remain auditable if
    the live URL changes.
-3. Record the retrieval date with `date +%F`; never guess it.
-4. Stay on the operational storage model. Ignore pricing, marketing claims,
+4. **Quotation marks mean transcribed, never summarized.** If text sits inside
+   quotes, it must match the source character for character, including its
+   punctuation. Tightening a comment while leaving the quotes on it produces a
+   claim that survives every mechanical check and is still false: a Mastra
+   default-throw message was rendered as "this is likely a bug -- all adapters
+   should implement this" when the source reads "This is likely a bug - all
+   Mastra storage adapters should implement resource support." Paraphrase
+   freely, but then drop the quotes and cite the line.
+5. Record the retrieval date with `date +%F`; never guess it.
+6. Stay on the operational storage model. Ignore pricing, marketing claims,
    and features unrelated to how sessions are persisted, resumed, listed, and
    retired.
-5. Fill the product skeleton sections in the order the product's model makes
+7. Fill the product skeleton sections in the order the product's model makes
    natural; omit a section only when the product genuinely has no such concept,
    and say so. Put anything the sources leave unanswered under **Open
    questions**.
-6. Where a conclusion here would differ from an accepted record in the
+8. Where a conclusion here would differ from an accepted record in the
    [ADR index](../../adr/index.md), the ADR is authoritative; note the
    difference rather than overriding it.
 
@@ -190,7 +219,7 @@ to the durable session.
 # {PRODUCT}: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot retrieved YYYY-MM-DD. Version-sensitive claims were checked
 against these authoritative anchors:
 

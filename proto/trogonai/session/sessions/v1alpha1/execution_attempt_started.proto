@@ -26,7 +26,8 @@ message ExecutionAttemptStarted {
   // invariant checked against folded state (ADR#0035 command matrix).
   string previous_attempt_id = 5;
   Checkpoint restored_checkpoint = 6;
-  string resume_cursor = 7;
+  reserved 7;
+  reserved resume_cursor;
   string host_artifact_ref = 8 [features.field_presence = LEGACY_REQUIRED];
   Digest host_artifact_digest = 9 [features.field_presence = LEGACY_REQUIRED];
   string authenticated_remote_subject = 10;

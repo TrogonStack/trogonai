@@ -1,16 +1,16 @@
 # fx compared to our session event catalog
 
 Part of Session Store Research. This maps the reconstructed fx storage
-format ([dossier](./fx.md)) onto `trogonai.session.sessions.v1alpha1`
+format ([dossier](./index.md)) onto `trogonai.session.sessions.v1alpha1`
 and separates three things: where fx carries structure we do not, where our
 model is stronger, and where the difference is a trade-off rather than a gap.
 
 Sources are the fx dossier (evidence tags `[observed]` / `[literal]` carry
 over unchanged), the documented CLI read contract in the
-[fx session detail JSON reference](./fx-session-detail-json-reference.md),
+[fx session detail JSON reference](./session-detail-json-reference.md),
 and the 57 `.proto` files under
 `proto/trogonai/session/sessions/v1alpha1/`. Where a conclusion here differs
-from an accepted record in the [ADR index](../../../adr/index.md), the ADR is
+from an accepted record in the [ADR index](../../../../adr/index.md), the ADR is
 authoritative. This document proposes; it does not decide.
 
 ## The one structural difference everything else follows from
@@ -39,7 +39,7 @@ and we get their effect for free:
 The corollary is the cost: fx pays one large write per turn and loses an
 in-flight turn on crash, while we pay N small writes and can always resume
 mid-turn. That is settled by
-[ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) and is not
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) and is not
 reopened here.
 
 The rest of this document is about the fields where fx is carrying real
@@ -91,7 +91,7 @@ Ordered by how much is lost today, not by implementation cost.
 
 Status note: items 1, 2, 3, 5, 6, 7, 8, and the `untruncated_size_bytes` part of
 item 10 have since been implemented in `v1alpha1` and folded into
-[ADR#0035](../../../adr/0035-session-store-decider-aggregate.md) facet 3, and
+[ADR#0035](../../../../adr/0035-session-store-decider-aggregate.md) facet 3, and
 the mapping table above reflects that ("Closed in `v1alpha1`" rows). Item 4
 was implemented as `ResourceObservation` on `ToolCallCompleted` rather than as a
 `FileRead` event, for the reason given in that section. Items 9 and the rest of
@@ -386,7 +386,7 @@ model is fine, a rollup in the event is a second source of truth.
   `command_output_replay` and `command_process_presentation`, so the public
   JSON hides exit codes and replay tapes but keeps handles, diffs, and the
   file ledger, and the projection is now a documented beta contract, the
-  [session detail JSON reference](./fx-session-detail-json-reference.md). What
+  [session detail JSON reference](./session-detail-json-reference.md). What
   survives of the criticism: the top-level response carries no
   `schema_version` of its own (only the nested execution object does), it
   omits the session-level metadata the store holds (workspace, model, token

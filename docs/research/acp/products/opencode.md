@@ -43,7 +43,7 @@ Copy: exposing ACP as a thin, additive surface over an agent's existing tool/ses
 - https://github.com/kortix-ai/opencode-channels
 - https://github.com/ominiverdi/opencode-chat-bridge
 - https://agentclientprotocol.com/overview/clients
-- [session store research](../../session-store/products/opencode.md) (anomalyco/opencode fork, commit 62e4641235d7847dadc60da37cca8a023dd54fc1)
+- [session store research](../../session-store/products/opencode/index.md) (anomalyco/opencode fork, commit 62e4641235d7847dadc60da37cca8a023dd54fc1)
 
 ## Adversarial verification
 

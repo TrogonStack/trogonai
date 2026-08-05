@@ -7,8 +7,12 @@
 /// restored via ExecutionAttemptStarted.restored_checkpoint, where it is
 /// deliberately embedded rather than referenced: it is attempt evidence of
 /// exactly what was restored, digest-verified, and now joined unambiguously to
-/// its producing event via checkpoint_id. The validator requires
-/// session_execution_plan_digest to match the session's own plan digest.
+/// its producing event via checkpoint_id. Per-event validation requires a
+/// restored checkpoint's plan digest to match its ExecutionAttemptStarted plan
+/// digest; the aggregate binds that digest to the session's stored plan.
+/// Admission additionally verifies the supervisor capture attestation and the
+/// effective-history digest (ADR#0031 §3) before CheckpointProduced is
+/// recorded, and restoration re-verifies the same proof before trusting bytes.
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointView<'a> {
     /// Locator for the checkpoint artifact stored out of line.
@@ -49,6 +53,28 @@ pub struct CheckpointView<'a> {
     ///
     /// Field 8: `session_execution_plan_digest`
     pub session_execution_plan_digest: ::buffa::MessageFieldView<
+        super::super::__buffa::view::DigestView<'a>,
+    >,
+    /// Locator for the capture attestation stored out of line: the producing
+    /// attempt's platform-controlled supervisor binds the artifact, attempt,
+    /// plan digest, covers_through, and effective_history_digest under that
+    /// attempt's confirmation key (ADR#0031 §3).
+    ///
+    /// Field 9: `capture_attestation_ref`
+    pub capture_attestation_ref: &'a str,
+    /// Digest over the capture attestation bytes, verified at admission and
+    /// re-verified before restore.
+    ///
+    /// Field 10: `capture_attestation_digest`
+    pub capture_attestation_digest: ::buffa::MessageFieldView<
+        super::super::__buffa::view::DigestView<'a>,
+    >,
+    /// Digest over the harness-relevant effective session facts, in fold order,
+    /// through covers_through; admission recomputes it from authoritative
+    /// history and requires equality with the attested value (ADR#0031 §3).
+    ///
+    /// Field 11: `effective_history_digest`
+    pub effective_history_digest: ::buffa::MessageFieldView<
         super::super::__buffa::view::DigestView<'a>,
     >,
     #[doc(hidden)]
@@ -118,6 +144,30 @@ Mirrors `is_set()` on the field: `true` after decoding a message where the field
     #[inline]
     pub const fn has_session_execution_plan_digest(&self) -> bool {
         self.session_execution_plan_digest.is_set()
+    }
+    /**Whether required field `capture_attestation_ref` was present on the wire.
+
+Distinguishes a field that was absent from one explicitly encoded with its default value (required scalar fields are stored as bare, non-`Option` types, so the value alone cannot tell the two apart). Presence is recorded only by the wire decoder: a default or hand-built view reports `false`. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_capture_attestation_ref(&self) -> bool {
+        self.__buffa_required_seen_0 & 32u64 != 0
+    }
+    /**Whether required field `capture_attestation_digest` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_capture_attestation_digest(&self) -> bool {
+        self.capture_attestation_digest.is_set()
+    }
+    /**Whether required field `effective_history_digest` is set.
+
+Mirrors `is_set()` on the field: `true` after decoding a message where the field was present on the wire, and `true` on a hand-built view whose field is populated. Encoding is unaffected — required fields are always written.*/
+    #[must_use]
+    #[inline]
+    pub const fn has_effective_history_digest(&self) -> bool {
+        self.effective_history_digest.is_set()
     }
 }
 impl<'a> ::buffa::MessageView<'a> for CheckpointView<'a> {
@@ -253,6 +303,56 @@ impl<'a> ::buffa::MessageView<'a> for CheckpointView<'a> {
                     }
                 }
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                view.capture_attestation_ref = ::buffa::types::borrow_str(&mut cur)?;
+                view.__buffa_required_seen_0 |= 32u64;
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.capture_attestation_digest.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.capture_attestation_digest = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DigestView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
+            11u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.effective_history_digest.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.effective_history_digest = ::buffa::MessageFieldView::set(
+                            <super::super::__buffa::view::DigestView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -310,6 +410,26 @@ impl<'a> ::buffa::MessageView<'a> for CheckpointView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            capture_attestation_ref: self.capture_attestation_ref.to_string(),
+            capture_attestation_digest: match self.capture_attestation_digest.as_option()
+            {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
+            effective_history_digest: match self.effective_history_digest.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::Digest,
+                        ::buffa::Inline<super::super::Digest>,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -351,6 +471,26 @@ impl<'a> ::buffa::ViewEncode<'a> for CheckpointView<'a> {
         if self.session_execution_plan_digest.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.session_execution_plan_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        size
+            += 1u64
+                + ::buffa::types::string_encoded_len(&self.capture_attestation_ref)
+                    as u64;
+        if self.capture_attestation_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.capture_attestation_digest.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.effective_history_digest.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.effective_history_digest.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -398,6 +538,23 @@ impl<'a> ::buffa::ViewEncode<'a> for CheckpointView<'a> {
                 buf,
             );
             self.session_execution_plan_digest.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(9u32, &self.capture_attestation_ref, buf);
+        if self.capture_attestation_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                10u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.capture_attestation_digest.write_to(__cache, buf);
+        }
+        if self.effective_history_digest.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                11u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.effective_history_digest.write_to(__cache, buf);
         }
     }
 }
@@ -454,6 +611,26 @@ impl<'__a> ::serde::Serialize for CheckpointView<'__a> {
                 .as_option()
             {
                 __map.serialize_entry("sessionExecutionPlanDigest", __v)?;
+            }
+        }
+        {
+            __map
+                .serialize_entry("captureAttestationRef", self.capture_attestation_ref)?;
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .capture_attestation_digest
+                .as_option()
+            {
+                __map.serialize_entry("captureAttestationDigest", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self
+                .effective_history_digest
+                .as_option()
+            {
+                __map.serialize_entry("effectiveHistoryDigest", __v)?;
             }
         }
         __map.end()
@@ -614,6 +791,37 @@ impl CheckpointOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
         &self.0.reborrow().session_execution_plan_digest
+    }
+    /// Locator for the capture attestation stored out of line: the producing
+    /// attempt's platform-controlled supervisor binds the artifact, attempt,
+    /// plan digest, covers_through, and effective_history_digest under that
+    /// attempt's confirmation key (ADR#0031 §3).
+    ///
+    /// Field 9: `capture_attestation_ref`
+    #[must_use]
+    pub fn capture_attestation_ref(&self) -> &'_ str {
+        self.0.reborrow().capture_attestation_ref
+    }
+    /// Digest over the capture attestation bytes, verified at admission and
+    /// re-verified before restore.
+    ///
+    /// Field 10: `capture_attestation_digest`
+    #[must_use]
+    pub fn capture_attestation_digest(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
+        &self.0.reborrow().capture_attestation_digest
+    }
+    /// Digest over the harness-relevant effective session facts, in fold order,
+    /// through covers_through; admission recomputes it from authoritative
+    /// history and requires equality with the attested value (ADR#0031 §3).
+    ///
+    /// Field 11: `effective_history_digest`
+    #[must_use]
+    pub fn effective_history_digest(
+        &self,
+    ) -> &::buffa::MessageFieldView<super::super::__buffa::view::DigestView<'_>> {
+        &self.0.reborrow().effective_history_digest
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<CheckpointView<'static>>>

@@ -33,8 +33,6 @@ pub struct ExecutionAttemptStartedView<'a> {
     pub restored_checkpoint: ::buffa::MessageFieldView<
         super::super::__buffa::view::CheckpointView<'a>,
     >,
-    /// Field 7: `resume_cursor`
-    pub resume_cursor: ::core::option::Option<&'a str>,
     /// Field 8: `host_artifact_ref`
     pub host_artifact_ref: &'a str,
     /// Field 9: `host_artifact_digest`
@@ -214,13 +212,6 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                     }
                 }
             }
-            7u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                view.resume_cursor = Some(::buffa::types::borrow_str(&mut cur)?);
-            }
             8u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -338,7 +329,6 @@ impl<'a> ::buffa::MessageView<'a> for ExecutionAttemptStartedView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
-            resume_cursor: self.resume_cursor.map(|s| s.to_string()),
             host_artifact_ref: self.host_artifact_ref.to_string(),
             host_artifact_digest: match self.host_artifact_digest.as_option() {
                 Some(v) => {
@@ -396,9 +386,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
-        if let Some(ref v) = self.resume_cursor {
-            size += 1u64 + ::buffa::types::string_encoded_len(v) as u64;
-        }
         size
             += 1u64 + ::buffa::types::string_encoded_len(&self.host_artifact_ref) as u64;
         if self.host_artifact_digest.is_set() {
@@ -454,9 +441,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ExecutionAttemptStartedView<'a> {
                 buf,
             );
             self.restored_checkpoint.write_to(__cache, buf);
-        }
-        if let Some(ref v) = self.resume_cursor {
-            ::buffa::types::put_string_field(7u32, v, buf);
         }
         ::buffa::types::put_string_field(8u32, &self.host_artifact_ref, buf);
         if self.host_artifact_digest.is_set() {
@@ -532,9 +516,6 @@ impl<'__a> ::serde::Serialize for ExecutionAttemptStartedView<'__a> {
             {
                 __map.serialize_entry("restoredCheckpoint", __v)?;
             }
-        }
-        if let ::core::option::Option::Some(__v) = self.resume_cursor {
-            __map.serialize_entry("resumeCursor", __v)?;
         }
         {
             __map.serialize_entry("hostArtifactRef", self.host_artifact_ref)?;
@@ -691,11 +672,6 @@ impl ExecutionAttemptStartedOwnedView {
         &self,
     ) -> &::buffa::MessageFieldView<super::super::__buffa::view::CheckpointView<'_>> {
         &self.0.reborrow().restored_checkpoint
-    }
-    /// Field 7: `resume_cursor`
-    #[must_use]
-    pub fn resume_cursor(&self) -> ::core::option::Option<&'_ str> {
-        self.0.reborrow().resume_cursor
     }
     /// Field 8: `host_artifact_ref`
     #[must_use]

@@ -1,9 +1,9 @@
 # fx (Vercel): how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Mapped field-by-field onto our own catalog in
-[fx compared to our session event catalog](./fx-vs-session-events.md).
+[fx compared to our session event catalog](./vs-session-events.md).
 Evidence snapshot retrieved 2026-08-01. fx ships as a closed-source native
 binary, so there is no repository or commit to cite and no source quotes are
 possible. Version-sensitive claims were checked against these anchors:
@@ -357,7 +357,7 @@ Two versions ship simultaneously and mean different things [observed]:
   sides except those two keys) settles this; an earlier revision of this
   dossier claimed all five fields were dropped, which the diff refutes. The
   projection is documented as a beta read contract in the
-  [session detail JSON reference](./fx-session-detail-json-reference.md).
+  [session detail JSON reference](./session-detail-json-reference.md).
 
 ```json
 {"schema_version":3,
@@ -528,7 +528,7 @@ checkpoints, against 2 turn commits.
 and outcomes `recovered`, `recovered_with_unverified_artifacts`,
 `indeterminate`), `workspace`. The `session_detail` shape is documented as a
 beta read contract in the
-[session detail JSON reference](./fx-session-detail-json-reference.md),
+[session detail JSON reference](./session-detail-json-reference.md),
 including an error envelope (`{"kind":"session","error":…,"code":…}`) this
 dossier had not catalogued.
 
@@ -674,7 +674,7 @@ has no structured exit code or signal), omits the session-level metadata the
 store holds (workspace, model, effort, token totals, title, preview), and the
 top-level response carries no `schema_version` of its own, only the nested
 execution object's. The projection is at least a documented beta contract now
-(see the [session detail JSON reference](./fx-session-detail-json-reference.md)),
+(see the [session detail JSON reference](./session-detail-json-reference.md)),
 but the emitted JSON can also contain unescaped control characters in strings,
 which strict JSON parsers reject [observed]. If we expose a read API over the
 Session Store, its projection needs to be a documented contract versioned at

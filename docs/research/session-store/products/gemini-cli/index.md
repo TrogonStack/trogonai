@@ -1,7 +1,7 @@
 # Gemini CLI: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local shallow checkout of `google-gemini/gemini-cli`
 (`https://github.com/google-gemini/gemini-cli.git`) at commit
 `87f785192c34067e4e8f26bda16cf9ce24014d83` (committed 2026-07-23). Every
@@ -23,13 +23,13 @@ Authoritative anchors:
 > Scope note. Gemini CLI keeps **three related on-disk artifacts**, only the
 > first of which is the durable session transcript:
 >
-> 1. **Chat recording JSONL** — one append-only `session-*.jsonl` per session
+> 1. **Chat recording JSONL** -- one append-only `session-*.jsonl` per session
 >    under `<projectTempDir>/chats/`. This is the durable session-as-log and the
 >    focus of this dossier (`chatRecordingService.ts`).
-> 2. **Shadow-git file-state checkpoints** — a hidden git repo mirroring the
+> 2. **Shadow-git file-state checkpoints** -- a hidden git repo mirroring the
 >    workspace, one commit per restorable tool call, referenced by hash from a
 >    per-tool-call `checkpoint-*.json` (`gitService.ts`, `checkpointUtils.ts`).
-> 3. **Legacy `Logger`** — a global `logs.json` cross-session prompt history and
+> 3. **Legacy `Logger`** -- a global `logs.json` cross-session prompt history and
 >    `checkpoint-<tag>.json` full-history snapshots for `/chat save`/`/restore`
 >    (`core/logger.ts`).
 
@@ -58,20 +58,20 @@ But `ConversationRecord` is the *materialized projection*, not what is stored
 line-by-line. On disk the file is a sequence of four line kinds, all appended,
 never edited in place (`chatRecordingService.ts:550-576`, `168-346`):
 
-- **An initial metadata line** — a `PartialMetadataRecord { sessionId,
+- **An initial metadata line** -- a `PartialMetadataRecord { sessionId,
   projectHash, startTime, lastUpdated, kind, directories, ... }`
   (`chatRecordingTypes.ts:131-140`), written once at session start
   (`chatRecordingService.ts:521-530`).
-- **Message lines** — full `MessageRecord`s (`id`, `timestamp`, `type`,
+- **Message lines** -- full `MessageRecord`s (`id`, `timestamp`, `type`,
   `content`, and for `gemini` messages `toolCalls`, `thoughts`, `tokens`,
   `model`) (`chatRecordingTypes.ts:44-87`). A message is *re-appended in full*
   whenever it changes (tokens arrive, tool results update), and the loader keeps
   the **last** occurrence per `id` (`chatRecordingService.ts:572-587`, `234`).
-- **Metadata-update lines** — `{ "$set": { ...partial ConversationRecord } }`,
+- **Metadata-update lines** -- `{ "$set": { ...partial ConversationRecord } }`,
   merged into metadata at replay; a `$set` carrying a full `messages` array is a
   **checkpoint** that clears and rebuilds the message set
   (`chatRecordingService.ts:243-299`, `566-570`).
-- **Rewind markers** — `{ "$rewindTo": "<messageId>" }`, interpreted at replay
+- **Rewind markers** -- `{ "$rewindTo": "<messageId>" }`, interpreted at replay
   as "drop this message and everything after it"
   (`chatRecordingService.ts:76-78`, `172-202`, `855-875`).
 
@@ -107,7 +107,7 @@ semantics are "latest full copy per id wins," not immutable events.
   The 8-char id slice is what listing/deletion match on ("shortId").
 - **Session id minting**: the session id is the runtime `context.promptId`
   (`chatRecordingService.ts:414`, `469`); message ids are `randomUUID()`
-  (`chatRecordingService.ts:602`). There is no ordinal/sequence number — order
+  (`chatRecordingService.ts:602`). There is no ordinal/sequence number -- order
   is line order, and identity within a session is the message `id`.
 - **Listing scope**: per-project. Listing scans one project's `chats/` dir;
   there is no global cross-project session enumeration in the picker
@@ -125,34 +125,34 @@ There is no pluggable store abstraction; the store is the `ChatRecordingService`
 class plus module-level load/delete helpers. Reconstructed contract
 (`packages/core/src/services/chatRecordingService.ts`):
 
-- `initialize(resumedSessionData?, kind?) -> Promise<void>` — open or resume.
+- `initialize(resumedSessionData?, kind?) -> Promise<void>` -- open or resume.
   New session: mint the file path, `mkdir -p` the chats dir, append the initial
   metadata line, seed `cachedConversation` (`:418-535`). Resume: adopt the
   existing file, load it into `cachedConversation`, migrate a legacy `.json`
   document to `.jsonl`, and append a `$set` updating the session id (`:424-463`).
-- `recordMessage({ model, type, content, displayContent?, id? }) -> string` —
+- `recordMessage({ model, type, content, displayContent?, id? }) -> string` --
   append a new/updated message line and bump `lastUpdated` via `$set`
   (`:610-641`). `recordSyntheticMessage(...)` wraps it (`:647-658`).
-- `recordToolCalls(model, toolCalls[])` — attach/merge tool-call records onto the
+- `recordToolCalls(model, toolCalls[])` -- attach/merge tool-call records onto the
   last `gemini` message and re-append it (`:699-768`).
-- `recordThought(thought)` / `recordMessageTokens(usage)` — queue thoughts and
+- `recordThought(thought)` / `recordMessageTokens(usage)` -- queue thoughts and
   fold token usage into the last `gemini` message (`:660-697`).
-- `saveSummary(summary)` / `recordDirectories(dirs)` — `$set` metadata updates
+- `saveSummary(summary)` / `recordDirectories(dirs)` -- `$set` metadata updates
   (`:770-786`).
-- `rewindTo(messageId) -> ConversationRecord | null` — truncate the in-memory
+- `rewindTo(messageId) -> ConversationRecord | null` -- truncate the in-memory
   messages and append a `$rewindTo` marker (`:855-875`).
-- `updateMessagesFromHistory(history)` — reconcile the recorded messages against
+- `updateMessagesFromHistory(history)` -- reconcile the recorded messages against
   the live model history (masking sync) and, if changed, append a checkpoint
   `$set: { messages }` (`:877-962`).
-- `getConversation() / getConversationFilePath()` — read the cached projection
+- `getConversation() / getConversationFilePath()` -- read the cached projection
   (`:788-795`).
 - `deleteSession(idOrBasename)` / `deleteCurrentSessionAsync()` /
-  `deleteCurrentSessionIfNotResumableAsync()` — delete files (`:804-849`).
+  `deleteCurrentSessionIfNotResumableAsync()` -- delete files (`:804-849`).
 
-Module-level readers: `loadConversationRecord(filePath, options?)` — the replay
+Module-level readers: `loadConversationRecord(filePath, options?)` -- the replay
 reducer that folds all line kinds into a `ConversationRecord` (with a
 `metadataOnly` fast path and a `maxMessages` window) (`:133-400`); and
-`parseLegacyRecordFallback` — parse a whole-file single-JSON legacy record
+`parseLegacyRecordFallback` -- parse a whole-file single-JSON legacy record
 (`:965-1026`). The takeaway: **every mutation is an append; all read/rewind/
 checkpoint semantics are applied by the loader replaying the log**.
 
@@ -173,7 +173,7 @@ checkpoint semantics are applied by the loader replaying the log**.
   effective semantics are **last-write-wins per message id**. That is how a
   `gemini` message accumulates tool calls, thoughts, and token counts across
   several appends.
-- **Concurrency**: single-writer-per-session in practice — one
+- **Concurrency**: single-writer-per-session in practice -- one
   `ChatRecordingService` owns the file for a live session. There is no file lock,
   no optimistic-concurrency token, and no expected-position precondition. Two
   processes appending to the same session file would interleave lines with no
@@ -222,7 +222,7 @@ checkpoint semantics are applied by the loader replaying the log**.
   `<projectTempDir>/chats/`, keeps files starting with `session-` and ending in
   `.json`/`.jsonl`, and loads each with `metadataOnly` to build `SessionInfo`
   (`sessionUtils.ts:409-447`, `234-321`). **Subagent sessions are skipped** in
-  the picker — "these are implementation details of a tool call"
+  the picker -- "these are implementation details of a tool call"
   (`sessionUtils.ts:288-290`). Results are sorted by `startTime`
   (`sessions.ts:36-40`). Cost scales linearly with the number of session files;
   no stated scale numbers, no index.
@@ -262,7 +262,7 @@ checkpoint semantics are applied by the loader replaying the log**.
   relies on for identity/dedup is the message `id`.
 - **Versioning**: there is **no explicit schema-version field** on the session
   format. Evolution is handled by (a) additive optional fields on the
-  interfaces; (b) **format sniffing** — legacy whole-file `.json` documents are
+  interfaces; (b) **format sniffing** -- legacy whole-file `.json` documents are
   detected and migrated to `.jsonl` on resume
   (`chatRecordingService.ts:436-460`, `965-1026`); and (c) `MemoryScratchpad`
   carrying its own `version: 1` literal (`chatRecordingTypes.ts:34`). The
@@ -292,7 +292,7 @@ checkpoint semantics are applied by the loader replaying the log**.
   truncates the in-memory messages and appends `{ "$rewindTo": messageId }`
   (`chatRecordingService.ts:855-875`). On load, the reducer finds that id and
   deletes it plus everything after (or clears all if not found)
-  (`:172-202`). The pre-rewind lines are not physically removed — this is the
+  (`:172-202`). The pre-rewind lines are not physically removed -- this is the
   append-marker pattern, so the transcript file still contains the rewound turns.
 - **File-state checkpoints are a shadow git repo, not inline content.** `/restore`
   (interactive `checkpointing`) uses `GitService`, which maintains a hidden
@@ -355,8 +355,8 @@ checkpoint semantics are applied by the loader replaying the log**.
   `~/.gemini/tmp/<projectShortId>/` tree, synchronous appends, and one live
   writer per session. There is no shared-filesystem coordination, remote
   writeback, lease, or crash-detection protocol. (A separate `a2a-server`
-  package has its own GCS persistence for the agent-to-agent server surface —
-  `packages/a2a-server/src/persistence/gcs.ts` — but that is a different product
+  package has its own GCS persistence for the agent-to-agent server surface --
+  `packages/a2a-server/src/persistence/gcs.ts` -- but that is a different product
   surface, not the CLI's session store.)
 
 ## Interop with foreign session stores
@@ -373,7 +373,7 @@ append-only per-session JSONL log whose lines are folded by a replay reducer
 into a `ConversationRecord` projection**, with rewind and compaction expressed
 as appended markers (`$rewindTo`, checkpoint `$set: {messages}`) rather than
 in-place edits. That is directionally the same append-only-log-with-projection
-shape our design targets, but implemented loosely — the message semantics are
+shape our design targets, but implemented loosely -- the message semantics are
 "latest full copy per id wins," not immutable events. Lessons:
 
 - **Markers-at-replay for rewind and compaction** (`$rewindTo`, checkpoint
@@ -386,11 +386,11 @@ shape our design targets, but implemented loosely — the message semantics are
   correctness depends entirely on physical line order and on the loader's
   heuristics (`chatRecordingService.ts:76-97`). Our store should use explicit
   entry types, a monotonic sequence/ordinal, and immutable events instead of
-  re-appended full-message upserts — the Codex/OpenCode ordinal approach is the
+  re-appended full-message upserts -- the Codex/OpenCode ordinal approach is the
   contrast to follow.
 - **File-state checkpoints via a content-addressed shadow git repo**
   (`gitService.ts`, `checkpointUtils.ts`) are a cheap, dedup'd way to snapshot the
-  workspace per tool call and restore by commit hash — a good model for our
+  workspace per tool call and restore by commit hash -- a good model for our
   environment-checkpoint story, keyed to a specific turn/message id.
 - **Directory-based subagent nesting** (`chats/<parentId>/<childId>.jsonl`) is
   simple but couples identity to path; a first-class parent pointer (as in
@@ -401,13 +401,13 @@ shape our design targets, but implemented loosely — the message semantics are
   chats dir with no automatic session re-linking (`storage.ts:181-273`). Our
   design needs a stable session key independent of cwd, plus explicit relocation
   reconciliation.
-- **Cautions**: (1) **Best-effort durability** — synchronous append with no
+- **Cautions**: (1) **Best-effort durability** -- synchronous append with no
   fsync, silent disable on `ENOSPC`, torn-line tolerance on read
   (`chatRecordingService.ts:540-563`, `343-345`); a hard crash can lose the last
-  write. (2) **No concurrency control** — single-writer assumption with no lock
+  write. (2) **No concurrency control** -- single-writer assumption with no lock
   or expected-version; unsafe for multi-writer/multi-host. (3) **Linear-scan
   listing** with no index; scales poorly with many sessions. (4) **No log
-  compaction/retention** of the JSONL itself — rewound and superseded lines
+  compaction/retention** of the JSONL itself -- rewound and superseded lines
   persist in the file indefinitely, so the file grows even as the projection
   shrinks.
 

@@ -11,20 +11,20 @@ conclusion here differs from an accepted record in the
 [ADR index](../../adr/index.md), the ADR is authoritative.
 
 The through-line is the append-log-vs-mutable-record spectrum. At one end
-sit [T3 Code](./products/t3code.md) and [OpenCode](./products/opencode.md)'s
+sit [T3 Code](./products/t3code/index.md) and [OpenCode](./products/opencode/index.md)'s
 v2 subsystem, whose durable session **is** an event table with rebuildable
-SQL projections. At the other sits [Goose](./products/goose.md) and
-[Hermes](./products/hermes-agent.md), whose durable session is a mutable
+SQL projections. At the other sits [Goose](./products/goose/index.md) and
+[Hermes](./products/hermes-agent/index.md), whose durable session is a mutable
 SQLite row that retroactive operations DELETE and re-INSERT or flip flags
-on. The CLIs in between, [Claude Agent SDK](./products/claude-agent-sdk.md),
-[Codex CLI](./products/codex-cli.md), [Gemini CLI](./products/gemini-cli.md),
-and [Grok Build](./products/grok-build.md), converge on append-only JSONL
+on. The CLIs in between, [Claude Agent SDK](./products/claude-agent-sdk/index.md),
+[Codex CLI](./products/codex-cli/index.md), [Gemini CLI](./products/gemini-cli/index.md),
+and [Grok Build](./products/grok-build/index.md), converge on append-only JSONL
 transcripts with derived read models bolted alongside (a SQLite index for
 Codex CLI; JSON sidecars/registries for Claude Agent SDK), which is
 directionally the same shape with looser discipline: no expected-version
 precondition anywhere in the group, though Codex CLI's SQLite projection
 carries a formal rebuild/read-repair cursor contract that the others
-lack. [LangGraph](./products/langgraph.md)
+lack. [LangGraph](./products/langgraph/index.md)
 is the odd one out structurally: its unit is a parent-linked chain of
 immutable state snapshots, not a message transcript, and it is the second
 cleanest event-sourcing analog in the corpus after T3 Code.
@@ -33,23 +33,23 @@ cleanest event-sourcing analog in the corpus after T3 Code.
 
 **1. Nobody stores model-visible context as the durable artifact; a
 separate durable log or table always exists, and the model's view is
-derived from it.** [Claude Agent SDK](./products/claude-agent-sdk.md): "a
+derived from it.** [Claude Agent SDK](./products/claude-agent-sdk/index.md): "a
 session whose store holds 503 raw entries may return 18 messages from
-`getSessionMessages`." [Codex CLI](./products/codex-cli.md): "the live and
+`getSessionMessages`." [Codex CLI](./products/codex-cli/index.md): "the live and
 persisted histories remain identical" even as `replacement_history`
-replaces what the model re-reads. [Grok Build](./products/grok-build.md):
+replaces what the model re-reads. [Grok Build](./products/grok-build/index.md):
 "Rebuild the derived `chat_history.jsonl` cache from `updates.jsonl`, the
-durable source of truth." [T3 Code](./products/t3code.md) and
-[OpenCode](./products/opencode.md) hold this as policy: "the only
+durable source of truth." [T3 Code](./products/t3code/index.md) and
+[OpenCode](./products/opencode/index.md) hold this as policy: "the only
 'shrinking' is view-side ... bound what the UI holds, not what is stored."
-Even [Goose](./products/goose.md),
+Even [Goose](./products/goose/index.md),
 the corpus's most mutable store, keeps pre-compaction turns as
 `agent_invisible` rows rather than deleting them.
 
 **2. JSONL append-only transcripts are the majority default for CLI
 products, and the append discipline is remarkably specific.** [Claude Agent
-SDK](./products/claude-agent-sdk.md), [Codex CLI](./products/codex-cli.md),
-[Gemini CLI](./products/gemini-cli.md), and [Grok Build](./products/grok-build.md)
+SDK](./products/claude-agent-sdk/index.md), [Codex CLI](./products/codex-cli/index.md),
+[Gemini CLI](./products/gemini-cli/index.md), and [Grok Build](./products/grok-build/index.md)
 all write one line per event/entry to a per-session `.jsonl` file with no
 in-place edits on the hot path. Two independently built torn-write defenses
 converge on the same fix: Codex repairs the rollout file to be
@@ -75,72 +75,72 @@ axis: Goose's rewind is "a destructive delete" (`truncate_conversation`),
 and Hermes's is an in-place flag flip (`active=0`).
 
 **4. Compaction is universally an upstream/agent-loop concern that the
-store merely records, never triggers or understands.** [LangGraph](./products/langgraph.md):
+store merely records, never triggers or understands.** [LangGraph](./products/langgraph/index.md):
 "the store neither triggers nor understands it," a summary is just the
-next value of a channel. [Claude Agent SDK](./products/claude-agent-sdk.md):
+next value of a channel. [Claude Agent SDK](./products/claude-agent-sdk/index.md):
 compaction produces "another appended entry," an `isCompactSummary` marker.
-[Codex CLI](./products/codex-cli.md) appends a `Compacted` item with
-`replacement_history`. [OpenCode](./products/opencode.md): "Compaction is
+[Codex CLI](./products/codex-cli/index.md) appends a `Compacted` item with
+`replacement_history`. [OpenCode](./products/opencode/index.md): "Compaction is
 upstream of the store... but leaves a durable marker in the log." Even
-[Goose](./products/goose.md), which rewrites rows for compaction, treats the
+[Goose](./products/goose/index.md), which rewrites rows for compaction, treats the
 summarization call itself as an agent-loop decision the store just
 persists the result of.
 
 **5. Fork/branch always mints a new identity; nobody reuses the source
-session id.** [Claude Agent SDK](./products/claude-agent-sdk.md)'s
+session id.** [Claude Agent SDK](./products/claude-agent-sdk/index.md)'s
 `forkSession` "rewrites every `sessionId` field and remaps message UUIDs...
 An adapter-level copy... would produce a transcript that still references
-the old session ID, so the SDK does not use one." [Codex CLI](./products/codex-cli.md)
+the old session ID, so the SDK does not use one." [Codex CLI](./products/codex-cli/index.md)
 mints a new `thread_id` and stitches lineage via `SessionMeta.forked_from_id`
-plus `history_base`. [T3 Code](./products/t3code.md) requires a dedicated
+plus `history_base`. [T3 Code](./products/t3code/index.md) requires a dedicated
 `ThreadForkService` and produces a `thread.forked` event on a new stream.
-[Grok Build](./products/grok-build.md): "Fork is copy-plus-lineage, not a
-shared-prefix reference." [Goose](./products/goose.md) mints a fresh
-`YYYYMMDD_N` id via `copy_session`. Only [LangGraph](./products/langgraph.md)
+[Grok Build](./products/grok-build/index.md): "Fork is copy-plus-lineage, not a
+shared-prefix reference." [Goose](./products/goose/index.md) mints a fresh
+`YYYYMMDD_N` id via `copy_session`. Only [LangGraph](./products/langgraph/index.md)
 gets a genuinely cheap fork, because content-addressed channel blobs are
 shared by reference across the copied chain.
 
 **6. Subagents are (almost) always a sibling stream/session linked by a
 parent pointer, never entries inlined in the parent's transcript.**
-[Codex CLI](./products/codex-cli.md): `SessionMeta.parent_thread_id`, "a
-first-class sibling thread." [T3 Code](./products/t3code.md): "each
+[Codex CLI](./products/codex-cli/index.md): `SessionMeta.parent_thread_id`, "a
+first-class sibling thread." [T3 Code](./products/t3code/index.md): "each
 subagent appears as its own thread: openable, inspectable mid-flight,
-steerable, and resumable." [OpenCode](./products/opencode.md): "a
-first-class sibling session," linked by `parent_id`. [Grok Build](./products/grok-build.md):
-its own directory plus a `SubagentMeta` pointer file. [Goose](./products/goose.md):
-its own row, linked by `parent_session_id`. [Hermes](./products/hermes-agent.md):
+steerable, and resumable." [OpenCode](./products/opencode/index.md): "a
+first-class sibling session," linked by `parent_id`. [Grok Build](./products/grok-build/index.md):
+its own directory plus a `SubagentMeta` pointer file. [Goose](./products/goose/index.md):
+its own row, linked by `parent_session_id`. [Hermes](./products/hermes-agent/index.md):
 its own row plus a durable delivery outbox (`async_delegations`) for
 crash-safe result reconciliation. The sole structural exception is
-[Claude Agent SDK](./products/claude-agent-sdk.md), which nests subagent
+[Claude Agent SDK](./products/claude-agent-sdk/index.md), which nests subagent
 `.jsonl` files physically *inside* the parent's session directory rather
 than as a database-level sibling, still a separate transcript, just a
 different addressing scheme.
 
 **7. Cascade-on-delete for subagents is inconsistent and mostly unhandled,
-and nobody has a clean answer.** [Codex CLI](./products/codex-cli.md): "a
+and nobody has a clean answer.** [Codex CLI](./products/codex-cli/index.md): "a
 missing parent produces a 'malformed lineage' error rather than silent
-cascade." [Goose](./products/goose.md): "no cascade to children... leaving
-a subagent row with a dangling `parent_session_id`." [OpenCode](./products/opencode.md):
+cascade." [Goose](./products/goose/index.md): "no cascade to children... leaving
+a subagent row with a dangling `parent_session_id`." [OpenCode](./products/opencode/index.md):
 "deleting a parent session row does not delete children, they would
-orphan." [T3 Code](./products/t3code.md): "No cascade to child threads was
+orphan." [T3 Code](./products/t3code/index.md): "No cascade to child threads was
 found... children keep their `parentThreadId` and would be orphaned."
-[Grok Build](./products/grok-build.md): "No GC for orphaned subagent
+[Grok Build](./products/grok-build/index.md): "No GC for orphaned subagent
 session directories was found." This is a convergence in the sense that
 every product that has subagents has the *same unresolved gap*.
 
 **8. No product implements true optimistic-concurrency control at the
 store's write boundary, and the exceptions that come closest are the two
-purest event-sourced designs.** [Claude Agent SDK](./products/claude-agent-sdk.md):
-"there is no expected-position precondition on `append`." [Goose](./products/goose.md):
-"no expected-version precondition anywhere; there is no CAS." [Hermes](./products/hermes-agent.md):
+purest event-sourced designs.** [Claude Agent SDK](./products/claude-agent-sdk/index.md):
+"there is no expected-position precondition on `append`." [Goose](./products/goose/index.md):
+"no expected-version precondition anywhere; there is no CAS." [Hermes](./products/hermes-agent/index.md):
 "there is no optimistic-concurrency / expected-position precondition
-anywhere." [Gemini CLI](./products/gemini-cli.md) and [Codex CLI](./products/codex-cli.md)
+anywhere." [Gemini CLI](./products/gemini-cli/index.md) and [Codex CLI](./products/codex-cli/index.md)
 rely on a single-writer-per-session assumption with no lock. Only
-[T3 Code](./products/t3code.md) (a unique `(aggregate_kind, stream_id,
+[T3 Code](./products/t3code/index.md) (a unique `(aggregate_kind, stream_id,
 stream_version)` index plus a single-writer command queue) and
-[OpenCode](./products/opencode.md) (an explicit expected-seq check on
+[OpenCode](./products/opencode/index.md) (an explicit expected-seq check on
 replay: "Sequence mismatch") give the write path any real
-conflict-detection teeth; [LangGraph](./products/langgraph.md)'s unique
+conflict-detection teeth; [LangGraph](./products/langgraph/index.md)'s unique
 `(thread_id, checkpoint_id)` key is unrelated to conflict detection, its
 own dossier flags "no expected-version/OCC in the OSS savers" and notes
 `put` is last-write-wins on a given checkpoint id.
@@ -148,20 +148,20 @@ own dossier flags "no expected-version/OCC in the OSS savers" and notes
 ## Divergence
 
 **A. Append-only log vs mutable row, the central axis.** Pure log:
-[T3 Code](./products/t3code.md) ("unambiguously session-as-log
-(event-sourced)"), [OpenCode](./products/opencode.md) v2 ("This is
-unambiguously session-as-log"), [LangGraph](./products/langgraph.md)
+[T3 Code](./products/t3code/index.md) ("unambiguously session-as-log
+(event-sourced)"), [OpenCode](./products/opencode/index.md) v2 ("This is
+unambiguously session-as-log"), [LangGraph](./products/langgraph/index.md)
 (immutable, id-addressed, parent-linked snapshots). Log-shaped but looser:
-[Claude Agent SDK](./products/claude-agent-sdk.md), [Codex CLI](./products/codex-cli.md),
-[Gemini CLI](./products/gemini-cli.md), [Grok Build](./products/grok-build.md),
+[Claude Agent SDK](./products/claude-agent-sdk/index.md), [Codex CLI](./products/codex-cli/index.md),
+[Gemini CLI](./products/gemini-cli/index.md), [Grok Build](./products/grok-build/index.md),
 all JSONL, but looser in different ways: tolerated multi-writer
 interleaving (Claude Agent SDK), message-level last-write-wins re-appends
 (Gemini), no ordinal at all (legacy Codex), or a single-writer-per-session
 assumption enforced only socially, via an exclusive per-append file lock
 plus a pid registry rather than a store-level contract (Grok Build).
-Mutable row: [Goose](./products/goose.md) ("a mutable row plus an
+Mutable row: [Goose](./products/goose/index.md) ("a mutable row plus an
 in-place-editable ordered message table... explicitly not session-as-log")
-and [Hermes](./products/hermes-agent.md) ("session-as-mutable-relational-
+and [Hermes](./products/hermes-agent/index.md) ("session-as-mutable-relational-
 record... the least event-sourced of the products studied"). **Our
 service must decide: is the append-only guarantee enforced by the store
 (reject any operation that isn't an append), or merely a convention the
@@ -172,22 +172,22 @@ one either).
 
 **B. Identity minting: client-random UUID vs client time-ordered UUIDv7 vs
 server-assigned date+ordinal vs server-assigned monotonic sequence.**
-Random, v4-shaped (observed on disk, not documented): [Claude Agent SDK](./products/claude-agent-sdk.md)
-session id. Time-ordered UUIDv7/ULID-like, client-minted: [Codex CLI](./products/codex-cli.md)
+Random, v4-shaped (observed on disk, not documented): [Claude Agent SDK](./products/claude-agent-sdk/index.md)
+session id. Time-ordered UUIDv7/ULID-like, client-minted: [Codex CLI](./products/codex-cli/index.md)
 ("Codex-generated thread IDs are UUIDv7, and some use cases rely on that"),
-[OpenCode](./products/opencode.md) (`ses_` ids pack timestamp + counter,
-bit-inverted for descending sort), [LangGraph](./products/langgraph.md)
+[OpenCode](./products/opencode/index.md) (`ses_` ids pack timestamp + counter,
+bit-inverted for descending sort), [LangGraph](./products/langgraph/index.md)
 (checkpoint id is UUID6, "unique and monotonically increasing, so can be
 used for sorting"). Time-ordered UUIDv7, server-assigned as a fallback:
-[Grok Build](./products/grok-build.md) (session ids "are minted as UUIDv7
+[Grok Build](./products/grok-build/index.md) (session ids "are minted as UUIDv7
 when the ACP client does not supply one," via `uuid::now_v7()`).
 Server-assigned, human-legible, low-entropy:
-[Goose](./products/goose.md) (`YYYYMMDD_N`, a per-day counter, "not a
-UUID... but no location"), [Hermes](./products/hermes-agent.md) session id
+[Goose](./products/goose/index.md) (`YYYYMMDD_N`, a per-day counter, "not a
+UUID... but no location"), [Hermes](./products/hermes-agent/index.md) session id
 (`{timestamp}_{6-hex}`, "~24 bits of entropy, second-resolution collisions
 theoretically possible"). Pure sequence, no id semantics at all:
-[T3 Code](./products/t3code.md) (`stream_version` per aggregate plus a
-global `sequence`) and [OpenCode](./products/opencode.md) (per-aggregate
+[T3 Code](./products/t3code/index.md) (`stream_version` per aggregate plus a
+global `sequence`) and [OpenCode](./products/opencode/index.md) (per-aggregate
 `seq`). **Divergence to resolve: do we want an id that is sortable by
 construction (UUIDv7/ULID) or an id that is opaque and let a separate
 sequence column carry order?** The two cleanest event-sourced designs
@@ -197,15 +197,15 @@ way UUIDv7-as-directory-name products do.
 
 **C. Scope of the store: per-project directory vs single global
 database.** Directory-per-project, no cross-project store: [Claude Agent
-SDK](./products/claude-agent-sdk.md) (`projectKey` flattens the cwd into
-the path), [Codex CLI](./products/codex-cli.md) (time-sharded but global
-within `$CODEX_HOME`, filtered by `cwd_filters`), [Gemini CLI](./products/gemini-cli.md)
+SDK](./products/claude-agent-sdk/index.md) (`projectKey` flattens the cwd into
+the path), [Codex CLI](./products/codex-cli/index.md) (time-sharded but global
+within `$CODEX_HOME`, filtered by `cwd_filters`), [Gemini CLI](./products/gemini-cli/index.md)
 (`projectShortId` directory). Single database, cwd as a plain filter
-column: [Goose](./products/goose.md) ("no cwd/project path is encoded into
-the key... project_id is just a nullable column"), [Hermes](./products/hermes-agent.md)
-(one `state.db` per profile, `cwd` a plain column), [T3 Code](./products/t3code.md)
-and [OpenCode](./products/opencode.md) (one DB, `project_id`/`workspace_id`
-columns), [Grok Build](./products/grok-build.md) (cwd-encoded directory
+column: [Goose](./products/goose/index.md) ("no cwd/project path is encoded into
+the key... project_id is just a nullable column"), [Hermes](./products/hermes-agent/index.md)
+(one `state.db` per profile, `cwd` a plain column), [T3 Code](./products/t3code/index.md)
+and [OpenCode](./products/opencode/index.md) (one DB, `project_id`/`workspace_id`
+columns), [Grok Build](./products/grok-build/index.md) (cwd-encoded directory
 path, but a remote registry merges cross-host listings). This directly
 determines whether "move the working directory" is a relocation problem
 (directory-keyed stores all have bespoke migration/registry code for this:
@@ -218,17 +218,17 @@ on a plain column; OpenCode is the middle case, still appending a
 non-migratory without becoming a bare out-of-band UPDATE).
 
 **D. Compaction's durable shape: in-place row rewrite vs external snapshot
-file vs pure append marker.** Rewrite in place: [Goose](./products/goose.md)
+file vs pure append marker.** Rewrite in place: [Goose](./products/goose/index.md)
 (`DELETE all rows, re-INSERT` via `replace_conversation`) and
-[Hermes](./products/hermes-agent.md) (`UPDATE active=0, compacted=1` then
+[Hermes](./products/hermes-agent/index.md) (`UPDATE active=0, compacted=1` then
 insert new rows, "a content-preserving UPDATE"). External snapshot plus a
-log marker: [Grok Build](./products/grok-build.md) (`CompactionCheckpoint`
+log marker: [Grok Build](./products/grok-build/index.md) (`CompactionCheckpoint`
 marker in `updates.jsonl` plus a full separate `compaction_checkpoints/
 {id}.json` file, required to rewind past the boundary, and rewind fails
 closed if the file is missing). Pure append, no external file needed:
-[Claude Agent SDK](./products/claude-agent-sdk.md) (`isCompactSummary`
-entry in the same log), [Codex CLI](./products/codex-cli.md) (`Compacted`
-item with `replacement_history` inline), [T3 Code](./products/t3code.md)
+[Claude Agent SDK](./products/claude-agent-sdk/index.md) (`isCompactSummary`
+entry in the same log), [Codex CLI](./products/codex-cli/index.md) (`Compacted`
+item with `replacement_history` inline), [T3 Code](./products/t3code/index.md)
 (no compaction of the log at all, it is unbounded and grows forever).
 **Divergence to resolve: does a compaction boundary require a sidecar
 artifact recoverable independently of the log (Grok Build's model, with an
@@ -239,44 +239,44 @@ un-compactably.
 
 **E. Retention: nobody enforces it at the store layer, but who is
 *expected* to differs.** Explicitly the caller's job, store provides
-mechanism only: [Claude Agent SDK](./products/claude-agent-sdk.md) ("The
+mechanism only: [Claude Agent SDK](./products/claude-agent-sdk/index.md) ("The
 SDK never deletes from your store on its own... TTLs, S3 lifecycle
-policies... are the adapter's responsibility"), [LangGraph](./products/langgraph.md)
+policies... are the adapter's responsibility"), [LangGraph](./products/langgraph/index.md)
 (`prune(strategy=)`, no automatic lifecycle). Product-owned sweep with a
-concrete default: [Claude Agent SDK](./products/claude-agent-sdk.md)'s own
-CLI (`cleanupPeriodDays`, default 30), [Gemini CLI](./products/gemini-cli.md)
-(delete-on-exit-if-not-resumable), [Hermes](./products/hermes-agent.md)
+concrete default: [Claude Agent SDK](./products/claude-agent-sdk/index.md)'s own
+CLI (`cleanupPeriodDays`, default 30), [Gemini CLI](./products/gemini-cli/index.md)
+(delete-on-exit-if-not-resumable), [Hermes](./products/hermes-agent/index.md)
 (`prune_sessions(older_than_days=90)`, invoked, not scheduled). No
-retention story at all, log grows forever: [T3 Code](./products/t3code.md)
+retention story at all, log grows forever: [T3 Code](./products/t3code/index.md)
 ("no retention or log-truncation/snapshotting, the log grows unbounded")
-and [OpenCode](./products/opencode.md) ("none found... the log is retained
+and [OpenCode](./products/opencode/index.md) ("none found... the log is retained
 indefinitely"). **The two purest event-sourced designs are also the two
 with zero retention story**, an event-sourced Session Store gets rewind
 and audit for free but inherits an explicit obligation to design retention
 deliberately, since nothing in the pattern forces it.
 
 **F. Multi-host / multi-writer posture.** Single-host by design, no
-coordination: [Codex CLI](./products/codex-cli.md), [Gemini CLI](./products/gemini-cli.md),
-[Goose](./products/goose.md) (SQLite write-lock only), [T3 Code](./products/t3code.md)
+coordination: [Codex CLI](./products/codex-cli/index.md), [Gemini CLI](./products/gemini-cli/index.md),
+[Goose](./products/goose/index.md) (SQLite write-lock only), [T3 Code](./products/t3code/index.md)
 ("the database is never shared across hosts"). Single-host with
-network-filesystem awareness: [Hermes](./products/hermes-agent.md) (WAL on
+network-filesystem awareness: [Hermes](./products/hermes-agent/index.md) (WAL on
 local disks, falls back to DELETE-mode journal on NFS/SMB/FUSE because "WAL's
 shared-memory index needs coherent mmap... those mounts don't provide").
 Multi-host as a first-class adapter concern, pushed above the core
-interface: [Claude Agent SDK](./products/claude-agent-sdk.md) ("Serverless
+interface: [Claude Agent SDK](./products/claude-agent-sdk/index.md) ("Serverless
 functions, autoscaled workers, and CI runners don't share a filesystem. A
 shared store lets any replica resume any session," with a documented
 clock-skew failure mode in the reference S3 adapter). Multi-host avoided
-rather than solved: [Grok Build](./products/grok-build.md) (per-host
+rather than solved: [Grok Build](./products/grok-build/index.md) (per-host
 SQLite files on network mounts, rebuildable indexes only, "concurrency
 control is advisory file locks plus a pid registry... multi-host is
 handled by giving up," with a remote registry merge as a secondary
 best-effort lane). Multi-host as a first-class *designed* protocol:
-[OpenCode](./products/opencode.md) (`events.replay` with an `ownerID` +
+[OpenCode](./products/opencode/index.md) (`events.replay` with an `ownerID` +
 `strictOwner` guard, `events.claim` to transfer ownership, a per-aggregate
 high-water history-fetch API, "a real distributed event-sync design
 layered on the same append-only log").
-Multi-host via a shared database instance: [LangGraph](./products/langgraph.md)
+Multi-host via a shared database instance: [LangGraph](./products/langgraph/index.md)
 (Postgres backend, content-addressed blob upserts are conflict-free by
 construction). **This is the widest-open axis**: only OpenCode has
 actually solved cross-host replication of an event-sourced session on top
@@ -284,13 +284,13 @@ of an ownership-claim protocol; everyone else either assumes single-host or
 punts the problem to the storage substrate.
 
 **G. What "the store" persists vs what it treats as opaque.** Fully
-opaque entries, store is a pure byte-transport: [Claude Agent SDK](./products/claude-agent-sdk.md)
+opaque entries, store is a pure byte-transport: [Claude Agent SDK](./products/claude-agent-sdk/index.md)
 (`SessionStoreEntry` is "a `{ type: string; ... }` object," treated as
 opaque JSON by contract). Parsed and validated on every read/write:
-[OpenCode](./products/opencode.md) (event `data` "decoded and validated
-through Effect Schema on both append and read"), [T3 Code](./products/t3code.md)
+[OpenCode](./products/opencode/index.md) (event `data` "decoded and validated
+through Effect Schema on both append and read"), [T3 Code](./products/t3code/index.md)
 (same, via Effect Schema, plus derived `actor_kind`). Partially parsed,
-targeted introspection: [Goose](./products/goose.md) ("neither fully
+targeted introspection: [Goose](./products/goose/index.md) ("neither fully
 opaque nor a normalized schema, JSON columns with targeted introspection"
 via `json_extract`/`json_each`). **Divergence: does the Session Store
 validate event payloads against a schema at the storage boundary, or does
@@ -310,8 +310,8 @@ application.
 | --- | --- |
 | session-as-log (append-only, source of truth) | T3 Code, OpenCode (v2) |
 | session-as-log-of-immutable-snapshots (event-sourcing-adjacent, unit is a state chain not a message stream) | LangGraph |
-| session-as-log with looser discipline (append-only JSONL, no formal OCC contract; projector-contract rigor varies — Codex CLI's SQLite projection has an explicit rebuild/read-repair cursor) | Claude Agent SDK / Claude Code, Codex CLI, Gemini CLI, Grok Build |
-| session-as-directory (path/filename encodes identity; scope encoding varies — Codex CLI's path is time-sharded only, with cwd scope applied as a query-time filter, not a path segment) | Claude Agent SDK, Codex CLI, Gemini CLI, Grok Build, OpenCode (legacy) |
+| session-as-log with looser discipline (append-only JSONL, no formal OCC contract; projector-contract rigor varies -- Codex CLI's SQLite projection has an explicit rebuild/read-repair cursor) | Claude Agent SDK / Claude Code, Codex CLI, Gemini CLI, Grok Build |
+| session-as-directory (path/filename encodes identity; scope encoding varies -- Codex CLI's path is time-sharded only, with cwd scope applied as a query-time filter, not a path segment) | Claude Agent SDK, Codex CLI, Gemini CLI, Grok Build, OpenCode (legacy) |
 | session-as-row (mutable, single record + child table) | Goose, Hermes |
 | session-as-mutable-relational-record (flag-mutation instead of events) | Hermes (Goose achieves a similar visibility effect only via a full delete+re-insert rewrite of the message table, not an in-place flag mutation) |
 | session-as-document (whole-file rewrite, last-write-wins per id) | Gemini CLI (legacy `.json`) |
@@ -324,15 +324,15 @@ the log is the file, and the file's path is the addressing scheme).
 
 | Product | Durable session is a... | Source of truth | Keying / id scheme | Compaction artifact | Rewind/fork | Append-log closeness |
 | --- | --- | --- | --- | --- | --- | --- |
-| [Claude Agent SDK](./products/claude-agent-sdk.md) | append-only JSONL transcript | the `.jsonl` file (mirrored, not replaced, by the SDK's `SessionStore`) | client v4-shaped UUID (observed); path = `projectKey/sessionId/subpath` | in-log `isCompactSummary` entry, raw entries retained | rewind = view op over log; fork = `forkSession` rewrites ids into a new key | high, but no OCC precondition and tolerates multi-writer interleave |
-| [Codex CLI](./products/codex-cli.md) | append-only JSONL rollout + derived SQLite index | `RolloutLine` log; SQLite is read-repaired from it | client UUIDv7 `thread_id`; filename = timestamp+id, time-sharded dir | in-log `Compacted` item with `replacement_history` | `ThreadRolledBack` marker replay; fork = new `thread_id` + `history_base` prefix pointer | high; explicit CQRS-shaped log+SQLite-projection design |
-| [Gemini CLI](./products/gemini-cli.md) | append-only JSONL folded by a replay reducer | the `.jsonl` file; `ConversationRecord` is "the materialized projection, not what is stored line-by-line" | client `promptId`; path = `projectShortId/chats/session-<ts>-<id8>.jsonl` | checkpoint `$set:{messages}` line replaces message set | `$rewindTo` marker, non-destructive; no first-class fork (resume continues same file) | medium; message-level last-write-wins per id, not immutable events |
-| [Goose](./products/goose.md) | mutable SQLite row + message table | the `sessions`/`messages` rows themselves | server date+counter `YYYYMMDD_N`; global DB, no path key | `replace_conversation`: DELETE all rows, re-INSERT with visibility flags | `truncate_conversation`, a destructive delete; fork = `copy_session`, full physical copy | low; explicitly "not session-as-log" |
-| [Grok Build](./products/grok-build.md) | append-only JSONL (`updates.jsonl`) + derived caches/index | `updates.jsonl`; cache/summary/FTS all rebuildable | server UUIDv7 session id; path = `sessions/{encoded_cwd}/{id}/` | append marker (`CompactionCheckpoint`) plus external snapshot file, fails closed if missing | `RewindMarker` + dead-branch-filter replay; fork = copy files + lineage fields | high; "event sourcing on the filesystem in all but name" |
-| [Hermes](./products/hermes-agent.md) | mutable SQLite row + message table | the `sessions`/`messages` rows | client `{timestamp}_{6hex}` id; global per-profile DB | `active=0, compacted=1` in-place flag flip, content-preserving | `rewind_to_message`: soft-delete via flag flip (reversible); fork = `/branch`, full row copy | low; "least event-sourced of the products studied" |
-| [LangGraph](./products/langgraph.md) | parent-linked chain of immutable state snapshots | the `checkpoints` table; channel values content-addressed by `(channel, version)` | caller-supplied `thread_id`; checkpoint id = UUID6 | no store-level compaction; `prune`/shallow-saver drop history, `DeltaChannel` snapshots for large channels | rewind = select an older checkpoint (nothing destroyed); fork = new checkpoint sharing ancestor blobs, `copy_thread` | very high; "materially closer to event-sourcing than the transcript products" |
-| [OpenCode](./products/opencode.md) | append-only SQLite event log (v2) / mutable JSON-per-path store (legacy) | the `event` table, keyed `(aggregate_id, seq)` | client-minted ULID-like `ses_`/`evt_` ids; per-aggregate `seq` | in-log `compaction.ended` event; model-visible view folds from latest compaction seq | `revert.commit` truncates only the projection, event rows kept; no first-class fork found | very high; "unambiguously session-as-log (event-sourced)" |
-| [T3 Code](./products/t3code.md) | append-only SQLite event log | the `orchestration_events` table, keyed `(aggregate_kind, stream_id, stream_version)` | client-supplied `threadId`; server UUIDv4 `eventId`; global `sequence` + per-stream `stream_version` | none; log is never compacted, only view-side caps | `thread.reverted` event filters the projection, log kept; fork = new stream via `ThreadForkService`, O(history) copy | highest in corpus; "the corpus's cleanest event-sourced example" |
+| [Claude Agent SDK](./products/claude-agent-sdk/index.md) | append-only JSONL transcript | the `.jsonl` file (mirrored, not replaced, by the SDK's `SessionStore`) | client v4-shaped UUID (observed); path = `projectKey/sessionId/subpath` | in-log `isCompactSummary` entry, raw entries retained | rewind = view op over log; fork = `forkSession` rewrites ids into a new key | high, but no OCC precondition and tolerates multi-writer interleave |
+| [Codex CLI](./products/codex-cli/index.md) | append-only JSONL rollout + derived SQLite index | `RolloutLine` log; SQLite is read-repaired from it | client UUIDv7 `thread_id`; filename = timestamp+id, time-sharded dir | in-log `Compacted` item with `replacement_history` | `ThreadRolledBack` marker replay; fork = new `thread_id` + `history_base` prefix pointer | high; explicit CQRS-shaped log+SQLite-projection design |
+| [Gemini CLI](./products/gemini-cli/index.md) | append-only JSONL folded by a replay reducer | the `.jsonl` file; `ConversationRecord` is "the materialized projection, not what is stored line-by-line" | client `promptId`; path = `projectShortId/chats/session-<ts>-<id8>.jsonl` | checkpoint `$set:{messages}` line replaces message set | `$rewindTo` marker, non-destructive; no first-class fork (resume continues same file) | medium; message-level last-write-wins per id, not immutable events |
+| [Goose](./products/goose/index.md) | mutable SQLite row + message table | the `sessions`/`messages` rows themselves | server date+counter `YYYYMMDD_N`; global DB, no path key | `replace_conversation`: DELETE all rows, re-INSERT with visibility flags | `truncate_conversation`, a destructive delete; fork = `copy_session`, full physical copy | low; explicitly "not session-as-log" |
+| [Grok Build](./products/grok-build/index.md) | append-only JSONL (`updates.jsonl`) + derived caches/index | `updates.jsonl`; cache/summary/FTS all rebuildable | server UUIDv7 session id; path = `sessions/{encoded_cwd}/{id}/` | append marker (`CompactionCheckpoint`) plus external snapshot file, fails closed if missing | `RewindMarker` + dead-branch-filter replay; fork = copy files + lineage fields | high; "event sourcing on the filesystem in all but name" |
+| [Hermes](./products/hermes-agent/index.md) | mutable SQLite row + message table | the `sessions`/`messages` rows | client `{timestamp}_{6hex}` id; global per-profile DB | `active=0, compacted=1` in-place flag flip, content-preserving | `rewind_to_message`: soft-delete via flag flip (reversible); fork = `/branch`, full row copy | low; "least event-sourced of the products studied" |
+| [LangGraph](./products/langgraph/index.md) | parent-linked chain of immutable state snapshots | the `checkpoints` table; channel values content-addressed by `(channel, version)` | caller-supplied `thread_id`; checkpoint id = UUID6 | no store-level compaction; `prune`/shallow-saver drop history, `DeltaChannel` snapshots for large channels | rewind = select an older checkpoint (nothing destroyed); fork = new checkpoint sharing ancestor blobs, `copy_thread` | very high; "materially closer to event-sourcing than the transcript products" |
+| [OpenCode](./products/opencode/index.md) | append-only SQLite event log (v2) / mutable JSON-per-path store (legacy) | the `event` table, keyed `(aggregate_id, seq)` | client-minted ULID-like `ses_`/`evt_` ids; per-aggregate `seq` | in-log `compaction.ended` event; model-visible view folds from latest compaction seq | `revert.commit` truncates only the projection, event rows kept; no first-class fork found | very high; "unambiguously session-as-log (event-sourced)" |
+| [T3 Code](./products/t3code/index.md) | append-only SQLite event log | the `orchestration_events` table, keyed `(aggregate_kind, stream_id, stream_version)` | client-supplied `threadId`; server UUIDv4 `eventId`; global `sequence` + per-stream `stream_version` | none; log is never compacted, only view-side caps | `thread.reverted` event filters the projection, log kept; fork = new stream via `ThreadForkService`, O(history) copy | highest in corpus; "the corpus's cleanest event-sourced example" |
 
 ## Working definition
 
@@ -348,10 +348,10 @@ each with the industry's answer where one exists:
    compaction, and revert are new appended events, never edits or
    deletes.** Industry's answer: T3 Code and OpenCode enforce this
    structurally; every JSONL product does it by convention only; Goose and
-   Hermes are the cautionary counterexamples — Goose via DELETE+re-INSERT
+   Hermes are the cautionary counterexamples -- Goose via DELETE+re-INSERT
    (`replace_conversation`), Hermes via both a destructive DELETE+re-INSERT
    (`replace_messages`, used by /retry, /undo, /compress) and a
-   non-destructive flag-flip (`archive_and_compact`) — both flagged in
+   non-destructive flag-flip (`archive_and_compact`) -- both flagged in
    their own dossiers as crash-risk and history-loss hazards.
 
 2. **Separate identity from order: an opaque event/session id for
@@ -421,7 +421,7 @@ each with the industry's answer where one exists:
 9. **Event payloads should be schema-validated at the storage boundary,
    not treated as opaque bytes.** Industry's answer: split. T3 Code and
    OpenCode validate every event type through a schema library on both
-   append and read — T3 Code via Effect Schema, though without an explicit
+   append and read -- T3 Code via Effect Schema, though without an explicit
    per-event-type version field, handling evolution additively rather than
    by branching on a version number; Claude Agent SDK deliberately keeps
    entries opaque (`{type: string}`) to maximize adapter portability.
@@ -432,10 +432,86 @@ each with the industry's answer where one exists:
 
 The one-line reading of the whole study: the industry has already proven
 the event-sourced session store pattern is implementable and exercised in
-real, evolving codebases at two independent shops (T3 Code, OpenCode) —
+real, evolving codebases at two independent shops (T3 Code, OpenCode) --
 though for OpenCode specifically, the evidence comes from a private fork
 mid-migration where which store (legacy filesystem vs. v2) is authoritative
-in the shipped distribution remains an open question — and approximated it
+in the shipped distribution remains an open question -- and approximated it
 everywhere else with append-only JSONL, which means our job is not to
 invent the pattern but to close the two gaps nobody has closed yet:
 subagent cascade semantics and retention on an unbounded log.
+
+## Stage-two results, not yet absorbed above
+
+Everything above is frozen as decision-time input from nine dossiers. Sixteen
+stage-two comparisons have landed since, and this section records what they add
+without rewriting the frozen text around it. Where the two disagree, the
+comparisons are the newer reading and the ADR is authoritative over both.
+
+**The design mostly survives contact with the evidence.** Across the
+comparisons' 55 numbered recommendations there are 45 blast-radius statements.
+Eight mention breaking in any form: four are "do not do X later" guardrails
+against regressions we have not committed to (Cline on deterministic child ids,
+Letta on relaxing optimistic concurrency for an `At` transition, OpenHands on a
+second non-replayable authoritative store, Zed on a pre-session draft keyspace),
+three are conditional on which answer we pick (Crush on a parent-cost rollup,
+Pi on `SessionForked` crossing a `WorkspaceRef`, Cline on a claim-check
+threshold), and exactly one asks for a change that breaks something today:
+adopt an explicit schema-version marker and a written back-compat policy at the
+`v1alpha1` to `v1` promotion (Google ADK, 10/12, with AWS Strands at 6/12
+arriving at the same question from the opposite direction). The remaining
+statements are additive, and most of those are documentation, Non-Goals, tests,
+or CI. The two thinnest stores, SWE-agent at 3/12 and Aider at 4/12, yield zero
+recommendations by explicit argument, which is the maturity rubric discarding
+evidence rather than letting a weak store anchor a change.
+
+**A tenth convergence, and the strongest single finding of the second stage: a
+pluggable store interface systematically hides the guarantees callers assume it
+provides.** Four products span the full maturity range and fail the same way.
+Google ADK (10/12) has real expected-version optimistic concurrency in
+`DatabaseSessionService`, materially weaker checking in `SqliteSessionService`,
+and none at all in the in-memory and Vertex backends, so "the same interface"
+conceals a behavioral cliff on concurrent append. Mastra (11/12) has four
+adapters reaching four different atomicity conclusions from one abstract
+interface. The OpenAI Agents SDK (5/12) has nine backends each re-deriving
+identity, ordering, and concurrency independently (an autoincrement column, a
+Mongo `seq`, a Dapr ETag), several imperfectly. Pi (7/12) has three
+implementations of one interface that have already silently diverged on a single
+field, with the checked-in documentation then describing harness-only behavior as
+if it were the CLI's. This converts Pi's recommendation 2 from a nice-to-have
+into the best-supported precondition in the corpus: any second `trogon-decider`
+implementation must pass a shared conformance suite over every
+`WRITE_PRECONDITION` class before it ships.
+
+**Convergence 8 above survives eighteen more products and gets sharper.** Even
+the two stores that do have optimistic concurrency put it in the wrong place.
+Letta version-checks exactly one ORM model, `Block`, which holds
+memory-configuration data, while the actual per-turn hot pointer
+`Agent.message_ids` has no guard at all. Substrate-level `At(current_position)`
+by default remains the corpus outlier, in our favor.
+
+**Cascade-on-terminal is validated, and the rewind split is not merely
+unvalidated but unattempted.** Zed is the only studied product with genuinely
+transitive cascade, and it chose the same behavior
+[ADR#0035](../../adr/0035-session-store-decider-aggregate.md) decision 6 does,
+independently. Cline's stops one level deep and only from a root. Codex CLI,
+Goose, OpenCode, and T3 Code orphan. Roo Code, queued as a presumed restatement
+of Cline, recurses the full child-task tree and is the second real cascade in the
+corpus. Nobody anywhere has an analog to invalidating a child whose dispatch
+point a still-running parent has rewound away, so that half of decision 6 is
+original design work rather than industry practice restated.
+
+**Decision 7 gets no evidence either way, structurally.** A mutable-document
+store never faces the problem, because replacing or deleting a whole document is
+strictly easier than masking part of a keep-forever fact stream. This is why no
+product validates `SessionHidden`, `RedactionApplied`, or `ArtifactErased`, and
+it is a property of the sample rather than a weakness in the decision.
+
+**The message payload is documented per product and not at all per provider.**
+Twenty-four of twenty-five dossiers carry an entry-structure section, and twelve
+comparisons map the product's message type row by row against `CanonicalMessage`
+and its seven-arm `ContentBlock` oneof. What no artifact covers is the provider
+side: `ProviderBlock` exists to absorb blocks the typed arms cannot model, and
+nothing in the corpus enumerates what would go through it, so whether seven arms
+are the right seven is still open. The queued stage three in the
+[backlog](./backlog.md) takes a provider rather than a product as its unit of
+study for that reason.

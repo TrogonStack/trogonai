@@ -36,17 +36,17 @@ This decision uses a smaller model:
       immutable record of the exact revision, implementation, models,
       provider routes, and dependencies admitted for one Session
 
-Codex and Claude Code are implementations in this model. An OpenAI or Claude
-model is a separate model selection. A process, container, microVM, or remote
-service may host an implementation, but hosting is not itself an Agent
-implementation.
+The platform-managed harness loop is the normative v1 implementation in this
+model. Codex and Claude Code are possible future edge integrations, not the
+source of the core Session schema. An OpenAI or Claude model is a separate model
+selection. A process, container, microVM, or remote service may host an
+implementation, but hosting is not itself an Agent implementation.
 
 OpenClaw uses its own precise product vocabulary: an agent runtime owns a
 prepared model loop, and a harness implements that runtime. The platform does
-not copy those nouns into its core model. For a verified configuration, an
-OpenClaw adapter maps the exact behavioral component to
-AgentImplementationVersion and preserves OpenClaw's native terms inside typed
-OpenClaw configuration.
+not copy those nouns into its core model. A future OpenClaw adapter would map
+the exact behavioral component to AgentImplementationVersion and preserve
+OpenClaw's native terms inside typed OpenClaw configuration.
 
 This ADR refines the ownership described by draft
 [ADR#0025](./0025-agent-definition-data-ownership.md). The exact
@@ -75,10 +75,11 @@ The repository already establishes adjacent constraints:
 - The generated protobuf types use unknown_fields=false. Older readers can
   discard unknown arms and unknown fields, so version skew must fail closed.
 
-This ADR defines logical ownership, Session admission, the implementation
-adapter, remote verification, and protobuf modeling. It does not select a
-container orchestrator, define a general hosting resource, or move provider
-credentials into Agent configuration.
+This ADR defines logical ownership, Session admission, the platform harness
+boundary, constraints on future implementation adapters, remote verification,
+and protobuf modeling. It does not select a container orchestrator, define a
+general hosting resource, or move provider credentials into Agent
+configuration.
 
 ## Decision
 
@@ -88,11 +89,12 @@ Use these normative logical records:
 
     AgentImplementationVersion
       implementation_version_id
-      built-in kind or registered extension identity
-      native product version
-      adapter artifact reference and digest
-      native artifact references and digests
-      adapter contract version
+      kind = platform_harness | registered_extension
+      platform_harness:
+        harness artifact references and digests
+        harness contract version
+      registered_extension:
+        immutable extension version reference and definition digest
       configuration contract version
       supported model protocols and capabilities
       definition_digest
@@ -128,10 +130,12 @@ precondition is unmet. The consequence recorded in
 rest of this ADR, including implementation pinning, plan immutability, and
 attestation, is unaffected by it.
 
-AgentImplementationVersion describes a reusable immutable release. Its
-definition digest commits to the product and adapter artifacts, native product
-version, supported contracts, and implementation capabilities. A mutable tag
-such as latest is not an exact version.
+AgentImplementationVersion describes a reusable immutable release. For the
+built-in arm, its definition digest commits to the platform harness artifacts,
+supported contracts, and implementation capabilities. A mutable tag such as
+latest is not an exact version. A registered edge extension pins any additional
+product and adapter artifacts inside its immutable extension version, not in
+the built-in harness fields.
 
 Every behavior-significant artifact is pinned transitively. This includes a
 bundled CLI or SDK, plugins, nested components, composition rules, and generated
@@ -147,7 +151,7 @@ activation.
 ModelSelection identifies an exact versioned model catalog record, not a
 display name, mutable provider alias, auto value, or provider credential. Its
 parameters are part of AgentConfiguration. The implementation cannot replace
-that model with a native default or fallback. Enforcing that last sentence
+that model with a harness default or fallback. Enforcing that last sentence
 requires the platform to read the pinned model, which runtime-owned model
 selection does not currently grant.
 
@@ -184,9 +188,10 @@ The following boundary decides where a value belongs:
   Session launch state.
 
 An OCI image may therefore be an implementation artifact when it is the
-immutable distribution of the pinned product. The cluster, node, process
-supervisor, filesystem allocation, and network placement that run it remain
-hosting details.
+immutable distribution of the pinned platform harness. A future registered
+extension pins a product image inside its extension version. The cluster, node,
+process supervisor, filesystem allocation, and network placement that run it
+remain hosting details.
 
 ### 2. Bind one immutable SessionExecutionPlan
 
@@ -198,14 +203,14 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
       agent_configuration_ref + configuration_digest
       agent_implementation_version_ref + definition_digest
       implementation_configuration_digest
-      effective_native_configuration_digest
+      effective_harness_configuration_digest
       primary_model_selection
       primary_resolved_model_route
       auxiliary_model_selections + resolved routes
       resolved variable bindings
       resolved tool, delegate, memory, and skill versions
       work contract and input references
-      adapter contract version
+      harness contract version
       session-plan contract version
       resolved-model-route contract version
 
@@ -220,12 +225,34 @@ ModelSelection. They cannot substitute another model. Attempt-scoped
 [model-access grants](../glossary/modelaccessgrant), secret values, and short-lived provider credentials never
 enter the plan.
 
+The plan's model fields inherit the contested ownership recorded in section 1.
+The shipped AgentConfiguration contract exposes no typed ModelSelection for
+admission to read, so `primary_model_selection`, `auxiliary_model_selections`,
+and their resolved model routes are provisional, together with admission
+steps 4 and 5, the model-protocol check in step 7, the model-access grants in
+step 10, and the ExactModelUnavailable and ExactModelMismatch failure
+categories below; none of them has anything to read until typed selections
+land, the same block
+[ADR#0032](./0032-model-route-and-credential-binding.md) records for route
+admission. Until the reconciliation tracked in
+[ADR#0025](./0025-agent-definition-data-ownership.md) lands, the authoritative
+interim source of model selection is the runtime-owned settings inside the
+pinned AgentConfiguration, when they record one: that selection cannot change
+within a revision, because `configuration_digest` commits to those settings,
+but the platform cannot read it as a typed value, resolve a provider route
+for it, or enforce the no-substitution rule above. When those settings are
+absent, the shipped contract lets the implementation's own defaults choose
+the model, which is exactly the invisibility this decision exists to remove;
+the reconciliation must close that gap. The plan fields and admission steps
+that do not depend on model selection are normative now.
+
 Admission proceeds in this order:
 
 1. Load the requested AgentRevision and verify AgentConfiguration bytes and
    digest.
-2. Load the exact AgentImplementationVersion and verify its definition,
-   native product artifacts, and adapter artifact digests.
+2. Load the exact AgentImplementationVersion and verify its definition and
+   harness artifact digests. A registered edge extension verifies its own
+   pinned product and adapter artifacts under the extension contract.
 3. Validate the typed implementation configuration against the exact
    configuration contract version.
 4. Read the exact primary and auxiliary ModelSelection values from
@@ -236,7 +263,7 @@ Admission proceeds in this order:
    Session dependencies.
 7. Verify that the implementation supports every model protocol and required
    Session capability.
-8. Build the exact native configuration projection and its expected digest.
+8. Build the exact harness configuration projection and its expected digest.
 9. Store the canonical SessionExecutionPlan bytes and digest atomically with
    SessionStarted.
 10. Authorize the first launch only after observing that durable start fact.
@@ -262,7 +289,7 @@ failure categories are:
 - CheckpointIncompatible; and
 - PinnedDependencyRevoked.
 
-These failures never trigger native or platform fallback. A caller may correct
+These failures never trigger harness or platform fallback. A caller may correct
 the configuration, activate another reviewed AgentRevision, or start a new
 Session after the unavailable dependency is restored.
 
@@ -279,9 +306,11 @@ plan to recreate the digest.
 
 ### 3. Keep every implementation attached to its platform Session
 
-An AgentImplementationAdapter is the bidirectional boundary between the
-platform Session and one native implementation. Its version and artifact
-digest are pinned by AgentImplementationVersion.
+The Session coordinator and platform-owned harness form the bidirectional
+execution boundary. A future AgentImplementationAdapter translates an external
+product into that boundary without changing the core Session contract. Its
+version and artifact digest are pinned by the immutable registered extension
+version.
 
 The platform Session owns:
 
@@ -292,33 +321,139 @@ The platform Session owns:
 - cancellation intent and terminal outcome; and
 - delivery of a child Session result to its waiting parent.
 
-The native implementation owns its private loop state while it runs. A durable
-checkpoint is an opaque typed artifact or reference whose schema, digest, and
-implementation version are recorded by the Session.
+The platform-owned harness runs the loop for a Session. Four durable records
+must not be conflated:
 
-The logical adapter exchange is:
+- The typed Session event log is the authoritative record of platform facts.
+  It alone rebuilds the Session aggregate and every read model.
+- An aggregate [snapshot](../glossary/snapshot) is an advisory persisted fold of
+  that log. If it is missing or invalid, replay starts earlier without changing
+  Session meaning.
+- A harness recovery checkpoint is opaque process state used only when the
+  platform needs to continue an in-flight loop under the same pinned plan. It
+  cannot replace event replay, prove a platform fact, or act as a Session
+  snapshot.
+- A projection or consumer [checkpoint](../glossary/checkpoint) is only a
+  processed stream position and is not any of these state artifacts.
+
+The protobuf named `Checkpoint` retains its wire name, but this ADR calls that
+object a harness recovery checkpoint to keep the meanings distinct.
+
+A harness recovery checkpoint is admissible only after capture completes and
+the Session command boundary verifies all the following before
+`CheckpointProduced` is recorded:
+
+- the sealed state includes every harness-relevant effective Session fact from
+  the beginning of the Session through the declared `covers_through` cut, so
+  restoring it produces the same harness state as a fresh replay through that
+  cut, proven by the capture attestation below rather than assumed;
+- the state has been sealed as a durable artifact independently of the process
+  memory that produced it;
+- independently fetching the sealed bytes and recomputing their digest
+  succeeds;
+- the producing ExecutionAttempt and immutable SessionExecutionPlan digest
+  match the Session;
+- the harness can correlate its cut to one settled platform `covers_through`
+  ordinal without guessing; and
+- `checkpoint_type` identifies a format supported by the implementation version
+  committed by the plan.
+
+Semantic coverage and replay equivalence cannot be recomputed from opaque
+bytes, so the first verification rests on a capture attestation rather than on
+the harness's word. When capture completes, the platform-controlled supervisor
+of the producing attempt (section 4) computes an effective-history digest over
+the harness-relevant effective Session facts it delivered, in fold order, from
+the beginning of the Session through `covers_through`, and signs, under that
+attempt's confirmation key, a binding of the artifact reference and digest,
+`checkpoint_id`, `checkpoint_type`, producing ExecutionAttempt,
+SessionExecutionPlan digest, `covers_through`, and that effective-history
+digest. Admission verifies the signature against the producing attempt's
+confirmation-key thumbprint, requires every attested value to equal the
+corresponding field of the checkpoint evidence being admitted, recomputes the
+effective-history digest from authoritative Session history, and requires
+equality with the attested value. An attestation is not transferable:
+evidence whose artifact reference, digest, id, type, cut, attempt, or plan
+digest differs from what the supervisor signed is rejected, never partially
+matched.
+The admitted checkpoint evidence retains the attestation reference and digest
+beside the effective-history digest, so restoration re-verifies the same proof
+before trusting any bytes. The attestation proves the binding: the measured
+harness and supervisor boundary verified under section 4 captured the sealed
+state from exactly the attested effective history. A missing, unverifiable, or
+mismatched attestation rejects the checkpoint.
+
+`Checkpoint.covers_through` is the core Session replay cut. Internal harness
+coordinates stay inside the opaque, versioned artifact and never become core
+Session facts or `SessionOrdinal` values. If any admission proof is
+unavailable, that checkpoint cannot continue the in-flight loop. The platform
+then replays authoritative Session history and starts a fresh ExecutionAttempt;
+only incomplete authoritative history or an indeterminate side effect requiring
+reconciliation can block recovery.
+
+Restoration is one guarded workflow:
+
+1. `StartExecutionAttempt` folds the Session at current head `H`, selects an
+   eligible admitted checkpoint, and appends `ExecutionAttemptStarted` under
+   `At(H)` with that exact checkpoint evidence.
+2. The supervisor fetches the sealed artifact again and verifies its digest,
+   format, capture attestation, producing attempt, plan, and effective
+   `covers_through` cut before trusting any bytes.
+3. The harness restores the sealed state, then replays the exact
+   harness-relevant effective tail after `covers_through` through `H`, using the
+   same rewind, redaction, and compaction interpretation as a fresh replay.
+4. Only after the tail reaches `H` may the attempt record Ready or receive new
+   work. Facts appended after `H` remain queued for normal delivery.
+
+Eligibility in step 1 demands more than an intact artifact: the covered prefix
+must still mean at `H` what it meant when the checkpoint was admitted. Tail
+replay applies interpretation only to facts after `covers_through`; it cannot
+rebuild the sealed prefix. Any fact folded through `H` that reinterprets
+history at or before the cut therefore disqualifies the checkpoint: a rewind
+that makes `covers_through` ineffective, a redaction targeting any event at or
+before it, or an artifact erasure reaching an artifact recorded at or before
+it. Without this rule, a restored attempt would keep content a fresh replay
+masks. A compaction marker in the tail does not disqualify, whatever range it
+covers: applying it is the loop's ordinary live operation, the restored
+attempt and a fresh replay hold the same covered facts and fold the same
+self-sufficient marker, and unlike redaction and erasure it removes nothing a
+fresh replay would still deliver. An ineligible checkpoint falls back to
+fresh replay from authoritative history, which applies the changed
+interpretation from the first fact.
+
+This makes checkpoint restore observationally equivalent to rebuilding the
+harness from authoritative history through the same selected head. A checkpoint
+is an optimization for process-local state, never an alternate history.
+
+Claude, Codex, or another product may be integrated later by translating at
+the platform edge. Such an integration cannot add product session ids,
+transcript layouts, bridge cursors, or product-specific resume semantics to the
+core Session schema. Its external recovery material remains outside this
+platform harness contract.
+
+The logical harness exchange is:
 
 | Direction | Operation | Required effect |
 | --- | --- | --- |
-| Platform to adapter | Start | Bind the exact Session, plan bytes, and plan digest. |
-| Adapter to platform | Ready | Prove the admitted implementation and effective configuration are running. |
-| Platform to adapter | DeliverInput | Deliver immutable work or continuation input. |
-| Adapter to platform | Output | Record ordered model-visible output. |
-| Adapter to platform | ToolRequested | Ask the platform to authorize and dispatch a declared tool. |
-| Platform to adapter | ToolResult | Return the typed result or denial. |
-| Adapter to platform | DelegateRequested | Ask the platform to create an authorized child Session or external delegation operation. |
-| Platform to adapter | DelegateResult | Return the recorded result to the waiting loop. |
-| Adapter to platform | ModelRequested | Ask the Session model proxy to call one planned model route. |
-| Platform to adapter | ModelResult | Return the response for the same planned operation. |
-| Adapter to platform | CheckpointProduced | Record an opaque checkpoint reference and digest. |
-| Platform to adapter | Cancel | Stop new work and acknowledge cancellation. |
-| Adapter to platform | Completed or Failed | Record one typed terminal outcome. |
+| Platform to harness | Start | Bind the exact Session, plan bytes, and plan digest. |
+| Harness to platform | Ready | Prove the admitted implementation and effective configuration are running. |
+| Platform to harness | DeliverInput | Deliver immutable work or continuation input. |
+| Harness to platform | Output | Record ordered model-visible output. |
+| Harness to platform | ToolRequested | Ask the platform to authorize and dispatch a declared tool. |
+| Platform to harness | ToolResult | Return the typed result or denial. |
+| Harness to platform | DelegateRequested | Ask the platform to create an authorized child Session or external delegation operation. |
+| Platform to harness | DelegateResult | Return the recorded result to the waiting loop. |
+| Harness to platform | ModelRequested | Ask the Session model proxy to call one planned model route. |
+| Platform to harness | ModelResult | Return the response for the same planned operation. |
+| Harness to platform | CheckpointProduced | Record an admitted harness recovery checkpoint. |
+| Platform to harness | Cancel | Stop new work and acknowledge cancellation. |
+| Harness to platform | Completed or Failed | Record one typed terminal outcome. |
 
 Every exchange binds the Session id and plan digest. Retryable requests carry
 a stable operation id and request digest. Ordered output carries a monotonic
-sequence or equivalent acknowledged cursor. Reconnect resumes from the last
-acknowledged position. If continuity cannot be proven, the coordinator restores
-an admitted checkpoint or fails the Session.
+sequence, while reconnect behavior stays inside the harness transport and
+operation ledger. If continuity cannot be proven, the coordinator restores an
+admitted harness recovery checkpoint or replays authoritative history into a
+fresh attempt.
 
 The Session keeps a durable operation ledger. Before a tool or delegation side
 effect, it reserves the operation id and typed request digest. A retry with the
@@ -332,7 +467,7 @@ stable dispatch identity or support outcome reconciliation. If a crash leaves
 a non-idempotent outcome indeterminate, recovery records ToolOutcomeUnknown
 and does not automatically repeat the side effect.
 
-Native spawning cannot create hidden collaboration state. A spawn must map
+Harness spawning cannot create hidden collaboration state. A spawn must map
 one-for-one to either an authorized child Session or an authorized external
 delegation operation, then wait for DelegateResult. Otherwise it is disabled.
 Each child Session has its own revision, plan, authorization, transcript, and
@@ -342,7 +477,7 @@ An external delegated agent does not become a child Session. The parent
 Session ledger records an ExternalDelegationOperation with the stable operation
 id, parent Session and plan digest, resolved delegate reference from the plan,
 authenticated remote subject, authorization reference, request digest, status,
-correlation id, and response or failure digest. The adapter receives only the
+correlation id, and response or failure digest. The harness receives only the
 resulting DelegateResult. This gives the parent loop a durable return path
 without claiming knowledge of the external system's implementation, model,
 internal tools, transcript, or execution plan.
@@ -351,18 +486,18 @@ The delegation or integration plane owns the external destination binding,
 endpoint, and authentication data. SessionExecutionPlan copies only the
 resolved non-secret reference and digest required to authorize dispatch. At
 dispatch, that plane authenticates the [transport](../glossary/transport) without exposing credential
-material to AgentConfiguration, the native implementation, the prompt, or the
+material to AgentConfiguration, the harness, the prompt, or the
 operation payload.
 
-### 4. Verify local and remote implementations before Ready
+### 4. Verify the platform harness before Ready
 
 Ready is an admission proof, not only a health signal. It binds:
 
 - Session id and plan digest;
 - AgentImplementationVersion reference and definition digest;
-- measured native product identity, version, and artifact digest;
-- measured adapter or supervisor artifact digest;
-- effective native configuration digest;
+- measured platform harness identity, version, and artifact digest;
+- measured supervisor artifact digest;
+- effective harness configuration digest;
 - supervisor confirmation-key thumbprint;
 - restored continuation evidence when resuming; and
 - the authenticated execution identity that produced the evidence.
@@ -371,32 +506,24 @@ The Session does not become runnable until the coordinator validates Ready and
 confirms that every required model-access grant and live launch authorization
 is active.
 
-The effective configuration digest covers the exact non-secret native
+The effective configuration digest covers the exact non-secret harness
 configuration projected from AgentConfiguration and SessionExecutionPlan.
 Secrets, temporary credentials, and sender-constrained proof keys are excluded.
 The digest must equal the expected value already stored in the plan.
 
-For an in-process or platform-managed launch, a platform-controlled supervisor
-verifies artifacts and produces Ready evidence. For a remote pinned
-implementation, Ready additionally requires attestation that the native
-product build and effective configuration actually deployed at the remote
-boundary match the plan. Attesting only the local adapter, remote endpoint, or
-transport driver is insufficient.
+For an in-process or remote platform-harness launch, a platform-controlled
+supervisor verifies the exact harness artifact and effective configuration and
+produces Ready evidence. A remote launch must attest the deployed harness and
+supervisor boundary; attesting only an endpoint or transport driver is
+insufficient.
 
-V1 verified remote model access requires a platform-controlled attested
-supervisor beside the remote implementation. The native product sends a
-Session-bound ModelRequested operation to that supervisor over an authenticated
-local or private channel. The supervisor verifies the Session, plan, route,
-operation id, and request digest, then presents the sender-constrained
-ModelAccessGrant to the platform model proxy. The native product never receives
-the grant token, proof private key, provider API key, or renewable credential.
-
-If that supervisor and attestation boundary cannot be established, the remote
-system is treated as an external delegated agent. This is a boundary
-classification, not another platform resource type. The platform may authorize
-a delegation request and record its result, but it does not claim that the
-remote internal implementation, configuration, model calls, or tool calls
-satisfy this SessionExecutionPlan.
+**Future registered edge extensions.** If a later ADR admits an external
+product, its extension contract additionally pins and attests the native product
+and adapter artifacts. A platform-controlled supervisor must still mediate
+Session-bound model requests without exposing a grant token, proof private key,
+provider API key, or renewable credential to that product. If the product and
+adapter boundary cannot provide this evidence, the system is an external
+delegated agent rather than a verified Session implementation.
 
 Hosting is deliberately not a first-class resource in this ADR. Launch attempts
 may record placement, process, container, remote endpoint, health, restart, and
@@ -414,8 +541,11 @@ an append-only sequence of immutable facts:
       attempt_number
       previous_attempt_id?
       restored_checkpoint?
-        reference + type + digest + implementation_version
-      resume_cursor?
+        checkpoint_id + reference + checkpoint_type + digest
+        implementation_version + producing_execution_attempt_id
+        covers_through + session_execution_plan_digest
+        capture attestation reference + digest
+        effective history digest
       host artifact or driver reference + digest
       authenticated remote subject?
       isolation and placement facts
@@ -435,50 +565,43 @@ ExecutionAttempt facts are evidence about one launch, not reusable
 configuration and not a reusable execution-runtime resource. Restart never
 edits the prior attempt. It creates a new attempt under the same immutable plan
 and records its lineage. Admission rejects a new attempt when its host changes
-implementation behavior or cannot reproduce the planned native artifact and
+implementation behavior or cannot reproduce the planned harness artifact and
 effective configuration. Cancellation intent belongs to the Session, while
 ExecutionAttemptEnded records how that intent affected the attempt.
 
-A continuing attempt records the exact admitted checkpoint and acknowledged
-cursor it restores. Ready attests that restoration. The prior attempt's model
-grants are revoked, and the new supervisor creates a fresh confirmation key.
-Only after Ready validates may the platform issue new grants bound to the new
-ExecutionAttempt and the unchanged resolved routes. If checkpoint continuity,
-cursor continuity, or grant rebinding cannot be proven, the Session fails
-instead of replaying work or rewriting its plan.
+A continuing attempt records the exact admitted harness recovery checkpoint it
+restores. Ready attests that the artifact was verified, its state restored, and
+the effective tail replayed through the head selected by the start command. The
+prior attempt's model grants are revoked, and the new supervisor creates a fresh
+confirmation key. Only after Ready validates may the platform issue new grants
+bound to the new ExecutionAttempt and the unchanged resolved routes. If
+checkpoint continuity or grant rebinding cannot be proven, that continuation is
+rejected and the platform starts a fresh attempt from authoritative history
+instead of rewriting the plan.
 
 ### 5. Use typed protobuf unions and registered extensions
 
-Built-in implementations use explicit oneof arms. The oneof case is the
-implementation kind. Do not add an enum discriminator beside generic
-configuration because the two values could disagree.
+The platform-managed harness is the only built-in v1 implementation arm. A
+future product integration uses the registered edge-extension arm unless a
+later ADR changes the core contract. The oneof case is the implementation kind;
+an enum discriminator beside it could disagree with the selected value.
 
 The following shapes are illustrative. Concrete packages, field names, and
 supporting value objects require their own Buf-validated contract design.
 
     message AgentImplementation {
       oneof implementation {
-        CodexImplementation codex = 1;
-        ClaudeCodeImplementation claude_code = 2;
-        ManagedImplementation managed = 3;
-        OpenClawImplementation openclaw = 4;
-        CompositeImplementation composite = 5;
+        PlatformHarnessImplementation platform_harness = 1;
         RegisteredImplementation registered_extension = 100;
       }
       Digest definition_digest = 101;
       Digest configuration_digest = 102;
     }
 
-    message CodexImplementation {
+    message PlatformHarnessImplementation {
       AgentImplementationVersionRef version = 1;
       ConfigurationContractVersion configuration_contract = 2;
-      CodexConfiguration configuration = 3;
-    }
-
-    message ClaudeCodeImplementation {
-      AgentImplementationVersionRef version = 1;
-      ConfigurationContractVersion configuration_contract = 2;
-      ClaudeCodeConfiguration configuration = 3;
+      PlatformHarnessConfiguration configuration = 3;
     }
 
     message RegisteredImplementation {
@@ -493,12 +616,12 @@ supporting value objects require their own Buf-validated contract design.
       AgentImplementationVersionRef implementation_version = 4;
       Digest implementation_definition_digest = 5;
       Digest implementation_configuration_digest = 6;
-      Digest effective_native_configuration_digest = 7;
+      Digest effective_harness_configuration_digest = 7;
       ModelSelection primary_model_selection = 8;
       ResolvedModelRoute primary_model_route = 9;
       repeated AuxiliaryModelRoute auxiliary_models = 10;
       SessionDependencies dependencies = 11;
-      AdapterContractVersion adapter_contract = 12;
+      HarnessContractVersion harness_contract = 12;
       SessionPlanContractVersion plan_contract = 13;
       ModelRouteContractVersion model_route_contract = 14;
     }
@@ -509,9 +632,9 @@ supporting value objects require their own Buf-validated contract design.
     }
 
 The kind recorded by the selected AgentImplementationVersion must agree with
-the AgentImplementation oneof arm. A Codex version in a ClaudeCodeImplementation
-arm, a standalone OpenClaw version in a CompositeImplementation arm, or any
-other mismatch is ImplementationKindMismatch.
+the AgentImplementation oneof arm. A platform-harness version in the registered
+extension arm, an extension version in the platform-harness arm, or any other
+mismatch is ImplementationKindMismatch.
 
 The registered_extension arm is the only place this decision permits
 google.protobuf.Any. Its immutable extension version pins one allowed [type URL](../glossary/type-url),
@@ -532,14 +655,15 @@ Apply these rules:
 
 1. Every boundary validates that exactly one known implementation arm exists.
    A missing arm is unsupported, never a default.
-2. Every built-in arm carries an explicit configuration contract version.
-   Writers, admission services, adapters, and supervisors advertise the exact
-   contract versions they can interpret.
+2. The built-in harness arm carries an explicit configuration contract version.
+   Writers, admission services, harnesses, supervisors, and registered extension
+   handlers advertise the exact contract versions they can interpret.
 3. Admission requires support for the selected arm and configuration contract
    version. A newer behavior-affecting field requires a newer contract version,
    even when protobuf considers the field additive.
 4. SessionExecutionPlan and ResolvedModelRoute carry independent contract
-   versions. Coordinators, adapters, supervisors, and the [model access service](../glossary/model-access-service)
+   versions. Coordinators, harnesses, supervisors, registered extension
+   handlers, and the [model access service](../glossary/model-access-service)
    advertise the exact versions they interpret. Admission requires every plan
    consumer to support both versions. A missing or unsupported version is a
    typed admission failure, never a default. Any behavior-affecting or
@@ -561,8 +685,9 @@ form. Unknown JSON keys are not an extension mechanism.
 Durable [event envelopes](../glossary/event-envelope) store the stable full name and exact bytes of each
 concrete [event](../glossary/event). SessionStarted stores StoredSessionExecutionPlan once in the
 Session stream. Do not persist the bytes of a top-level event oneof wrapper.
-Large immutable implementation definitions and checkpoints may be external
-only when the event retains their exact reference, type, and digest.
+Large immutable implementation definitions and harness recovery
+checkpoints may be external only when the event retains their exact reference,
+type, and digest.
 
 ### 7. Apply the model to concrete products
 
@@ -570,26 +695,20 @@ The Model ownership column below assumes platform-owned model selection, which
 the shipped contract does not provide; read it as intended design pending the
 reconciliation recorded in
 [ADR#0025](./0025-agent-definition-data-ownership.md).
+The platform-managed loop is the only normative v1 row. Product rows summarize
+research and possible edge integrations; they do not reserve core oneof arms or
+field numbers.
 
 | Arrangement | AgentConfiguration implementation | Model ownership | Classification |
 | --- | --- | --- | --- |
-| Codex | Exact Codex product and adapter version, artifacts, and typed options | Exact compatible model selections are separate AgentConfiguration fields | Verified implementation |
-| Claude Code | Exact Claude Code product and adapter version, artifacts, and typed options | Exact compatible model selections are separate AgentConfiguration fields | Verified implementation |
-| Platform managed loop | Exact managed implementation version and typed options | Exact model selections remain in AgentConfiguration | Verified implementation |
-| Fully pinned OpenClaw | OpenClawImplementation pins the exact build, plugins, effective configuration, and allowed delegation behavior | Every model role is explicit in AgentConfiguration; native auto selection and failover are disabled | Verified standalone implementation only with Ready attestation |
-| OpenClaw transparently hosting Codex | Codex is the implementation; OpenClaw is an attested launch fact | Codex uses the exact AgentConfiguration model selections | Verified only when OpenClaw cannot alter loop semantics |
-| OpenClaw delegating to Codex | OpenClaw parent Session and Codex child Session | Each AgentConfiguration owns exact model selections and its revision binds them | Two verified Sessions |
-| OpenClaw plus Codex layered loop | CompositeImplementation pins every component version and composition rule | Every model role is explicit and pinned | Verified composite implementation |
-| Unpinned or auto-selecting OpenClaw | None | Internal model and component choices are opaque | External delegated agent only |
+| Platform managed loop | `platform_harness` with its exact version and typed options | Exact model selections remain in AgentConfiguration | Normative built-in v1 implementation |
+| Codex or Claude Code | No built-in arm; a later accepted integration uses `registered_extension` and edge-owned product state | Exact compatible model selections remain separate AgentConfiguration fields | Future edge integration research |
+| OpenClaw or another composite product | No built-in or composite arm; use external delegation unless a later accepted edge extension can prove the required behavior | Every platform-authorized model role remains explicit in AgentConfiguration | Future edge integration or external delegation |
 
-OpenClaw may still make dynamic decisions while running pinned code and
-configuration. Dynamic output is not configuration mutability. Dynamically
-substituting an unpinned implementation, plugin, model, or hidden child agent
-is prohibited for a verified Session.
-
-When evidence cannot prove that OpenClaw is a transparent host, use the
-composite classification or treat it as an external delegated agent. Do not
-infer transparency from product naming or transport protocol.
+Product composition, hidden spawning, native fallback, and product-specific
+resume behavior cannot become core Session semantics through the extension
+arm. An integration either translates them into existing platform commands or
+keeps them outside the verified Session boundary.
 
 ### 8. Bound mutability explicitly
 
@@ -640,11 +759,11 @@ The current decision only requires exact implementation artifacts and
 auditable launch facts. A reusable hosting resource would add policy and
 versioning before a proven domain invariant requires it.
 
-### Generic configuration for built-ins
+### Generic configuration for the built-in harness
 
 An enum plus map, Struct, bytes, or unrestricted Any loses type safety and
-allows the discriminator to disagree with the value. Built-ins use typed
-oneof arms. Any is reserved for registered extensions.
+allows the discriminator to disagree with the value. The built-in harness uses
+a typed oneof arm. Any is reserved for registered extensions.
 
 ### Treat dynamic OpenClaw as an ordinary verified implementation
 
@@ -660,13 +779,15 @@ attested. Otherwise it is treated as an external delegated agent.
   hidden Session resolution.
 - Every Session records the exact implementation, configuration projection,
   model routes, dependencies, and canonical plan bytes it admitted.
+- Session events, aggregate snapshots, harness recovery checkpoints,
+  and read-side checkpoints have separate authority and failure behavior.
 - Provider credentials remain outside Agent and implementation configuration.
-- Local and remote implementations share one adapter contract, but remote
-  verified execution requires stronger native artifact, configuration, and
-  supervisor attestation.
-- Codex and Claude Code provide the primary implementation model. OpenClaw
-  remains supported through explicit pinned, composite, delegated, or external
-  classifications.
+- A future registered edge extension owns its product and adapter attestation
+  inside the extension contract; it does not add product fields to the built-in
+  harness plan.
+- The platform-managed harness loop provides the normative v1 implementation
+  model. Codex, Claude Code, and OpenClaw remain future edge compatibility
+  cases and cannot shape the core Session contract.
 - The platform avoids premature hosting resources while preserving launch
   evidence in Session and deployment records.
 - Protobuf evolution requires explicit configuration contract capability

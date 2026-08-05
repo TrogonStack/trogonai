@@ -1,7 +1,7 @@
 # Goose: how session transcripts are stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local checkout of Goose (Block's open-source AI agent,
 originally [block/goose](https://github.com/block/goose)) in the
 `aaif-goose/goose` fork, at commit
@@ -32,7 +32,7 @@ on and a 30s busy timeout (`session_manager.rs:849-856`).
 The source of truth is three tables (`create_schema`,
 `session_manager.rs:924-999`):
 
-- **`sessions`** — one mutable row per session; the session "header" plus
+- **`sessions`** -- one mutable row per session; the session "header" plus
   denormalized rollups (`session_manager.rs:926-956`):
 
   ```sql
@@ -58,7 +58,7 @@ The source of truth is three tables (`create_schema`,
   )
   ```
 
-- **`messages`** — the transcript, one row per message, insertion-ordered by an
+- **`messages`** -- the transcript, one row per message, insertion-ordered by an
   autoincrement `id` and a `created_timestamp` (`session_manager.rs:962-978`):
 
   ```sql
@@ -75,7 +75,7 @@ The source of truth is three tables (`create_schema`,
   )
   ```
 
-- **`usage_ledger`** — an **append-only** per-session ledger of token/cost
+- **`usage_ledger`** -- an **append-only** per-session ledger of token/cost
   deltas, `ON DELETE CASCADE` from `sessions` (`session_manager.rs:980-999`). It
   is the one genuinely append-structured table in the design, used to reconcile
   cumulative usage (including carried-forward rows for subagents).
@@ -83,7 +83,7 @@ The source of truth is three tables (`create_schema`,
 Authoritative vs. derived:
 
 - **Authoritative**: the `sessions` row and its `messages` rows. Both are
-  mutated in place — the session row via `UPDATE` (`apply_update`,
+  mutated in place -- the session row via `UPDATE` (`apply_update`,
   `session_manager.rs:1590-1725`); the transcript via `INSERT` for a new turn
   (`add_message`, `1765-1798`) but also via bulk `DELETE`+re-`INSERT`
   (`replace_conversation_inner`, `1800-1838`) and `DELETE` (`truncate_*`,
@@ -116,7 +116,7 @@ than appending interpreted markers.
   working directories share it and are separated by columns
   (`session_manager.rs:859-867`). No cwd/project path is encoded into the key.
 - **Session id**: a `TEXT PRIMARY KEY` minted server-side (by the store) as
-  `YYYYMMDD_N` — today's date followed by a per-day monotonic counter computed
+  `YYYYMMDD_N` -- today's date followed by a per-day monotonic counter computed
   inside the `INSERT` (`create_session`, `session_manager.rs:1497-1540`):
 
   ```sql
@@ -155,35 +155,35 @@ reconstructed from `SessionManager`/`SessionStorage` methods, is:
 
 Session lifecycle:
 
-- `create_session(working_dir, name, session_type, goose_mode) -> Session` —
+- `create_session(working_dir, name, session_type, goose_mode) -> Session` --
   mints the `YYYYMMDD_N` id and inserts the row (`session_manager.rs:1497-1540`).
-- `get_session(id, include_messages) -> Session` — load the row; optionally load
+- `get_session(id, include_messages) -> Session` -- load the row; optionally load
   and attach the full ordered conversation, else just compute count + last
   timestamp (`1542-1588`).
-- `update(id) -> SessionUpdateBuilder` … `.apply()` — partial mutable update of
+- `update(id) -> SessionUpdateBuilder` … `.apply()` -- partial mutable update of
   any header field; builds a dynamic `UPDATE ... SET` and always bumps
   `updated_at` (`426-432`, `1590-1725`).
-- `delete_session(id)` — existence check, then `DELETE messages`, `DELETE
+- `delete_session(id)` -- existence check, then `DELETE messages`, `DELETE
   usage_ledger`, `DELETE sessions` in one tx (`2012-2043`).
 - `copy_session(id, new_name) -> Session` and `import_session`/`export_session`
   (`2252-2342`).
 
 Transcript I/O:
 
-- `add_message(id, &Message)` — append one message row; bump `updated_at`
+- `add_message(id, &Message)` -- append one message row; bump `updated_at`
   (`1765-1798`).
-- `replace_conversation(id, &Conversation)` — destructive full rewrite:
+- `replace_conversation(id, &Conversation)` -- destructive full rewrite:
   `DELETE` all message rows for the session, then re-`INSERT` each
   (`1800-1847`).
-- `get_conversation(id) -> Conversation` (internal) — ordered read of all rows
+- `get_conversation(id) -> Conversation` (internal) -- ordered read of all rows
   (`1727-1763`).
-- `truncate_conversation(id, timestamp)` — `DELETE ... created_timestamp >= ?`
+- `truncate_conversation(id, timestamp)` -- `DELETE ... created_timestamp >= ?`
   (`2344-2353`).
-- `truncate_conversation_from_message(id, message_id)` — resolve the boundary
+- `truncate_conversation_from_message(id, message_id)` -- resolve the boundary
   row, then delete it and everything after (`2355-2385`).
-- `update_message_metadata(id, message_id, f)` — read/modify/write a message's
+- `update_message_metadata(id, message_id, f)` -- read/modify/write a message's
   `metadata_json` (`2412-2452`).
-- `update_tool_request_meta(id, message_id, tool_call_id, patch)` — in-place
+- `update_tool_request_meta(id, message_id, tool_call_id, patch)` -- in-place
   merge into a `ToolRequest.tool_meta` inside a stored message's `content_json`
   (`2459-2509`).
 
@@ -191,13 +191,13 @@ Listing / analytics / search:
 
 - `list_sessions()` / `list_sessions_by_types(types)` / `list_all_sessions()`
   (`442-459`, `1952-2010`).
-- `list_sessions_paged(SessionListPageQuery)` — keyset pagination by
+- `list_sessions_paged(SessionListPageQuery)` -- keyset pagination by
   `(sort_timestamp, id)` returning a `next_cursor` (`450-455`, `1963-2005`).
-- `get_insights()` — count + summed tokens over selected types (`2045-2076`).
-- `get_session_usage_totals(id)` — recursive parent→child rollup (`2168-2250`).
-- `record_usage_metrics(...)` — reconcile rollups + append a `usage_ledger` row
+- `get_insights()` -- count + summed tokens over selected types (`2045-2076`).
+- `get_session_usage_totals(id)` -- recursive parent→child rollup (`2168-2250`).
+- `record_usage_metrics(...)` -- reconcile rollups + append a `usage_ledger` row
   (`2078-2166`).
-- `search_chat_history(query, limit, dates, exclude, types)` — keyword LIKE scan
+- `search_chat_history(query, limit, dates, exclude, types)` -- keyword LIKE scan
   (`599-618`, delegating to `chat_history_search.rs`).
 
 Ordering/consistency contract: every mutation runs inside a `BEGIN IMMEDIATE`
@@ -268,7 +268,7 @@ and single lazy-init are reused.
   Only *listing* paginates (keyset cursor, below). The legacy JSONL importer caps
   a single legacy file at 50 MiB (`legacy.rs:11`, `42-44`), but the SQLite path
   imposes no per-session size cap.
-- **Materialization**: on resume everything is eager — the full conversation is
+- **Materialization**: on resume everything is eager -- the full conversation is
   loaded into memory as a `Conversation`. `last_message_snippet` and per-message
   usage are the only things hydrated lazily/optionally.
 
@@ -297,7 +297,7 @@ and single lazy-init are reused.
   content.value,'$.text')) LIKE ?` clauses and additionally respects
   `metadata_json.$.agentVisible` and per-content `annotations.audience` so hidden
   text is not recalled (`chat_history_search.rs:133-206`). Nothing is
-  bootstrapped or kept in sync — the scan reads current rows every time.
+  bootstrapped or kept in sync -- the scan reads current rows every time.
 
 ## Entry/message structure and versioning
 
@@ -306,7 +306,7 @@ and single lazy-init are reused.
   ordering and filtering; `content_json` and `metadata_json` are JSON blobs that
   the store nonetheless reaches *into* via `json_extract`/`json_each` for search
   and for the `update_tool_request_meta` patch (`session_manager.rs:2459-2509`).
-  So it is neither fully opaque nor a normalized schema — JSON columns with
+  So it is neither fully opaque nor a normalized schema -- JSON columns with
   targeted introspection.
 - **Message type** (`goose-provider-types/src/conversation/message.rs:763-770`):
 
@@ -367,7 +367,7 @@ and single lazy-init are reused.
   survives on disk as `user_visible`/`agent_invisible` rows, so the human history
   is preserved and re-shown on resume, while the model only re-reads the summary
   + tail. This is a **soft, view-shrinking compaction implemented by rewriting
-  the whole message set with new visibility flags** — not an appended marker
+  the whole message set with new visibility flags** -- not an appended marker
   interpreted at replay, and not a hard deletion. Usage of the summarization call
   is charged and flagged `is_compaction` in the `usage_ledger`
   (`message.rs:636-637`; `session_manager.rs:837`).
@@ -455,7 +455,7 @@ never treats a foreign store as a live backend.
   rollouts under `~/.codex/sessions/YYYY/MM/DD/...`), and **Pi** (`.jsonl` under
   `~/.pi/agent/sessions/...`) (`import_formats/mod.rs:1-24`;
   `claude_code.rs`, `codex.rs`, `pi.rs`). Import is a one-way, converting copy
-  into goose's SQLite — read-only against the foreign file, and the result is a
+  into goose's SQLite -- read-only against the foreign file, and the result is a
   normal goose session.
 - **Legacy self-import**: on first initialization of a fresh DB, goose scans the
   old per-session `*.jsonl` layout in the sessions folder and imports each into
@@ -488,20 +488,20 @@ contrast:
   intact history for free.
 - **Ideas worth carrying over**: (1) The **`agent_visible`/`user_visible`
   visibility split** (`message.rs:661-675`) is a clean way to shrink the
-  model-visible view while keeping the human transcript — our log can express the
+  model-visible view while keeping the human transcript -- our log can express the
   same with a projection filter instead of a metadata flag on a rewritten row.
   (2) The **append-only `usage_ledger` beside the mutable row** shows they already
   reach for an append log exactly where correctness of cumulative state matters;
   our design generalizes that to the whole session. (3) **Recomputing
   count/last-activity/snippet at query time** (`get_session`, list query) is a
-  reminder that not every list field needs a maintained sidecar — cheap
+  reminder that not every list field needs a maintained sidecar -- cheap
   projections can stay lazy.
-- **Cautions our design should heed**: (1) **No store-level idempotence** —
+- **Cautions our design should heed**: (1) **No store-level idempotence** --
   `message_id` is non-unique and `add_message` blind-inserts (`1765-1798`); we
-  want a dedup/idempotency key on append. (2) **No expected-version / OCC** —
+  want a dedup/idempotency key on append. (2) **No expected-version / OCC** --
   concurrency is only SQLite's write lock; the moment writers aren't one local
   process, that guarantee evaporates, so we need an explicit expected-position
-  precondition. (3) **Fork/subagent lineage is thin** — fork records no
+  precondition. (3) **Fork/subagent lineage is thin** -- fork records no
   `parent_session_id` at all and delete does not cascade to subagent children,
   leaving orphans (`2012-2043`); our lineage metadata and cascade/retention rules
   must be deliberate.

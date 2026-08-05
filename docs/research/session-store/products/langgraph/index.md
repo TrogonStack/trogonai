@@ -1,7 +1,7 @@
 # LangGraph: how session (thread) state is stored and resumed
 
 Part of Session Store Research.
-Produced by running [RESEARCH_PROMPT](../RESEARCH_PROMPT.md).
+Produced by running [RESEARCH_PROMPT](../../RESEARCH_PROMPT.md).
 Evidence snapshot: local shallow checkout of `langchain-ai/langgraph`
 (`https://github.com/langchain-ai/langgraph.git`) at commit
 `31f90df3e6b0268fa77fd2d118a917d420b84a68` (committed 2026-07-21). Every
@@ -22,7 +22,7 @@ Authoritative anchors:
 > Framing note. LangGraph is a **library**, not a CLI, so "a session" is a
 > **thread** and the durable session state is a **checkpointer** (a pluggable
 > `BaseCheckpointSaver`). Unlike the transcript-oriented products in this corpus,
-> LangGraph does not store a message transcript per se — it stores **state
+> LangGraph does not store a message transcript per se -- it stores **state
 > snapshots of a graph's channels** plus **pending intermediate writes**, keyed
 > by thread. A conversational message history is just one channel's value. This
 > is the most explicitly *pluggable-store-interface* product in the study and the
@@ -46,11 +46,11 @@ class Checkpoint(TypedDict):
 
 Two durable record kinds make up a thread's state:
 
-1. **Checkpoints** — immutable, id-addressed snapshots forming a **parent-linked
+1. **Checkpoints** -- immutable, id-addressed snapshots forming a **parent-linked
    chain** (each carries `parent_checkpoint_id`, `base/__init__.py:145`,
    `CheckpointMetadata.parents`, `:56-60`). A thread is the ordered chain of its
    checkpoints.
-2. **Pending writes** — `PendingWrite = tuple[str, str, Any]` = `(task_id,
+2. **Pending writes** -- `PendingWrite = tuple[str, str, Any]` = `(task_id,
    channel, value)` (`base/__init__.py:31`), the intermediate outputs a task
    produced against a specific checkpoint, stored so an interrupted/failed
    superstep can resume without recomputation (`put_writes`, `:300-318`).
@@ -61,7 +61,7 @@ What is authoritative vs. derived:
   `(thread_id, checkpoint_ns, checkpoint_id)`. In the production Postgres saver
   the *channel values themselves* are stored **content-addressed by `(channel,
   version)`** in a separate `checkpoint_blobs` table with `ON CONFLICT DO
-  NOTHING` — i.e. immutable, deduplicated, versioned value blobs
+  NOTHING` -- i.e. immutable, deduplicated, versioned value blobs
   (`postgres/base.py:57-65`, `131-135`). The `checkpoints` row then holds only the
   metadata + `channel_versions` *pointers*, and full `channel_values` are
   reconstructed by joining `checkpoint.channel_versions → checkpoint_blobs`
@@ -85,7 +85,7 @@ fold over the chain.
   resume from interrupts, or enable time-travel debugging"
   (`base/__init__.py:190-192`). It is client-supplied via
   `config["configurable"]["thread_id"]` (`base/__init__.py:186`).
-- **Full key hierarchy** is `(thread_id, checkpoint_ns, checkpoint_id)` — the
+- **Full key hierarchy** is `(thread_id, checkpoint_ns, checkpoint_id)` -- the
   composite primary key of every backend's `checkpoints` table
   (`sqlite/__init__.py:150`, `postgres/base.py:55`). `checkpoint_ns` (namespace,
   default `''`) scopes checkpoints produced by nested/subgraph executions;
@@ -104,9 +104,9 @@ fold over the chain.
 - **Listing scope**: per-thread (and optionally per-namespace). `list`/`alist`
   take a `config` (thread) plus `filter`/`before`/`limit`
   (`base/__init__.py:253-275`). There is no cross-thread global enumeration in the
-  saver contract — enumerating threads is the host application's concern (the
+  saver contract -- enumerating threads is the host application's concern (the
   LangGraph Platform server layer, not this OSS store).
-- **Relocation / rename**: not applicable — there is no cwd/filesystem coupling.
+- **Relocation / rename**: not applicable -- there is no cwd/filesystem coupling.
   Identity is the caller's `thread_id`. Moving a thread's state is an explicit
   `copy_thread(source, target)` operation (`base/__init__.py:350-372`).
 
@@ -147,7 +147,7 @@ class BaseCheckpointSaver(Generic[V]):
 Contract notes drawn from the docstrings:
 
 - **Required to implement**: `get_tuple`, `list`, `put`, `put_writes` (and the
-  async equivalents) — all `raise NotImplementedError` in the base
+  async equivalents) -- all `raise NotImplementedError` in the base
   (`:239-318`, `429-509`). `get`/`aget` are conveniences built on the tuple
   getters (`:227-237`, `417-427`).
 - **`put`** stores one checkpoint and returns the updated config carrying the new
@@ -158,7 +158,7 @@ Contract notes drawn from the docstrings:
 - **`CheckpointTuple`** is the read shape: `(config, checkpoint, metadata,
   parent_config, pending_writes)` (`:139-146`).
 - **Lifecycle ops**: `delete_thread`, `delete_for_runs`, `copy_thread`, `prune`
-  (`keep_latest` vs `delete`) — all optional, several carrying explicit
+  (`keep_latest` vs `delete`) -- all optional, several carrying explicit
   **`DeltaChannel` correctness warnings** that copies/prunes must preserve the
   ancestor chain back to the nearest `_DeltaSnapshot` or silently corrupt delta
   channels (`:320-415`, `540-580`).
@@ -195,14 +195,14 @@ product's real extension point.
   transactions/pipelines. The in-memory saver has no durability
   (`memory/__init__.py:38`).
 - **Concurrency model**: the OSS savers do **not** implement optimistic
-  concurrency or an expected-version precondition on `put` — `put` simply writes
+  concurrency or an expected-version precondition on `put` -- `put` simply writes
   the checkpoint the Pregel loop computed. Safety against concurrent runs of the
   *same thread* is expected to be enforced above the saver (the LangGraph Platform
   serializes runs per thread); the store contract itself is last-write-wins on a
   given `checkpoint_id`.
 - **`put_writes` delivery = idempotent, with a special-channel override.** For
   ordinary channels writes are `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`
-  keyed by `(thread_id, ns, checkpoint_id, task_id, idx)` — **at-least-once with
+  keyed by `(thread_id, ns, checkpoint_id, task_id, idx)` -- **at-least-once with
   dedup by write position** (`sqlite/__init__.py:462-482`,
   `postgres/base.py:155-159`). For "special" channels in `WRITES_IDX_MAP` (e.g.
   the `RESUME` channel) it uses `INSERT OR REPLACE` / `DO UPDATE` so a re-sent
@@ -252,9 +252,9 @@ product's real extension point.
   `sqlite/__init__.py:421-423`). Per-thread indexes exist on `thread_id`
   (`checkpoints_thread_id_idx`, etc., `postgres/base.py:82-89`).
 - **No FTS/vector search over checkpoints.** Semantic search is a *different*
-  subsystem — the `BaseStore` / long-term memory store
+  subsystem -- the `BaseStore` / long-term memory store
   (`libs/checkpoint/langgraph/store/base/**`, with an embeddings/`embed` module)
-  — which is orthogonal to the checkpointer and stores namespaced key-value
+  -- which is orthogonal to the checkpointer and stores namespaced key-value
   "memories," not session transcripts. It is out of scope for session
   persistence.
 
@@ -263,12 +263,12 @@ product's real extension point.
 - **Checkpoint envelope**: the `Checkpoint` TypedDict itself (`v`, `id`, `ts`,
   `channel_values`, `channel_versions`, `versions_seen`, `updated_channels`)
   (`base/__init__.py:92-123`), stored serialized. `v` is the **format version,
-  currently 1** (`:95-96`) — an explicit schema-version field on every snapshot.
+  currently 1** (`:95-96`) -- an explicit schema-version field on every snapshot.
 - **Write envelope**: `checkpoint_writes` rows are `(thread_id, ns,
   checkpoint_id, task_id, task_path, idx, channel, type, blob)`
   (`postgres/base.py:66-76`, `90`). The store relies on `(task_id, idx)` for write
   identity/dedup.
-- **Store interpretation**: values are **opaque to the store** — serialized via
+- **Store interpretation**: values are **opaque to the store** -- serialized via
   the pluggable `SerializerProtocol`. The default `JsonPlusSerializer` uses
   `ormsgpack` with a JSON fallback and an ext-hook allowlist for safe type
   reconstruction (`serde/jsonplus.py:30`, `83-125`); `dumps_typed` returns a
@@ -276,12 +276,12 @@ product's real extension point.
   blob. The store persists and returns bytes verbatim; it does not parse channel
   values.
 - **Versioning of the format**: three layers. (1) The per-checkpoint `v` field
-  (`:95-96`). (2) **Numbered backend migrations** — Postgres keeps an ordered
+  (`:95-96`). (2) **Numbered backend migrations** -- Postgres keeps an ordered
   `MIGRATIONS` list where "the position of the migration in the list is the
   version number," tracked in a `checkpoint_migrations(v)` table
   (`postgres/base.py:40-91`), including additive `ALTER TABLE … ADD COLUMN IF NOT
   EXISTS` (e.g. `task_path`, `:90`). This is a forward-only ratchet. (3) **Serde
-  compatibility** — pre-msgpack checkpoints remain loadable, and the msgpack
+  compatibility** -- pre-msgpack checkpoints remain loadable, and the msgpack
   allowlist is versioned by `SAFE_MSGPACK_TYPES` (`serde/jsonplus.py:64-70`).
 
 ## Compaction and history management
@@ -307,17 +307,17 @@ product's real extension point.
 
 - **Every step is a checkpoint; rewind is native.** Because each superstep writes
   a parent-linked checkpoint, "rewind" is simply resuming from an earlier
-  `checkpoint_id` (time travel, `base/__init__.py:192`). Nothing is destroyed — you
+  `checkpoint_id` (time travel, `base/__init__.py:192`). Nothing is destroyed -- you
   select an older snapshot in the chain.
 - **Fork is a first-class metadata concept.** `CheckpointMetadata.source` includes
-  `"fork"` — "The checkpoint was created as a copy of another checkpoint"
+  `"fork"` -- "The checkpoint was created as a copy of another checkpoint"
   (`:41-48`), and `parents` maps namespace → parent checkpoint id (`:56-60`). A
   fork produces a new checkpoint whose `parent_checkpoint_id`/`parents` point at
   the branch point, sharing the (immutable, content-addressed) ancestor blobs.
   `copy_thread(source, target)` copies an entire thread's checkpoints + writes to
   a new thread id, and its docstring **requires copying the complete parent
   chain** so `DeltaChannel` state remains reconstructable (`:350-372`).
-- **File-state/environment checkpoints**: not applicable — LangGraph checkpoints
+- **File-state/environment checkpoints**: not applicable -- LangGraph checkpoints
   application *graph state* (channel values), not workspace files. There is no
   git-snapshot or filesystem checkpoint concept.
 
@@ -334,15 +334,15 @@ product's real extension point.
   `parents[ns]`. The child shares the thread and its content-addressed blobs; it
   is isolated by namespace rather than by a separate thread/file.
 - **Cascade**: `delete_thread(thread_id)` deletes *all* checkpoints and writes for
-  the thread across namespaces — SQLite `DELETE FROM checkpoints WHERE thread_id =
-  ?` (`sqlite/__init__.py:484-496`) — so nested namespaces cascade with the
+  the thread across namespaces -- SQLite `DELETE FROM checkpoints WHERE thread_id =
+  ?` (`sqlite/__init__.py:484-496`) -- so nested namespaces cascade with the
   parent thread. (A fully separate subagent running under its *own* `thread_id`
   would be an independent thread with no automatic cascade.)
 
 ## Retention, deletion, and multi-host
 
-- **Retention**: caller-owned. The store provides the *mechanisms* —
-  `prune(strategy=…)`, shallow savers, `delete_for_runs(run_ids)` — but enforces
+- **Retention**: caller-owned. The store provides the *mechanisms* --
+  `prune(strategy=…)`, shallow savers, `delete_for_runs(run_ids)` -- but enforces
   no TTL or automatic lifecycle (`base/__init__.py:331-415`). `delete_for_runs`
   targets checkpoints by `run_id` and carries the `DeltaChannel` warning that
   deleting ancestor rows a live thread depends on will corrupt reconstruction
@@ -359,7 +359,7 @@ product's real extension point.
   content-addressed blob upserts are conflict-free
   (`postgres/base.py:131-135`), and idempotent `put_writes` tolerates retries
   (`:155-159`). The store does not itself implement cross-host leasing or
-  single-writer arbitration — that is layered above (the Platform run queue) — but
+  single-writer arbitration -- that is layered above (the Platform run queue) -- but
   a shared Postgres checkpointer is explicitly the intended multi-host deployment,
   unlike the local-filesystem CLIs in this corpus.
 
@@ -384,7 +384,7 @@ Transferable ideas:
 - **A small, conformance-tested store interface.** `BaseCheckpointSaver`'s
   four required methods (`get_tuple`, `list`, `put`, `put_writes`) plus optional
   lifecycle ops, validated by a conformance suite, is a clean template for our own
-  pluggable Session Store contract — separate the read/append core from the
+  pluggable Session Store contract -- separate the read/append core from the
   lifecycle (delete/copy/prune) extras.
 - **Content-addressed, version-keyed value blobs with `ON CONFLICT DO NOTHING`**
   (`postgres/base.py:57-65`, `131-135`) is an excellent dedup strategy: store each
@@ -398,7 +398,7 @@ Transferable ideas:
 - **Monotonic, time-ordered ids (UUID6) as the sort key** (`base/id.py`,
   `base/__init__.py:99-101`) plus a **separate monotonic per-channel version**
   (`get_next_version`, `:692-711`) cleanly separate "ordering of snapshots" from
-  "ordering of a value's revisions" — worth mirroring.
+  "ordering of a value's revisions" -- worth mirroring.
 - **`DeltaChannel` = periodic-snapshot + delta-fold** (`:63-86`, `582-649`) is a
   concrete pattern for bounding log-replay cost: snapshot every N updates, store
   deltas between, fold forward from the nearest snapshot. This is exactly the
@@ -407,15 +407,15 @@ Transferable ideas:
 - **Namespaces (`checkpoint_ns`) for nested/subgraph state** under one thread key,
   with `parents[ns]` links and cascade on `delete_thread`, is a tidy alternative
   to separate child sessions when the child is truly part of the same run.
-- **Cautions**: (1) **No expected-version/OCC in the OSS savers** — `put` is
+- **Cautions**: (1) **No expected-version/OCC in the OSS savers** -- `put` is
   last-write-wins on an id, and single-writer-per-thread is assumed to be enforced
   above the store; our multi-host design should add an explicit expected-position
   precondition rather than rely on an upstream queue. (2) **Correctness coupling
-  between prune/copy/delete and the delta chain** — the repeated `DeltaChannel`
+  between prune/copy/delete and the delta chain** -- the repeated `DeltaChannel`
   warnings (`:340-415`, `540-580`) show how snapshot-based history makes deletion
   dangerous: any retention/GC we build must be snapshot-chain-aware or it will
   silently corrupt reconstructed state. (3) **It is state-snapshot-oriented, not
-  transcript-oriented** — a "message history" is just one channel's value, so if
+  transcript-oriented** -- a "message history" is just one channel's value, so if
   our store must also serve a first-class, queryable message transcript, that is
   an additional projection LangGraph does not provide at the store layer.
 
