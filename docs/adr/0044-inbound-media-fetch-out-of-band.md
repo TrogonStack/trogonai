@@ -124,8 +124,14 @@ at a credential that cannot honor it. Readers already have both tokens: they are
 the leading part of the endpoint on the event the attachment arrived with, and
 they are what selects the token used to redeem.
 
-Absence means not yet resolved, and it says nothing about whether work is under
-way. The record is absent before the downloader's durable has reached the
+The bucket holds outcomes only. Nothing is written when a handle is first seen,
+so there is no `pending` state and no record whose job is to say that work
+started: a `pending` write would be a second thing the downloader must do before
+it may fail, and it would still be missing in exactly the case a reader has to
+survive, which is a downloader that never ran.
+
+Absence is therefore the unresolved state, and it says nothing about whether work
+is under way. The record is absent before the downloader's durable has reached the
 message, while a download is running, and for as long as the downloader is down
 or behind. A reader cannot tell those apart and does not need to. What it needs
 is that absence is never permanent by accident, and two rules give it that.
@@ -150,10 +156,11 @@ long absence can last. The terminal record is what turns the failures a
 downloader survives into an explanation the agent can be given instead of a
 timeout, and it is not load-bearing for liveness.
 
-Readers await readiness with a KV watch and a deadline, not a poll. A late
-reader observes current state directly with no replay concern, and a deadline
-expiry is reported to the agent as an unavailable attachment rather than as a
-turn failure.
+Readers await readiness with a KV watch and a deadline, not a poll. Finding
+nothing is where a reader starts, not a failure it reports: it watches for the
+first record the key ever gets and stops on its own deadline. A late reader
+observes current state directly with no replay concern, and a deadline expiry is
+reported to the agent as an unavailable attachment rather than as a turn failure.
 
 ### 4. The inbound event carries the handle, never the object reference
 
@@ -171,8 +178,10 @@ in the object store; there is no handle to redeem and nothing to wait for.
 
 The bridge builds the inbound event and dispatches the prompt without waiting.
 Waiting happens inside the agent-facing download tool, at the moment the agent
-actually opens the file. Text-only turns and turns that ignore an attachment
-pay nothing.
+actually opens the file, and it is the reader described above: absence means keep
+waiting until the deadline, `failed` is an explanation to hand the agent, and
+`ready` is the object reference. Text-only turns and turns that ignore an
+attachment pay nothing.
 
 ## Invariants
 
@@ -190,9 +199,11 @@ pay nothing.
 - No handle is redeemed for an endpoint that resolves to no principal.
   Authorization precedes credential use, in every component that holds a
   credential.
-- Readiness is always observable as an explicit state. "Bytes absent from the
-  object store" is never interpreted as a lifecycle signal, and an absent
-  readiness record is never read as an assertion that a download is running.
+- The readiness bucket records outcomes and nothing else: `ready` and `failed`
+  are the only states ever written, and absence is the unresolved state. It is
+  never read as an assertion that a download is running, has not started, or ever
+  will. "Bytes absent from the object store" is not a lifecycle signal either,
+  because readiness is asked of the bucket and never of the store.
 - Every handle a downloader stops working on leaves a terminal record, written
   before the message is acknowledged. Giving up is written down, not expressed by
   falling silent.
