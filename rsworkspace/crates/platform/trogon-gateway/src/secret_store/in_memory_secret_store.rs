@@ -5,8 +5,8 @@ use tokio::sync::Mutex;
 use trogon_std::SecretString;
 
 use super::{
-    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
+    SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope,
@@ -26,8 +26,9 @@ struct InMemorySecretStoreState {
 
 #[derive(Clone)]
 struct StoredCredential {
-    material: SecretMaterial,
+    material: Option<SecretMaterial>,
     metadata: CredentialMetadata,
+    destroy_reason: Option<SecretDestroyReason>,
 }
 
 impl InMemorySecretStoreState {
@@ -67,8 +68,9 @@ impl SecretStorePut for InMemorySecretStore {
         state.entries.insert(
             credential.clone(),
             StoredCredential {
-                material: SecretMaterial::plaintext(value),
+                material: Some(SecretMaterial::plaintext(value)),
                 metadata,
+                destroy_reason: None,
             },
         );
         Ok(credential)
@@ -90,7 +92,9 @@ impl SecretStoreGet for InMemorySecretStore {
                 status,
             });
         }
-        Ok(stored.material.clone())
+        stored.material.clone().ok_or_else(|| SecretStoreError::Missing {
+            credential: credential.clone(),
+        })
     }
 }
 
@@ -105,6 +109,13 @@ impl SecretStoreRotate for InMemorySecretStore {
             .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
             })?;
+        let status = stored.metadata.status();
+        if !status.is_writable() {
+            return Err(SecretStoreError::Unwritable {
+                credential: credential.clone(),
+                status,
+            });
+        }
         stored.metadata = metadata(credential, CredentialStatus::Previous)?;
 
         let new_credential = credential.next_version();
@@ -112,8 +123,9 @@ impl SecretStoreRotate for InMemorySecretStore {
         state.entries.insert(
             new_credential.clone(),
             StoredCredential {
-                material: SecretMaterial::plaintext(value),
+                material: Some(SecretMaterial::plaintext(value)),
                 metadata,
+                destroy_reason: None,
             },
         );
 
@@ -132,7 +144,35 @@ impl SecretStoreRevoke for InMemorySecretStore {
             .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
             })?;
+        let status = stored.metadata.status();
+        if status == CredentialStatus::Destroyed {
+            return Err(SecretStoreError::Unwritable {
+                credential: credential.clone(),
+                status,
+            });
+        }
         stored.metadata = metadata(credential, CredentialStatus::Revoked)?;
+        Ok(())
+    }
+}
+
+impl SecretStoreDestroy for InMemorySecretStore {
+    type Error = SecretStoreError;
+
+    async fn destroy(&self, credential: &CredentialRef, reason: &SecretDestroyReason) -> Result<(), Self::Error> {
+        let mut state = self.state.lock().await;
+        let stored = state
+            .entries
+            .get_mut(credential)
+            .ok_or_else(|| SecretStoreError::Missing {
+                credential: credential.clone(),
+            })?;
+        if stored.metadata.status() == CredentialStatus::Destroyed {
+            return Ok(());
+        }
+        stored.material = None;
+        stored.destroy_reason = Some(reason.clone());
+        stored.metadata = metadata(credential, CredentialStatus::Destroyed)?;
         Ok(())
     }
 }
@@ -215,5 +255,124 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn destroy_drops_material_and_marks_status_destroyed() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.get(&credential).await,
+            Err(SecretStoreError::Unreadable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+        assert_eq!(
+            store.metadata(&credential).await.unwrap().status(),
+            CredentialStatus::Destroyed
+        );
+    }
+
+    #[tokio::test]
+    async fn destroying_an_already_destroyed_version_is_idempotent() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+        let reason = SecretDestroyReason::new("compliance request").unwrap();
+        store.destroy(&credential, &reason).await.unwrap();
+
+        store.destroy(&credential, &reason).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rotate_after_destroy_fails() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+                .await,
+            Err(SecretStoreError::Unwritable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn destroy_of_unknown_ref_returns_missing() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let unknown = CredentialRef::new(
+            CredentialId::new("memory:tenant-1:discord:bot_token:missing").unwrap(),
+            CredentialVersion::initial(),
+            &scope,
+            CredentialKind::BotToken,
+        );
+
+        assert!(matches!(
+            store
+                .destroy(&unknown, &SecretDestroyReason::new("compliance request").unwrap())
+                .await,
+            Err(SecretStoreError::Missing { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn destroying_previous_version_leaves_active_version_readable() {
+        let store = InMemorySecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(
+                scope,
+                CredentialKind::BotToken,
+                SecretString::new("Bot old-token").unwrap(),
+            )
+            .await
+            .unwrap();
+        let rotated = store
+            .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+            .await
+            .unwrap();
+
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.get(&credential).await,
+            Err(SecretStoreError::Unreadable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+        assert_eq!(
+            store.get(&rotated).await.unwrap().as_plaintext().unwrap().as_str(),
+            "Bot new-token"
+        );
     }
 }

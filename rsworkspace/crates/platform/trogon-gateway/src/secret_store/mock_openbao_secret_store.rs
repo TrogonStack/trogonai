@@ -5,8 +5,8 @@ use tokio::sync::Mutex;
 use trogon_std::SecretString;
 
 use super::{
-    SecretMaterial, SecretStoreError, SecretStoreGet, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke,
-    SecretStoreRotate,
+    SecretDestroyReason, SecretMaterial, SecretStoreDestroy, SecretStoreError, SecretStoreGet, SecretStoreMetadata,
+    SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
@@ -26,8 +26,9 @@ struct MockOpenBaoSecretStoreState {
 
 #[derive(Clone)]
 struct MockOpenBaoVersion {
-    material: SecretMaterial,
+    material: Option<SecretMaterial>,
     metadata: CredentialMetadata,
+    destroy_reason: Option<SecretDestroyReason>,
 }
 
 impl MockOpenBaoSecretStore {
@@ -90,8 +91,9 @@ impl SecretStorePut for MockOpenBaoSecretStore {
         state.versions.insert(
             credential.clone(),
             MockOpenBaoVersion {
-                material: SecretMaterial::plaintext(value),
+                material: Some(SecretMaterial::plaintext(value)),
                 metadata: active_metadata,
+                destroy_reason: None,
             },
         );
         Ok(credential)
@@ -116,7 +118,9 @@ impl SecretStoreGet for MockOpenBaoSecretStore {
                 status,
             });
         }
-        Ok(stored.material.clone())
+        stored.material.clone().ok_or_else(|| SecretStoreError::Missing {
+            credential: credential.clone(),
+        })
     }
 }
 
@@ -132,7 +136,7 @@ impl SecretStoreRotate for MockOpenBaoSecretStore {
                 credential: credential.clone(),
             })?;
         let status = stored.metadata.status();
-        if status != CredentialStatus::Active {
+        if !status.is_writable() {
             return Err(SecretStoreError::Unwritable {
                 credential: credential.clone(),
                 status,
@@ -145,8 +149,9 @@ impl SecretStoreRotate for MockOpenBaoSecretStore {
         state.versions.insert(
             new_credential.clone(),
             MockOpenBaoVersion {
-                material: SecretMaterial::plaintext(value),
+                material: Some(SecretMaterial::plaintext(value)),
                 metadata,
+                destroy_reason: None,
             },
         );
 
@@ -159,16 +164,45 @@ impl SecretStoreRevoke for MockOpenBaoSecretStore {
 
     async fn revoke(&self, credential: &CredentialRef) -> Result<(), Self::Error> {
         let mut state = self.state.lock().await;
-        if !state.versions.contains_key(credential) {
-            return Err(SecretStoreError::Missing {
+        let stored = state
+            .versions
+            .get(credential)
+            .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
+            })?;
+        let status = stored.metadata.status();
+        if status == CredentialStatus::Destroyed {
+            return Err(SecretStoreError::Unwritable {
+                credential: credential.clone(),
+                status,
             });
         }
         for (stored_ref, stored) in &mut state.versions {
-            if stored_ref.id() == credential.id() {
+            if stored_ref.id() == credential.id() && stored.metadata.status() != CredentialStatus::Destroyed {
                 stored.metadata = metadata(stored_ref, CredentialStatus::Revoked)?;
             }
         }
+        Ok(())
+    }
+}
+
+impl SecretStoreDestroy for MockOpenBaoSecretStore {
+    type Error = SecretStoreError;
+
+    async fn destroy(&self, credential: &CredentialRef, reason: &SecretDestroyReason) -> Result<(), Self::Error> {
+        let mut state = self.state.lock().await;
+        let stored = state
+            .versions
+            .get_mut(credential)
+            .ok_or_else(|| SecretStoreError::Missing {
+                credential: credential.clone(),
+            })?;
+        if stored.metadata.status() == CredentialStatus::Destroyed {
+            return Ok(());
+        }
+        stored.material = None;
+        stored.destroy_reason = Some(reason.clone());
+        stored.metadata = metadata(credential, CredentialStatus::Destroyed)?;
         Ok(())
     }
 }
@@ -343,5 +377,146 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn destroy_drops_material_and_marks_status_destroyed() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.get(&credential).await,
+            Err(SecretStoreError::Unreadable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+        assert_eq!(
+            store.metadata(&credential).await.unwrap().status(),
+            CredentialStatus::Destroyed
+        );
+    }
+
+    #[tokio::test]
+    async fn destroying_an_already_destroyed_version_is_idempotent() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+        let reason = SecretDestroyReason::new("compliance request").unwrap();
+        store.destroy(&credential, &reason).await.unwrap();
+
+        store.destroy(&credential, &reason).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rotate_after_destroy_fails() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+                .await,
+            Err(SecretStoreError::Unwritable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn revoke_after_destroy_fails() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(scope, CredentialKind::BotToken, SecretString::new("Bot token").unwrap())
+            .await
+            .unwrap();
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.revoke(&credential).await,
+            Err(SecretStoreError::Unwritable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn destroy_of_unknown_ref_returns_missing() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let unknown = CredentialRef::new(
+            openbao_credential_id(&scope, CredentialKind::BotToken).unwrap(),
+            CredentialVersion::initial(),
+            &scope,
+            CredentialKind::BotToken,
+        );
+
+        assert!(matches!(
+            store
+                .destroy(&unknown, &SecretDestroyReason::new("compliance request").unwrap())
+                .await,
+            Err(SecretStoreError::Missing { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn destroying_previous_version_leaves_active_version_readable() {
+        let store = MockOpenBaoSecretStore::default();
+        let scope = CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord);
+        let credential = store
+            .put(
+                scope,
+                CredentialKind::BotToken,
+                SecretString::new("Bot old-token").unwrap(),
+            )
+            .await
+            .unwrap();
+        let rotated = store
+            .rotate(&credential, SecretString::new("Bot new-token").unwrap())
+            .await
+            .unwrap();
+
+        store
+            .destroy(&credential, &SecretDestroyReason::new("compliance request").unwrap())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store.get(&credential).await,
+            Err(SecretStoreError::Unreadable {
+                status: CredentialStatus::Destroyed,
+                ..
+            })
+        ));
+        assert_eq!(
+            store.get(&rotated).await.unwrap().as_plaintext().unwrap().as_str(),
+            "Bot new-token"
+        );
     }
 }

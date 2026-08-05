@@ -234,6 +234,7 @@ fn proto_credential_status(value: CredentialStatus) -> v1::CredentialStatus {
         CredentialStatus::Previous => v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS,
         CredentialStatus::Revoked => v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED,
         CredentialStatus::Expired => v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED,
+        CredentialStatus::Destroyed => v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED,
     }
 }
 
@@ -295,6 +296,7 @@ fn decode_credential_status(
         v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS => Ok(CredentialStatus::Previous),
         v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED => Ok(CredentialStatus::Revoked),
         v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED => Ok(CredentialStatus::Expired),
+        v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED => Ok(CredentialStatus::Destroyed),
         v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => {
             Err(invalid_field(field, "unspecified credential status"))
         }
@@ -509,6 +511,7 @@ fn proto_state_credential_status(value: CredentialStatus) -> state_v1::Credentia
         CredentialStatus::Previous => state_v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS,
         CredentialStatus::Revoked => state_v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED,
         CredentialStatus::Expired => state_v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED,
+        CredentialStatus::Destroyed => state_v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED,
     }
 }
 
@@ -574,6 +577,7 @@ fn decode_credential_status_state(
         state_v1::CredentialStatus::CREDENTIAL_STATUS_PREVIOUS => Ok(CredentialStatus::Previous),
         state_v1::CredentialStatus::CREDENTIAL_STATUS_REVOKED => Ok(CredentialStatus::Revoked),
         state_v1::CredentialStatus::CREDENTIAL_STATUS_EXPIRED => Ok(CredentialStatus::Expired),
+        state_v1::CredentialStatus::CREDENTIAL_STATUS_DESTROYED => Ok(CredentialStatus::Destroyed),
         state_v1::CredentialStatus::CREDENTIAL_STATUS_UNSPECIFIED => {
             Err(invalid_field(field, "unspecified credential status"))
         }
