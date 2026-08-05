@@ -12,6 +12,24 @@ fn a_session_id_must_be_a_subject_token() {
     assert_eq!(AgentSessionId::new("").unwrap_err(), AgentSessionIdError::Empty);
 }
 
+/// How long a handle may be is the transport's rule, not the channel's, so the
+/// limit is read from there rather than restated here. An id that breaks it must
+/// be refused for its length: an agent that has already minted the session is
+/// told which rule it broke, and a handle sitting exactly at the limit can still
+/// address one.
+#[test]
+fn a_session_id_too_long_for_a_subject_token_is_refused_for_its_length() {
+    let limit = trogon_nats::constants::MAX_NATS_TOKEN_LENGTH;
+    assert_eq!(
+        AgentSessionId::new("s".repeat(limit)).expect("valid").as_str().len(),
+        limit
+    );
+    assert_eq!(
+        AgentSessionId::new("s".repeat(limit + 1)).unwrap_err(),
+        AgentSessionIdError::TooLong(limit + 1)
+    );
+}
+
 /// The bridge never mints these, so the alphabet its own keys are drawn from
 /// has no say: an agent that names sessions the way ACP allows must not have
 /// them refused after it has already opened one.
