@@ -73,6 +73,19 @@ struct FakePort {
     /// only place from which the write can be failed without also failing the
     /// read that precedes it.
     bucket_to_drop: RefCell<Option<(async_nats::jetstream::Context, String)>>,
+    /// The same, but dropped once the next session has been minted. The pipeline
+    /// records a brand new session before it prompts, so that write can only be
+    /// failed from inside the creation it follows.
+    bucket_to_drop_on_creation: RefCell<Option<(async_nats::jetstream::Context, String)>>,
+}
+
+/// Take away the bucket a scheduled failure needs, if one is scheduled. Dropping
+/// the bucket is how a KV write is made to fail against a real server.
+async fn drop_scheduled_bucket(scheduled: &RefCell<Option<(async_nats::jetstream::Context, String)>>) {
+    let dropped = scheduled.borrow_mut().take();
+    if let Some((js, bucket)) = dropped {
+        js.delete_key_value(&bucket).await.expect("drop the KV bucket");
+    }
 }
 
 /// Consume one use of a scripted behaviour.
@@ -96,6 +109,7 @@ impl FakePort {
             creation_failures: RefCell::new(0),
             silent_turns: RefCell::new(0),
             bucket_to_drop: RefCell::new(None),
+            bucket_to_drop_on_creation: RefCell::new(None),
         }
     }
 
@@ -117,6 +131,10 @@ impl FakePort {
 
     fn drop_bucket_after_next_reply(&self, js: &async_nats::jetstream::Context, bucket: &str) {
         *self.bucket_to_drop.borrow_mut() = Some((js.clone(), bucket.to_string()));
+    }
+
+    fn drop_bucket_after_next_session(&self, js: &async_nats::jetstream::Context, bucket: &str) {
+        *self.bucket_to_drop_on_creation.borrow_mut() = Some((js.clone(), bucket.to_string()));
     }
 
     async fn stream(&self, session: &AgentSessionId, text: &str) {
@@ -144,7 +162,9 @@ impl trogon_channel::AgentPort for FakePort {
             return Err(FakeError { session_lost: false });
         }
         *self.sessions_created.borrow_mut() += 1;
-        Ok(AgentSessionId::new(format!("sess-{}", self.sessions_created.borrow())).expect("session id"))
+        let session = AgentSessionId::new(format!("sess-{}", self.sessions_created.borrow())).expect("session id");
+        drop_scheduled_bucket(&self.bucket_to_drop_on_creation).await;
+        Ok(session)
     }
 
     async fn prompt(&self, session: &AgentSessionId, event: &InboundEvent) -> Result<PromptOutcome, Self::Error> {
@@ -167,10 +187,7 @@ impl trogon_channel::AgentPort for FakePort {
         }
 
         self.stream(session, &self.reply).await;
-        let dropped = self.bucket_to_drop.borrow_mut().take();
-        if let Some((js, bucket)) = dropped {
-            js.delete_key_value(&bucket).await.expect("drop the KV bucket");
-        }
+        drop_scheduled_bucket(&self.bucket_to_drop).await;
         Ok(PromptOutcome::Completed)
     }
 
@@ -894,7 +911,7 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
 
     assert_eq!(
         *port.released.borrow(),
-        vec![("sess-2".to_string(), ReleaseReason::RepairFailed)],
+        vec![("sess-2".to_string(), ReleaseReason::Unrecorded)],
         "a session nothing points at must be handed back"
     );
     for session in ["sess-1", "sess-2"] {
@@ -909,6 +926,97 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         vec![(42, "hi there".to_string())],
         "only the turn that was recorded may reach the chat"
     );
+
+    let info = settled_consumer_info(&stream, "bridge-test", 1).await;
+    assert_eq!(info.num_ack_pending, 1);
+}
+
+/// The same cleanup for a conversation's very first session, which reaches the
+/// pointer write by another route: no repair, no prompt yet, just a session minted
+/// for a conversation that has none. If that write fails, redelivery mints another
+/// and no turn can ever name this one, so each retry would leave one more session
+/// open at the agent.
+#[tokio::test]
+async fn pipeline_hands_back_a_first_session_it_could_not_record() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+
+    js.create_stream(async_nats::jetstream::stream::Config {
+        name: "TELEGRAM".to_string(),
+        subjects: vec!["telegram.>".to_string()],
+        ..Default::default()
+    })
+    .await
+    .expect("create TELEGRAM stream");
+
+    let store = ChannelStore::ensure(&js, "test").await.expect("ensure buckets");
+    let principal = PrincipalId::new("telegram-42").expect("principal");
+    let endpoint = Endpoint::new("telegram", "mybot", "42").expect("endpoint");
+    store
+        .link_endpoint(&principal, &PrincipalRecord { display_name: None }, &endpoint)
+        .await
+        .expect("seed principal");
+
+    js.publish("telegram.message", raw_update(1, 42, 42, "hello").into())
+        .await
+        .expect("publish")
+        .await
+        .expect("ack");
+
+    let stream = js.get_stream("TELEGRAM").await.expect("get stream");
+    let consumer = stream
+        .get_or_create_consumer(
+            "bridge-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("bridge-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("consumer");
+    let mut messages = consumer.messages().await.expect("messages");
+
+    let renderer = Rc::new(TelegramRenderClient::new());
+    let port = FakePort::new(renderer.clone(), "hi there");
+    let outbound = FakeOutbound::default();
+    let triggers = CommandTriggers::default();
+    let account = bridge_account();
+    let agent_id = configured_agent();
+    let claims = unclaimed_resolver();
+    let pipeline = Pipeline {
+        store: &store,
+        port: &port,
+        renderer: renderer.as_ref(),
+        outbound: &outbound,
+        claims: &claims,
+        account: &account,
+        agent_id: &agent_id,
+        triggers: &triggers,
+        ids: &UuidV7Generator,
+    };
+
+    // The conversation is created, the session is minted, and the bucket the
+    // pointer lives in disappears in between.
+    port.drop_bucket_after_next_session(&js, "channel_conversations_test");
+    let error = pipeline
+        .handle_message(&next_message(&mut messages).await)
+        .await
+        .expect_err("the pointer write must fail");
+    assert!(
+        matches!(error, PipelineError::Store(_)),
+        "the store failure must surface, got {error:?}"
+    );
+
+    assert_eq!(
+        *port.released.borrow(),
+        vec![("sess-1".to_string(), ReleaseReason::Unrecorded)],
+        "a session the conversation never recorded must be handed back"
+    );
+    assert!(
+        port.prompted.borrow().is_empty(),
+        "the turn must not reach the agent on a session the conversation does not have"
+    );
+    assert!(outbound.sent.borrow().is_empty(), "nothing may reach the chat");
 
     let info = settled_consumer_info(&stream, "bridge-test", 1).await;
     assert_eq!(info.num_ack_pending, 1);

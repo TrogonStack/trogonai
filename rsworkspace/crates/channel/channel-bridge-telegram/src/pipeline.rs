@@ -217,7 +217,21 @@ where
                     .await
                     .map_err(PipelineError::CreateSession)?;
                 record.current_session = Some(session.clone());
-                self.store.update_conversation(&conversation_id, &record).await?;
+                if let Err(error) = self.store.update_conversation(&conversation_id, &record).await {
+                    // The write is what makes this session the conversation's.
+                    // Without it the conversation still points nowhere and the
+                    // redelivery of this message opens another session, so this one
+                    // would be named by nothing and freed by nobody.
+                    let release = self.port.release_session(&session, ReleaseReason::Unrecorded).await;
+                    warn!(
+                        conversation = %conversation_id,
+                        session = %session,
+                        cancelled = ?release.cancelled,
+                        closed = ?release.closed,
+                        "Could not point the conversation at the session opened for it; released it instead"
+                    );
+                    return Err(PipelineError::Store(error));
+                }
                 session
             }
         };
@@ -258,7 +272,7 @@ where
                             // will ever read this reply or hand this session
                             // back. Redelivery retries the prompt on the session
                             // the conversation still has.
-                            let release = self.port.release_session(&fresh, ReleaseReason::RepairFailed).await;
+                            let release = self.port.release_session(&fresh, ReleaseReason::Unrecorded).await;
                             self.renderer.discard(fresh.as_str());
                             self.renderer.discard(active_session.as_str());
                             warn!(

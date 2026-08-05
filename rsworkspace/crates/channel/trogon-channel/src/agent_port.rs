@@ -112,15 +112,19 @@ pub trait AgentPortError: std::error::Error + 'static {
 pub enum ReleaseReason {
     /// The user asked for a fresh conversation.
     NewSession,
-    /// A session opened to repair a suspected lost session is being handed back
-    /// unused: either it failed the same way the old one did, or it answered and
-    /// the conversation could not be pointed at it, which leaves its reply
-    /// unreadable either way.
+    /// A session opened to repair a suspected lost session failed the same way
+    /// the old one did, so the session was never the problem and this one is
+    /// handed back unused.
     RepairFailed,
     /// A suspected lost session was replaced by a fresh one that answered. The
     /// suspicion is a guess, so the agent may still hold the old session; it is
     /// told to let go rather than left holding one nothing points at.
     Replaced,
+    /// A session was opened for a conversation whose pointer to it could not be
+    /// written. Every later turn mints its own id, so nothing above the port will
+    /// ever name this one again; it goes back rather than staying open for the
+    /// agent's lifetime.
+    Unrecorded,
     /// The agent answered `session/new` with a handle this bridge cannot name
     /// (see [`AgentSessionIdError`]). The session exists at the agent and
     /// nothing above the port will ever be able to ask for it, so it goes back
