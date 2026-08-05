@@ -583,6 +583,12 @@ named policies. Keep the current static-token adapter for local dev only.
 
 ## OpenBao Operations (OPENBAO_OPERATIONS)
 
+DECIDED (ADR#0048): production OpenBao must auto-unseal against a cloud KMS
+key (GCP Cloud KMS or AWS KMS expected); the Shamir quorum seal is
+prohibited in production except for deployments whose network cannot reach
+a cloud KMS, and recovery keys exist for break-glass ceremonies only. See
+docs/adr/0048-cloud-kms-production-seal.md.
+
 ### Path convention (verified in openbao_secret_store.rs)
 
 ```text
