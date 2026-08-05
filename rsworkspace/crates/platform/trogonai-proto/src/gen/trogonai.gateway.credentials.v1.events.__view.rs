@@ -251,6 +251,99 @@ impl<'a> ::buffa::MessageView<'a> for CredentialEventView<'a> {
                     );
                 }
             }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::CredentialDestroyRequestedView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::CredentialDestroyedView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
+            10u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                if let Some(
+                    super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
+                        ref mut existing,
+                    ),
+                ) = view.event
+                {
+                    ::buffa::MessageView::merge_into_view(
+                        &mut **existing,
+                        sub,
+                        __sub_ctx,
+                    )?;
+                } else {
+                    view.event = Some(
+                        super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
+                            ::buffa::alloc::boxed::Box::new(
+                                <super::super::__buffa::view::CredentialDestroyFailedView as ::buffa::MessageView>::decode_view_ctx(
+                                    sub,
+                                    __sub_ctx,
+                                )?,
+                            ),
+                        ),
+                    );
+                }
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, &mut cur, ctx.depth())?;
             }
@@ -338,6 +431,33 @@ impl<'a> ::buffa::MessageView<'a> for CredentialEventView<'a> {
                                     ),
                                 )
                             }
+                            super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_event::Event::DestroyRequested(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_event::Event::Destroyed(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
+                            super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
+                                v,
+                            ) => {
+                                super::super::__buffa::oneof::credential_event::Event::DestroyFailed(
+                                    ::buffa::alloc::boxed::Box::new(
+                                        v.to_owned_from_source(__buffa_src)?,
+                                    ),
+                                )
+                            }
                         },
                     )
                 }
@@ -416,6 +536,36 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialEventView<'a> {
                             + inner;
                 }
                 super::super::__buffa::view::oneof::credential_event::Event::Revoked(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
                     x,
                 ) => {
                     let __slot = __cache.reserve();
@@ -509,6 +659,36 @@ impl<'a> ::buffa::ViewEncode<'a> for CredentialEventView<'a> {
                     );
                     x.write_to(__cache, buf);
                 }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        8u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        9u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        10u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
             }
         }
     }
@@ -567,6 +747,21 @@ impl<'__a> ::serde::Serialize for CredentialEventView<'__a> {
                     v,
                 ) => {
                     __map.serialize_entry("revoked", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyRequested(
+                    v,
+                ) => {
+                    __map.serialize_entry("destroyRequested", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::Destroyed(
+                    v,
+                ) => {
+                    __map.serialize_entry("destroyed", v)?;
+                }
+                super::super::__buffa::view::oneof::credential_event::Event::DestroyFailed(
+                    v,
+                ) => {
+                    __map.serialize_entry("destroyFailed", v)?;
                 }
             }
         }

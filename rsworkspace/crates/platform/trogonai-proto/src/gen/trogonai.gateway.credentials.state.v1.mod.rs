@@ -45,6 +45,9 @@ pub mod __buffa {
         reg.register_json_any(super::__FAILED_CREDENTIAL_WRITE_STATE_JSON_ANY);
         reg.register_json_any(super::__ROTATION_PENDING_CREDENTIAL_STATE_JSON_ANY);
         reg.register_json_any(super::__REVOKED_CREDENTIAL_STATE_JSON_ANY);
+        reg.register_json_any(super::__DESTROY_REQUESTED_CREDENTIAL_STATE_JSON_ANY);
+        reg.register_json_any(super::__DESTROYED_CREDENTIAL_STATE_JSON_ANY);
+        reg.register_json_any(super::__CLEANUP_FAILED_CREDENTIAL_STATE_JSON_ANY);
     }
 }
 #[doc(inline)]
@@ -83,5 +86,17 @@ pub use self::__buffa::view::RotationPendingCredentialStateOwnedView;
 pub use self::__buffa::view::RevokedCredentialStateView;
 #[doc(inline)]
 pub use self::__buffa::view::RevokedCredentialStateOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DestroyRequestedCredentialStateView;
+#[doc(inline)]
+pub use self::__buffa::view::DestroyRequestedCredentialStateOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::DestroyedCredentialStateView;
+#[doc(inline)]
+pub use self::__buffa::view::DestroyedCredentialStateOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CleanupFailedCredentialStateView;
+#[doc(inline)]
+pub use self::__buffa::view::CleanupFailedCredentialStateOwnedView;
 #[doc(inline)]
 pub use self::__buffa::register_types;

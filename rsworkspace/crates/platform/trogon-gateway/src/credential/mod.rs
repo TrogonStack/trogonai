@@ -9,7 +9,8 @@ pub(crate) mod stream;
 
 pub use commands::domain::CredentialFailureReason;
 pub use commands::{
-    ActivateCredentialRotation, ActivateCredentialWrite, RecordCredentialRotationFailure, RecordCredentialWriteFailure,
-    RequestCredentialRotation, RequestCredentialWrite, RevokeCredential,
+    ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, RecordCredentialDestroyFailure,
+    RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation,
+    RequestCredentialWrite, RevokeCredential,
 };
 pub(crate) use commands::{CredentialDecideError, CredentialEvolveError, evolve, initial_state};

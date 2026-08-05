@@ -47,5 +47,24 @@ pub mod credential_event {
                 super::super::super::super::__buffa::view::CredentialRevokedView<'a>,
             >,
         ),
+        DestroyRequested(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::CredentialDestroyRequestedView<
+                    'a,
+                >,
+            >,
+        ),
+        Destroyed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::CredentialDestroyedView<'a>,
+            >,
+        ),
+        DestroyFailed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::__buffa::view::CredentialDestroyFailedView<
+                    'a,
+                >,
+            >,
+        ),
     }
 }
