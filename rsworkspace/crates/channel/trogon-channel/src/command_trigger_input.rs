@@ -1,8 +1,7 @@
 //! Untrusted command-trigger text before validation.
 
 #[cfg(test)]
-#[path = "command_trigger_input_tests.rs"]
-mod command_trigger_input_tests;
+mod tests;
 
 /// Raw trigger text from config or another boundary. Convert once into
 /// [`crate::CommandTrigger`].

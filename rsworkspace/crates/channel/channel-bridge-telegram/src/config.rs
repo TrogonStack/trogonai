@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "config_tests.rs"]
-mod config_tests;
+mod tests;
 
 use acp_nats::{AcpPrefix, AcpPrefixError, NatsConfig};
 use std::path::PathBuf;

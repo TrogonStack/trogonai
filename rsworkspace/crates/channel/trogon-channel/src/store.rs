@@ -9,8 +9,7 @@ use trogon_nats::jetstream::{
 use trogon_std::NowV7;
 
 #[cfg(test)]
-#[path = "store_tests.rs"]
-mod store_tests;
+mod tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChannelStoreError {

@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "command_tests.rs"]
-mod command_tests;
+mod tests;
 
 use crate::CommandTrigger;
 use crate::CommandTriggerInput;

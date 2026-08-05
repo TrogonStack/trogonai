@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "render_tests.rs"]
-mod render_tests;
+mod tests;
 
 use acp_nats::ClientHandler;
 use agent_client_protocol::schema::v1::{

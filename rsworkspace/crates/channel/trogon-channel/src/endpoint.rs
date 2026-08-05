@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "endpoint_tests.rs"]
-mod endpoint_tests;
+mod tests;
 
 use crate::safe_token::{SafeToken, SafeTokenError};
 use serde::{Deserialize, Deserializer, Serialize};

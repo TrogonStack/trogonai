@@ -4,8 +4,7 @@
 //! the intersection of what NATS KV keys and NATS subject tokens accept.
 
 #[cfg(test)]
-#[path = "safe_token_tests.rs"]
-mod safe_token_tests;
+mod tests;
 
 use serde::{Deserialize, Deserializer, Serialize};
 

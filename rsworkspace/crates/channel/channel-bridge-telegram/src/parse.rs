@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "parse_tests.rs"]
-mod parse_tests;
+mod tests;
 
 use teloxide::types::{Update, UpdateKind};
 use trogon_channel::{CommandTriggers, Endpoint, InboundEvent, MessageRef, PlatformUserId, Sender};

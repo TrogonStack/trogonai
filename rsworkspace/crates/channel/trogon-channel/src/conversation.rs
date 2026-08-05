@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "conversation_tests.rs"]
-mod conversation_tests;
+mod tests;
 
 use crate::agent_port::AgentSessionId;
 use crate::endpoint::{EndpointError, PrincipalId};

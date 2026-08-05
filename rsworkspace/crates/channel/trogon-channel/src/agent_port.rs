@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "agent_port_tests.rs"]
-mod agent_port_tests;
+mod tests;
 
 use crate::conversation::ConversationRecord;
 use crate::event::InboundEvent;

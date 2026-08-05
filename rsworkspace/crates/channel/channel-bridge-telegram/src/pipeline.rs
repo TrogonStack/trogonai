@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
-mod pipeline_tests;
+mod tests;
 
 use crate::constants::{NEW_SESSION_ACKNOWLEDGEMENT, TEXT_CHUNK_LIMIT};
 use crate::outbound::{SendText, SendTyping};

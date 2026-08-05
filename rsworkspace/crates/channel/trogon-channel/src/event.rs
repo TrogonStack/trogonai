@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "event_tests.rs"]
-mod event_tests;
+mod tests;
 
 use crate::command::Command;
 use crate::endpoint::{Endpoint, EndpointError};

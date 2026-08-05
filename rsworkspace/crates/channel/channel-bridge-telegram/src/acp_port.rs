@@ -1,6 +1,5 @@
 #[cfg(test)]
-#[path = "acp_port_tests.rs"]
-mod acp_port_tests;
+mod tests;
 
 use agent_client_protocol::ErrorCode;
 use agent_client_protocol::schema::v1::InitializeResponse;
