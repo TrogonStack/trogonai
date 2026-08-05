@@ -15,7 +15,7 @@ pub mod traits;
 pub mod mocks;
 
 pub use crate::constants::{DEFAULT_CLAIM_BUCKET, HEADER_CLAIM_BUCKET, HEADER_CLAIM_CHECK, HEADER_CLAIM_KEY};
-pub use claim_bucket::{ClaimBucket, ClaimBucketError};
+pub use claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
 pub use claim_check::{ClaimCheckPublisher, ClaimResolveError, ClaimResolver, MaxPayload, is_claim, resolve_claim};
 pub use claim_retention::ClaimRetention;
 #[cfg(not(coverage))]

@@ -12,7 +12,7 @@ use crate::constants::{
     PROTOCOL_OVERHEAD,
 };
 
-use super::claim_bucket::ClaimBucket;
+use super::claim_bucket::{ClaimBucket, ClaimBucketError, ClaimBucketHeader};
 use super::object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 use super::publish::PublishOutcome;
 use super::traits::JetStreamPublisher;
@@ -114,13 +114,18 @@ impl<S: ObjectStoreGet> ClaimResolver<S> {
         if !is_claim(headers) {
             return Ok(payload);
         }
-        if let Some(named) = headers.get(HEADER_CLAIM_BUCKET)
-            && named.as_str() != self.bucket.as_str()
-        {
-            return Err(ClaimResolveError::BucketMismatch {
-                expected: self.bucket.clone(),
-                named: named.as_str().to_string(),
-            });
+        if let Some(header) = headers.get(HEADER_CLAIM_BUCKET) {
+            let header = ClaimBucketHeader::new(header.as_str());
+            let named = match header.parse() {
+                Ok(named) => named,
+                Err(source) => return Err(ClaimResolveError::UnnamableBucket { named: header, source }),
+            };
+            if named != self.bucket {
+                return Err(ClaimResolveError::BucketMismatch {
+                    expected: self.bucket.clone(),
+                    named,
+                });
+            }
         }
         resolve_claim(headers, payload, &self.store).await
     }
@@ -130,12 +135,21 @@ impl<S: ObjectStoreGet> ClaimResolver<S> {
 pub enum ClaimResolveError<E> {
     #[error("claim message missing {} header", HEADER_CLAIM_KEY)]
     MissingKey,
-    /// `named` stays a string because it is whatever the header carried, which
-    /// in this arm is by definition not the bucket this consumer opened and may
-    /// not be a legal bucket name at all. Narrowing it would discard the one
-    /// value an operator needs to read.
-    #[error("claim names bucket {named:?} but this consumer reads {expected}")]
-    BucketMismatch { expected: ClaimBucket, named: String },
+    /// A claim written to a bucket this consumer does not read: both names are
+    /// bucket names, they are simply not the same one.
+    #[error("claim names bucket {named} but this consumer reads {expected}")]
+    BucketMismatch { expected: ClaimBucket, named: ClaimBucket },
+    /// The header did not carry a bucket name at all, so there is nothing to
+    /// compare against the bucket this consumer opened. Kept apart from a
+    /// mismatch because it says something different: a publisher naming a real
+    /// but foreign bucket is a deployment pointed the wrong way, whereas a name
+    /// no NATS server would accept is a corrupted or forged header.
+    #[error("claim names {named:?}, which is not a bucket name: {source}")]
+    UnnamableBucket {
+        named: ClaimBucketHeader,
+        #[source]
+        source: ClaimBucketError,
+    },
     #[error("failed to resolve claim from object store: {0}")]
     StoreFailed(#[source] E),
     #[error("failed to read claim payload: {0}")]

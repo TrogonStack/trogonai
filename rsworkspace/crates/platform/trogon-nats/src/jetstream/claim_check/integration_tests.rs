@@ -356,6 +356,32 @@ async fn resolver_rejects_a_claim_from_another_bucket() {
     ));
 }
 
+/// A header nobody could have written by configuring a bucket says something a
+/// mismatch does not, so it is reported as what it is rather than folded into
+/// "some other bucket". The object is left alone either way: a consumer that
+/// cannot trust the header has no business spending the key next to it.
+#[tokio::test]
+async fn resolver_rejects_a_claim_naming_something_that_is_not_a_bucket() {
+    let store = MockObjectStore::new();
+    store.seed("test.subject/some-id", Bytes::from("offloaded body"));
+    let resolver = ClaimResolver::new(test_binding(store));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_CLAIM_CHECK, CLAIM_CHECK_VERSION);
+    headers.insert(HEADER_CLAIM_BUCKET, "not a bucket");
+    headers.insert(HEADER_CLAIM_KEY, "test.subject/some-id");
+
+    let error = resolver.resolve(Some(&headers), Bytes::new()).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            ClaimResolveError::UnnamableBucket { ref named, source: ClaimBucketError::InvalidCharacter(' ') }
+                if named.as_str() == "not a bucket"
+        ),
+        "{error}"
+    );
+}
+
 /// The publisher writes the object and only then publishes the claim, so a
 /// consumer that cannot read the object is looking at a transient failure and
 /// must not treat the message as consumed.
