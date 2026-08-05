@@ -129,9 +129,12 @@ Within `v1alpha1`, a field may still be added as `LEGACY_REQUIRED`, and the
 reason it is admissible is narrower than the version suffix: no deployed producer
 has written these events yet. A new required field breaks by having a current
 validator reject already-stored bytes, and there are no stored bytes until a
-producer ships. The gate is therefore the first deployed producer, not the
-promotion to `v1` -- a producer shipping on `v1alpha1` would close this window
-early, and from then on a new required field needs a new package version. Note
+producer ships. The window is therefore open only while both conditions hold --
+no deployed producer, and the package still `v1alpha1` -- and it closes at
+whichever comes first. A producer shipping on `v1alpha1` closes it early, because
+that is what creates the stored bytes; promotion closes it regardless of
+producers, because promotion is the act of accepting the compatibility
+obligation. Once it closes, a new required field needs a new package version. Note
 that `buf breaking` under `WIRE_JSON` passes either way, since it compares fields
 present on both sides and a field new to one side is not among them; the check
 here is a review obligation, not a mechanical one.
@@ -675,20 +678,31 @@ The Session-owned append and replay boundary, outside
 `validate_session_event`, verifies that the decoded type belongs to Session and
 that its payload `session_id` matches the addressed stream. The Session command
 boundary also computes request digests over the exact bytes it will persist.
-`decide` and `evolve` own every history-dependent relationship, and which of the
-two owns a given one follows from whether its command reads state at all.
+`decide` and `evolve` own every history-dependent relationship, and the state
+read is what places a given one: where a command reads no state there is nothing
+to reject against, so its relationship can only be a fold rule.
 `decide` owns the relationships whose command declares a state read in the
-command matrix: in-session ordinal existence and compaction ordering, exact
-attempt lineage, first-wins checkpoint evidence selection, complete
-restored-checkpoint equality with that evidence, continued effectiveness of
-`covers_through` after rewind, and equality with the stored Session plan. Those
-are checked before the append and rejected if they fail.
+command matrix, and checks them before the append: in-session ordinal existence
+and compaction ordering, exact attempt lineage, a checkpoint's producing attempt
+and plan digest and settled `covers_through`, complete restored-checkpoint
+equality with the fold-selected evidence, continued effectiveness of
+`covers_through` after rewind, and equality with the stored Session plan. These
+are rejected if they fail.
 `evolve` owns the relationships carried by commuting facts whose state read is
 `none` -- the assistant start/completion id and model joins, and the tool
 lifecycle joins. Those append under `Any` with nothing to check against, so they
 are fold rules rather than append-time rejections: an unmatched or disagreeing
 fact lands on the log and is surfaced by a projection flag, exactly as the `Any`
 fold rules above prescribe.
+`ProduceCheckpoint` is the one command whose relationships split across both, so
+the state read alone does not place all of them. Its admissibility checks are
+append-time and rejectable, as listed above; its **first-evidence-wins selection
+per `checkpoint_id` is a fold rule, not a precondition**. Rejecting a later
+conflicting payload at append would destroy the audit record the checkpoint
+contract promises: a later payload reusing a `checkpoint_id` is retained and
+visible, distinguished by the canonical digest of the complete evidence, and
+merely never selected. This is why restoration compares against the evidence the
+fold selected rather than against whatever the store saw last.
 This split prevents a local payload validator from claiming facts that only
 the command context or folded history can prove, and it keeps the command
 matrix honest: a command whose state read is `none` cannot enforce a join, so
@@ -1059,7 +1073,7 @@ decision.
 | `FailToolCall` | none | `Any` | `[ToolCallFailed]` | first-terminal-outcome-wins vs. `ToolCallCompleted` (fold rule) | `tool_execution_id` |
 | `RecordArtifact` | none | `Any` | `[ArtifactRecorded]` | source oneof set; MIME fallback rule | `artifact_id` |
 | `RecordFileChange` | none | `Any` | `[FileChanged]` | `RENAMED` requires `previous_path`; others omit it | change id |
-| `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible; attempt and plan match; `covers_through` settled; first evidence wins per `checkpoint_id` | `checkpoint_id` + canonical digest of the complete checkpoint evidence |
+| `ProduceCheckpoint` | settled history, plan, producing attempt | `Any` | `[CheckpointProduced]` | artifact admissible, attempt and plan match, `covers_through` settled (all append-time); first evidence wins per `checkpoint_id` (fold rule: a later conflicting payload is retained and visible, never selected) | `checkpoint_id` + canonical digest of the complete checkpoint evidence |
 | `RecordSystemNotice` | none | `Any` | `[SystemNoticeRecorded]` | none | notice id |
 | `UpdateTodo` | none | `Any` | `[TodoUpdated]` | `revision` monotonic from single logical writer; highest-revision-wins fold | `session_id` + `revision` |
 | `RenameSession` | none | `Any` | `[SessionRenamed]` | none | rename-request id |
