@@ -146,7 +146,7 @@ pub enum MediaTypeError {
     EmptySubtype,
     #[error("a media type has one subtype, so its subtype may not contain '/'")]
     SubtypeIsNotOne,
-    #[error("a media type may not contain whitespace")]
+    #[error("a media type's type and subtype may not contain whitespace")]
     InteriorWhitespace,
 }
 
@@ -154,9 +154,10 @@ pub enum MediaTypeError {
 /// because the standard defines those two as case-insensitive and a caller
 /// comparing them as bytes would otherwise be wrong for `IMAGE/PNG`.
 ///
-/// Parameters are kept byte for byte, because case-insensitivity stops at the
-/// subtype: a `multipart` boundary and a `filename` are values a sender chose
-/// and folding them changes what they refer to.
+/// Parameters are kept byte for byte apart from the optional space around the
+/// separator, because case-insensitivity stops at the subtype: a `multipart`
+/// boundary and a `filename` are values a sender chose and folding them changes
+/// what they refer to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct MimeType(String);
@@ -165,8 +166,11 @@ impl MimeType {
     pub fn new(raw: impl Into<String>) -> Result<Self, EventFieldError> {
         let raw = raw.into();
         let trimmed = raw.trim();
+        // The space either side of the separator is optional in the standard, so
+        // it says nothing about which media type this is and is dropped here
+        // rather than left to make one spelling of a type unequal to another.
         let (essence, parameters) = match trimmed.split_once(';') {
-            Some((essence, parameters)) => (essence, Some(parameters)),
+            Some((essence, parameters)) => (essence.trim_end(), Some(parameters.trim_start())),
             None => (trimmed, None),
         };
         let (kind, subtype) = essence.split_once('/').ok_or(MediaTypeError::MissingSeparator)?;
@@ -179,7 +183,10 @@ impl MimeType {
         if subtype.contains('/') {
             return Err(MediaTypeError::SubtypeIsNotOne.into());
         }
-        if trimmed.chars().any(char::is_whitespace) {
+        // Only the type and subtype. A parameter value is the sender's to choose
+        // and a quoted one may hold spaces, so what is inside the parameters is
+        // not this constructor's to reject.
+        if essence.chars().any(char::is_whitespace) {
             return Err(MediaTypeError::InteriorWhitespace.into());
         }
         let mut normalized = format!("{}/{}", kind.to_ascii_lowercase(), subtype.to_ascii_lowercase());

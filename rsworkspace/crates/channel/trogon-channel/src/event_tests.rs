@@ -89,6 +89,39 @@ fn a_media_type_keeps_parameters() {
     );
 }
 
+/// The space after the separator is how `Content-Type` is written nearly
+/// everywhere, so the attachment contract will be handed this spelling and has
+/// to read it as the type it is. It is dropped rather than kept, because two
+/// spellings of one media type must not compare as two types.
+#[test]
+fn a_media_type_reads_the_spelling_the_standard_writes_parameters_in() {
+    for raw in [
+        "text/plain;charset=utf-8",
+        "text/plain; charset=utf-8",
+        "text/plain ; charset=utf-8",
+        "  text/plain;  charset=utf-8  ",
+    ] {
+        assert_eq!(
+            MimeType::new(raw).expect("valid").as_str(),
+            "text/plain;charset=utf-8",
+            "{raw:?} is one media type spelled several ways"
+        );
+    }
+}
+
+/// A quoted parameter value holds whatever the sender put in it, spaces
+/// included, and a boundary that loses one stops delimiting the body it was
+/// picked for.
+#[test]
+fn a_media_type_keeps_the_spaces_inside_a_quoted_parameter() {
+    assert_eq!(
+        MimeType::new("MULTIPART/Mixed; boundary=\"a b c\"")
+            .expect("valid")
+            .as_str(),
+        "multipart/mixed;boundary=\"a b c\""
+    );
+}
+
 /// Case-insensitivity is defined for the type and the subtype only. A
 /// `multipart` boundary is a delimiter the sender picked and has to survive as
 /// typed, or the body it delimits stops being parseable.
