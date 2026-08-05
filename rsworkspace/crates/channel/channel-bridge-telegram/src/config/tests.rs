@@ -126,9 +126,11 @@ fn a_seed_list_with_an_unparseable_id_fails_and_names_it() {
         panic!("an unparseable seed id must be refused as one: {error}");
     };
     assert_eq!(entry, "not-an-id");
-    assert!(
-        error.to_string().contains("not-an-id"),
-        "the operator has to be told which entry to go and fix: {error}"
+    // The whole rendered line, because the entry alone does not tell an operator
+    // which variable to open: both halves of that sentence are the message.
+    assert_eq!(
+        error.to_string(),
+        r#"CHANNEL_SEED_TELEGRAM_USERS contains an entry that is not a Telegram user id: "not-an-id""#
     );
 }
 
