@@ -255,16 +255,15 @@ OperationId
 
 ### Complete The Credential State Machines
 
-The decider currently covers pending/active/previous/revoked/expired version
-states with write, rotation, and revoke transitions. Remaining states:
+The decider covers pending/active/previous/revoked/expired version states
+with write, rotation, and revoke transitions, plus the destroy saga states
+(destroy_requested, destroyed, cleanup_failed) with an admin destroy route
+and idempotent retry. Remaining states:
 
 ```text
 CredentialVersionState (additions)
-  resubmission_required
-  revocation_requested
-  destroy_requested
-  destroyed
-  cleanup_failed
+  resubmission_required   (blocked on the write_failed mapping decision)
+  revocation_requested    (belongs with Phase 6 async cleanup)
 
 CredentialState (not built)
   draft
@@ -323,9 +322,9 @@ SignedPublicKeyState
 Complete. The segregated store traits are the single contract shape (the
 unused unified trait was deleted), and `destroy(ref, reason)` exists across
 the adapters with a `destroyed` terminal status backed by the OpenBao KV v2
-destroy endpoint. What remains around destroy is lifecycle work tracked in
-Phase 1 (destroy_requested/destroyed version states) and Phase 6 (async
-cleanup); no runtime path invokes the store-level destroy yet.
+destroy endpoint. The destroy lifecycle saga (destroy_requested, destroyed,
+cleanup_failed) and the admin destroy route now drive it end to end; the
+remaining destroy-adjacent work is Phase 6 async cleanup.
 
 ## Phase 3: Persistence And Idempotent Operations
 
