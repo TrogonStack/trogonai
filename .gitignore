@@ -25,6 +25,11 @@ docs/.vitepress/cache
 !.env.example
 mise.local.toml
 
+# Docker
+compose.override.yml
+compose.override.yaml
+docker-compose.override.yml
+
 # IDE
 .idea/
 .vscode/
