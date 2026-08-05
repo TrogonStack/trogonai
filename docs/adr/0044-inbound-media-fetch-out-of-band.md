@@ -19,9 +19,10 @@ what a conversational turn has to wait for.
 [The multi-channel routing design](../architecture/multi-channel-agent-routing.md)
 originally recorded "eager claim-check": the bridge downloads media at
 normalize time, before dispatching the prompt. That decision was never
-implemented. `channel-bridge-telegram`'s parser drops every media update
-(`parse.rs` returns `None` for any message without text and hardcodes
-`attachments: Vec::new()`), so nothing is sunk and the decision is open.
+implemented. `channel-bridge-telegram`'s parser carries no media: `parse.rs`
+takes the words a message came with, from `text` or from a media `caption`, and
+hardcodes `attachments: Vec::new()`, so a photo reaches the agent as whatever was
+said about it and never as a handle. Nothing is sunk and the decision is open.
 
 Three properties of the problem constrain the answer:
 
