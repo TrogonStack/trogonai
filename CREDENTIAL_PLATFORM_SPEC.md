@@ -28,6 +28,11 @@ as sections in one file, but they should become separate files before
 implementation grows," so this single file is the intended starting point,
 not a final structure.
 
+ADRs 0042 through 0045 resolved part of the decision list below on
+2026-08-05; those blocks are marked `DECIDED (ADR#00NN):` with a link to
+the ratifying ADR. Every remaining `DECISION NEEDED:` block is still open
+and still needs sign-off.
+
 ## Credential Lifecycle (CREDENTIAL_LIFECYCLE)
 
 There are three separate lifecycle layers in play: the event-sourced decider
@@ -209,27 +214,17 @@ before wiring CredentialState failed to any retry UI. Today, offering a
 "retry" action against a write_failed credential would offer an action the
 decider has no path to accept.
 
-DECISION NEEDED (Required Decision): owner boundary, one of workspace,
-organization, project, tenant, or user.
-recommendation: treat owner_id as the top-level tenant/account boundary,
-distinct from workspace. PLAN.md's own Phase 1 value-object list already
-separates `OwnerId` from `WorkspaceId` as two different planned types (and
-notes OwnerId is "pending the Phase 0 decision" while "today only a
-credential-scoped CredentialOwnerId exists"). Grepping the codebase confirms
-`WorkspaceId` does not exist anywhere yet, only `CredentialOwnerId`
-(a validated, non-empty, length-bounded string). Keeping owner_id as the
-coarser tenant boundary and introducing workspace_id as a nested concept
-under it matches what PLAN.md has already implied without contradicting it.
+DECIDED (ADR#0042): the hierarchy is organization over project, and the
+owner boundary is the project: an immutable project id. Resource names,
+OpenBao paths, and event streams anchor at the project and never embed the
+organization above it. See
+docs/adr/0042-project-anchored-resource-hierarchy.md.
 
-DECISION NEEDED (Required Decision): first credential metadata backend,
-one of Postgres, NATS KV, or the existing control plane store.
-recommendation: application database (Postgres), per PLAN.md's own
-Implementation Defaults ("credential backend -> application database for
-metadata, OpenBao for raw provider credential material"). This is already
-the documented default; nothing in the current code contradicts it since
-the gateway has no database dependency yet at all (Phase 3: "the gateway
-has no database dependency and no vault, operation, or audit-fact concept
-at all").
+DECIDED (ADR#0043): the event stream is the source of truth for credential
+metadata. Operational records live in NATS KV, listing surfaces arrive
+later as projections over the same streams, and no relational store enters
+the first version. See
+docs/adr/0043-event-sourced-credential-metadata.md.
 
 DECISION NEEDED (Decisions Still Needed): what default pending-credential
 TTL should apply, separate from the idempotency TTL?
@@ -355,27 +350,28 @@ API does not have.
 ### Public API, PLAN.md Phase 4 (nothing built)
 
 Every endpoint below is unbuilt. There is no vault, operation, or
-resubmit-secret concept behind any of them today.
+resubmit-secret concept behind any of them today. Paths are parent-scoped
+resource names rooted at the project, following ADR#0042 section 3.
 
 ```text
-POST   /v1/credential-vaults
-GET    /v1/credential-vaults
-GET    /v1/credential-vaults/{vault_id}
-PATCH  /v1/credential-vaults/{vault_id}
-POST   /v1/credential-vaults/{vault_id}/archive
-POST   /v1/credential-vaults/{vault_id}/restore
+POST   /v1/projects/{project}/credential-vaults
+GET    /v1/projects/{project}/credential-vaults
+GET    /v1/projects/{project}/credential-vaults/{vault_id}
+PATCH  /v1/projects/{project}/credential-vaults/{vault_id}
+POST   /v1/projects/{project}/credential-vaults/{vault_id}/archive
+POST   /v1/projects/{project}/credential-vaults/{vault_id}/restore
 
-POST   /v1/credentials
-GET    /v1/credentials
-GET    /v1/credentials/{credential_id}
-PATCH  /v1/credentials/{credential_id}
-POST   /v1/credentials/{credential_id}/rotate
-POST   /v1/credentials/{credential_id}/resubmit-secret
-POST   /v1/credentials/{credential_id}/revoke
-POST   /v1/credentials/{credential_id}/archive
-POST   /v1/credentials/{credential_id}/delete
+POST   /v1/projects/{project}/credentials
+GET    /v1/projects/{project}/credentials
+GET    /v1/projects/{project}/credentials/{credential_id}
+PATCH  /v1/projects/{project}/credentials/{credential_id}
+POST   /v1/projects/{project}/credentials/{credential_id}/rotate
+POST   /v1/projects/{project}/credentials/{credential_id}/resubmit-secret
+POST   /v1/projects/{project}/credentials/{credential_id}/revoke
+POST   /v1/projects/{project}/credentials/{credential_id}/archive
+POST   /v1/projects/{project}/credentials/{credential_id}/delete
 
-GET    /v1/operations/{operation_id}
+GET    /v1/projects/{project}/operations/{operation_id}
 ```
 
 Idempotency rule per write command, following PLAN.md's Phase 3 contract
@@ -384,7 +380,7 @@ Idempotency rule per write command, following PLAN.md's Phase 3 contract
 for targeted operations):
 
 ```text
-POST /v1/credential-vaults
+POST /v1/projects/{project}/credential-vaults
   namespace credential_vault.create, scoped by owner_id + key (no target
   yet since the vault_id does not exist before this call)
 
@@ -392,11 +388,11 @@ PATCH .../{vault_id}, POST .../archive, POST .../restore
   namespace credential_vault.update / .archive / .restore, targeted by
   vault_id
 
-POST /v1/credentials
+POST /v1/projects/{project}/credentials
   namespace credential.create, targeted by credential_id if the client can
   pre-assign one, otherwise scoped by owner_id + key alone
 
-PATCH /v1/credentials/{credential_id}
+PATCH /v1/projects/{project}/credentials/{credential_id}
   namespace credential.update, targeted by credential_id
 
 POST .../rotate
@@ -424,8 +420,9 @@ legitimately hand back new secret material, and even those only display it
 once:
 
 ```text
-POST /v1/credentials          -> returns the new secret value once, on the
-                                  first non-replay execution only
+POST /v1/projects/{project}/credentials
+  -> returns the new secret value once, on the first non-replay execution
+     only
 POST .../rotate                -> returns the new secret value once, same
                                   one-time rule
 POST .../resubmit-secret        -> receives plaintext in the request; the
@@ -438,7 +435,8 @@ Error codes, taken verbatim from PLAN.md's Phase 4 list, mapped per
 endpoint by what can plausibly fail there:
 
 ```text
-POST /v1/credential-vaults            validation_failed, permission_denied,
+POST /v1/projects/{project}/credential-vaults
+                                       validation_failed, permission_denied,
                                        idempotency_conflict
 GET .../credential-vaults[/{id}]      validation_failed, permission_denied
 PATCH .../{vault_id}                  validation_failed, permission_denied,
@@ -447,7 +445,8 @@ POST .../archive, .../restore          validation_failed, permission_denied,
                                        idempotency_conflict,
                                        pending_operation_exists
 
-POST /v1/credentials                  validation_failed, permission_denied,
+POST /v1/projects/{project}/credentials
+                                       validation_failed, permission_denied,
                                        idempotency_conflict,
                                        pending_operation_exists,
                                        secret_write_failed,
@@ -475,7 +474,8 @@ POST .../revoke                       validation_failed, permission_denied,
                                        credential_not_ready, cleanup_pending
 POST .../archive, .../delete          validation_failed, permission_denied,
                                        idempotency_conflict, cleanup_pending
-GET /v1/operations/{operation_id}     validation_failed, permission_denied
+GET /v1/projects/{project}/operations/{operation_id}
+                                       validation_failed, permission_denied
 ```
 
 Two error codes in PLAN.md's list, `host_not_allowed` and
@@ -484,24 +484,16 @@ than management-API failures; they belong to the delivery-policy checks
 described in RUNTIME_PROJECTION (allowed_hosts, allowed_runtime_services),
 not to any of the endpoints above.
 
-DECISION NEEDED (Decisions Still Needed): must a replay of the same
-idempotency key re-serve the one-time plaintext from create/rotate, or does
-replay only ever return metadata once the value has been shown once?
-recommendation: replay must never re-serve plaintext, even for the exact
-same idempotency key and fingerprint. Store only a metadata-only response
-snapshot in the idempotency record, per PLAN.md's own Phase 3 Acceptance
-Criteria ("Response snapshots never contain raw secrets or one-time key
-material"); treat the one-time display as a side channel that fires exactly
-once, on the original non-replay execution, never on
-IdempotencyDecision::Replay.
+DECIDED (ADR#0044): a replay of the same idempotency key returns metadata
+only, never plaintext, even for the caller who originally received it on
+the first, non-replay execution. See
+docs/adr/0044-one-time-plaintext-exposure.md.
 
-DECISION NEEDED (Decisions Still Needed): is one-time display escrow
-allowed at all?
-recommendation: no escrow. A lost one-time response requires
-resubmit-secret (credentials) or reroll (API keys), matching PLAN.md's
-Failure UX section verbatim ("lost one-time API key response -> offer
-reroll") and preserving the Definition of Done guarantee that public API
-responses are metadata-only after one-time display.
+DECIDED (ADR#0044): no server-side escrow of one-time material exists in
+any form. Recovery from a lost one-time response is reroll
+(Trogonai-issued keys) or resubmission (provider-supplied secrets), never
+recovery of the original value. See
+docs/adr/0044-one-time-plaintext-exposure.md.
 
 DECISION NEEDED (Decisions Still Needed): what default idempotency TTL
 should apply on the public API?
@@ -588,14 +580,6 @@ service, e.g. gateway, control-plane, lifecycle worker) rather than
 Kubernetes auth or continuing with static tokens. AppRole works regardless
 of whether the runtime is Kubernetes, and it maps directly onto the five
 named policies. Keep the current static-token adapter for local dev only.
-
-DECISION NEEDED (Decisions Still Needed): what can support/audit roles see
-during incidents?
-recommendation: audit_read should see credential metadata (status,
-fingerprint, last-rotated timestamp, owner) and operation/audit-fact
-history, never plaintext and never raw OpenBao paths. Break-glass access
-should be its own short-lived elevated grant, not a standing widened
-audit_read policy.
 
 ## OpenBao Operations (OPENBAO_OPERATIONS)
 
@@ -701,19 +685,10 @@ the recovery worker reads metadata() to recover stuck activations. The
 "during cleanup" pattern has no code yet since cleanup itself is unbuilt
 (see RUNTIME_PROJECTION and PLAN.md Phase 6).
 
-DECISION NEEDED (Required Decision / Decisions Still Needed): ratify
-`trogonai/{owner_id}/credentials/{credential_id}` as the published OpenBao
-path convention and mount name, or replace either before more sources are
-wired.
-recommendation: ratify the path convention as-is; it is deterministic and
-reconstructible purely from validated domain values, and PLAN.md's own
-Definition of Done already requires exactly this ("OpenBao paths are
-generated from validated domain values"). For the mount, move off the
-generic default `"secret"` to a dedicated mount name (for example
-`"trogonai"`), since a shared, out-of-the-box `"secret"` mount gives
-OpenBao policies no boundary to scope against; a dedicated mount is the
-natural coarse-grained policy boundary the five named policies in
-AUTHORIZATION_MATRIX need.
+DECIDED (ADR#0042): `trogonai/{owner_id}/credentials/{credential_id}` and
+its mount are ratified as-is, with owner_id understood as project id.
+Names anchor at the project and never embed the organization above it. See
+docs/adr/0042-project-anchored-resource-hierarchy.md.
 
 DECISION NEEDED: should revoke() keep soft-deleting every version 1 through
 current, or move to targeting only the version(s) a caller intended to
@@ -849,14 +824,10 @@ RuntimeCredentialProjection (missing fields)
 and the per-kind CredentialRef map today; none of the five planned policy
 fields exist on it.
 
-DECISION NEEDED (Required Decision / Decisions Still Needed): first default
-cache TTL and revocation latency target.
-recommendation: ratify the existing 300s ttl / 30s jitter as the default
-rather than choosing a new number, since it is already implemented and
-exercised by tests. Set the revocation latency target at ttl + jitter worst
-case (330s) until Phase 6's outbox-driven invalidation exists; once outbox
-invalidation lands, tighten the target, since revocation will no longer
-need to wait out the cache TTL.
+DECIDED (ADR#0045): target p99 revocation-to-invalidation latency at or
+under 5 seconds under normal operation; page when p99 exceeds 10 seconds
+sustained over 5 minutes. The existing 300s ttl / 30s jitter is ratified as
+the working cache default. See docs/adr/0045-revocation-latency-target.md.
 
 DECISION NEEDED: should cache invalidation stay whole-cache-clear on every
 projection merge, or move to per-CredentialRef invalidation now, ahead of
