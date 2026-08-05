@@ -20,35 +20,10 @@ pub enum ClaimBucketError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClaimBucket(String);
 
-/// The characters a bucket name is drawn from, stated once so that
-/// [`ClaimBucket::new`] and the compile-time check below cannot come to
-/// different answers about the same name.
-const fn is_permitted(c: char) -> bool {
+/// The characters a bucket name is drawn from.
+fn is_permitted(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_')
 }
-
-/// Whether [`ClaimBucket::new`] would accept this name, asked at compile time.
-/// Walks bytes because that is what a `const` can walk; a multi-byte character
-/// fails it, which is the answer the factory gives too.
-const fn is_a_bucket_name(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() {
-        return false;
-    }
-    let mut index = 0;
-    while index < bytes.len() {
-        if !is_permitted(bytes[index] as char) {
-            return false;
-        }
-        index += 1;
-    }
-    true
-}
-
-const _: () = assert!(
-    is_a_bucket_name(DEFAULT_CLAIM_BUCKET),
-    "DEFAULT_CLAIM_BUCKET must be a name ClaimBucket::new accepts"
-);
 
 impl ClaimBucket {
     pub fn new(name: impl Into<String>) -> Result<Self, ClaimBucketError> {
@@ -70,8 +45,8 @@ impl ClaimBucket {
 impl Default for ClaimBucket {
     /// The one bucket a trogon deployment uses. Built without going through
     /// [`ClaimBucket::new`] because the factory is fallible and this cannot be:
-    /// the constant is held to the factory's rule by `is_a_bucket_name` above,
-    /// which fails the build rather than a deployment.
+    /// the constant is held to the factory's rule by the tests, so a name the
+    /// factory would refuse fails there rather than in a deployment.
     fn default() -> Self {
         Self(DEFAULT_CLAIM_BUCKET.to_string())
     }

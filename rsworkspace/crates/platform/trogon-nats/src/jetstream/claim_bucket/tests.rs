@@ -27,6 +27,10 @@ fn a_name_nats_would_refuse_is_refused_here() {
         ClaimBucket::new("claims/one").unwrap_err(),
         ClaimBucketError::InvalidCharacter('/')
     );
+    assert_eq!(
+        ClaimBucket::new("claims-ñ").unwrap_err(),
+        ClaimBucketError::InvalidCharacter('ñ')
+    );
 }
 
 /// [`ClaimBucket::default`] skips validation because the constant cannot fail.
@@ -38,4 +42,19 @@ fn the_default_bucket_is_a_valid_name() {
         ClaimBucket::default()
     );
     assert_eq!(ClaimBucket::default().to_string(), DEFAULT_CLAIM_BUCKET);
+}
+
+/// A header is input, so what it holds may not be a bucket name at all. Both
+/// answers matter: the name to compare against the bucket this consumer opened,
+/// and the text an operator has to read when there is nothing to compare.
+#[test]
+fn a_header_parses_to_a_bucket_name_or_says_why_it_cannot() {
+    let named = ClaimBucketHeader::new("trogon-claims");
+    assert_eq!(named.parse().expect("valid"), ClaimBucket::default());
+    assert_eq!(named.as_str(), "trogon-claims");
+    assert_eq!(named.to_string(), "trogon-claims");
+
+    let unnamable = ClaimBucketHeader::new("trogon.claims");
+    assert_eq!(unnamable.parse().unwrap_err(), ClaimBucketError::InvalidCharacter('.'));
+    assert_eq!(unnamable.to_string(), "trogon.claims");
 }
