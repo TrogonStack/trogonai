@@ -2,10 +2,9 @@
 #[path = "config_tests.rs"]
 mod config_tests;
 
-use acp_nats::{AcpPrefix, NatsConfig};
-use anyhow::Context;
+use acp_nats::{AcpPrefix, AcpPrefixError, NatsConfig};
 use std::path::PathBuf;
-use trogon_channel::CommandTriggers;
+use trogon_channel::{CommandTriggerError, CommandTriggers};
 use trogon_nats::jetstream::ClaimBucket;
 use trogon_std::env::ReadEnv;
 
@@ -59,6 +58,28 @@ fn var<E: ReadEnv>(env: &E, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Why the environment did not describe a bridge.
+///
+/// One variant per variable that can be wrong, each keeping the error that
+/// rejected it. A boot failure is read by an operator who has to go and edit
+/// something, so the variant names the variable and the source says what was
+/// unacceptable about the value.
+#[derive(Debug, thiserror::Error)]
+pub enum BridgeConfigError {
+    #[error("TELEGRAM_BOT_TOKEN is unset or blank")]
+    BotToken(#[from] BlankBotTokenError),
+    #[error("CHANNEL_SEED_TELEGRAM_USERS contains an entry that is not a Telegram user id: {entry:?}")]
+    SeedUser {
+        entry: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    #[error("CHANNEL_NEW_SESSION_TRIGGERS is not a usable trigger list")]
+    CommandTriggers(#[from] CommandTriggerError),
+    #[error("{} is not a usable ACP prefix", acp_nats::ENV_ACP_PREFIX)]
+    AcpPrefix(#[from] AcpPrefixError),
+}
+
 pub struct BridgeConfig {
     pub acp: acp_nats::Config,
     /// Environment/tenant token for KV buckets and the durable consumer name.
@@ -94,9 +115,8 @@ pub struct BridgeConfig {
 }
 
 impl BridgeConfig {
-    pub fn from_env<E: ReadEnv>(env: &E) -> anyhow::Result<Self> {
-        let bot_token =
-            BotToken::new(env.var("TELEGRAM_BOT_TOKEN").unwrap_or_default()).context("TELEGRAM_BOT_TOKEN not set")?;
+    pub fn from_env<E: ReadEnv>(env: &E) -> Result<Self, BridgeConfigError> {
+        let bot_token = BotToken::new(env.var("TELEGRAM_BOT_TOKEN").unwrap_or_default())?;
 
         let channel_prefix = var(env, "CHANNEL_PREFIX").unwrap_or_else(|| "prod".to_string());
         let inbound_stream = var(env, "TELEGRAM_INBOUND_STREAM").unwrap_or_else(|| "TELEGRAM".to_string());
@@ -107,13 +127,15 @@ impl BridgeConfig {
         let seed_users = match var(env, "CHANNEL_SEED_TELEGRAM_USERS") {
             Some(raw) => raw
                 .split(',')
-                .filter(|s| !s.trim().is_empty())
-                .map(|s| {
-                    s.trim()
-                        .parse::<i64>()
-                        .with_context(|| format!("invalid Telegram user id in CHANNEL_SEED_TELEGRAM_USERS: {s:?}"))
+                .map(str::trim)
+                .filter(|entry| !entry.is_empty())
+                .map(|entry| {
+                    entry.parse::<i64>().map_err(|source| BridgeConfigError::SeedUser {
+                        entry: entry.to_string(),
+                        source,
+                    })
                 })
-                .collect::<anyhow::Result<Vec<_>>>()?,
+                .collect::<Result<Vec<_>, _>>()?,
             None => Vec::new(),
         };
 
@@ -127,13 +149,12 @@ impl BridgeConfig {
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(String::from),
-            )
-            .context("invalid CHANNEL_NEW_SESSION_TRIGGERS")?,
+            )?,
             Err(_) => CommandTriggers::default(),
         };
 
         let raw_prefix = var(env, acp_nats::ENV_ACP_PREFIX).unwrap_or_else(|| acp_nats::DEFAULT_ACP_PREFIX.to_string());
-        let acp_prefix = AcpPrefix::new(raw_prefix).context("invalid ACP prefix")?;
+        let acp_prefix = AcpPrefix::new(raw_prefix)?;
         let acp = acp_nats::Config::with_prefix(acp_prefix, NatsConfig::from_env(env));
 
         Ok(Self {

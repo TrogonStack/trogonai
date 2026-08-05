@@ -1,10 +1,13 @@
 use super::*;
 use trogon_std::env::InMemoryEnv;
 
-/// Whether a config loaded. Spelled out instead of `is_ok` because a
-/// `BridgeConfig` is not `Debug`, which is the point: it holds a token.
-fn loads(env: &InMemoryEnv) -> bool {
-    BridgeConfig::from_env(env).is_ok()
+/// Why a config did not load. `BridgeConfig` is not `Debug` (it holds a token),
+/// so `expect_err` is out and the failure has to be taken by pattern.
+fn rejection(env: &InMemoryEnv) -> BridgeConfigError {
+    let Err(error) = BridgeConfig::from_env(env) else {
+        panic!("this environment must not configure the bridge");
+    };
+    error
 }
 
 /// A token is the one required variable, so every way of not supplying one has
@@ -17,13 +20,13 @@ fn a_blank_bot_token_fails_like_an_unset_one() {
 
         let env = InMemoryEnv::new();
         env.set("TELEGRAM_BOT_TOKEN", token);
-        assert!(!loads(&env), "blank token {token:?} must not configure the bridge");
+        assert!(
+            matches!(rejection(&env), BridgeConfigError::BotToken(_)),
+            "blank token {token:?} must be refused as a token, not as something else"
+        );
     }
 
-    assert!(
-        !loads(&InMemoryEnv::new()),
-        "an absent token must not configure the bridge"
-    );
+    assert!(matches!(rejection(&InMemoryEnv::new()), BridgeConfigError::BotToken(_)));
 }
 
 /// The bridge resolves claims from exactly the bucket the gateway publishes
@@ -118,15 +121,37 @@ fn a_seed_list_with_an_unparseable_id_fails_and_names_it() {
     env.set("TELEGRAM_BOT_TOKEN", "secret-token");
     env.set("CHANNEL_SEED_TELEGRAM_USERS", "42, not-an-id ,43");
 
-    // Matched rather than `expect_err`ed because a `BridgeConfig` is not
-    // `Debug`: it holds a token.
-    let Err(error) = BridgeConfig::from_env(&env) else {
-        panic!("an unparseable seed id must not configure the bridge");
+    let error = rejection(&env);
+    let BridgeConfigError::SeedUser { entry, .. } = &error else {
+        panic!("an unparseable seed id must be refused as one: {error}");
     };
+    assert_eq!(entry, "not-an-id");
     assert!(
-        format!("{error:#}").contains("not-an-id"),
-        "the failure must name the offending entry: {error:#}"
+        error.to_string().contains("not-an-id"),
+        "the operator has to be told which entry to go and fix: {error}"
     );
+}
+
+/// The trigger list and the ACP prefix are the other two values a deployment can
+/// get wrong, and each has to be refused as itself: an operator reading a boot
+/// failure is being told which variable to go and edit.
+#[test]
+fn each_unusable_value_is_refused_as_the_variable_it_came_from() {
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set("CHANNEL_NEW_SESSION_TRIGGERS", "/new session");
+    assert!(matches!(
+        rejection(&env),
+        BridgeConfigError::CommandTriggers(CommandTriggerError::MultipleTokens)
+    ));
+
+    let env = InMemoryEnv::new();
+    env.set("TELEGRAM_BOT_TOKEN", "secret-token");
+    env.set(acp_nats::ENV_ACP_PREFIX, "not a prefix");
+    assert!(matches!(
+        rejection(&env),
+        BridgeConfigError::AcpPrefix(AcpPrefixError::InvalidCharacter(' '))
+    ));
 }
 
 #[test]

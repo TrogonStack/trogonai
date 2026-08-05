@@ -5,14 +5,13 @@ use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, SessionNotif
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
-use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
     AgentPortError, AgentSessionId, Endpoint, InboundEvent, MessageRef, PlatformUserId, PrincipalId, PromptOutcome,
     ReleaseReason, ReleaseStep, Sender, SessionRelease,
 };
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, MockObjectStore};
+use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::UuidV7Generator;
 
 // The claim-check scenarios below need the real object store and publisher, which
@@ -21,28 +20,6 @@ use trogon_std::UuidV7Generator;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, ClaimRetention, DEFAULT_CLAIM_BUCKET, MaxPayload, NatsJetStreamClient, NatsObjectStore,
 };
-
-struct NatsServer {
-    _container: ContainerAsync<Nats>,
-    url: String,
-}
-
-impl NatsServer {
-    async fn start() -> Self {
-        let cmd = NatsServerCmd::default().with_jetstream();
-        let container = Nats::default()
-            .with_cmd(&cmd)
-            .start()
-            .await
-            .expect("start NATS testcontainer");
-        let host = container.get_host().await.expect("get host");
-        let port = container.get_host_port_ipv4(4222).await.expect("get port");
-        Self {
-            _container: container,
-            url: format!("{host}:{port}"),
-        }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 #[error("fake agent failure (session_lost={session_lost})")]
@@ -335,9 +312,8 @@ async fn claim_resolver(js: &async_nats::jetstream::Context) -> ClaimResolver<Na
 /// for the whole scenario.
 #[tokio::test]
 async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -474,9 +450,8 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
 #[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_redeems_a_claim_checked_update() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -563,9 +538,8 @@ async fn pipeline_redeems_a_claim_checked_update() {
 #[cfg(not(coverage))]
 #[tokio::test]
 async fn pipeline_leaves_an_unredeemable_claim_unacked() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -656,9 +630,8 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
 /// scenario.
 #[tokio::test]
 async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -824,9 +797,8 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
 /// the cleanup each redelivery of one message leaves the agent holding one more.
 #[tokio::test]
 async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -928,9 +900,8 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
 /// never succeed. One container for the whole scenario.
 #[tokio::test]
 async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
@@ -1076,9 +1047,8 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
 /// container for the whole scenario.
 #[tokio::test]
 async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
-    let server = NatsServer::start().await;
-    let client = async_nats::connect(&server.url).await.expect("connect");
-    let js = async_nats::jetstream::new(client);
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
 
     js.create_stream(async_nats::jetstream::stream::Config {
         name: "TELEGRAM".to_string(),
