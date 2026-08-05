@@ -669,6 +669,8 @@ Rules:
   target (HTTP method/host/path or NATS subject), payload digest, iat/exp
   within a 2 minute ceiling, jti replay store, server-nonce escalation;
 - verification fails closed when the replay store is unavailable;
+- tokens verify once at admission; durable flows carry provenance onward
+  per ADR#0039, and consumers never re-verify expired caller tokens;
 - root/management keyspaces are signed-only and demand server nonces.
 
 ### Bearer Keys
