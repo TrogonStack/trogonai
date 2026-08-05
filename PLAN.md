@@ -500,25 +500,23 @@ round-trip test. The operational contract around it does not exist:
 
 - Ratify the path convention as a published decision (see Phase 0). External
   callers must never provide arbitrary OpenBao paths.
-- Write non-secret metadata alongside every secret. Today only the raw value
-  is posted.
 - Define and configure service auth methods. Today everything uses a static
   dev root token.
 - Define policies.
 
 ### Metadata Convention
 
-Every OpenBao write should include non-secret metadata:
+Every OpenBao write now records path-level custom metadata with the fields
+that exist today: owner_id, credential_id, credential_kind, current_version,
+created_at. Remaining fields wait on their concepts:
 
 ```text
-owner_id
-workspace_id
-integration_id
-credential_id
+workspace_id       (needs the Phase 0 owner boundary decision)
+integration_id     (needs integration records)
+operation_id       (needs Phase 3 operation records)
 credential_version_id
-credential_kind
-operation_id
-created_at
+  -> KV v2 custom metadata is path-level, not per-version; per-version
+     attribution needs its own convention
 ```
 
 ### Policies
@@ -638,8 +636,9 @@ RuntimeCredentialProjection (missing fields)
 
 ### Cache Rules
 
-- Add TTL and jitter. Today the cache is a plain map invalidated only by
-  explicit events and clears.
+- TTL with deterministic per-key jitter exists (default 300s ttl, 30s
+  jitter); expose the policy through configuration once the Phase 0 cache
+  TTL decision is ratified.
 - Invalidate on outbox projection event once the outbox exists.
 - Decide fallback behavior for OpenBao outage per credential kind.
 
@@ -936,9 +935,9 @@ Exit criteria:
 
 ### Milestone 4: Runtime Delivery (Remaining)
 
-Projection, cache, invalidation, and fail-closed revocation exist. Remaining:
+Projection, cache with TTL and jitter, invalidation, and fail-closed
+revocation exist. Remaining:
 
-- cache TTL and jitter;
 - revocation latency measured against a target.
 
 ### Milestone 5: Product UI
