@@ -10,9 +10,9 @@ use buffa::Message as _;
 use bytes::Bytes;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use trogon_decider_nats::StreamStoreError;
 use trogon_decider_runtime::{
-    EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition, StreamRead,
+    EventDecodeOutcome, InvalidStreamPositionError, ReadFrom, ReadStreamRequest, StreamEvent, StreamPosition,
+    StreamRead,
 };
 use trogon_nats::jetstream::{
     JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStreamInfo,
@@ -26,6 +26,7 @@ use trogonai_proto::gateway::credentials::{
 };
 
 use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
+use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_message_field,
     decode_revoked, decode_revoked_state, decode_rotated, decode_rotation_failed, decode_rotation_requested,
@@ -363,7 +364,7 @@ pub enum RuntimeProjectionStreamRefreshError {
     #[error("credential event stream read failed: {source}")]
     ReadStream {
         #[source]
-        source: StreamStoreError,
+        source: CredentialEventStreamReadError,
     },
     #[error("runtime projection refresh failed: {source}")]
     Refresh {
@@ -838,7 +839,7 @@ pub async fn refresh_runtime_projections_from_credential_stream<S>(
 where
     S: JetStreamGetStreamInfo + JetStreamGetRawMessage,
 {
-    let events = trogon_decider_nats::read_stream(stream, from_sequence)
+    let events = read_credential_event_stream(stream, from_sequence)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::ReadStream { source })?;
     refresh_runtime_projections_from_credential_events(projections, cache, events)
@@ -896,7 +897,7 @@ where
     EventStore: StreamRead<str>,
     <EventStore as StreamRead<str>>::Error: Error + Send + Sync + 'static,
 {
-    let events = trogon_decider_nats::read_stream(event_stream, from_sequence)
+    let events = read_credential_event_stream(event_stream, from_sequence)
         .await
         .map_err(|source| RuntimeProjectionStreamRefreshError::ReadStream { source })?;
     refresh_runtime_projections_from_changed_credential_events(projections, cache, event_store, events)
@@ -1083,7 +1084,8 @@ fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, Cred
 }
 
 fn position(value: u64) -> Result<StreamPosition, RuntimeProjectionRefreshError> {
-    StreamPosition::try_new(value).map_err(|source| RuntimeProjectionRefreshError::InvalidStreamPositionError { source })
+    StreamPosition::try_new(value)
+        .map_err(|source| RuntimeProjectionRefreshError::InvalidStreamPositionError { source })
 }
 
 fn merge_projection(

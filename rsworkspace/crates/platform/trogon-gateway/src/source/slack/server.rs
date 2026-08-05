@@ -365,6 +365,7 @@ pub fn router<P: JetStreamPublisher, S: ObjectStorePut>(
 pub fn runtime_router<P, S, G>(
     publisher: ClaimCheckPublisher<P, S>,
     config: &SlackConfig,
+    webhook: &SlackWebhookConfig,
     integration_id: SourceIntegrationId,
     credential_resolver: RuntimeCredentialResolver<G>,
 ) -> Router
@@ -373,9 +374,6 @@ where
     S: ObjectStorePut,
     G: SecretStoreGet<Error = SecretStoreError>,
 {
-    let webhook = config
-        .webhook()
-        .expect("Slack runtime webhook router requires webhook transport config");
     runtime_router_with_clock(
         publisher,
         config,

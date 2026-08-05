@@ -163,7 +163,7 @@ impl OpenBaoSecretStore {
         )
     }
 
-    fn endpoint(&self, kind: OpenBaoEndpoint, credential: &CredentialRef) -> Url {
+    fn endpoint(&self, kind: OpenBaoEndpoint, credential: &CredentialRef) -> Result<Url, SecretStoreError> {
         self.address
             .join(&format!(
                 "/v1/{}/{}/{}",
@@ -171,7 +171,10 @@ impl OpenBaoSecretStore {
                 kind.as_str(),
                 self.credential_path(credential)
             ))
-            .expect("validated OpenBao URL must accept API paths")
+            .map_err(|error| SecretStoreError::BackendUnavailable {
+                backend: StorageBackend::OpenBao,
+                message: format!("failed to build endpoint url: {error}"),
+            })
     }
 
     fn authorize(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -303,7 +306,7 @@ impl SecretStorePut for OpenBaoSecretStore {
         let initial_ref = self.credential_ref(&scope, kind, CredentialVersion::initial())?;
         let response: OpenBaoWriteResponse = self
             .send_json(
-                self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, &initial_ref)))
+                self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, &initial_ref)?))
                     .json(&json!({
                         "data": {
                             "value": value.as_str(),
@@ -328,7 +331,7 @@ impl SecretStoreGet for OpenBaoSecretStore {
             });
         }
 
-        let mut url = self.endpoint(OpenBaoEndpoint::Data, credential);
+        let mut url = self.endpoint(OpenBaoEndpoint::Data, credential)?;
         url.query_pairs_mut()
             .append_pair("version", &credential.version().get().to_string());
         let response: OpenBaoReadResponse = self.send_json(self.authorize(self.http.get(url))).await?;
@@ -353,7 +356,7 @@ impl SecretStoreRotate for OpenBaoSecretStore {
 
         let response: OpenBaoWriteResponse = self
             .send_json(
-                self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, credential)))
+                self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Data, credential)?))
                     .json(&json!({
                         "data": {
                             "value": value.as_str(),
@@ -379,7 +382,7 @@ impl SecretStoreRevoke for OpenBaoSecretStore {
         }
 
         self.send_empty(
-            self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Delete, credential)))
+            self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Delete, credential)?))
                 .json(&json!({
                     "versions": versions,
                 })),
@@ -435,7 +438,7 @@ fn openbao_fingerprint(metadata_path: &str, version: u64) -> String {
 impl OpenBaoSecretStore {
     async fn openbao_metadata(&self, credential: &CredentialRef) -> Result<OpenBaoMetadataResponse, SecretStoreError> {
         match self
-            .send_json(self.authorize(self.http.get(self.endpoint(OpenBaoEndpoint::Metadata, credential))))
+            .send_json(self.authorize(self.http.get(self.endpoint(OpenBaoEndpoint::Metadata, credential)?)))
             .await
         {
             Ok(metadata) => Ok(metadata),

@@ -228,15 +228,16 @@ impl SlackPlugin {
         G: SecretStoreGet<Error = SecretStoreError>,
     {
         for integration in &config.slack {
-            if integration.config.webhook().is_none() {
+            let Some(webhook) = integration.config.webhook() else {
                 continue;
-            }
+            };
             let path = format!("{}/{}", self.path_prefix(), integration.id);
             app = app.nest(
                 &path,
                 crate::source::slack::runtime_router(
                     publisher.clone(),
                     &integration.config,
+                    webhook,
                     integration.id.clone(),
                     credential_resolver.clone(),
                 ),

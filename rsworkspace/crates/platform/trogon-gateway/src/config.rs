@@ -3465,7 +3465,7 @@ token = "file-token"
 
     #[test]
     fn config_error_display_validation() {
-        let err = ConfigError::Validation(ValidationErrors(vec![
+        let err = ConfigError::Validation(AggregateValidationError(vec![
             ConfigValidationError::invalid("discord", "stream_max_age_secs", ZeroDurationError),
             ConfigValidationError::invalid_subject_token(
                 "discord",
@@ -3532,14 +3532,14 @@ status = "maybe"
 
     #[test]
     fn duration_too_long_display_uses_plural_for_values_above_one_second() {
-        let err = DurationTooLong::new(2);
+        let err = DurationTooLongError::new(2);
 
         assert_eq!(err.to_string(), "must not exceed 2 seconds");
     }
 
     #[test]
     fn config_error_is_std_error() {
-        let err = ConfigError::Validation(ValidationErrors(vec![ConfigValidationError::invalid(
+        let err = ConfigError::Validation(AggregateValidationError(vec![ConfigValidationError::invalid(
             "discord",
             "stream_max_age_secs",
             ZeroDurationError,

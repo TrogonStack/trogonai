@@ -1,10 +1,11 @@
+use async_nats::SubjectError;
 use async_nats::jetstream::stream;
 use async_nats::jetstream::stream::Stream;
 use trogon_decider_nats::{
     StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
 };
-use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::JetStreamContext;
+use trogon_nats::{DottedNatsToken, SubjectTokenViolationError};
 use uuid::Uuid;
 
 use super::commands::domain::CredentialId;
@@ -53,11 +54,10 @@ pub(crate) struct CredentialSubject {
 }
 
 impl CredentialSubject {
-    pub(crate) fn event(key: &CredentialKey) -> Self {
+    pub(crate) fn event(key: &CredentialKey) -> Result<Self, SubjectTokenViolationError> {
         let subject = format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{}", key.simple());
-        let token = DottedNatsToken::new(&subject)
-            .expect("a subject built from a fixed prefix and a uuid-simple key is a valid dotted token");
-        Self { token, key: *key }
+        let token = DottedNatsToken::new(&subject)?;
+        Ok(Self { token, key: *key })
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -72,8 +72,24 @@ impl CredentialSubject {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CredentialEventSubjectResolver;
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CredentialEventSubjectResolverError {
+    #[error("failed to build credential event subject token: {source}")]
+    BuildSubjectToken {
+        #[source]
+        source: SubjectTokenViolationError,
+    },
+    #[error("failed to validate credential event subject: {source}")]
+    ValidateSubject {
+        #[source]
+        source: SubjectError,
+    },
+    #[error(transparent)]
+    Stream(StreamStoreError),
+}
+
 impl StreamSubjectResolver<str> for CredentialEventSubjectResolver {
-    type Error = StreamStoreError;
+    type Error = CredentialEventSubjectResolverError;
 
     async fn resolve_subject_state(
         &self,
@@ -81,9 +97,13 @@ impl StreamSubjectResolver<str> for CredentialEventSubjectResolver {
         stream_id: &str,
     ) -> Result<SubjectState, Self::Error> {
         let key = CredentialKey::for_stream(&CredentialStreamId::from(stream_id));
-        let subject = StreamSubject::new(CredentialSubject::event(&key).as_str())
-            .expect("credential subject is generated from validated parts");
-        let current_position = subject_current_position(events_stream, &subject).await?;
+        let event_subject = CredentialSubject::event(&key)
+            .map_err(|source| CredentialEventSubjectResolverError::BuildSubjectToken { source })?;
+        let subject = StreamSubject::new(event_subject.as_str())
+            .map_err(|source| CredentialEventSubjectResolverError::ValidateSubject { source })?;
+        let current_position = subject_current_position(events_stream, &subject)
+            .await
+            .map_err(CredentialEventSubjectResolverError::Stream)?;
 
         Ok(SubjectState {
             subject,
@@ -125,7 +145,7 @@ mod tests {
     #[test]
     fn key_derivation_keeps_nats_unsafe_ids_out_of_subject_tokens() {
         let key = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-        let subject = CredentialSubject::event(&key);
+        let subject = CredentialSubject::event(&key).unwrap();
 
         assert_eq!(
             subject.as_str(),
