@@ -20,6 +20,7 @@ axum = { workspace = true }
 base64 = "0.22"
 buffa = { workspace = true }
 bytes = { workspace = true }
+chrono = "0.4"
 clap = { workspace = true }
 confique = { workspace = true }
 form_urlencoded = "1"
@@ -49,7 +50,6 @@ url = "2.5"
 uuid = { workspace = true, features = ["v5"] }
 
 [dev-dependencies]
-chrono = "0.4"
 tempfile = { workspace = true }
 testcontainers-modules = "0.15"
 time = { workspace = true }
