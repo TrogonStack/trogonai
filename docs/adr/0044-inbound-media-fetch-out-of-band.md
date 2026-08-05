@@ -132,11 +132,23 @@ is that absence is never permanent by accident, and two rules give it that.
 
 The downloader writes a `failed` record for every permanent error, and also on
 its last delivery attempt, which it recognizes from the delivery count JetStream
-puts on the message. A handle whose deliveries are exhausted therefore ends as a
-terminal record rather than as silence, since a consumer that has stopped
-redelivering will never speak again on its own. The reader's deadline is the
-backstop for the one case no consumer can cover, a downloader that never runs at
-all.
+puts on the message. The write comes before the acknowledgement, and the
+acknowledgement is what the write earns: a downloader that cannot reach the KV
+bucket leaves the message unacknowledged, so JetStream redelivers and the
+terminal record is attempted again on the next delivery. A handle whose
+deliveries are exhausted therefore ends as a terminal record rather than as
+silence, since a consumer that has stopped redelivering will never speak again on
+its own.
+
+Redelivery is a bounded number of attempts, so ordering the write before the ack
+narrows the window in which a handle ends absent without closing it. A KV bucket
+unreachable for the whole life of a message, or a downloader that dies between
+its final read and its final write, exhausts the deliveries with nothing written.
+That is the same shape as a downloader that never runs at all, and it has the
+same backstop: the reader's deadline, not the terminal record, is what bounds how
+long absence can last. The terminal record is what turns the failures a
+downloader survives into an explanation the agent can be given instead of a
+timeout, and it is not load-bearing for liveness.
 
 Readers await readiness with a KV watch and a deadline, not a poll. A late
 reader observes current state directly with no replay concern, and a deadline
@@ -181,8 +193,13 @@ pay nothing.
 - Readiness is always observable as an explicit state. "Bytes absent from the
   object store" is never interpreted as a lifecycle signal, and an absent
   readiness record is never read as an assertion that a download is running.
-- Every handle a downloader stops working on leaves a terminal record. Giving up
-  is written down, not expressed by falling silent.
+- Every handle a downloader stops working on leaves a terminal record, written
+  before the message is acknowledged. Giving up is written down, not expressed by
+  falling silent.
+- No wait for readiness depends on a record arriving. A reader's deadline bounds
+  absence on its own, so a downloader that cannot write its terminal record
+  degrades the explanation an agent receives, never the reader's ability to stop
+  waiting.
 - An inbound event never asserts the existence of bytes that have not been
   written.
 
@@ -202,8 +219,11 @@ pay nothing.
 - **Failure is legible.** A download that fails permanently is a `failed`
   record with a reason, distinguishable from one still in flight, so an agent
   can be told the difference. The cost is that the downloader has to write that
-  record on the way out, including on its final delivery attempt, rather than
-  letting the consumer's own give-up be the ending.
+  record on the way out, including on its final delivery attempt and before it
+  acknowledges, rather than letting the consumer's own give-up be the ending.
+  Redelivery covers a write that fails while deliveries remain, and the reader's
+  deadline covers the rest, which is why readers keep a deadline instead of
+  trusting that a record always arrives.
 - **The endpoints bucket gains a second reader.** `channel_endpoints_{prefix}`
   stays the bridge's to write, but the downloader reads it to authorize before
   redeeming, so identity is one registry consulted by every component that acts
