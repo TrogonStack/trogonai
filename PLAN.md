@@ -212,13 +212,13 @@ the sections split into their own files:
 ### Required Decisions
 
 Owner boundary, metadata backend, path convention, cache TTL, and latency
-target are decided in ADR#0042..0045.
+target are decided in ADR#0042..0045. The signed-key algorithm and the
+signed-first caller authentication posture are decided in ADR#0046.
 
 - First OpenBao auth method per service. The prototype uses a static dev
   token; that is not a production answer.
 - First supported credential kinds.
 - First API keyspaces.
-- First signed-key algorithm.
 
 ### Acceptance Criteria
 
@@ -647,11 +647,32 @@ RuntimeCredentialProjection (missing fields)
 ## Phase 8: API Key Platform
 
 Nothing is implemented; `API_KEY.md` is design-only and no bearer key, signed
-key, keyspace, or `ApiPrincipal` code exists anywhere in the repo.
+key, keyspace, or `ApiPrincipal` code exists anywhere in the repo. Signed
+mode is the strongly recommended default and the primary build target per
+ADR#0046; bearer is the policy-bounded compatibility tier.
+
+### Signed Keys
+
+Implement Coinbase-style signed keys as the recommended mode:
+
+```text
+api_key.public_key.add
+api_key.public_key.revoke
+api_key.verify_signed_request
+```
+
+Rules:
+
+- client-generated key pairs only; the platform never holds private keys;
+- Ed25519 default, ES256 accepted (ADR#0046);
+- DB stores public key and fingerprint;
+- signed token binds method, host, path, time, and nonce;
+- replay cache and bounded clock-skew tolerance on the platform side;
+- root/management keyspaces are signed-only.
 
 ### Bearer Keys
 
-Implement Unkey-style ordinary bearer keys:
+Implement Unkey-style bearer keys as the compatibility tier:
 
 ```text
 api_key.create
@@ -662,29 +683,12 @@ api_key.verify
 
 Rules:
 
-- raw key shown once;
+- raw key shown once (ADR#0044);
 - DB stores verifier digest;
 - verifier pepper lives outside the API-key table;
 - list/read responses are metadata-only;
-- lost one-time response requires reroll by default.
-
-### Signed Keys
-
-Implement Coinbase-style signed high-authority keys:
-
-```text
-api_key.public_key.add
-api_key.public_key.revoke
-api_key.verify_signed_request
-```
-
-Rules:
-
-- prefer client-generated key pairs;
-- DB stores public key and fingerprint;
-- private key is not stored by default;
-- signed token binds method, host, path, time, and nonce;
-- root/management keys should prefer signed mode.
+- lost one-time response requires reroll by default;
+- keyspace policy can disallow bearer issuance entirely (ADR#0046).
 
 ### Authorization Result
 
@@ -991,17 +995,18 @@ Unless later decisions override these, use:
 
 ```text
 credential backend
-  -> application database for metadata
+  -> event stream as the metadata source of truth (ADR#0043)
   -> OpenBao for raw provider credential material
 
 API key model
-  -> bearer keys for normal developer automation
-  -> signed keys for root/management/high-risk automation
+  -> signed keys strongly recommended for all callers (ADR#0046)
+  -> bearer keys as the policy-bounded compatibility tier
+  -> root/management keyspaces are signed-only
 
 signed key default
   -> Coinbase-style JWT request token
-  -> client-generated key pair preferred
-  -> ES256 acceptable first default if Coinbase compatibility matters
+  -> client-generated key pair only; the platform never holds private keys
+  -> Ed25519 default, ES256 accepted for compatibility (ADR#0046)
 
 idempotency
   -> scoped by owner/workspace and command namespace
@@ -1022,7 +1027,6 @@ cleanup
 - Which OpenBao auth method should each service use?
 - Which credential kinds ship in the first UI?
 - Which providers get first-class validation?
-- Which signed-key algorithm ships first?
 - What default idempotency TTL should be.
 - What default pending credential TTL should be.
 
