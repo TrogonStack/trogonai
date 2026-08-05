@@ -325,22 +325,14 @@ SignedPublicKeyState
 - State transitions can be retried safely.
 - State transition tests cover success, conflict, and failure paths.
 
-## Phase 2: SecretStore Contract (Remaining)
+## Phase 2: SecretStore Contract
 
-The trait split, static config adapter, in-memory adapter, and OpenBao adapter
-all exist and are tested. Two contract items remain:
-
-```text
-destroy(ref, reason)
-  -> not implemented in any adapter; revoke maps to the OpenBao KV v2
-     soft-delete endpoint only
-  -> add a destroyed terminal state and the permanent-destroy operation
-
-unified SecretStore trait
-  -> secret_store/traits.rs defines the plan's combined trait but nothing
-     uses it; either adopt it at the composition boundary or delete it so
-     the segregated traits are the single contract shape
-```
+Complete. The segregated store traits are the single contract shape (the
+unused unified trait was deleted), and `destroy(ref, reason)` exists across
+the adapters with a `destroyed` terminal status backed by the OpenBao KV v2
+destroy endpoint. What remains around destroy is lifecycle work tracked in
+Phase 1 (destroy_requested/destroyed version states) and Phase 6 (async
+cleanup); no runtime path invokes the store-level destroy yet.
 
 ## Phase 3: Persistence And Idempotent Operations
 
