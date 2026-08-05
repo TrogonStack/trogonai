@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use chrono::Utc;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -315,7 +316,9 @@ impl SecretStorePut for OpenBaoSecretStore {
                     })),
             )
             .await?;
-        self.credential_ref(&scope, kind, response.data.version()?)
+        let credential = self.credential_ref(&scope, kind, response.data.version()?)?;
+        self.write_custom_metadata(&credential).await?;
+        Ok(credential)
     }
 }
 
@@ -366,7 +369,9 @@ impl SecretStoreRotate for OpenBaoSecretStore {
             )
             .await?;
 
-        Ok(credential.with_version(response.data.version()?))
+        let rotated = credential.with_version(response.data.version()?);
+        self.write_custom_metadata(&rotated).await?;
+        Ok(rotated)
     }
 }
 
@@ -469,6 +474,22 @@ impl OpenBaoSecretStore {
             Err(error) => Err(error),
         }
     }
+
+    async fn write_custom_metadata(&self, credential: &CredentialRef) -> Result<(), SecretStoreError> {
+        self.send_empty(
+            self.authorize(self.http.post(self.endpoint(OpenBaoEndpoint::Metadata, credential)?))
+                .json(&json!({
+                    "custom_metadata": {
+                        "owner_id": credential.owner_id().as_str(),
+                        "credential_id": credential.id().as_str(),
+                        "credential_kind": credential.kind().as_str(),
+                        "current_version": credential.version().get().to_string(),
+                        "created_at": Utc::now().to_rfc3339(),
+                    },
+                })),
+        )
+        .await
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -533,6 +554,9 @@ struct OpenBaoMetadataResponse {
 struct OpenBaoMetadata {
     current_version: u64,
     versions: BTreeMap<String, OpenBaoVersionMetadata>,
+    #[serde(default)]
+    #[allow(dead_code, reason = "populated for reconciliation tooling; read from tests today")]
+    custom_metadata: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -736,7 +760,38 @@ mod tests {
         assert_eq!(output, TEST_INPUT);
         assert_eq!(metadata.status(), CredentialStatus::Active);
         assert_eq!(metadata.storage_backend(), StorageBackend::OpenBao);
+        assert_custom_metadata(store, &credential).await;
         credential
+    }
+
+    async fn assert_custom_metadata(store: &OpenBaoSecretStore, credential: &CredentialRef) {
+        let response = store.openbao_metadata(credential).await.unwrap();
+        let custom_metadata = response
+            .data
+            .custom_metadata
+            .expect("custom metadata to be populated on write");
+
+        let expected_version = credential.version().get().to_string();
+        assert_eq!(
+            custom_metadata.get("owner_id").map(String::as_str),
+            Some(credential.owner_id().as_str())
+        );
+        assert_eq!(
+            custom_metadata.get("credential_id").map(String::as_str),
+            Some(credential.id().as_str())
+        );
+        assert_eq!(
+            custom_metadata.get("credential_kind").map(String::as_str),
+            Some(credential.kind().as_str())
+        );
+        assert_eq!(
+            custom_metadata.get("current_version").map(String::as_str),
+            Some(expected_version.as_str())
+        );
+
+        let created_at = custom_metadata.get("created_at").cloned().unwrap_or_default();
+        assert!(!created_at.is_empty());
+        assert!(chrono::DateTime::parse_from_rfc3339(&created_at).is_ok());
     }
 
     #[tokio::test]
@@ -788,6 +843,21 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn openbao_testcontainer_rotate_advances_custom_metadata_version() {
+        let server = OpenBaoServer::start().await;
+        let store = server.store();
+        let credential = assert_roundtrip(&store).await;
+
+        let rotated = store
+            .rotate(&credential, SecretString::new("rotated-value").unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(rotated.version().get(), credential.version().get() + 1);
+        assert_custom_metadata(&store, &rotated).await;
     }
 
     #[tokio::test]
