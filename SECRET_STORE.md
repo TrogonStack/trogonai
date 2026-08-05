@@ -1280,7 +1280,7 @@ Failure handling:
   events by the credential id carried in the payload, replays each aggregate,
   and plans recovery commands from pending lifecycle state and the deterministic
   OpenBao credential id. The worker persists its raw stream cursor in
-  `GATEWAY_CREDENTIAL_LIFECYCLE_WORKER_CHECKPOINTS` and only advances it after
+  `GATEWAY_CREDENTIAL_WORKER_CHECKPOINTS` and only advances it after
   planned recoveries complete without failures. Failed recoveries keep that
   cursor pinned, save bounded retry/backoff metadata on the checkpoint, and
   emit stuck-state reporting once the failure age crosses the worker threshold.
@@ -2275,14 +2275,14 @@ Current slice includes:
 - config resolution routed through the static config adapter while preserving
   existing provider-specific validators;
 - OpenBao Testcontainers coverage for both adapter copy-in/copy-out behavior and
-  the lifecycle-runtime path through `CredentialLifecycleRuntimeHandler`.
+  the lifecycle-runtime path through `CredentialRuntimeHandler`.
 
 Verified commands from the implementation pass:
 
 ```text
 mise exec -- cargo test -p trogon-gateway
 mise exec -- cargo check -p trogon-gateway
-mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_lifecycle_and_resolves_precise_value
+mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_state_and_resolves_precise_value
 mise exec -- git diff --check
 ```
 
@@ -2325,7 +2325,7 @@ requiring a process restart.
 
 Credential lifecycle command execution now uses the same scheduler-style
 snapshot boundary as the scheduler deciders. Commands read metadata-only
-`CredentialLifecycleStateSnapshot` payloads before replay and write snapshots on
+`CredentialStateSnapshot` payloads before replay and write snapshots on
 a fixed 32-event frequency. Snapshot payloads may include lifecycle refs,
 fingerprints, metadata, failure reasons, and revocation facts, but they must not
 include plaintext credential material.
@@ -2343,11 +2343,11 @@ The recovery worker records OpenTelemetry counters under the `trogon-gateway`
 meter:
 
 ```text
-gateway.credential_lifecycle.recovery.passes
-gateway.credential_lifecycle.recovery.errors
-gateway.credential_lifecycle.recovery.scanned_events
-gateway.credential_lifecycle.recovery.recoveries
-gateway.credential_lifecycle.recovery.stuck_reports
+gateway.credential.recovery.passes
+gateway.credential.recovery.errors
+gateway.credential.recovery.scanned_events
+gateway.credential.recovery.recoveries
+gateway.credential.recovery.stuck_reports
 ```
 
 The first operator alerts should watch for `stuck_reports` increasing, repeated

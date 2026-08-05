@@ -220,7 +220,7 @@ Automated Rust tests start their own OpenBao container with Testcontainers:
 ```bash
 cd ../../../rsworkspace
 mise exec -- cargo test -p trogon-gateway openbao_testcontainer_roundtrips_precise_value
-mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_lifecycle_and_resolves_precise_value
+mise exec -- cargo test -p trogon-gateway runtime_handler_with_openbao_testcontainer_applies_state_and_resolves_precise_value
 ```
 
 To run the same gateway adapter round trip against this compose service:
@@ -232,7 +232,7 @@ OPENBAO_ADDR=http://openbao.trogonai.orb.local:8200 OPENBAO_TOKEN=dev-only-token
 
 The adapter tests write `copy-this-value-in-and-out` into OpenBao and read it
 back through `OpenBaoSecretStore`. The lifecycle-runtime test writes that same
-value through `CredentialLifecycleRuntimeHandler`, resolves it through the
+value through `CredentialRuntimeHandler`, resolves it through the
 runtime registry, rotates it to `rotated-copy-this-value-in-and-out`, revokes
 it, and verifies lifecycle events do not contain plaintext. The compose-backed
 ignored test also prints the credential ref plus the API data and metadata
