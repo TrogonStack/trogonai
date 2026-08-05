@@ -19,6 +19,10 @@ impl CredentialFailureReason {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn secret_store_write_failed() -> Self {
+        Self(Arc::from("secret store write failed"))
+    }
 }
 
 impl fmt::Debug for CredentialFailureReason {

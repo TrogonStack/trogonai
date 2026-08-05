@@ -17,7 +17,7 @@ impl CredentialVersion {
     }
 
     pub fn next(self) -> Self {
-        Self(self.0.checked_add(1).expect("credential version overflowed"))
+        Self(self.0.saturating_add(1))
     }
 }
 

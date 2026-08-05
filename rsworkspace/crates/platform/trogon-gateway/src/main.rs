@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
+
 #[cfg(not(coverage))]
 mod cli;
 #[cfg_attr(coverage, allow(dead_code))]
@@ -29,6 +31,8 @@ use std::error::Error;
 use std::io::Write;
 #[cfg(not(coverage))]
 use std::net::SocketAddr;
+#[cfg(not(coverage))]
+use std::time::Duration;
 
 #[cfg(not(coverage))]
 use anyhow::Context;

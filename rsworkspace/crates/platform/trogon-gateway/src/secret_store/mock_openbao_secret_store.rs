@@ -49,8 +49,15 @@ impl MockOpenBaoSecretStore {
 }
 
 impl MockOpenBaoSecretStoreState {
-    fn next_credential_ref(&mut self, scope: CredentialScope, kind: CredentialKind) -> CredentialRef {
-        let id = openbao_credential_id(&scope, kind).expect("generated OpenBao credential id is valid");
+    fn next_credential_ref(
+        &mut self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+    ) -> Result<CredentialRef, SecretStoreError> {
+        let id = openbao_credential_id(&scope, kind).map_err(|error| SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::OpenBao,
+            message: format!("generated credential id is invalid: {error}"),
+        })?;
         let current = self
             .versions
             .keys()
@@ -59,7 +66,7 @@ impl MockOpenBaoSecretStoreState {
             .max();
         let version = current.map_or_else(CredentialVersion::initial, CredentialVersion::next);
 
-        CredentialRef::new(id, version, &scope, kind)
+        Ok(CredentialRef::new(id, version, &scope, kind))
     }
 }
 
@@ -73,11 +80,11 @@ impl SecretStorePut for MockOpenBaoSecretStore {
         value: SecretString,
     ) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = state.next_credential_ref(scope, kind);
-        let active_metadata = metadata(&credential, CredentialStatus::Active);
+        let credential = state.next_credential_ref(scope, kind)?;
+        let active_metadata = metadata(&credential, CredentialStatus::Active)?;
         for (stored_ref, stored) in &mut state.versions {
             if stored_ref.id() == credential.id() {
-                stored.metadata = metadata(stored_ref, CredentialStatus::Previous);
+                stored.metadata = metadata(stored_ref, CredentialStatus::Previous)?;
             }
         }
         state.versions.insert(
@@ -131,10 +138,10 @@ impl SecretStoreRotate for MockOpenBaoSecretStore {
                 status,
             });
         }
-        stored.metadata = metadata(credential, CredentialStatus::Previous);
+        stored.metadata = metadata(credential, CredentialStatus::Previous)?;
 
         let new_credential = credential.next_version();
-        let metadata = metadata(&new_credential, CredentialStatus::Active);
+        let metadata = metadata(&new_credential, CredentialStatus::Active)?;
         state.versions.insert(
             new_credential.clone(),
             MockOpenBaoVersion {
@@ -159,7 +166,7 @@ impl SecretStoreRevoke for MockOpenBaoSecretStore {
         }
         for (stored_ref, stored) in &mut state.versions {
             if stored_ref.id() == credential.id() {
-                stored.metadata = metadata(stored_ref, CredentialStatus::Revoked);
+                stored.metadata = metadata(stored_ref, CredentialStatus::Revoked)?;
             }
         }
         Ok(())
@@ -181,15 +188,23 @@ impl SecretStoreMetadata for MockOpenBaoSecretStore {
     }
 }
 
-fn metadata(credential: &CredentialRef, status: CredentialStatus) -> CredentialMetadata {
+fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
     let fingerprint = CredentialFingerprint::new(format!(
         "openbao:{}#{}",
         MockOpenBaoSecretStore::metadata_path(credential),
         credential.version().get()
     ))
-    .expect("generated OpenBao credential fingerprint is valid");
+    .map_err(|error| SecretStoreError::BackendUnavailable {
+        backend: StorageBackend::OpenBao,
+        message: format!("generated credential fingerprint is invalid: {error}"),
+    })?;
 
-    CredentialMetadata::new(credential.clone(), status, StorageBackend::OpenBao, fingerprint)
+    Ok(CredentialMetadata::new(
+        credential.clone(),
+        status,
+        StorageBackend::OpenBao,
+        fingerprint,
+    ))
 }
 
 #[cfg(test)]

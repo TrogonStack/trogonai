@@ -31,7 +31,11 @@ struct StoredCredential {
 }
 
 impl InMemorySecretStoreState {
-    fn next_credential_ref(&mut self, scope: CredentialScope, kind: CredentialKind) -> CredentialRef {
+    fn next_credential_ref(
+        &mut self,
+        scope: CredentialScope,
+        kind: CredentialKind,
+    ) -> Result<CredentialRef, SecretStoreError> {
         self.next_id += 1;
         let id = CredentialId::new(format!(
             "memory:{}:{}:{}",
@@ -39,9 +43,12 @@ impl InMemorySecretStoreState {
             kind.as_str(),
             self.next_id
         ))
-        .expect("generated in-memory credential id is valid");
+        .map_err(|error| SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::InMemory,
+            message: format!("generated credential id is invalid: {error}"),
+        })?;
 
-        CredentialRef::new(id, CredentialVersion::initial(), &scope, kind)
+        Ok(CredentialRef::new(id, CredentialVersion::initial(), &scope, kind))
     }
 }
 
@@ -55,8 +62,8 @@ impl SecretStorePut for InMemorySecretStore {
         value: SecretString,
     ) -> Result<CredentialRef, Self::Error> {
         let mut state = self.state.lock().await;
-        let credential = state.next_credential_ref(scope, kind);
-        let metadata = metadata(&credential, CredentialStatus::Active);
+        let credential = state.next_credential_ref(scope, kind)?;
+        let metadata = metadata(&credential, CredentialStatus::Active)?;
         state.entries.insert(
             credential.clone(),
             StoredCredential {
@@ -98,10 +105,10 @@ impl SecretStoreRotate for InMemorySecretStore {
             .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
             })?;
-        stored.metadata = metadata(credential, CredentialStatus::Previous);
+        stored.metadata = metadata(credential, CredentialStatus::Previous)?;
 
         let new_credential = credential.next_version();
-        let metadata = metadata(&new_credential, CredentialStatus::Active);
+        let metadata = metadata(&new_credential, CredentialStatus::Active)?;
         state.entries.insert(
             new_credential.clone(),
             StoredCredential {
@@ -125,7 +132,7 @@ impl SecretStoreRevoke for InMemorySecretStore {
             .ok_or_else(|| SecretStoreError::Missing {
                 credential: credential.clone(),
             })?;
-        stored.metadata = metadata(credential, CredentialStatus::Revoked);
+        stored.metadata = metadata(credential, CredentialStatus::Revoked)?;
         Ok(())
     }
 }
@@ -145,10 +152,19 @@ impl SecretStoreMetadata for InMemorySecretStore {
     }
 }
 
-fn metadata(credential: &CredentialRef, status: CredentialStatus) -> CredentialMetadata {
-    let fingerprint = CredentialFingerprint::new(format!("memory:{}", credential))
-        .expect("generated credential fingerprint is valid");
-    CredentialMetadata::new(credential.clone(), status, StorageBackend::InMemory, fingerprint)
+fn metadata(credential: &CredentialRef, status: CredentialStatus) -> Result<CredentialMetadata, SecretStoreError> {
+    let fingerprint = CredentialFingerprint::new(format!("memory:{}", credential)).map_err(|error| {
+        SecretStoreError::BackendUnavailable {
+            backend: StorageBackend::InMemory,
+            message: format!("generated credential fingerprint is invalid: {error}"),
+        }
+    })?;
+    Ok(CredentialMetadata::new(
+        credential.clone(),
+        status,
+        StorageBackend::InMemory,
+        fingerprint,
+    ))
 }
 
 #[cfg(test)]

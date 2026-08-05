@@ -840,13 +840,8 @@ where
 }
 
 fn failure_reason(source: &impl fmt::Display) -> CredentialFailureReason {
-    let value = source.to_string();
-    let value = if value.is_empty() {
-        "secret store write failed".to_string()
-    } else {
-        value.chars().take(512).collect()
-    };
-    CredentialFailureReason::new(value).expect("generated credential failure reason is valid")
+    let value: String = source.to_string().chars().take(512).collect();
+    CredentialFailureReason::new(value).unwrap_or_else(|_| CredentialFailureReason::secret_store_write_failed())
 }
 
 #[cfg(test)]

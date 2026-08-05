@@ -8,7 +8,6 @@ use bytes::Bytes;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use tracing::{error, info, warn};
-use trogon_decider_nats::StreamStoreError;
 use trogon_decider_runtime::{
     EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite, StreamAppend, StreamEvent, StreamRead,
 };
@@ -25,6 +24,7 @@ use crate::credential::handler::{
     CredentialActivationRecoveryCommand, CredentialActivationRecoveryPlanError, CredentialRuntimeHandler,
     activation_recovery_command,
 };
+use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
     CredentialProtoDecodeError, decode_credential_metadata, decode_message_field, decode_revoked, decode_rotated,
     decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
@@ -377,7 +377,7 @@ where
     }
 
     let from_sequence = checkpoint.next_sequence();
-    let events = trogon_decider_nats::read_stream(event_stream, from_sequence)
+    let events = read_credential_event_stream(event_stream, from_sequence)
         .await
         .map_err(|source| CredentialRecoveryWorkerError::ReadStream { source })?;
     let max_scanned_sequence = events.iter().map(|event| event.stream_position.as_u64()).max();
@@ -602,7 +602,7 @@ pub(crate) enum CredentialRecoveryWorkerError {
     #[error("credential event stream read failed: {source}")]
     ReadStream {
         #[source]
-        source: StreamStoreError,
+        source: CredentialEventStreamReadError,
     },
     #[error("credential recovery checkpoint failed: {source}")]
     Checkpoint {

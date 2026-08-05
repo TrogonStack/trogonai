@@ -664,7 +664,7 @@ where
             target.kind.as_str(),
             secret_value.as_str(),
         ],
-    );
+    )?;
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Create.as_str(),
@@ -1047,7 +1047,7 @@ where
             target.kind.as_str(),
             secret_value.as_str(),
         ],
-    );
+    )?;
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Rotate.as_str(),
@@ -1428,7 +1428,7 @@ where
             version.as_str(),
             target.kind.as_str(),
         ],
-    );
+    )?;
     let idempotency_scope = IdempotencyScope::new(
         scope.owner_id().as_str(),
         CommandNamespace::Revoke.as_str(),
@@ -1669,13 +1669,18 @@ fn idempotency_key_from_headers(headers: &HeaderMap) -> Result<IdempotencyKey, C
     IdempotencyKey::new(provided).map_err(CredentialManagementHttpError::invalid_input)
 }
 
-fn request_fingerprint(admin_token: &SecretString, parts: &[&str]) -> RequestFingerprint {
-    let mut mac = HmacSha256::new_from_slice(admin_token.as_str().as_bytes()).expect("HMAC accepts any key length");
+fn request_fingerprint(
+    admin_token: &SecretString,
+    parts: &[&str],
+) -> Result<RequestFingerprint, CredentialManagementHttpError> {
+    let mut mac = HmacSha256::new_from_slice(admin_token.as_str().as_bytes()).map_err(|error| {
+        CredentialManagementHttpError::IdempotencyStore(format!("request fingerprint hmac: {error}"))
+    })?;
     for part in parts {
         mac.update(&(part.len() as u64).to_be_bytes());
         mac.update(part.as_bytes());
     }
-    RequestFingerprint::new(hex::encode(mac.finalize().into_bytes()))
+    Ok(RequestFingerprint::new(hex::encode(mac.finalize().into_bytes())))
 }
 
 fn authorize(headers: &HeaderMap, admin_token: &SecretString) -> Result<(), CredentialManagementHttpError> {
