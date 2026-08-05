@@ -3,12 +3,14 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_nats::jetstream::{self, context, kv};
 use buffa::Message as _;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use opentelemetry::metrics::Histogram;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 use trogon_decider_runtime::{
@@ -40,6 +42,42 @@ use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError
 const RUNTIME_PROJECTION_CHECKPOINT_KEY: &str = "v1.runtime-projection";
 pub(crate) const CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINT_BUCKET: &str =
     "GATEWAY_CREDENTIAL_RUNTIME_PROJECTION_CHECKPOINTS";
+const RUNTIME_PROJECTION_METER_NAME: &str = "trogon-gateway";
+
+#[derive(Debug)]
+struct RuntimeProjectionMetrics {
+    revocation_latency: Histogram<f64>,
+}
+
+impl RuntimeProjectionMetrics {
+    fn new() -> Self {
+        let meter = trogon_telemetry::meter(RUNTIME_PROJECTION_METER_NAME);
+        Self {
+            revocation_latency: meter
+                .f64_histogram("gateway.credential.revocation.latency")
+                .with_description(
+                    "Time from a credential revocation event's recorded timestamp to runtime cache invalidation.",
+                )
+                .with_unit("s")
+                .build(),
+        }
+    }
+
+    fn record_revocation_latency(&self, revoked_recorded_at: DateTime<Utc>) {
+        self.revocation_latency
+            .record(revocation_latency_seconds(revoked_recorded_at, Utc::now()), &[]);
+    }
+}
+
+static RUNTIME_PROJECTION_METRICS: OnceLock<RuntimeProjectionMetrics> = OnceLock::new();
+
+fn runtime_projection_metrics() -> &'static RuntimeProjectionMetrics {
+    RUNTIME_PROJECTION_METRICS.get_or_init(RuntimeProjectionMetrics::new)
+}
+
+fn revocation_latency_seconds(recorded_at: DateTime<Utc>, now: DateTime<Utc>) -> f64 {
+    (now - recorded_at).to_std().unwrap_or(Duration::ZERO).as_secs_f64()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeIntegrationStatus {
@@ -970,10 +1008,12 @@ where
 {
     let mut report = RuntimeProjectionRefreshReport::default();
     let mut changed_credentials = BTreeMap::<CredentialId, u64>::new();
+    let mut revoked_recorded_at = BTreeMap::<CredentialId, DateTime<Utc>>::new();
 
     for event in events {
         report.scanned_events += 1;
         let stream_position = event.stream_position.as_u64();
+        let recorded_at = event.recorded_at;
         report.checkpoint_advanced_to = Some(report.checkpoint_advanced_to.unwrap_or(0).max(stream_position));
         match event
             .decode::<v1::CredentialEvent>()
@@ -987,6 +1027,9 @@ where
                     .ok_or(RuntimeProjectionRefreshError::MissingEvent)?;
                 let credential_id = event_credential_id(case)
                     .map_err(|source| RuntimeProjectionRefreshError::InvalidEvent { source })?;
+                if matches!(case, CredentialEventCase::Revoked(_)) {
+                    revoked_recorded_at.insert(credential_id.clone(), recorded_at);
+                }
                 changed_credentials
                     .entry(credential_id)
                     .and_modify(|position| *position = (*position).max(stream_position))
@@ -1002,7 +1045,15 @@ where
 
     for (credential_id, version) in changed_credentials {
         let state = load_credential_state(event_store, &credential_id).await?;
-        apply_state_to_projection(projections, cache, &state, position(version)?).await?;
+        let revoked_event_recorded_at = revoked_recorded_at.get(&credential_id).copied();
+        apply_state_to_projection(
+            projections,
+            cache,
+            &state,
+            position(version)?,
+            revoked_event_recorded_at,
+        )
+        .await?;
         report.applied_credentials += 1;
     }
     report.projected_integrations = projections.len().await;
@@ -1046,6 +1097,7 @@ async fn apply_state_to_projection(
     cache: &RuntimeCredentialCache,
     state: &state_v1::CredentialStateSnapshot,
     stream_position: StreamPosition,
+    revoked_event_recorded_at: Option<DateTime<Utc>>,
 ) -> Result<(), RuntimeProjectionRefreshError> {
     if let Some(projection) = RuntimeIntegrationProjection::from_credential_state(state, stream_position.as_u64())
         .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?
@@ -1062,6 +1114,9 @@ async fn apply_state_to_projection(
         let key = RuntimeIntegrationKey::from_credential_ref(&credential_ref)
             .map_err(|source| RuntimeProjectionRefreshError::BuildProjection { source })?;
         projections.remove_credential(&key, credential_ref.kind()).await;
+        if let Some(recorded_at) = revoked_event_recorded_at {
+            runtime_projection_metrics().record_revocation_latency(recorded_at);
+        }
     }
     Ok(())
 }
@@ -2257,5 +2312,106 @@ mod tests {
         let expires_b = cache.expires_at(&credential_b).await.unwrap();
 
         assert_ne!(expires_a, expires_b);
+    }
+
+    fn timestamp(seconds: i64) -> DateTime<Utc> {
+        DateTime::<Utc>::from_timestamp(seconds, 0).unwrap()
+    }
+
+    #[test]
+    fn revocation_latency_seconds_computes_elapsed_duration() {
+        let recorded_at = timestamp(1_000);
+        let now = timestamp(1_005);
+
+        assert_eq!(revocation_latency_seconds(recorded_at, now), 5.0);
+    }
+
+    #[test]
+    fn revocation_latency_seconds_clamps_negative_clock_skew_to_zero() {
+        let recorded_at = timestamp(1_005);
+        let now = timestamp(1_000);
+
+        assert_eq!(revocation_latency_seconds(recorded_at, now), 0.0);
+    }
+
+    #[test]
+    fn revocation_latency_seconds_is_zero_for_identical_timestamps() {
+        let at = timestamp(1_000);
+
+        assert_eq!(revocation_latency_seconds(at, at), 0.0);
+    }
+
+    #[tokio::test]
+    async fn incremental_refresh_invalidates_cache_and_removes_projection_on_revoked_event() {
+        let store = MockOpenBaoSecretStore::default();
+        let credential = put_bot_token(&store, "Bot token").await;
+        let metadata = store.metadata(&credential).await.unwrap();
+        let event_store = ProjectionTestEventStore::default();
+        event_store.push(credential.id().as_str(), 1, write_requested(&credential));
+        event_store.push(
+            credential.id().as_str(),
+            2,
+            v1::CredentialEvent {
+                event: Some(activated_to_proto(&metadata).into()),
+            },
+        );
+        let stream = raw_stream([
+            runtime_event(1, write_requested(&credential)),
+            runtime_event(
+                2,
+                v1::CredentialEvent {
+                    event: Some(activated_to_proto(&metadata).into()),
+                },
+            ),
+        ])
+        .await;
+        let registry = RuntimeCredentialRegistry::default();
+        let resolver = registry.resolver(store.clone());
+
+        registry
+            .refresh_from_credential_stream_incremental(&stream, &event_store, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            resolver
+                .resolve_plaintext(&key(), CredentialKind::BotToken)
+                .await
+                .unwrap()
+                .as_str(),
+            "Bot token"
+        );
+
+        store.revoke(&credential).await.unwrap();
+        event_store.push(
+            credential.id().as_str(),
+            3,
+            v1::CredentialEvent {
+                event: Some(revoked_to_proto(&credential).into()),
+            },
+        );
+        append_stream(
+            &stream,
+            StreamSubject::new("gateway.credentials.events.v1.raw").unwrap(),
+            None,
+            &[runtime_event(
+                3,
+                v1::CredentialEvent {
+                    event: Some(revoked_to_proto(&credential).into()),
+                },
+            )],
+        )
+        .await
+        .unwrap();
+
+        let report = registry
+            .refresh_from_credential_stream_incremental(&stream, &event_store, 3)
+            .await
+            .unwrap();
+
+        assert_eq!(report.applied_credentials(), 1);
+        assert!(matches!(
+            resolver.resolve(&key(), CredentialKind::BotToken).await,
+            Err(RuntimeCredentialError::IntegrationNotFound { .. })
+        ));
     }
 }
