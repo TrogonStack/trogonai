@@ -26,8 +26,9 @@ use crate::credential::handler::{
 };
 use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
-    CredentialProtoDecodeError, decode_credential_metadata, decode_message_field, decode_revoked, decode_rotated,
-    decode_rotation_failed, decode_rotation_requested, decode_write_failed, decode_write_requested,
+    CredentialProtoDecodeError, decode_credential_metadata, decode_destroy_failed, decode_destroy_requested,
+    decode_destroyed, decode_message_field, decode_revoked, decode_rotated, decode_rotation_failed,
+    decode_rotation_requested, decode_write_failed, decode_write_requested,
 };
 use crate::credential::{CredentialEvolveError, evolve, initial_state};
 use crate::secret_store::SecretStoreMetadata;
@@ -594,6 +595,9 @@ fn event_credential_id(event: &CredentialEventCase) -> Result<CredentialId, Cred
         CredentialEventCase::RotationFailed(inner) => Ok(decode_rotation_failed(inner)?.0.id().clone()),
         CredentialEventCase::Revoked(inner) => Ok(decode_revoked(inner)?.id().clone()),
         CredentialEventCase::Rotated(inner) => Ok(decode_rotated(inner)?.0.id().clone()),
+        CredentialEventCase::DestroyRequested(inner) => Ok(decode_destroy_requested(inner)?.0.id().clone()),
+        CredentialEventCase::Destroyed(inner) => Ok(decode_destroyed(inner)?.id().clone()),
+        CredentialEventCase::DestroyFailed(inner) => Ok(decode_destroy_failed(inner)?.0.id().clone()),
     }
 }
 

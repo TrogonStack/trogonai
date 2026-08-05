@@ -20,6 +20,17 @@ pub mod credential_state_snapshot {
             >,
         ),
         Revoked(::buffa::alloc::boxed::Box<super::super::super::RevokedCredentialState>),
+        DestroyRequested(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::DestroyRequestedCredentialState,
+            >,
+        ),
+        Destroyed(
+            ::buffa::alloc::boxed::Box<super::super::super::DestroyedCredentialState>,
+        ),
+        CleanupFailed(
+            ::buffa::alloc::boxed::Box<super::super::super::CleanupFailedCredentialState>,
+        ),
     }
     impl ::buffa::Oneof for State {}
     impl From<super::super::super::CredentialMissingState> for State {
@@ -88,6 +99,39 @@ pub mod credential_state_snapshot {
             Self::Some(State::from(v))
         }
     }
+    impl From<super::super::super::DestroyRequestedCredentialState> for State {
+        fn from(v: super::super::super::DestroyRequestedCredentialState) -> Self {
+            Self::DestroyRequested(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::DestroyRequestedCredentialState>
+    for ::core::option::Option<State> {
+        fn from(v: super::super::super::DestroyRequestedCredentialState) -> Self {
+            Self::Some(State::from(v))
+        }
+    }
+    impl From<super::super::super::DestroyedCredentialState> for State {
+        fn from(v: super::super::super::DestroyedCredentialState) -> Self {
+            Self::Destroyed(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::DestroyedCredentialState>
+    for ::core::option::Option<State> {
+        fn from(v: super::super::super::DestroyedCredentialState) -> Self {
+            Self::Some(State::from(v))
+        }
+    }
+    impl From<super::super::super::CleanupFailedCredentialState> for State {
+        fn from(v: super::super::super::CleanupFailedCredentialState) -> Self {
+            Self::CleanupFailed(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::CleanupFailedCredentialState>
+    for ::core::option::Option<State> {
+        fn from(v: super::super::super::CleanupFailedCredentialState) -> Self {
+            Self::Some(State::from(v))
+        }
+    }
     impl serde::Serialize for State {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -113,6 +157,15 @@ pub mod credential_state_snapshot {
                 }
                 Self::Revoked(v) => {
                     map.serialize_entry("revoked", v)?;
+                }
+                Self::DestroyRequested(v) => {
+                    map.serialize_entry("destroyRequested", v)?;
+                }
+                Self::Destroyed(v) => {
+                    map.serialize_entry("destroyed", v)?;
+                }
+                Self::CleanupFailed(v) => {
+                    map.serialize_entry("cleanupFailed", v)?;
                 }
             }
             map.end()

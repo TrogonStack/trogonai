@@ -58,6 +58,9 @@ fn encode_credential_event_case(event: &CredentialEventCase) -> Vec<u8> {
         CredentialEventCase::RotationFailed(inner) => inner.encode_to_vec(),
         CredentialEventCase::Rotated(inner) => inner.encode_to_vec(),
         CredentialEventCase::Revoked(inner) => inner.encode_to_vec(),
+        CredentialEventCase::DestroyRequested(inner) => inner.encode_to_vec(),
+        CredentialEventCase::Destroyed(inner) => inner.encode_to_vec(),
+        CredentialEventCase::DestroyFailed(inner) => inner.encode_to_vec(),
     }
 }
 
@@ -71,6 +74,9 @@ fn decode_credential_event_case(
         .or_else(|| decode_event_case::<v1::CredentialRotationFailed, CredentialEventCase>(&event))
         .or_else(|| decode_event_case::<v1::CredentialRotated, CredentialEventCase>(&event))
         .or_else(|| decode_event_case::<v1::CredentialRevoked, CredentialEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::CredentialDestroyRequested, CredentialEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::CredentialDestroyed, CredentialEventCase>(&event))
+        .or_else(|| decode_event_case::<v1::CredentialDestroyFailed, CredentialEventCase>(&event))
     else {
         return Ok(None);
     };
@@ -87,6 +93,9 @@ fn credential_event_case_type(event: &CredentialEventCase) -> &'static str {
         CredentialEventCase::RotationFailed(_) => event_type::<v1::CredentialRotationFailed>(),
         CredentialEventCase::Rotated(_) => event_type::<v1::CredentialRotated>(),
         CredentialEventCase::Revoked(_) => event_type::<v1::CredentialRevoked>(),
+        CredentialEventCase::DestroyRequested(_) => event_type::<v1::CredentialDestroyRequested>(),
+        CredentialEventCase::Destroyed(_) => event_type::<v1::CredentialDestroyed>(),
+        CredentialEventCase::DestroyFailed(_) => event_type::<v1::CredentialDestroyFailed>(),
     }
 }
 
@@ -218,6 +227,53 @@ mod tests {
         .into_decoded()
         .unwrap();
         assert!(matches!(decoded.event, Some(CredentialEventCase::Revoked(_))));
+
+        let credential_ref = MessageField::some(v1::CredentialRef {
+            id: "github:primary:webhook_secret".to_string(),
+            version: Some(1),
+            owner_id: "tenant-1".to_string(),
+            source: Some(v1::CredentialSource::Github.into()),
+            scope_key: "github".to_string(),
+            kind: Some(v1::CredentialKind::WebhookSecret.into()),
+        });
+        let destroy_requested = v1::CredentialDestroyRequested {
+            credential_ref: credential_ref.clone(),
+            reason: "logical cleanup complete".to_string(),
+        };
+        let destroyed = v1::CredentialDestroyed {
+            credential_ref: credential_ref.clone(),
+        };
+        let destroy_failed = v1::CredentialDestroyFailed {
+            credential_ref,
+            reason: "secret store unavailable".to_string(),
+        };
+
+        let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
+            <v1::CredentialDestroyRequested as buffa::MessageName>::FULL_NAME,
+            &destroy_requested.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(decoded.event, Some(CredentialEventCase::DestroyRequested(_))));
+
+        let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
+            <v1::CredentialDestroyed as buffa::MessageName>::FULL_NAME,
+            &destroyed.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(decoded.event, Some(CredentialEventCase::Destroyed(_))));
+
+        let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
+            <v1::CredentialDestroyFailed as buffa::MessageName>::FULL_NAME,
+            &destroy_failed.encode_to_vec(),
+        ))
+        .unwrap()
+        .into_decoded()
+        .unwrap();
+        assert!(matches!(decoded.event, Some(CredentialEventCase::DestroyFailed(_))));
     }
 
     #[test]

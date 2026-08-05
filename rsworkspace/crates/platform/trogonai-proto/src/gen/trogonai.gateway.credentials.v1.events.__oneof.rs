@@ -21,6 +21,13 @@ pub mod credential_event {
         ),
         Rotated(::buffa::alloc::boxed::Box<super::super::super::CredentialRotated>),
         Revoked(::buffa::alloc::boxed::Box<super::super::super::CredentialRevoked>),
+        DestroyRequested(
+            ::buffa::alloc::boxed::Box<super::super::super::CredentialDestroyRequested>,
+        ),
+        Destroyed(::buffa::alloc::boxed::Box<super::super::super::CredentialDestroyed>),
+        DestroyFailed(
+            ::buffa::alloc::boxed::Box<super::super::super::CredentialDestroyFailed>,
+        ),
     }
     impl ::buffa::Oneof for Event {}
     impl From<super::super::super::CredentialWriteRequested> for Event {
@@ -98,6 +105,39 @@ pub mod credential_event {
             Self::Some(Event::from(v))
         }
     }
+    impl From<super::super::super::CredentialDestroyRequested> for Event {
+        fn from(v: super::super::super::CredentialDestroyRequested) -> Self {
+            Self::DestroyRequested(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::CredentialDestroyRequested>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::CredentialDestroyRequested) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::CredentialDestroyed> for Event {
+        fn from(v: super::super::super::CredentialDestroyed) -> Self {
+            Self::Destroyed(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::CredentialDestroyed>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::CredentialDestroyed) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
+    impl From<super::super::super::CredentialDestroyFailed> for Event {
+        fn from(v: super::super::super::CredentialDestroyFailed) -> Self {
+            Self::DestroyFailed(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<super::super::super::CredentialDestroyFailed>
+    for ::core::option::Option<Event> {
+        fn from(v: super::super::super::CredentialDestroyFailed) -> Self {
+            Self::Some(Event::from(v))
+        }
+    }
     impl serde::Serialize for Event {
         fn serialize<S: serde::Serializer>(
             &self,
@@ -126,6 +166,15 @@ pub mod credential_event {
                 }
                 Self::Revoked(v) => {
                     map.serialize_entry("revoked", v)?;
+                }
+                Self::DestroyRequested(v) => {
+                    map.serialize_entry("destroyRequested", v)?;
+                }
+                Self::Destroyed(v) => {
+                    map.serialize_entry("destroyed", v)?;
+                }
+                Self::DestroyFailed(v) => {
+                    map.serialize_entry("destroyFailed", v)?;
                 }
             }
             map.end()

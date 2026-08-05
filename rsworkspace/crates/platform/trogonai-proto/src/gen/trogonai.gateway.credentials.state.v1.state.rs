@@ -88,6 +88,32 @@ impl ::buffa::Message for CredentialStateSnapshot {
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
+                __buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                    x,
+                ) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                __buffa::oneof::credential_state_snapshot::State::Destroyed(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
+                __buffa::oneof::credential_state_snapshot::State::CleanupFailed(x) => {
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
+                    size
+                        += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
+                            + inner;
+                }
             }
         }
         size
@@ -144,6 +170,32 @@ impl ::buffa::Message for CredentialStateSnapshot {
                 __buffa::oneof::credential_state_snapshot::State::Revoked(x) => {
                     ::buffa::types::put_len_delimited_header(
                         6u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                    x,
+                ) => {
+                    ::buffa::types::put_len_delimited_header(
+                        7u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::credential_state_snapshot::State::Destroyed(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        8u32,
+                        __cache.consume_next(),
+                        buf,
+                    );
+                    x.write_to(__cache, buf);
+                }
+                __buffa::oneof::credential_state_snapshot::State::CleanupFailed(x) => {
+                    ::buffa::types::put_len_delimited_header(
+                        9u32,
                         __cache.consume_next(),
                         buf,
                     );
@@ -290,6 +342,72 @@ impl ::buffa::Message for CredentialStateSnapshot {
                     ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
                     self.state = ::core::option::Option::Some(
                         __buffa::oneof::credential_state_snapshot::State::Revoked(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            7u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                        ref mut existing,
+                    ),
+                ) = self.state
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.state = ::core::option::Option::Some(
+                        __buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            8u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::credential_state_snapshot::State::Destroyed(
+                        ref mut existing,
+                    ),
+                ) = self.state
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.state = ::core::option::Option::Some(
+                        __buffa::oneof::credential_state_snapshot::State::Destroyed(
+                            ::buffa::alloc::boxed::Box::new(val),
+                        ),
+                    );
+                }
+            }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                if let ::core::option::Option::Some(
+                    __buffa::oneof::credential_state_snapshot::State::CleanupFailed(
+                        ref mut existing,
+                    ),
+                ) = self.state
+                {
+                    ::buffa::Message::merge_length_delimited(&mut **existing, buf, ctx)?;
+                } else {
+                    let mut val = ::core::default::Default::default();
+                    ::buffa::Message::merge_length_delimited(&mut val, buf, ctx)?;
+                    self.state = ::core::option::Option::Some(
+                        __buffa::oneof::credential_state_snapshot::State::CleanupFailed(
                             ::buffa::alloc::boxed::Box::new(val),
                         ),
                     );
@@ -466,6 +584,82 @@ impl<'de> serde::Deserialize<'de> for CredentialStateSnapshot {
                                 }
                                 __oneof_state = Some(
                                     __buffa::oneof::credential_state_snapshot::State::Revoked(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "destroyRequested" | "destroy_requested" => {
+                            let v: ::core::option::Option<
+                                DestroyRequestedCredentialState,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            DestroyRequestedCredentialState,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_state.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'state'",
+                                        ),
+                                    );
+                                }
+                                __oneof_state = Some(
+                                    __buffa::oneof::credential_state_snapshot::State::DestroyRequested(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "destroyed" => {
+                            let v: ::core::option::Option<DestroyedCredentialState> = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            DestroyedCredentialState,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_state.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'state'",
+                                        ),
+                                    );
+                                }
+                                __oneof_state = Some(
+                                    __buffa::oneof::credential_state_snapshot::State::Destroyed(
+                                        ::buffa::alloc::boxed::Box::new(v),
+                                    ),
+                                );
+                            }
+                        }
+                        "cleanupFailed" | "cleanup_failed" => {
+                            let v: ::core::option::Option<
+                                CleanupFailedCredentialState,
+                            > = map
+                                .next_value_seed(
+                                    ::buffa::json_helpers::NullableDeserializeSeed(
+                                        ::buffa::json_helpers::DefaultDeserializeSeed::<
+                                            CleanupFailedCredentialState,
+                                        >::new(),
+                                    ),
+                                )?;
+                            if let Some(v) = v {
+                                if __oneof_state.is_some() {
+                                    return Err(
+                                        serde::de::Error::custom(
+                                            "multiple oneof fields set for 'state'",
+                                        ),
+                                    );
+                                }
+                                __oneof_state = Some(
+                                    __buffa::oneof::credential_state_snapshot::State::CleanupFailed(
                                         ::buffa::alloc::boxed::Box::new(v),
                                     ),
                                 );
@@ -1276,5 +1470,375 @@ pub const __REVOKED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEn
     type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.RevokedCredentialState",
     to_json: ::buffa::type_registry::any_to_json::<RevokedCredentialState>,
     from_json: ::buffa::type_registry::any_from_json::<RevokedCredentialState>,
+    is_wkt: false,
+};
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct DestroyRequestedCredentialState {
+    /// Field 1: `credential_ref`
+    #[serde(rename = "credentialRef", alias = "credential_ref")]
+    pub credential_ref: ::buffa::MessageField<CredentialRef>,
+    /// Field 2: `reason`
+    #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
+    pub reason: ::buffa::alloc::string::String,
+}
+impl ::core::fmt::Debug for DestroyRequestedCredentialState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("DestroyRequestedCredentialState")
+            .field("credential_ref", &self.credential_ref)
+            .field("reason", &self.reason)
+            .finish()
+    }
+}
+impl DestroyRequestedCredentialState {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+}
+::buffa::impl_default_instance!(DestroyRequestedCredentialState);
+impl ::buffa::MessageName for DestroyRequestedCredentialState {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "DestroyRequestedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState";
+}
+impl ::buffa::Message for DestroyRequestedCredentialState {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// The result is a `u32`; the protobuf specification requires all
+    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
+    /// compliant message will never overflow this type.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.reason) as u32;
+        size
+    }
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.credential_ref.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.reason, buf)?;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.credential_ref = ::buffa::MessageField::none();
+        self.reason.clear();
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for DestroyRequestedCredentialState {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __DESTROY_REQUESTED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyRequestedCredentialState",
+    to_json: ::buffa::type_registry::any_to_json::<DestroyRequestedCredentialState>,
+    from_json: ::buffa::type_registry::any_from_json::<DestroyRequestedCredentialState>,
+    is_wkt: false,
+};
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct DestroyedCredentialState {
+    /// Field 1: `credential_ref`
+    #[serde(rename = "credentialRef", alias = "credential_ref")]
+    pub credential_ref: ::buffa::MessageField<CredentialRef>,
+}
+impl ::core::fmt::Debug for DestroyedCredentialState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("DestroyedCredentialState")
+            .field("credential_ref", &self.credential_ref)
+            .finish()
+    }
+}
+impl DestroyedCredentialState {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+}
+::buffa::impl_default_instance!(DestroyedCredentialState);
+impl ::buffa::MessageName for DestroyedCredentialState {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "DestroyedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyedCredentialState";
+}
+impl ::buffa::Message for DestroyedCredentialState {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// The result is a `u32`; the protobuf specification requires all
+    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
+    /// compliant message will never overflow this type.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size
+    }
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.credential_ref.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.credential_ref = ::buffa::MessageField::none();
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for DestroyedCredentialState {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __DESTROYED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.DestroyedCredentialState",
+    to_json: ::buffa::type_registry::any_to_json::<DestroyedCredentialState>,
+    from_json: ::buffa::type_registry::any_from_json::<DestroyedCredentialState>,
+    is_wkt: false,
+};
+#[derive(Clone, PartialEq, Default)]
+#[derive(::serde::Serialize, ::serde::Deserialize)]
+#[serde(default)]
+pub struct CleanupFailedCredentialState {
+    /// Field 1: `credential_ref`
+    #[serde(rename = "credentialRef", alias = "credential_ref")]
+    pub credential_ref: ::buffa::MessageField<CredentialRef>,
+    /// Field 2: `reason`
+    #[serde(rename = "reason", with = "::buffa::json_helpers::proto_string")]
+    pub reason: ::buffa::alloc::string::String,
+}
+impl ::core::fmt::Debug for CleanupFailedCredentialState {
+    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+        f.debug_struct("CleanupFailedCredentialState")
+            .field("credential_ref", &self.credential_ref)
+            .field("reason", &self.reason)
+            .finish()
+    }
+}
+impl CleanupFailedCredentialState {
+    /// Protobuf type URL for this message, for use with `Any::pack` and
+    /// `Any::unpack_if`.
+    ///
+    /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
+    pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+}
+::buffa::impl_default_instance!(CleanupFailedCredentialState);
+impl ::buffa::MessageName for CleanupFailedCredentialState {
+    const PACKAGE: &'static str = "trogonai.gateway.credentials.state.v1";
+    const NAME: &'static str = "CleanupFailedCredentialState";
+    const FULL_NAME: &'static str = "trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+    const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState";
+}
+impl ::buffa::Message for CleanupFailedCredentialState {
+    /// Returns the total encoded size in bytes.
+    ///
+    /// The result is a `u32`; the protobuf specification requires all
+    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
+    /// compliant message will never overflow this type.
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        let mut size = 0u32;
+        if self.credential_ref.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.credential_ref.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        size += 1u32 + ::buffa::types::string_encoded_len(&self.reason) as u32;
+        size
+    }
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        if self.credential_ref.is_set() {
+            ::buffa::types::put_len_delimited_header(1u32, __cache.consume_next(), buf);
+            self.credential_ref.write_to(__cache, buf);
+        }
+        ::buffa::types::put_string_field(2u32, &self.reason, buf);
+    }
+    fn merge_field(
+        &mut self,
+        tag: ::buffa::encoding::Tag,
+        buf: &mut impl ::buffa::bytes::Buf,
+        ctx: ::buffa::DecodeContext<'_>,
+    ) -> ::core::result::Result<(), ::buffa::DecodeError> {
+        #[allow(unused_imports)]
+        use ::buffa::bytes::Buf as _;
+        #[allow(unused_imports)]
+        use ::buffa::Enumeration as _;
+        match tag.field_number() {
+            1u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.credential_ref.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
+            2u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::types::merge_string(&mut self.reason, buf)?;
+            }
+            _ => {
+                ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
+            }
+        }
+        ::core::result::Result::Ok(())
+    }
+    fn clear(&mut self) {
+        self.credential_ref = ::buffa::MessageField::none();
+        self.reason.clear();
+    }
+}
+impl ::buffa::json_helpers::ProtoElemJson for CleanupFailedCredentialState {
+    fn serialize_proto_json<S: ::serde::Serializer>(
+        v: &Self,
+        s: S,
+    ) -> ::core::result::Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(v, s)
+    }
+    fn deserialize_proto_json<'de, D: ::serde::Deserializer<'de>>(
+        d: D,
+    ) -> ::core::result::Result<Self, D::Error> {
+        <Self as ::serde::Deserialize>::deserialize(d)
+    }
+}
+#[doc(hidden)]
+pub const __CLEANUP_FAILED_CREDENTIAL_STATE_JSON_ANY: ::buffa::type_registry::JsonAnyEntry = ::buffa::type_registry::JsonAnyEntry {
+    type_url: "type.googleapis.com/trogonai.gateway.credentials.state.v1.CleanupFailedCredentialState",
+    to_json: ::buffa::type_registry::any_to_json::<CleanupFailedCredentialState>,
+    from_json: ::buffa::type_registry::any_from_json::<CleanupFailedCredentialState>,
     is_wkt: false,
 };

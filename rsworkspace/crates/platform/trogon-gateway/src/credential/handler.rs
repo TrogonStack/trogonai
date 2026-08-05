@@ -13,16 +13,20 @@ use super::commands::domain::{
     CredentialVersion, SourceKind,
 };
 use super::proto::{
-    CredentialProtoDecodeError, active_credential_ref, decode_message_field, decode_pending_write_state,
+    CredentialProtoDecodeError, active_credential_ref, decode_destroy_requested_state, decode_destroyed_state,
+    decode_message_field, decode_pending_write_state,
 };
 use super::{
-    ActivateCredentialRotation, ActivateCredentialWrite, CredentialDecideError, CredentialEvolveError,
-    CredentialFailureReason, RecordCredentialRotationFailure, RecordCredentialWriteFailure, RequestCredentialRotation,
-    RequestCredentialWrite, RevokeCredential, evolve, initial_state,
+    ActivateCredentialRotation, ActivateCredentialWrite, CompleteCredentialDestroy, CredentialDecideError,
+    CredentialEvolveError, CredentialFailureReason, RecordCredentialDestroyFailure, RecordCredentialRotationFailure,
+    RecordCredentialWriteFailure, RequestCredentialDestroy, RequestCredentialRotation, RequestCredentialWrite,
+    RevokeCredential, evolve, initial_state,
 };
 use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeProjectionRefreshError};
 use crate::secret_store::openbao_secret_store::{OpenBaoCredentialIdParseError, openbao_credential_ref_from_id};
-use crate::secret_store::{SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate};
+use crate::secret_store::{
+    SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
+};
 
 type ExecutionError<SnapshotReadError, ReadError, AppendError> = CommandError<
     CredentialDecideError,
@@ -101,6 +105,18 @@ pub(crate) struct RevokeStoredCredential {
 impl RevokeStoredCredential {
     pub(crate) fn new(credential_ref: CredentialRef) -> Self {
         Self { credential_ref }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DestroyStoredCredential {
+    credential_ref: CredentialRef,
+    reason: SecretDestroyReason,
+}
+
+impl DestroyStoredCredential {
+    pub(crate) fn new(credential_ref: CredentialRef, reason: SecretDestroyReason) -> Self {
+        Self { credential_ref, reason }
     }
 }
 
@@ -187,7 +203,10 @@ pub(crate) fn activation_recovery_command(
             CredentialStateSnapshotCase::Missing(_)
             | CredentialStateSnapshotCase::Active(_)
             | CredentialStateSnapshotCase::WriteFailed(_)
-            | CredentialStateSnapshotCase::Revoked(_),
+            | CredentialStateSnapshotCase::Revoked(_)
+            | CredentialStateSnapshotCase::DestroyRequested(_)
+            | CredentialStateSnapshotCase::Destroyed(_)
+            | CredentialStateSnapshotCase::CleanupFailed(_),
         ) => Ok(None),
     }
 }
@@ -368,6 +387,30 @@ where
     }
 }
 
+impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + 'static,
+    Secrets: SecretStoreDestroy,
+{
+    pub(crate) async fn destroy(
+        &self,
+        command: DestroyStoredCredential,
+    ) -> RuntimeHandlerResult<EventStore, <Secrets as SecretStoreDestroy>::Error> {
+        let outcome = self
+            .handler
+            .destroy(command)
+            .await
+            .map_err(|source| CredentialRuntimeHandlerError::Command { source })?;
+        self.apply(&outcome).await?;
+        Ok(outcome)
+    }
+}
+
 impl<EventStore, Secrets> CredentialRuntimeHandler<EventStore, Secrets> {
     async fn apply<SecretError, SnapshotReadError, ReadError, AppendError>(
         &self,
@@ -520,7 +563,7 @@ where
         {
             Ok(_) => Ok(()),
             Err(source) => {
-                let state = load_state(&self.event_store, command.credential_id().as_str()).await?;
+                let (state, _stream_position) = load_state(&self.event_store, command.credential_id().as_str()).await?;
                 let matches = match state.state.as_ref() {
                     Some(CredentialStateSnapshotCase::PendingWrite(pending)) => pending_matches(pending, command)
                         .map_err(|source| CredentialHandlerError::InvalidState { source })?,
@@ -621,7 +664,8 @@ where
         {
             Ok(_) => Ok(()),
             Err(source) => {
-                let state = load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
+                let (state, _stream_position) =
+                    load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
                 let matches = match state.state.as_ref() {
                     Some(CredentialStateSnapshotCase::RotationPending(rotation)) => {
                         let active = decode_message_field("rotation_pending.active", &rotation.active)
@@ -694,6 +738,136 @@ where
             .map_err(|source| CredentialHandlerError::Revoke { source })?;
 
         Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
+    }
+}
+
+enum DestroyRequestOutcome {
+    Proceed,
+    AlreadyDestroyed(CredentialHandlerOutcome),
+}
+
+impl<EventStore, Secrets> CredentialHandler<EventStore, Secrets>
+where
+    EventStore: StreamRead<str>
+        + StreamAppend<str>
+        + SnapshotRead<state_v1::CredentialStateSnapshot, str>
+        + SnapshotWrite<state_v1::CredentialStateSnapshot, str>
+        + Clone
+        + 'static,
+    Secrets: SecretStoreDestroy,
+{
+    pub(crate) async fn destroy(
+        &self,
+        command: DestroyStoredCredential,
+    ) -> HandlerResult<EventStore, <Secrets as SecretStoreDestroy>::Error> {
+        let request = RequestCredentialDestroy::new(command.credential_ref.clone(), command.reason.clone());
+        match self.ensure_destroy_requested(&request).await? {
+            DestroyRequestOutcome::AlreadyDestroyed(outcome) => return Ok(outcome),
+            DestroyRequestOutcome::Proceed => {}
+        }
+
+        match self.secrets.destroy(&command.credential_ref, &command.reason).await {
+            Ok(()) => {}
+            Err(source) => {
+                let reason = failure_reason(&source);
+                self.record_destroy_failure(command.credential_ref, reason).await?;
+                return Err(CredentialHandlerError::SecretDestroy { source });
+            }
+        }
+
+        let result = CommandExecution::new(
+            &self.event_store,
+            &CompleteCredentialDestroy::new(command.credential_ref),
+        )
+        .with_snapshot(&self.event_store)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
+        .execute()
+        .await
+        .map_err(|source| CredentialHandlerError::CompleteDestroy { source })?;
+
+        Ok(CredentialHandlerOutcome::new(result.state, result.stream_position))
+    }
+
+    async fn ensure_destroy_requested(
+        &self,
+        command: &RequestCredentialDestroy,
+    ) -> Result<
+        DestroyRequestOutcome,
+        CredentialHandlerError<
+            <Secrets as SecretStoreDestroy>::Error,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
+        >,
+    > {
+        match CommandExecution::new(&self.event_store, command)
+            .with_snapshot(&self.event_store)
+            .with_task_runtime(TokioSnapshotTaskScheduler)
+            .execute()
+            .await
+        {
+            Ok(_) => Ok(DestroyRequestOutcome::Proceed),
+            Err(source) => {
+                let (state, stream_position) =
+                    load_state(&self.event_store, command.credential_ref().id().as_str()).await?;
+
+                let pending_matches = match state.state.as_ref() {
+                    Some(CredentialStateSnapshotCase::DestroyRequested(pending)) => {
+                        let (current_ref, _) = decode_destroy_requested_state(pending)
+                            .map_err(|source| CredentialHandlerError::InvalidState { source })?;
+                        current_ref == *command.credential_ref()
+                    }
+                    _ => false,
+                };
+                if pending_matches {
+                    return Ok(DestroyRequestOutcome::Proceed);
+                }
+
+                let already_destroyed = match state.state.as_ref() {
+                    Some(CredentialStateSnapshotCase::Destroyed(destroyed)) => {
+                        let current_ref = decode_destroyed_state(destroyed)
+                            .map_err(|source| CredentialHandlerError::InvalidState { source })?;
+                        current_ref == *command.credential_ref()
+                    }
+                    _ => false,
+                };
+                if already_destroyed {
+                    let stream_position =
+                        stream_position.ok_or(CredentialHandlerError::MissingDestroyedStreamPosition)?;
+                    return Ok(DestroyRequestOutcome::AlreadyDestroyed(CredentialHandlerOutcome::new(
+                        state,
+                        stream_position,
+                    )));
+                }
+
+                Err(CredentialHandlerError::RequestDestroy { source })
+            }
+        }
+    }
+
+    async fn record_destroy_failure(
+        &self,
+        credential_ref: CredentialRef,
+        reason: CredentialFailureReason,
+    ) -> Result<
+        (),
+        CredentialHandlerError<
+            <Secrets as SecretStoreDestroy>::Error,
+            SnapshotReadError<EventStore>,
+            ReadError<EventStore>,
+            AppendError<EventStore>,
+        >,
+    > {
+        CommandExecution::new(
+            &self.event_store,
+            &RecordCredentialDestroyFailure::new(credential_ref, reason),
+        )
+        .with_snapshot(&self.event_store)
+        .with_task_runtime(TokioSnapshotTaskScheduler)
+        .execute()
+        .await
+        .map(|_| ())
+        .map_err(|source| CredentialHandlerError::RecordDestroyFailure { source })
     }
 }
 
@@ -790,6 +964,28 @@ where
         #[source]
         source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
     },
+    #[error("credential destroy request failed: {source}")]
+    RequestDestroy {
+        #[source]
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
+    },
+    #[error("secret store destroy failed: {source}")]
+    SecretDestroy {
+        #[source]
+        source: SecretError,
+    },
+    #[error("credential destroy failure recording failed: {source}")]
+    RecordDestroyFailure {
+        #[source]
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
+    },
+    #[error("credential destroy completion failed: {source}")]
+    CompleteDestroy {
+        #[source]
+        source: ExecutionError<SnapshotReadError, ReadError, AppendError>,
+    },
+    #[error("credential was destroyed but its persisted state carried no stream position")]
+    MissingDestroyedStreamPosition,
 }
 
 fn pending_matches(
@@ -807,7 +1003,7 @@ async fn load_state<EventStore, SecretError>(
     event_store: &EventStore,
     stream_id: &str,
 ) -> Result<
-    state_v1::CredentialStateSnapshot,
+    (state_v1::CredentialStateSnapshot, Option<StreamPosition>),
     CredentialHandlerError<SecretError, SnapshotReadError<EventStore>, ReadError<EventStore>, AppendError<EventStore>>,
 >
 where
@@ -826,6 +1022,7 @@ where
         })
         .await
         .map_err(|source| CredentialHandlerError::ReadState { source })?;
+    let current_position = stream.current_position;
     let mut state = initial_state();
     for event in stream.events {
         let EventDecodeOutcome::Decoded(event) = event
@@ -836,7 +1033,7 @@ where
         };
         state = evolve(state, &event).map_err(|source| CredentialHandlerError::ReplayState { source })?;
     }
-    Ok(state)
+    Ok((state, current_position))
 }
 
 fn failure_reason(source: &impl fmt::Display) -> CredentialFailureReason {
@@ -1064,6 +1261,20 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct FailingDestroySecretStore;
+
+    impl SecretStoreDestroy for FailingDestroySecretStore {
+        type Error = SecretStoreError;
+
+        async fn destroy(&self, credential: &CredentialRef, _reason: &SecretDestroyReason) -> Result<(), Self::Error> {
+            Err(SecretStoreError::BackendUnavailable {
+                backend: StorageBackend::OpenBao,
+                message: format!("OpenBao refused destroy for {}", credential.id()),
+            })
+        }
+    }
+
     fn current_position(events: &[StreamEvent], stream_id: &str) -> Option<StreamPosition> {
         events
             .iter()
@@ -1111,6 +1322,10 @@ mod tests {
             &scope(),
             CredentialKind::WebhookSecret,
         )
+    }
+
+    fn destroy_reason() -> SecretDestroyReason {
+        SecretDestroyReason::new("credential lifecycle cleanup").unwrap()
     }
 
     fn put_command(value: &str) -> PutCredential {
@@ -1663,6 +1878,166 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn destroy_destroys_secret_and_records_state() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
+        handler
+            .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+            .await
+            .unwrap();
+
+        let outcome = handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.stream_position(), position(5));
+        let state = outcome.into_state();
+        assert!(matches!(
+            state.state.as_ref(),
+            Some(CredentialStateSnapshotCase::Destroyed(_))
+        ));
+        assert!(matches!(
+            secrets.get(&credential_ref).await,
+            Err(SecretStoreError::Unreadable { .. })
+        ));
+        let decoded = events.decoded_events();
+        assert_eq!(decoded.len(), 5);
+        assert!(matches!(
+            decoded[3].event,
+            Some(CredentialEventCase::DestroyRequested(_))
+        ));
+        assert!(matches!(decoded[4].event, Some(CredentialEventCase::Destroyed(_))));
+    }
+
+    #[tokio::test]
+    async fn destroy_records_cleanup_failed_state_when_secret_store_fails() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
+        handler
+            .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+            .await
+            .unwrap();
+        let failing_handler = CredentialHandler::new(events.clone(), FailingDestroySecretStore);
+
+        let error = failing_handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, CredentialHandlerError::SecretDestroy { .. }));
+        let decoded = events.decoded_events();
+        assert_eq!(decoded.len(), 5);
+        assert!(matches!(
+            decoded[3].event,
+            Some(CredentialEventCase::DestroyRequested(_))
+        ));
+        assert!(matches!(decoded[4].event, Some(CredentialEventCase::DestroyFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn destroy_retries_after_cleanup_failure() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
+        handler
+            .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+            .await
+            .unwrap();
+        let failing_handler = CredentialHandler::new(events.clone(), FailingDestroySecretStore);
+        failing_handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap_err();
+
+        let outcome = handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            outcome.into_state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Destroyed(_))
+        ));
+        let decoded = events.decoded_events();
+        assert_eq!(decoded.len(), 7);
+        assert!(matches!(
+            decoded[5].event,
+            Some(CredentialEventCase::DestroyRequested(_))
+        ));
+        assert!(matches!(decoded[6].event, Some(CredentialEventCase::Destroyed(_))));
+    }
+
+    #[tokio::test]
+    async fn destroy_rejects_credential_that_is_not_revoked_or_expired() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets);
+
+        let error = handler
+            .destroy(DestroyStoredCredential::new(credential_ref(1), destroy_reason()))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, CredentialHandlerError::RequestDestroy { .. }));
+        assert!(events.decoded_events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn destroy_is_idempotent_for_already_destroyed_credential() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let handler = CredentialHandler::new(events.clone(), secrets.clone());
+        let state = handler.put(put_command("initial-secret")).await.unwrap().into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
+        handler
+            .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+            .await
+            .unwrap();
+        let first = handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap();
+        assert_eq!(first.stream_position(), position(5));
+
+        let second = handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap();
+
+        assert_eq!(second.stream_position(), position(5));
+        assert!(matches!(
+            second.into_state().state.as_ref(),
+            Some(CredentialStateSnapshotCase::Destroyed(_))
+        ));
+        assert_eq!(events.decoded_events().len(), 5);
+    }
+
+    #[tokio::test]
     async fn runtime_handler_put_updates_runtime_projection() {
         let events = HandlerTestStreamStore::default();
         let secrets = MockOpenBaoSecretStore::default();
@@ -1783,6 +2158,46 @@ mod tests {
         runtime_credentials
             .projections()
             .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential_ref, 3).unwrap())
+            .await;
+        assert!(matches!(
+            resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
+            Err(RuntimeCredentialError::SecretStore(SecretStoreError::Unreadable { .. }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn runtime_handler_destroy_removes_projection_and_invalidates_cached_secret() {
+        let events = HandlerTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let runtime_credentials = RuntimeCredentialRegistry::default();
+        let resolver = runtime_credentials.resolver(secrets.clone());
+        let handler = CredentialRuntimeHandler::new(events.clone(), secrets.clone(), runtime_credentials.clone());
+        let outcome = handler.put(put_command("super-secret")).await.unwrap();
+        let state = outcome.into_state();
+        let Some(CredentialStateSnapshotCase::Active(active)) = state.state.as_ref() else {
+            panic!("expected active credential");
+        };
+        let (active_metadata, _) = decode_active_state("active", active).unwrap();
+        let credential_ref = active_metadata.reference().clone();
+        handler
+            .revoke(RevokeStoredCredential::new(credential_ref.clone()))
+            .await
+            .unwrap();
+
+        let outcome = handler
+            .destroy(DestroyStoredCredential::new(credential_ref.clone(), destroy_reason()))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.stream_position(), position(5));
+        assert!(matches!(
+            resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,
+            Err(RuntimeCredentialError::IntegrationNotFound { .. })
+        ));
+
+        runtime_credentials
+            .projections()
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential_ref, 5).unwrap())
             .await;
         assert!(matches!(
             resolver.resolve(&runtime_key(), CredentialKind::WebhookSecret).await,

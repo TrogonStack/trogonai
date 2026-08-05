@@ -7,6 +7,7 @@ use super::commands::domain::{
     CredentialFailureReason, CredentialFingerprint, CredentialId, CredentialKind, CredentialMetadata,
     CredentialOwnerId, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind, StorageBackend,
 };
+use crate::secret_store::SecretDestroyReason;
 use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -119,6 +120,32 @@ pub(crate) fn revoked_to_proto(credential_ref: &CredentialRef) -> v1::Credential
     }
 }
 
+pub(crate) fn destroy_requested_to_proto(
+    credential_ref: &CredentialRef,
+    reason: &SecretDestroyReason,
+) -> v1::CredentialDestroyRequested {
+    v1::CredentialDestroyRequested {
+        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        reason: reason.as_str().to_string(),
+    }
+}
+
+pub(crate) fn destroyed_to_proto(credential_ref: &CredentialRef) -> v1::CredentialDestroyed {
+    v1::CredentialDestroyed {
+        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+    }
+}
+
+pub(crate) fn destroy_failed_to_proto(
+    credential_ref: &CredentialRef,
+    reason: &CredentialFailureReason,
+) -> v1::CredentialDestroyFailed {
+    v1::CredentialDestroyFailed {
+        credential_ref: MessageField::some(credential_ref_to_proto(credential_ref)),
+        reason: reason.as_str().to_string(),
+    }
+}
+
 pub(crate) fn decode_write_requested(
     event: &v1::CredentialWriteRequested,
 ) -> Result<(CredentialId, CredentialOwnerId, SourceKind, CredentialKind), CredentialProtoDecodeError> {
@@ -193,6 +220,37 @@ pub(crate) fn decode_revoked(event: &v1::CredentialRevoked) -> Result<Credential
         "credential_ref",
         decode_message_field("credential_ref", &event.credential_ref)?,
     )
+}
+
+pub(crate) fn decode_destroy_requested(
+    event: &v1::CredentialDestroyRequested,
+) -> Result<(CredentialRef, SecretDestroyReason), CredentialProtoDecodeError> {
+    Ok((
+        decode_credential_ref(
+            "credential_ref",
+            decode_message_field("credential_ref", &event.credential_ref)?,
+        )?,
+        SecretDestroyReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+    ))
+}
+
+pub(crate) fn decode_destroyed(event: &v1::CredentialDestroyed) -> Result<CredentialRef, CredentialProtoDecodeError> {
+    decode_credential_ref(
+        "credential_ref",
+        decode_message_field("credential_ref", &event.credential_ref)?,
+    )
+}
+
+pub(crate) fn decode_destroy_failed(
+    event: &v1::CredentialDestroyFailed,
+) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
+    Ok((
+        decode_credential_ref(
+            "credential_ref",
+            decode_message_field("credential_ref", &event.credential_ref)?,
+        )?,
+        CredentialFailureReason::new(&event.reason).map_err(|source| invalid_field("reason", source))?,
+    ))
 }
 
 fn proto_source_kind(value: SourceKind) -> v1::CredentialSource {
@@ -456,6 +514,39 @@ pub(crate) fn decode_revoked_state(
     )
 }
 
+pub(crate) fn decode_destroy_requested_state(
+    state: &state_v1::DestroyRequestedCredentialState,
+) -> Result<(CredentialRef, SecretDestroyReason), CredentialProtoDecodeError> {
+    Ok((
+        decode_credential_ref_state(
+            "destroy_requested.credential_ref",
+            decode_message_field("destroy_requested.credential_ref", &state.credential_ref)?,
+        )?,
+        SecretDestroyReason::new(&state.reason).map_err(|source| invalid_field("destroy_requested.reason", source))?,
+    ))
+}
+
+pub(crate) fn decode_destroyed_state(
+    state: &state_v1::DestroyedCredentialState,
+) -> Result<CredentialRef, CredentialProtoDecodeError> {
+    decode_credential_ref_state(
+        "destroyed.credential_ref",
+        decode_message_field("destroyed.credential_ref", &state.credential_ref)?,
+    )
+}
+
+pub(crate) fn decode_cleanup_failed_state(
+    state: &state_v1::CleanupFailedCredentialState,
+) -> Result<(CredentialRef, CredentialFailureReason), CredentialProtoDecodeError> {
+    Ok((
+        decode_credential_ref_state(
+            "cleanup_failed.credential_ref",
+            decode_message_field("cleanup_failed.credential_ref", &state.credential_ref)?,
+        )?,
+        CredentialFailureReason::new(&state.reason).map_err(|source| invalid_field("cleanup_failed.reason", source))?,
+    ))
+}
+
 pub(crate) fn write_failed_to_proto_state(
     credential_id: &CredentialId,
     reason: &CredentialFailureReason,
@@ -469,6 +560,32 @@ pub(crate) fn write_failed_to_proto_state(
 pub(crate) fn revoked_to_proto_state(credential_ref: &CredentialRef) -> state_v1::RevokedCredentialState {
     state_v1::RevokedCredentialState {
         credential_ref: MessageField::some(credential_ref_to_proto_state(credential_ref)),
+    }
+}
+
+pub(crate) fn destroy_requested_to_proto_state(
+    credential_ref: &CredentialRef,
+    reason: &SecretDestroyReason,
+) -> state_v1::DestroyRequestedCredentialState {
+    state_v1::DestroyRequestedCredentialState {
+        credential_ref: MessageField::some(credential_ref_to_proto_state(credential_ref)),
+        reason: reason.as_str().to_string(),
+    }
+}
+
+pub(crate) fn destroyed_to_proto_state(credential_ref: &CredentialRef) -> state_v1::DestroyedCredentialState {
+    state_v1::DestroyedCredentialState {
+        credential_ref: MessageField::some(credential_ref_to_proto_state(credential_ref)),
+    }
+}
+
+pub(crate) fn cleanup_failed_to_proto_state(
+    credential_ref: &CredentialRef,
+    reason: &CredentialFailureReason,
+) -> state_v1::CleanupFailedCredentialState {
+    state_v1::CleanupFailedCredentialState {
+        credential_ref: MessageField::some(credential_ref_to_proto_state(credential_ref)),
+        reason: reason.as_str().to_string(),
     }
 }
 
