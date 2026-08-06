@@ -298,8 +298,9 @@ pub trait SessionThreadService: Send + Sync {
 }
 ```
 
-Source: `crates/domains/ironclaw_threads/src/service.rs:22-373`. Thirty-two
-methods, of which sixteen are required. Three properties are worth extracting:
+Source: `crates/domains/ironclaw_threads/src/service.rs:22-373`. Most of the
+trait ships fail-closed defaults, leaving a small required core. Three
+properties are worth extracting:
 
 - **Fail-closed defaults over silent lies.** The default
   `list_threads_for_scope` returns `Backend(...)` deliberately, "so backends

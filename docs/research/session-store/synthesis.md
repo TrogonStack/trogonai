@@ -204,9 +204,11 @@ work with CAS (`put` + `CasExpectation::Version`) as the floor." Two caveats
 keep this from being a free win. First, per-record CAS protects each record,
 not an invariant across records, which is exactly why IronClaw still needs a
 separate durable per-thread active-run lock and an atomic sequence
-reservation; a per-aggregate expected-sequence append gets all three
-properties from one mechanism. Second, CAS is a lost-update defense on a
-mutable store, not an immutability guarantee.
+reservation; a per-aggregate expected-sequence append folds lost-update
+safety and cross-record ordering into one mechanism, though run ownership
+still has to be modeled as explicit lease transitions on the aggregate rather
+than obtained for free. Second, CAS is a lost-update defense on a mutable
+store, not an immutability guarantee.
 
 ## Divergence
 
@@ -529,9 +531,13 @@ each with the industry's answer where one exists:
    have none and rely on tolerated multi-writer interleaving or a social
    single-writer convention. The lesson to carry: per-record CAS is not
    equivalent to a per-aggregate expected-sequence append. IronClaw needs
-   *three* mechanisms (record CAS, atomic sequence reservation, active-run
-   lock) to get what one expected-version append on a decider aggregate
-   gives us, which is an argument for our shape rather than against it.
+   record CAS plus an atomic sequence reservation to get the lost-update and
+   ordering guarantees one expected-version append on a decider aggregate
+   gives us, which is an argument for our shape rather than against it. Its
+   third mechanism, the active-run lock, is not something the append replaces:
+   lease ownership, heartbeat renewal, expiry, and admission before any
+   model or tool side effect have to become modeled transitions on the
+   aggregate, with the append enforcing them rather than supplying them.
 
 4. **Compaction is upstream: the store persists an event carrying the
    summary/replacement content, it does not trigger, understand, or
@@ -629,20 +635,23 @@ boundary with a leak-scanning test rather than a growth policy, so
 transcripts still grow without bound while lifecycle records get a bounded
 terminal-retention window. IronClaw also demonstrates that the write-boundary
 concurrency guarantee we want is achievable outside event sourcing, at the
-cost of three coordinating mechanisms instead of one expected-version append.
+cost of coordinating separate record, sequence, and lock mechanisms where an
+expected-version append covers the lost-update and ordering half on its own.
 That strengthens rather than weakens the case for our shape, and it means the
 remaining novel work is transcript cascade on delete plus a real growth
 policy.
 
 ## Stage-two results, not yet absorbed above
 
-Everything above is frozen as decision-time input from nine dossiers. Sixteen
-stage-two comparisons have landed since, and this section records what they add
-without rewriting the frozen text around it. Where the two disagree, the
-comparisons are the newer reading and the ADR is authoritative over both.
+Everything above is frozen as decision-time input from the dossiers that
+existed when it was written. The stage-two comparisons landed after it, and
+this section records what they add without rewriting the frozen text around
+it. Where the two disagree, the comparisons are the newer reading and the ADR
+is authoritative over both.
 
-**The design mostly survives contact with the evidence.** Across the
-comparisons' 55 numbered recommendations there are 45 blast-radius statements.
+**The design mostly survives contact with the evidence.** Across the numbered
+recommendations in the comparisons read for this pass, 55 of them, there are 45
+blast-radius statements.
 Eight mention breaking in any form: four are "do not do X later" guardrails
 against regressions we have not committed to (Cline on deterministic child ids,
 Letta on relaxing optimistic concurrency for an `At` transition, OpenHands on a
@@ -676,7 +685,7 @@ into the best-supported precondition in the corpus: any second `trogon-decider`
 implementation must pass a shared conformance suite over every
 `WRITE_PRECONDITION` class before it ships.
 
-**Convergence 8 above survives eighteen more products and gets sharper.** Even
+**Convergence 8 above survives every product added since and gets sharper.** Even
 the two stores that do have optimistic concurrency put it in the wrong place.
 Letta version-checks exactly one ORM model, `Block`, which holds
 memory-configuration data, while the actual per-turn hot pointer
@@ -701,8 +710,8 @@ product validates `SessionHidden`, `RedactionApplied`, or `ArtifactErased`, and
 it is a property of the sample rather than a weakness in the decision.
 
 **The message payload is documented per product and not at all per provider.**
-Twenty-four of twenty-five dossiers carry an entry-structure section, and twelve
-comparisons map the product's message type row by row against `CanonicalMessage`
+All but one dossier carries an entry-structure section, and the comparisons that
+go further map the product's message type row by row against `CanonicalMessage`
 and its seven-arm `ContentBlock` oneof. What no artifact covers is the provider
 side: `ProviderBlock` exists to absorb blocks the typed arms cannot model, and
 nothing in the corpus enumerates what would go through it, so whether seven arms

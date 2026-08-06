@@ -433,8 +433,8 @@ and the most successful designs are the ones that made those decisions
 explicit rather than inheriting them.
 
 Revised after IronClaw: the trio is a set of *roles*, not necessarily a set of
-resources, and the eighteenth product is the one that proves it by shipping
-without the first member. What that reframing buys us is a sharper test for
+resources, and IronClaw is the one that proves it by shipping without the
+first member. What that reframing buys us is a sharper test for
 our own design. Every property we are tempted to put on the agent definition
 should have to answer why it belongs to the agent rather than to the scope
 (authorization), the files (persona), or the run (resolved mechanism). The
