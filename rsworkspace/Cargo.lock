@@ -7082,7 +7082,9 @@ dependencies = [
  "async-nats",
  "axum",
  "base64 0.22.1",
+ "buffa",
  "bytes",
+ "chrono",
  "clap",
  "confique",
  "form_urlencoded",
@@ -7090,6 +7092,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac 0.13.0",
+ "opentelemetry",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -7104,14 +7107,19 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "trogon-decider",
+ "trogon-decider-nats",
+ "trogon-decider-runtime",
  "trogon-nats",
  "trogon-semconv",
  "trogon-service-config",
  "trogon-std",
  "trogon-telemetry",
+ "trogonai-proto",
  "twilight-gateway",
  "twilight-model",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -7554,6 +7562,7 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

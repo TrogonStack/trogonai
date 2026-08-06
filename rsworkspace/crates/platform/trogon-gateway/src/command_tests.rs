@@ -1,9 +1,65 @@
 use super::*;
 use async_nats::jetstream::message::StreamMessage;
 use bytes::Bytes;
+use std::sync::{Arc, Mutex};
 use time::OffsetDateTime;
+use trogon_decider_runtime::{ReadFrom, ReadStreamRequest, ReadStreamResponse, StreamEvent, StreamRead};
 use trogon_nats::MockNatsClient;
-use trogon_nats::jetstream::MockJetStreamConsumerFactory;
+use trogon_nats::jetstream::{MockJetStreamConsumerFactory, MockJetStreamKvStore, MockJetStreamPublishMessage};
+
+#[derive(Clone, Default)]
+struct EmptyCredentialEventStore {
+    events: Arc<Mutex<Vec<StreamEvent>>>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("empty credential event store failed")]
+struct EmptyCredentialEventStoreError;
+
+impl StreamRead<str> for EmptyCredentialEventStore {
+    type Error = EmptyCredentialEventStoreError;
+
+    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+        let start = match request.from {
+            ReadFrom::Beginning => 1,
+            ReadFrom::Position(position) => position.as_u64(),
+        };
+        let events = self.events.lock().unwrap();
+        Ok(ReadStreamResponse {
+            current_position: events
+                .iter()
+                .filter(|event| event.stream_id() == request.stream_id)
+                .map(|event| event.stream_position)
+                .max(),
+            events: events
+                .iter()
+                .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+                .cloned()
+                .collect(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn credential_runtime_projection_refresh_handles_empty_stream() {
+    let stream = MockJetStreamPublishMessage::new();
+    let event_store = EmptyCredentialEventStore::default();
+    let kv = MockJetStreamKvStore::new();
+    kv.enqueue_entry_none();
+    let checkpoints = credential::processor::runtime_projection::RuntimeProjectionKvCheckpointStore::new(kv);
+    let registry = credential::processor::runtime_projection::RuntimeCredentialRegistry::default();
+
+    let (_registry, report) =
+        refresh_credential_runtime_projection_with_checkpoints(&stream, &event_store, &checkpoints, registry)
+            .await
+            .unwrap();
+
+    assert_eq!(report.scanned_events(), 0);
+    assert_eq!(report.decoded_events(), 0);
+    assert_eq!(report.projected_integrations(), 0);
+    assert_eq!(report.checkpoint_loaded_sequence(), 0);
+    assert_eq!(report.checkpoint_advanced_to(), None);
+}
 
 #[tokio::test]
 async fn notion_verification_token_command_reads_latest_message() {

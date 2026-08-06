@@ -205,7 +205,10 @@ pub struct CredentialManagementIdempotencyRecord {
         rename = "response",
         skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
     )]
-    pub response: ::buffa::MessageField<CredentialCommandResponse>,
+    pub response: ::buffa::MessageField<
+        CredentialCommandResponse,
+        ::buffa::Inline<CredentialCommandResponse>,
+    >,
 }
 impl ::core::fmt::Debug for CredentialManagementIdempotencyRecord {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -245,32 +248,34 @@ impl ::buffa::MessageName for CredentialManagementIdempotencyRecord {
 impl ::buffa::Message for CredentialManagementIdempotencyRecord {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.fingerprint) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.fingerprint) as u64;
         if let Some(ref v) = self.status {
-            size += 1u32 + ::buffa::types::int32_encoded_len(v.to_i32()) as u32;
+            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
         }
         if self.response.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.response.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -279,7 +284,11 @@ impl ::buffa::Message for CredentialManagementIdempotencyRecord {
             ::buffa::types::put_int32_field(2u32, v.to_i32(), buf);
         }
         if self.response.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.response.write_to(__cache, buf);
         }
     }
@@ -374,7 +383,10 @@ pub struct CredentialCommandResponse {
     pub stream_position: ::core::option::Option<u64>,
     /// Field 3: `credential_ref`
     #[serde(rename = "credentialRef", alias = "credential_ref")]
-    pub credential_ref: ::buffa::MessageField<CredentialRefResponse>,
+    pub credential_ref: ::buffa::MessageField<
+        CredentialRefResponse,
+        ::buffa::Inline<CredentialRefResponse>,
+    >,
 }
 impl ::core::fmt::Debug for CredentialCommandResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -411,32 +423,34 @@ impl ::buffa::MessageName for CredentialCommandResponse {
 impl ::buffa::Message for CredentialCommandResponse {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.state) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.state) as u64;
         if let Some(v) = self.stream_position {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
         if self.credential_ref.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.credential_ref.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        size
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         __cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
@@ -445,7 +459,11 @@ impl ::buffa::Message for CredentialCommandResponse {
             ::buffa::types::put_uint64_field(2u32, v, buf);
         }
         if self.credential_ref.is_set() {
-            ::buffa::types::put_len_delimited_header(3u32, __cache.consume_next(), buf);
+            ::buffa::types::put_len_delimited_header(
+                3u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
             self.credential_ref.write_to(__cache, buf);
         }
     }
@@ -596,29 +614,31 @@ impl ::buffa::MessageName for CredentialRefResponse {
 impl ::buffa::Message for CredentialRefResponse {
     /// Returns the total encoded size in bytes.
     ///
-    /// The result is a `u32`; the protobuf specification requires all
-    /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
-    /// compliant message will never overflow this type.
+    /// Accumulates in `u64` (which cannot overflow for in-memory
+    /// data) and saturates to `u32` at return, so a message whose
+    /// encoded size exceeds the 2 GiB protobuf limit yields a value
+    /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
+    /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
     fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        let mut size = 0u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.id) as u32;
+        let mut size = 0u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.id) as u64;
         if let Some(v) = self.version {
-            size += 1u32 + ::buffa::types::uint64_encoded_len(v) as u32;
+            size += 1u64 + ::buffa::types::uint64_encoded_len(v) as u64;
         }
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.owner_id) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.source) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.scope_key) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.kind) as u32;
-        size += 1u32 + ::buffa::types::string_encoded_len(&self.status) as u32;
-        size
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.source) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.kind) as u64;
+        size += 1u64 + ::buffa::types::string_encoded_len(&self.status) as u64;
+        ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
         _cache: &mut ::buffa::SizeCache,
-        buf: &mut impl ::buffa::bytes::BufMut,
+        buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
