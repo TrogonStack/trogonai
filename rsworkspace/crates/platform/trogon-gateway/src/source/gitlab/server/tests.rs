@@ -1,8 +1,12 @@
 use super::*;
 use std::time::Duration;
 
+use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
+use crate::credential::processor::runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
+use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
 use crate::source::standard_webhooks::sign_for_test;
+use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::Request;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,6 +19,7 @@ use trogon_nats::jetstream::{
 };
 
 const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
+const RUNTIME_SIGNING_TOKEN: &str = "whsec_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=";
 
 fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<MockJetStreamPublisher, MockObjectStore> {
     ClaimCheckPublisher::new(
@@ -43,6 +48,36 @@ fn mock_app(publisher: MockJetStreamPublisher) -> Router {
     router(wrap_publisher(publisher), &test_config())
 }
 
+async fn runtime_app(publisher: MockJetStreamPublisher, token: &str) -> Router {
+    let config = test_config();
+    let store = MockOpenBaoSecretStore::default();
+    let integration_id = SourceIntegrationId::new("primary").unwrap();
+    let credential = store
+        .put(
+            CredentialScope::integration(
+                CredentialOwnerId::new("tenant-1").unwrap(),
+                SourceKind::Gitlab,
+                integration_id.clone(),
+            ),
+            CredentialKind::SigningToken,
+            trogon_std::SecretString::new(token).unwrap(),
+        )
+        .await
+        .unwrap();
+    let registry = RuntimeCredentialRegistry::default();
+    registry
+        .projections()
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .await;
+
+    runtime_router(
+        wrap_publisher(publisher),
+        &config,
+        integration_id,
+        registry.resolver(store),
+    )
+}
+
 fn valid_timestamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -56,7 +91,11 @@ fn signing_token() -> GitLabSigningToken {
 }
 
 fn sign(webhook_id: &str, webhook_timestamp: &str, body: &[u8]) -> String {
-    let token = signing_token();
+    sign_with_token(TEST_SIGNING_TOKEN, webhook_id, webhook_timestamp, body)
+}
+
+fn sign_with_token(token: &str, webhook_id: &str, webhook_timestamp: &str, body: &[u8]) -> String {
+    let token = GitLabSigningToken::new(token).unwrap();
     sign_for_test(token.as_bytes(), webhook_id, webhook_timestamp, body)
 }
 
@@ -77,12 +116,19 @@ fn request_builder(event: Option<&str>) -> axum::http::request::Builder {
 }
 
 fn webhook_request(body: &[u8], event: &str) -> Request<Body> {
+    webhook_request_with_token(body, event, TEST_SIGNING_TOKEN)
+}
+
+fn webhook_request_with_token(body: &[u8], event: &str, token: &str) -> Request<Body> {
     let webhook_id = "msg_123";
     let timestamp = valid_timestamp();
     request_builder(Some(event))
         .header(HEADER_WEBHOOK_ID, webhook_id)
         .header(HEADER_WEBHOOK_TIMESTAMP, &timestamp)
-        .header(HEADER_WEBHOOK_SIGNATURE, sign(webhook_id, &timestamp, body))
+        .header(
+            HEADER_WEBHOOK_SIGNATURE,
+            sign_with_token(token, webhook_id, &timestamp, body),
+        )
         .body(Body::from(body.to_vec()))
         .unwrap()
 }
@@ -272,6 +318,33 @@ async fn valid_signature_publishes_and_returns_200() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(publisher.published_subjects(), vec!["gitlab.pull_request"]);
+}
+
+#[tokio::test]
+async fn runtime_signing_token_publishes_and_rejects_static_token() {
+    let _guard = tracing_guard();
+    let publisher = MockJetStreamPublisher::new();
+    let app = runtime_app(publisher.clone(), RUNTIME_SIGNING_TOKEN).await;
+    let body = br#"{"ref":"refs/heads/main"}"#;
+
+    let static_response = app
+        .clone()
+        .oneshot(webhook_request_with_token(body, "push", TEST_SIGNING_TOKEN))
+        .await
+        .unwrap();
+
+    assert_eq!(static_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(publisher.published_messages().is_empty());
+
+    let runtime_response = app
+        .oneshot(webhook_request_with_token(body, "push", RUNTIME_SIGNING_TOKEN))
+        .await
+        .unwrap();
+
+    assert_eq!(runtime_response.status(), StatusCode::OK);
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "gitlab.push");
 }
 
 #[tokio::test]
@@ -467,7 +540,73 @@ async fn dlq_publish_failure_returns_500() {
     assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
 }
 
-mod ack_test_support;
+mod ack_test_support {
+    use super::*;
+    use async_nats::jetstream::publish::PublishAck;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use trogon_nats::mocks::MockError;
+
+    #[derive(Clone)]
+    enum AckBehavior {
+        Fail,
+        Hang,
+    }
+
+    #[derive(Clone)]
+    pub struct AckFailPublisher {
+        behavior: Arc<Mutex<AckBehavior>>,
+    }
+
+    impl AckFailPublisher {
+        pub fn failing() -> Self {
+            Self {
+                behavior: Arc::new(Mutex::new(AckBehavior::Fail)),
+            }
+        }
+
+        pub fn hanging() -> Self {
+            Self {
+                behavior: Arc::new(Mutex::new(AckBehavior::Hang)),
+            }
+        }
+    }
+
+    pub enum AckFuture {
+        Fail,
+        Hang,
+    }
+
+    impl IntoFuture for AckFuture {
+        type Output = Result<PublishAck, MockError>;
+        type IntoFuture = std::pin::Pin<Box<dyn Future<Output = Self::Output> + Send>>;
+
+        fn into_future(self) -> Self::IntoFuture {
+            match self {
+                AckFuture::Fail => Box::pin(async { Err(MockError("simulated ack failure".to_string())) }),
+                AckFuture::Hang => Box::pin(std::future::pending()),
+            }
+        }
+    }
+
+    impl JetStreamPublisher for AckFailPublisher {
+        type PublishError = MockError;
+        type AckFuture = AckFuture;
+
+        async fn publish_with_headers<S: ToSubject + Send>(
+            &self,
+            _subject: S,
+            _headers: async_nats::HeaderMap,
+            _payload: Bytes,
+        ) -> Result<AckFuture, MockError> {
+            let behavior = self.behavior.lock().unwrap().clone();
+            match behavior {
+                AckBehavior::Fail => Ok(AckFuture::Fail),
+                AckBehavior::Hang => Ok(AckFuture::Hang),
+            }
+        }
+    }
+}
 
 use ack_test_support::AckFailPublisher;
 use async_nats::subject::ToSubject;

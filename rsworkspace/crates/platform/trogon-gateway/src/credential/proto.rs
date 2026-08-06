@@ -1,6 +1,6 @@
 use std::fmt;
 
-use buffa::{EnumValue, MessageField};
+use buffa::{EnumValue, MessageField, ProtoBox};
 use trogonai_proto::gateway::credentials::{state_v1, v1};
 
 use super::commands::domain::{
@@ -715,9 +715,9 @@ fn decode_storage_backend_state(
     }
 }
 
-pub(crate) fn decode_message_field<'a, T: Default>(
+pub(crate) fn decode_message_field<'a, T: Default, P: ProtoBox<T>>(
     field: &'static str,
-    value: &'a MessageField<T>,
+    value: &'a MessageField<T, P>,
 ) -> Result<&'a T, CredentialProtoDecodeError> {
     value
         .as_option()
