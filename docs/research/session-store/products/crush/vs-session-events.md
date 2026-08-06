@@ -394,7 +394,7 @@ under `NoStream`); the graph is acyclic by construction, not by a runtime
 check; rewind invalidation (`ParentHistoryInvalidated`) is explicitly
 distinct from terminal cascade (`ParentTerminated`, carrying a typed
 `ParentTerminalCause`); terminal cascade is driven by a reconciler
-[processor](../../../glossary/processor) subscribed to
+[processor](../../../../glossary/processor) subscribed to
 `session.sessions.events.>`, discovering children through the parent-to-
 children lineage projection folded from `DelegationDispatched`, and is
 transitive across a chain of depth D in D sequential reconciler round-trips;

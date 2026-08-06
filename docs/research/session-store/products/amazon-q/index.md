@@ -146,8 +146,8 @@ session-as-directory.
 - Resume is a boolean switch tied to the *directory you are currently in*,
   not to a chosen session id: `ChatArgs.resume: bool`
   (`crates/chat-cli/src/cli/chat/mod.rs:233`, "Resumes the previous
-  conversation from this directory") is the only lever; there is no `--session
-  <id>` flag or a session picker anywhere in `ChatArgs`
+  conversation from this directory") is the only lever; there is no
+  `--session <id>` flag or a session picker anywhere in `ChatArgs`
   (`crates/chat-cli/src/cli/chat/mod.rs:227-253`).
 
 ## The store interface
