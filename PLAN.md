@@ -212,8 +212,8 @@ the sections split into their own files:
 ### Required Decisions
 
 Owner boundary, metadata backend, path convention, cache TTL, and latency
-target are decided in ADR#0042..0045. The signed-key algorithm and the
-signed-first caller authentication posture are decided in ADR#0046.
+target are decided in ADR#0046..0049. The signed-key algorithm and the
+signed-first caller authentication posture are decided in ADR#0050.
 
 - First OpenBao auth method per service. The prototype uses a static dev
   token; that is not a production answer.
@@ -240,9 +240,9 @@ model around them.
 Define rich types instead of primitive strings:
 
 ```text
-OwnerId          (project id per ADR#0042; today only a credential-scoped
+OwnerId          (project id per ADR#0046; today only a credential-scoped
                   CredentialOwnerId exists)
-WorkspaceId      (collapses into the project id per ADR#0042)
+WorkspaceId      (collapses into the project id per ADR#0046)
 VaultId
 CredentialVersionId
 CredentialPath   (today path building lives inside the OpenBao adapter)
@@ -354,7 +354,7 @@ The client supplies an opaque key. The server supplies the scope.
 ```text
 IdempotencyRecord
   owner_id
-  workspace_id       (project id per ADR#0042)
+  workspace_id       (project id per ADR#0046)
   command_namespace
   target_resource_id
   idempotency_key
@@ -411,7 +411,7 @@ resubmit-secret concept behind it.
 ### Endpoints
 
 Paths are parent-scoped resource names rooted at the project, following
-ADR#0042 section 3.
+ADR#0046 section 3.
 
 ```text
 POST   /v1/projects/{project}/credential-vaults
@@ -506,7 +506,7 @@ that exist today: owner_id, credential_id, credential_kind, current_version,
 created_at. Remaining fields wait on their concepts:
 
 ```text
-workspace_id       (project id per ADR#0042)
+workspace_id       (project id per ADR#0046)
 integration_id     (needs integration records)
 operation_id       (needs Phase 3 operation records)
 credential_version_id
@@ -622,7 +622,7 @@ requires:
 
 ```text
 RuntimeCredentialProjection (missing fields)
-  workspace_id       (project id per ADR#0042)
+  workspace_id       (project id per ADR#0046)
   allowed_hosts
   allowed_runtime_services
   injection_locations
@@ -648,7 +648,7 @@ RuntimeCredentialProjection (missing fields)
 Nothing is implemented; `API_KEY.md` is design-only and no bearer key, signed
 key, keyspace, or `ApiPrincipal` code exists anywhere in the repo. Signed
 mode is the strongly recommended default and the primary build target per
-ADR#0046; bearer is the policy-bounded compatibility tier.
+ADR#0050; bearer is the policy-bounded compatibility tier.
 
 ### Signed Keys
 
@@ -663,9 +663,9 @@ api_key.verify_signed_request
 Rules:
 
 - client-generated key pairs only; the platform never holds private keys;
-- Ed25519 default, ES256 accepted (ADR#0046);
+- Ed25519 default, ES256 accepted (ADR#0050);
 - DB stores public key and fingerprint;
-- single-use tokens with full binding per ADR#0047: transport-mapped
+- single-use tokens with full binding per ADR#0051: transport-mapped
   target (HTTP method/host/path or NATS subject), payload digest, iat/exp
   within a 2 minute ceiling, jti replay store, server-nonce escalation;
 - verification fails closed when the replay store is unavailable;
@@ -686,12 +686,12 @@ api_key.verify
 
 Rules:
 
-- raw key shown once (ADR#0044);
+- raw key shown once (ADR#0048);
 - DB stores verifier digest;
 - verifier pepper lives outside the API-key table;
 - list/read responses are metadata-only;
 - lost one-time response requires reroll by default;
-- keyspace policy can disallow bearer issuance entirely (ADR#0046).
+- keyspace policy can disallow bearer issuance entirely (ADR#0050).
 
 ### Authorization Result
 
@@ -803,7 +803,7 @@ emits.
 - OpenBao dev setup.
 - OpenBao production HA setup.
 - Unseal and key custody (cloud KMS auto-unseal is mandatory in
-  production per ADR#0048; Shamir only under the restricted-network
+  production per ADR#0052; Shamir only under the restricted-network
   exception, recovery keys break-glass only).
 - Backup and restore.
 - Audit log export and review.
@@ -1000,18 +1000,18 @@ Unless later decisions override these, use:
 
 ```text
 credential backend
-  -> event stream as the metadata source of truth (ADR#0043)
+  -> event stream as the metadata source of truth (ADR#0047)
   -> OpenBao for raw provider credential material
 
 API key model
-  -> signed keys strongly recommended for all callers (ADR#0046)
+  -> signed keys strongly recommended for all callers (ADR#0050)
   -> bearer keys as the policy-bounded compatibility tier
   -> root/management keyspaces are signed-only
 
 signed key default
   -> Coinbase-style JWT request token
   -> client-generated key pair only; the platform never holds private keys
-  -> Ed25519 default, ES256 accepted for compatibility (ADR#0046)
+  -> Ed25519 default, ES256 accepted for compatibility (ADR#0050)
 
 idempotency
   -> scoped by owner/workspace and command namespace
