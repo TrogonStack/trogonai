@@ -36,6 +36,16 @@ in dashboards.
   rather than paged on: a tail percentile over a handful of events is noise,
   and the missing-data alert already covers silence. The sample floor is a
   working value like the latency numbers.
+- The target and alert are all-replica, evaluated per replica. Invalidation
+  is fan-out, each replica invalidating its own cache through its own
+  consumer, because queue-group delivery would leave the other replicas
+  serving a revoked credential
+  ([ADR#0023](./0023-secret-management-and-key-custody-direction.md)). The
+  histogram therefore carries its emitting instance's resource identity
+  ([ADR#0008](./0008-opentelemetry-observability.md)), evaluation groups by
+  instance, and one replica sustaining a p99 above the alert threshold pages
+  even when the fleet-wide aggregate looks healthy. The sample floor and the
+  missing-data alert apply per replica as well.
 - The cache TTL plus jitter (at most 330 seconds) is the hard upper bound on
   staleness when the event path fails entirely; the alert on the event path
   exists precisely so the backstop is never the operative mechanism.
@@ -45,11 +55,13 @@ in dashboards.
 ## Consequences
 
 - Alert definitions have a concrete threshold to encode.
-- Outbox-driven invalidation is sized against the 5-second target.
+- Event-driven invalidation through the checkpointed projection refresh is
+  sized against the 5-second target.
 - "What revocation latency is required" is settled as a ratified working value
   rather than left open.
 
 ## References
 
 - [ADR#0008: OpenTelemetry Observability](./0008-opentelemetry-observability.md)
+- [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0046: Project-Anchored Resource Hierarchy for the Credential Platform](./0046-project-anchored-resource-hierarchy.md)

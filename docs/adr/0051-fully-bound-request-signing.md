@@ -70,9 +70,12 @@ root and management keyspaces demand it by default.
 
 ### 4. Replay store
 
-Replay records are keyed by key id and `jti` and live for the validity
-ceiling plus skew, in NATS KV per
-[ADR#0047](./0047-event-sourced-credential-metadata.md). Check-and-record
+Replay records are keyed by key id and `jti` and live in NATS KV per
+[ADR#0047](./0047-event-sourced-credential-metadata.md). A record lives for
+the validity ceiling plus twice the clock-skew tolerance: skew is
+bidirectional, so a token admitted at the earliest tolerated moment
+(issued-at minus skew) stays verifiable until expiry plus skew, and the
+record must outlive that whole span. Check-and-record
 is a single atomic conditional create of the `(key id, jti)` record, never
 a read followed by a write; a key-already-exists result is the replay
 rejection. Signed-request verification fails closed when the replay store
@@ -116,8 +119,8 @@ by NKeys/JWT connection identity and subject permissions does not need it.
   first version; there is no partially bound rollout stage to migrate away
   from later.
 - The platform operates a replay store whose size is bounded by request
-  rate times the record lifetime, the validity ceiling plus clock skew
-  (150 seconds as specified), roughly two and a half minutes of traffic.
+  rate times the record lifetime, the validity ceiling plus twice the clock
+  skew (180 seconds as specified), roughly three minutes of traffic.
 - Clients must know the complete body before signing; streaming uploads
   would need a digest-first design, which is acceptable for a management
   API surface.

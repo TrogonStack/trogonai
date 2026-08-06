@@ -39,8 +39,13 @@ domain nouns. `trogon-scheduler` is the reference implementation.
 
 ### Organize by stream
 
-The unit of organization is the stream, the workflow or aggregate it represents,
-not a technical layer. There is one module per stream, named for that stream.
+The unit of organization is the stream, not a technical layer. Stream,
+aggregate, and workflow name that one unit from three angles: the aggregate is
+the consistency boundary that decides commands, the stream is that aggregate's
+event log, and the workflow is what the log captures over time. One aggregate,
+one stream, one module; wherever this ADR says "stream" or "aggregate" it
+means this same unit, never two different module boundaries. There is one
+module per stream, named for that stream.
 `commands` (with its nested `state`, `snapshot`, and `domain` submodules) and
 the read-side `processor` are subdivisions inside a stream, never top-level
 buckets that imply the whole crate is a single command model.
@@ -130,8 +135,13 @@ because the codec lives in `trogonai-proto`.
 ### Domain stays free of infrastructure
 
 Decision and projection logic in `commands` and `processor` is free of
-transport and persistence SDKs. Convert at the
-boundary per [ADR#0009](./0009-protocol-buffers-wire-contracts.md). Infrastructure adapters (NATS/JetStream stores, stream and
+transport and persistence SDKs. What converts at the boundary per
+[ADR#0009](./0009-protocol-buffers-wire-contracts.md) is the transport and
+persistence envelope: adapters turn message frames, KV entries, and wire bytes
+into the proto event and state messages and the aggregate's value objects, and
+back. The decider's event and state values stay the generated proto types
+through that conversion; the boundary never reintroduces the parallel domain
+enums rejected above. Infrastructure adapters (NATS/JetStream stores, stream and
 subject configuration, KV stores) are thin and live inside the module
 that owns them, not scattered at the crate root: the event store and command
 handler next to the commands they serve, a processor's checkpoint store nested
