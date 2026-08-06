@@ -46,9 +46,12 @@ ceremony, or attested identity.
   material and then under the external manager's key, so neither party alone
   can decrypt it.
 - **[OpenBao](../glossary/openbao)** encrypts everything it stores, including
-  Transit keys, under a barrier key. The barrier key is protected by the
-  unseal ceremony: quorum-held Shamir shares, or auto-unseal against another
-  KMS. OpenBao is not an HSM, and unsealed key material exists in server
+  Transit keys, under its barrier keyring. The keyring is encrypted by the
+  root key, and the root key is protected by the seal: quorum-held Shamir
+  shares of the unseal key, or auto-unseal against another KMS. Production
+  mandates the cloud KMS auto-unseal
+  ([ADR#0052](../adr/0052-cloud-kms-production-seal.md)). OpenBao is not an
+  HSM, and unsealed key material exists in server
   process memory
   ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md)).
 - **The platform** reaches OpenBao through deployment-attested identity, never
@@ -64,7 +67,12 @@ two customer-facing tiers, which differ in who holds the KEK hop of the chain:
 
 - With a **[managed key](../glossary/managed-key)**, the KEK is an OpenBao
   Transit key operated by the platform. The chain terminates in the platform
-  operator's OpenBao barrier and unseal ceremony.
+  operator's OpenBao barrier keyring and its seal: in production, mandatory
+  auto-unseal against a platform-controlled, HSM-backed cloud KMS key
+  ([ADR#0052](../adr/0052-cloud-kms-production-seal.md)). The Shamir quorum
+  seal survives only under that ADR's air-gapped exception; auto-unseal still
+  generates a recovery-key quorum for break-glass administrative operations,
+  and those shares cannot unseal the cluster.
 - With a **[customer managed key](../glossary/customer-managed-key)**, the KEK
   lives in a backend the customer controls: their AWS KMS key, their Google
   Cloud KMS key, or their own OpenBao. The platform holds only wrapped DEKs,
