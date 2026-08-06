@@ -26,7 +26,9 @@ as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
 The fx artifacts (the dossier, the session detail JSON reference, and the
 comparison against our event catalog) were added after the synthesis and are
-not yet folded into it.
+not yet folded into it. The IronClaw dossier was also added after the
+synthesis was frozen, but its evidence is folded in and marked inline
+wherever it revised a frozen claim.
 
 The corpus is being extended to twenty-eight products. The queue, its
 ordering, and the verification state of each candidate are in the
@@ -55,11 +57,11 @@ at once. Run per-artifact as each landed, it reported clean on files that were
 not: a sweep of every artifact with a local clone found flattened paths, wrong
 crates, and bare basenames in six files that individual waves had already
 passed. The current state of that sweep is 1912 citations, all resolved, no
-missing file and no out-of-range line, across all eighteen products whose
+missing file and no out-of-range line, across every product whose
 source is checked out locally. The remaining dossiers (fx, Claude Agent SDK,
-Codex CLI, Gemini CLI, Goose, Grok Build, Hermes, LangGraph, OpenCode, T3 Code)
-predate that sweep and were verified by hand only, so they carry weaker
-mechanical guarantees than the number above suggests.
+Codex CLI, Gemini CLI, Goose, Grok Build, Hermes, IronClaw, LangGraph,
+OpenCode, T3 Code) predate that sweep and were verified by hand only, so they
+carry weaker mechanical guarantees than the number above suggests.
 
 The second layer is the one that earns its cost. It is what caught a migration
 ratchet described as content-hashed when the source compares stored text, a
@@ -139,6 +141,7 @@ artifact; this corpus nests because every product here has at least two.
 - [Goose (Block)](./products/goose/index.md)
 - [Grok Build](./products/grok-build/index.md)
 - [Hermes (Nous Research)](./products/hermes-agent/index.md)
+- [IronClaw (NEAR AI)](./products/ironclaw/index.md)
 - [LangGraph (LangChain)](./products/langgraph/index.md)
 - [Letta](./products/letta/index.md)
   - [Letta compared to our session event catalog](./products/letta/vs-session-events.md)

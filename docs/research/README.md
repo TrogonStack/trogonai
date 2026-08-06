@@ -13,6 +13,7 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [block/buzz](https://github.com/block/buzz)
 - [xai-org/grok-build](https://github.com/xai-org/grok-build)
 - [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- [nearai/ironclaw](https://github.com/nearai/ironclaw)
 - [anomalyco/opencode](https://github.com/anomalyco/opencode)
 - [pingdotgg/t3code](https://github.com/pingdotgg/t3code)
 - [cloudflare/agents](https://github.com/cloudflare/agents)
