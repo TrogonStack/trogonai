@@ -9,12 +9,13 @@ date: 2026-08-05
 
 ## Context
 
-Everything OpenBao persists is encrypted by its barrier key, which is
-wrapped by its root key. What protects the top of that chain is a seal
-choice: Shamir quorum shares (the default: the root key split into shares,
-typically 5 with a threshold of 3, held by humans and re-entered on every
-restart), auto-unseal against a cloud KMS key (AWS KMS, GCP Cloud KMS,
-Azure Key Vault), or a transit seal chained to another OpenBao.
+Everything OpenBao persists is encrypted by its barrier keyring, the
+keyring is encrypted by the root key, and the root key is protected by the
+seal. What protects the top of that chain is a seal choice: Shamir quorum
+shares (the default: the unseal key protecting the root key is split into
+shares, typically 5 with a threshold of 3, held by humans and re-entered on
+every restart), auto-unseal against a cloud KMS key (AWS KMS, GCP Cloud
+KMS, Azure Key Vault), or a transit seal chained to another OpenBao.
 
 The cloud KMS option roots the platform's entire encryption chain in
 FIPS-validated HSMs: the wrapping key physically never leaves the
@@ -37,10 +38,19 @@ default to be weighed per deployment; it is the rule.
 
 ### 1. Providers
 
-GCP Cloud KMS and AWS KMS are the expected providers. Azure Key Vault is an
-acceptable adapter of the same posture. The KMS key lives in a
-platform-controlled cloud account, with provider-default rotation and
-either a multi-region key or a documented recovery path for a KMS outage.
+GCP Cloud KMS and AWS KMS are the expected providers; Azure is acceptable
+in its HSM-backed form. "Cloud KMS" alone does not guarantee the hardware
+posture the chain of trust claims, so the seal key MUST be HSM-backed
+wherever the provider distinguishes protection levels: `HSM`, not
+`SOFTWARE`, on GCP Cloud KMS; Azure Managed HSM or an HSM-protected Key
+Vault key; AWS KMS keys are HSM-backed by construction. The key lives in a
+platform-controlled cloud account, with unwrap access IAM-scoped to the
+OpenBao service identity and the provider's key-level audit logging
+enabled. Key lifecycle is explicit rather than provider-default: rotation
+is enabled deliberately (it is opt-in on AWS), prior key versions are never
+destroyed while a root key they wrapped might still need unwrapping, purge
+or deletion protection is enabled where the provider offers it, and the
+key is multi-region or has a documented recovery path for a KMS outage.
 
 ### 2. The single exception
 
@@ -56,7 +66,10 @@ Auto-unseal still generates a recovery-key quorum. Those shares exist
 solely for break-glass operations under
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md)'s
 out-of-band ceremony (quorum-held shares, root token revoked after use) and
-are never part of routine operation.
+are never part of routine operation. Recovery keys authorize administrative
+operations such as generating a root token or approving a seal migration;
+they cannot unseal the cluster or decrypt the root key, so they are not a
+fallback unseal path when the KMS is unreachable.
 
 ### 4. Development
 
@@ -77,8 +90,14 @@ depends on which seal a deployment uses.
   automatically; the runbook covers the KMS-outage path (running nodes stay
   unsealed, restarts block until KMS returns or the documented recovery is
   executed) and the break-glass recovery ceremony.
-- The chain of trust reads end to end: cloud HSM wraps the OpenBao root,
-  the barrier encrypts platform storage, the secrets service and
+- The recoverability boundary is stated plainly: seal migration requires
+  the current seal to still be reachable and takes a brief full-cluster
+  restart, so migrating away from a failing KMS key is possible only while
+  that key still unwraps. Permanent loss of the seal key with no surviving
+  migration path loses the cluster, storage backups included; the
+  documented recovery path in section 1 exists to prevent exactly that.
+- The chain of trust reads end to end: cloud HSM wraps the OpenBao root
+  key, the barrier keyring encrypts platform storage, the secrets service and
   `KeyManagement` route tenant material to managed or customer-managed
   backends per [ADR#0030](./0030-customer-controlled-key-backend-routing.md).
 - Auto-unseal protects the bootstrap of the chain only. It does not protect

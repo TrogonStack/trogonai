@@ -35,8 +35,13 @@ relational database enters the platform for the first version.
   operation records once they exist) live in NATS KV as protobuf payloads,
   keyed and scoped the way the existing idempotency ledger is.
 - Listing and query surfaces are deferred. When the product needs them, they
-  are built as read-side projections over the same streams, rebuildable from
-  the stream at any time.
+  are built as read-side projections over the same streams. Rebuildability is
+  bounded by retention: a projection rebuild replays the retained event
+  range, and events purged below the
+  [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) watermark
+  are not recoverable by a rebuild; past truncation, only the aggregate's
+  own snapshot-carried state survives, and that serves the write side, not
+  a projection replay.
 - A relational store may arrive later only as another projection consumer.
   It never becomes a write model, and no command handler ever writes to it
   directly.
@@ -49,7 +54,11 @@ relational database enters the platform for the first version.
 - The public API's first slice ships without list endpoints; single-resource
   reads resolve through projections or aggregate replay. List endpoints
   arrive with their projections.
-- Audit facts are events; an audit query surface is a projection over them.
+- Audit facts are events; an audit query surface is a projection over the
+  retained stream range.
+  [ADR#0029](./0029-decider-retention-and-truncation-watermark.md) keeps
+  truncation an operator-invoked decision, so preserving audit-relevant
+  history is a retention-policy commitment made before any purge runs.
 - Retries and recovery keep exactly one consistency mechanism (stream
   position plus scoped idempotency), avoiding cross-store reconciliation
   between a database and the stream.

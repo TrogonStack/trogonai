@@ -28,9 +28,14 @@ in dashboards.
 ## Decision
 
 - Target: p99 revocation-to-invalidation latency at or under 5 seconds under
-  normal operation, as observed by `gateway.credential.revocation.latency`.
-- Alerting: page when the p99 exceeds 10 seconds sustained over 5 minutes,
+  normal operation, as observed by `gateway.credential.revocation.latency`
+  evaluated as a rolling 5-minute p99.
+- Alerting: page when that p99 exceeds 10 seconds sustained over 5 minutes,
   or when the histogram stops reporting while credential traffic continues.
+  An evaluation window holding fewer than 20 revocation samples is skipped
+  rather than paged on: a tail percentile over a handful of events is noise,
+  and the missing-data alert already covers silence. The sample floor is a
+  working value like the latency numbers.
 - The cache TTL plus jitter (at most 330 seconds) is the hard upper bound on
   staleness when the event path fails entirely; the alert on the event path
   exists precisely so the backstop is never the operative mechanism.
@@ -40,7 +45,7 @@ in dashboards.
 ## Consequences
 
 - Alert definitions have a concrete threshold to encode.
-- Outbox-driven invalidation is sized against the 5 second target.
+- Outbox-driven invalidation is sized against the 5-second target.
 - "What revocation latency is required" is settled as a ratified working value
   rather than left open.
 

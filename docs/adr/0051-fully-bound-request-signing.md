@@ -29,10 +29,15 @@ WIMSE workload proof tokens) showed the sketch leaves real gaps:
   demand freshness; DPoP's server-issued nonce closes that for surfaces
   that warrant it.
 
-With full binding, the security statement becomes simple: a captured
-request is useless (wrong body, wrong nonce, expired within a minute or
-two), a platform breach yields public keys only, and the sole remaining
-asset in the system is the private key on the client machine.
+With full binding, the security statement becomes concrete: a captured
+request cannot be altered or reused (wrong body, spent nonce, expired
+within a minute or two); the one residual power of an intercepted unspent
+token is to deliver the caller's exact request once, racing the legitimate
+sender for its single admission. A breach of the signed-key tier yields
+public keys only, while provider-held plaintext in OpenBao remains, bounded
+separately by [ADR#0050](./0050-signed-first-caller-authentication.md)
+section 6. Within the signed tier, the sole remaining secret is the
+private key on the client machine.
 
 ## Decision
 
@@ -45,7 +50,10 @@ one request. There is no reduced-binding or multi-use mode.
 
 - Request target, transport-mapped: for HTTP, method, host, and canonical
   path; for NATS, the subject and operation. One canonical serialization is
-  defined in the API contracts and shared by both.
+  defined in the API contracts and shared by both; that definition fixes
+  case, default-port elision, and percent-encoding for HTTP targets, ships
+  with canonicalization test vectors for both transports, and lands before
+  `api_key.verify_signed_request` does.
 - Payload digest: SHA-256 over the exact request body, with a defined
   constant digest for bodyless requests. Always required.
 - Time: issued-at and expiry. The validity window is at most 2 minutes,
@@ -64,8 +72,11 @@ root and management keyspaces demand it by default.
 
 Replay records are keyed by key id and `jti` and live for the validity
 ceiling plus skew, in NATS KV per
-[ADR#0047](./0047-event-sourced-credential-metadata.md). Signed-request
-verification fails closed when the replay store cannot be consulted.
+[ADR#0047](./0047-event-sourced-credential-metadata.md). Check-and-record
+is a single atomic conditional create of the `(key id, jti)` record, never
+a read followed by a write; a key-already-exists result is the replay
+rejection. Signed-request verification fails closed when the replay store
+cannot be consulted.
 
 ### 5. Inherited posture
 
@@ -105,15 +116,17 @@ by NKeys/JWT connection identity and subject permissions does not need it.
   first version; there is no partially bound rollout stage to migrate away
   from later.
 - The platform operates a replay store whose size is bounded by request
-  rate times the validity window, roughly one to two minutes of traffic.
+  rate times the record lifetime, the validity ceiling plus clock skew
+  (150 seconds as specified), roughly two and a half minutes of traffic.
 - Clients must know the complete body before signing; streaming uploads
   would need a digest-first design, which is acceptable for a management
   API surface.
 - Intermediaries that rewrite paths or bodies break signatures by design;
   the canonicalization rules in the API contracts are the compatibility
   surface, and rewriting proxies are unsupported in front of signed routes.
-- Amends the token-contract sketch in ADR#0050 section 4; that section now
-  defers to this contract.
+- Amends the token-contract sketch in
+  [ADR#0050](./0050-signed-first-caller-authentication.md) section 4; that
+  section now defers to this contract.
 
 ## References
 

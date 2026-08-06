@@ -41,26 +41,28 @@ domain nouns. `trogon-scheduler` is the reference implementation.
 
 The unit of organization is the stream, the workflow or aggregate it represents,
 not a technical layer. There is one module per stream, named for that stream.
-`commands`, `state`, `snapshot`, `domain`, and the read-side `processor` are
-subdivisions inside a stream, never top-level buckets that imply the whole crate
-is a single command model.
+`commands` (with its nested `state`, `snapshot`, and `domain` submodules) and
+the read-side `processor` are subdivisions inside a stream, never top-level
+buckets that imply the whole crate is a single command model.
 
 A stream module contains:
 
-- `commands/`: one file per command decider, named after the command. Each file
-  holds the command struct and its `Decider` implementation. The decider's
-  `Event` and `State` associated types are the generated proto types used
-  directly (see "Proto types are the event and state" below), not hand-written
-  domain enums.
-- `state`: `initial_state`, `evolve`, and the decide-time and evolve-time
-  validators, operating on the proto state type.
-- `snapshot`: the snapshot policy only, for example the snapshot frequency. It
-  does not contain the snapshot codec.
-- `domain`: the aggregate's value objects used as command inputs, one type per
-  file. The event and state shapes are proto, so this module holds value objects,
-  not event or state definitions.
+- `commands/`: the write side. One file per command decider, named after the
+  command; each file holds the command struct and its `Decider` implementation.
+  The decider's `Event` and `State` associated types are the generated proto
+  types used directly (see "Proto types are the event and state" below), not
+  hand-written domain enums. The write-side submodules nest inside `commands/`:
+  - `commands/state`: `initial_state`, `evolve`, and the decide-time and
+    evolve-time validators, operating on the proto state type.
+  - `commands/snapshot`: the snapshot policy only, for example the snapshot
+    frequency. It does not contain the snapshot codec.
+  - `commands/domain`: the aggregate's value objects used as command inputs,
+    one type per file. The event and state shapes are proto, so this module
+    holds value objects, not event or state definitions.
 - `processor` (or a named projection): the read model that consumes the stream.
-  A processor's own rebuildable checkpoint store nests under that processor.
+  A processor's own rebuildable checkpoint store nests under that processor and
+  is its adapter boundary: the store owns the persistence SDK calls, and
+  projection logic above it stays SDK-free.
 - The aggregate's persistence and command handler: the event store, stream and
   subject configuration, and the handler that executes commands against the
   store. These belong to the aggregate and live inside its module, next to the
@@ -96,12 +98,12 @@ credential has two: the workflow that provisions and maintains it over time
 
 ### Value objects
 
-Domain value objects for an aggregate live under that aggregate's `domain`
-module, one file per type, with the construction and error rules from
-`rsworkspace/crates/AGENTS.md`. The flat `src/{type}.rs` placement in the crate
-conventions applies to value-object and library crates that own no aggregate. The
-read model depending on the aggregate's `domain` is expected, not a layering
-violation.
+Domain value objects for an aggregate live under that aggregate's
+`commands/domain` module, one file per type, with the construction and error
+rules from `rsworkspace/crates/AGENTS.md`. The flat `src/{type}.rs` placement in
+the crate conventions applies to value-object and library crates that own no
+aggregate. The read model depending on the aggregate's `commands/domain` is
+expected, not a layering violation.
 
 ### Proto types are the event and state; their codec lives in the proto crate
 
@@ -127,11 +129,13 @@ because the codec lives in `trogonai-proto`.
 
 ### Domain stays free of infrastructure
 
-`commands`, `state`, `snapshot`, `domain`, and `processor` contain domain and
-application logic free of transport and persistence SDKs. Convert at the
+Decision and projection logic in `commands` and `processor` is free of
+transport and persistence SDKs. Convert at the
 boundary per [ADR#0009](./0009-protocol-buffers-wire-contracts.md). Infrastructure adapters (NATS/JetStream stores, stream and
-subject configuration, KV stores) are thin and live inside the aggregate module
-that owns them, not scattered at the crate root.
+subject configuration, KV stores) are thin and live inside the module
+that owns them, not scattered at the crate root: the event store and command
+handler next to the commands they serve, a processor's checkpoint store nested
+under that processor.
 
 ## Design Rules
 
@@ -140,8 +144,8 @@ that owns them, not scattered at the crate root.
   domain enums or hand-written proto conversion for them ([ADR#0009](./0009-protocol-buffers-wire-contracts.md)).
 - The event and snapshot codec and the `trogon-decider-runtime` trait impls live
   in `trogonai-proto` on the proto types, behind a registered per-domain feature
-  that pulls in `trogon-decider-runtime`. The consuming crate's `snapshot` module
-  holds only the snapshot policy.
+  that pulls in `trogon-decider-runtime`. The consuming crate's
+  `commands/snapshot` module holds only the snapshot policy.
 - Keep the fold (`evolve`) separate from the snapshot policy.
 - Name a stream for the workflow it represents, expressed as a noun (a workflow
   made noun), not for the event-sourcing mechanism. Reject `Lifecycle`,
@@ -153,7 +157,7 @@ that owns them, not scattered at the crate root.
   aggregate is a migration. Do it before the contract ships; treat it as
   storage-breaking afterward.
 - Value objects follow `rsworkspace/crates/AGENTS.md`, located under the
-  aggregate's `domain`.
+  aggregate's `commands/domain`.
 
 ## Consequences
 

@@ -41,8 +41,9 @@ created it. Everything else is metadata.
 
 ## Consequences
 
-- The idempotency record shape stays metadata-only, which also keeps the KV
-  ledger out of scope for secret-redaction auditing.
+- The idempotency record shape stays metadata-only by contract. The KV ledger
+  stays inside security-test and audit coverage, which verifies that no
+  plaintext ever enters its schema or replay path.
 - The UI must state plainly that a value shown once cannot be recovered and
   offer reroll or resubmit as the recovery action.
 - Retry-safety guidance for API clients: capture the plaintext from the

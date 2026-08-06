@@ -73,7 +73,12 @@ organization is an IAM and billing event, not a storage migration.
 The public management API adopts AIP-style parent-scoped resource names rooted
 at the project: `projects/{project}/credential-vaults/{vault}`,
 `projects/{project}/credentials/{credential}`, and so on. Flat, unparented
-names such as `/v1/credentials` are superseded.
+names such as `/v1/credentials` are superseded. The parent is also an
+authorization statement: admission derives the expected project from the
+authenticated caller context
+([ADR#0050](./0050-signed-first-caller-authentication.md),
+[ADR#0051](./0051-fully-bound-request-signing.md)) and rejects a request whose
+`{project}` does not match it.
 
 ### 4. Environments are attributes, not hierarchy levels
 
@@ -115,5 +120,7 @@ rule in section 2 guarantees it can be added without touching stored names.
 
 - [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
 - [ADR#0040: Contract Field Vocabulary: Identifiers, Handles, and Display Labels](./0040-contract-field-vocabulary.md)
+- [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
+- [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
 - Google API Improvement Proposals, resource-oriented design (aip.dev)
 - Google Cloud Secret Manager resource model and Vercel environment scoping
