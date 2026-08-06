@@ -129,6 +129,15 @@ client_secret = "{secret}"
     )
 }
 
+fn datadog_toml(token: &str) -> String {
+    format!(
+        r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "{token}"
+"#
+    )
+}
+
 fn incidentio_valid_test_secret() -> String {
     ["whsec_", "dGVzdC1zZWNyZXQ="].concat()
 }
@@ -882,6 +891,179 @@ client_secret = "sentry-client-secret"
     let f = write_toml(toml);
     let cfg = load(Some(f.path())).expect("load failed");
     assert!(cfg.sentry.is_empty());
+}
+
+#[test]
+fn datadog_resolves_with_valid_token() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(!cfg.datadog.is_empty());
+    assert!(cfg.has_any_source());
+}
+
+#[test]
+fn datadog_disabled_is_empty() {
+    let toml = r#"
+[sources.datadog]
+status = "disabled"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog.is_empty());
+}
+
+#[test]
+fn datadog_enabled_without_webhook_token_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+status = "enabled"
+
+[sources.datadog.integrations.primary.webhook]
+
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: missing webhook_token")))
+    );
+}
+
+#[test]
+fn datadog_empty_webhook_token_is_invalid() {
+    let f = write_toml(&datadog_toml(""));
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: invalid webhook_token")))
+    );
+}
+
+#[test]
+fn datadog_enabled_integration_without_webhook_block_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+subject_prefix = "datadog-primary"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn datadog_invalid_integration_id_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations."bad/id".webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/bad/id: invalid integration id")))
+    );
+}
+
+#[test]
+fn datadog_integration_disabled_is_skipped() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+status = "disabled"
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog.is_empty());
+}
+
+#[test]
+fn datadog_zero_stream_max_age_is_error() {
+    let toml = r#"
+[sources.datadog.integrations.primary]
+stream_max_age_secs = 0
+
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: stream_max_age_secs must not be zero")))
+    );
+}
+
+#[test]
+fn datadog_timestamp_tolerance_defaults_to_disabled() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog[0].config.timestamp_tolerance.is_none());
+}
+
+#[test]
+fn datadog_timestamp_tolerance_resolves_when_set() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+timestamp_tolerance_secs = 300
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.datadog[0].config.timestamp_tolerance.map(std::time::Duration::from),
+        Some(std::time::Duration::from_secs(300)),
+    );
+}
+
+#[test]
+fn datadog_zero_timestamp_tolerance_disables_check() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+timestamp_tolerance_secs = 0
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert!(cfg.datadog[0].config.timestamp_tolerance.is_none());
+}
+
+#[test]
+fn datadog_webhook_token_header_defaults() {
+    let f = write_toml(&datadog_toml("datadog-webhook-token"));
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(
+        cfg.datadog[0].config.webhook_token_header.as_str(),
+        "x-datadog-webhook-token",
+    );
+}
+
+#[test]
+fn datadog_custom_webhook_token_header_resolves() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+webhook_token_header = "X-Acme-Token"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.datadog[0].config.webhook_token_header.as_str(), "x-acme-token");
+}
+
+#[test]
+fn datadog_invalid_webhook_token_header_is_invalid() {
+    let toml = r#"
+[sources.datadog.integrations.primary.webhook]
+webhook_token = "datadog-webhook-token"
+webhook_token_header = "bad header"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("datadog/primary: invalid webhook_token_header")))
+    );
 }
 
 #[test]
@@ -2086,4 +2268,191 @@ fn load_invalid_toml_returns_load_error() {
     let f = write_toml("this is not { valid toml");
     let result = load(Some(f.path()));
     assert!(matches!(result, Err(ConfigError::Load(_))));
+}
+
+#[test]
+fn github_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.github.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("github/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn telegram_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.telegram.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("telegram/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn twitter_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.twitter.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("twitter/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn gitlab_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.gitlab.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("gitlab/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn linear_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.linear.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("linear/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn microsoft_graph_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.microsoft_graph.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("microsoft_graph/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn incidentio_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.incidentio.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("incidentio/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn notion_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.notion.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("notion/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn sentry_enabled_integration_without_webhook_is_invalid() {
+    let toml = r#"
+[sources.sentry.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("sentry/primary: missing webhook")))
+    );
+}
+
+#[test]
+fn slack_enabled_integration_without_transport_is_invalid() {
+    let toml = r#"
+[sources.slack.integrations.primary]
+status = "enabled"
+"#;
+    let f = write_toml(toml);
+    let result = load(Some(f.path()));
+    assert!(
+        matches!(result, Err(ConfigError::Validation(ref errs)) if errs.iter().any(|e| e.contains("slack/primary: missing transport")))
+    );
+}
+
+#[test]
+fn max_stream_max_age_is_none_without_sources() {
+    let f = write_toml(&minimal_toml());
+    let cfg = load(Some(f.path())).expect("load failed");
+    assert_eq!(cfg.max_stream_max_age(), None);
+}
+
+#[test]
+fn max_stream_max_age_picks_the_longest_across_sources() {
+    let toml = r#"
+[sources.github.integrations.primary]
+stream_max_age_secs = 3600
+[sources.github.integrations.primary.webhook]
+webhook_secret = "short-lived"
+
+[sources.slack.integrations.primary]
+stream_max_age_secs = 7200
+[sources.slack.integrations.primary.webhook]
+signing_secret = "8f7e6d5c4b3a29180f1e2d3c4b5a69788f7e6d5c4b3a29180f1e2d3c4b5a6978"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert_eq!(
+        cfg.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(7200).expect("non-zero"))
+    );
+}
+
+#[test]
+fn longest_stream_max_age_is_none_when_empty() {
+    assert_eq!(longest_stream_max_age(std::iter::empty()), None);
+}
+
+#[test]
+fn longest_stream_max_age_keeps_the_larger_regardless_of_order() {
+    let short = StreamMaxAge::from_secs(3600).expect("non-zero");
+    let long = StreamMaxAge::from_secs(7200).expect("non-zero");
+
+    assert_eq!(longest_stream_max_age([short, long].into_iter()), Some(long));
+    assert_eq!(longest_stream_max_age([long, short].into_iter()), Some(long));
+}
+
+#[test]
+fn longest_stream_max_age_lets_no_expiry_dominate_in_either_position() {
+    let bounded = StreamMaxAge::from_secs(7200).expect("non-zero");
+
+    assert_eq!(
+        longest_stream_max_age([bounded, StreamMaxAge::NoExpiry].into_iter()),
+        Some(StreamMaxAge::NoExpiry)
+    );
+    assert_eq!(
+        longest_stream_max_age([StreamMaxAge::NoExpiry, bounded].into_iter()),
+        Some(StreamMaxAge::NoExpiry)
+    );
 }
