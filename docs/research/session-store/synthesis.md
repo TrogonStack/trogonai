@@ -1,7 +1,7 @@
 # Synthesis: what the industry means by a "stored session"
 
 Part of Session Store Research.
-Nine product dossiers, one question: when an agent product persists,
+Every product dossier, one question: when an agent product persists,
 resumes, lists, and retires a session, what does it actually keep on disk
 and how close is that shape to an append-only log with derived
 projections? Purpose: extract the invariant core our own event-sourced
@@ -28,6 +28,18 @@ lack. [LangGraph](./products/langgraph/index.md)
 is the odd one out structurally: its unit is a parent-linked chain of
 immutable state snapshots, not a message transcript, and it is the second
 cleanest event-sourcing analog in the corpus after T3 Code.
+[IronClaw](./products/ironclaw/index.md) sits off the spectrum's midpoint rather
+than along it: its durable session is neither one log nor one mutable row
+but a **set of individually compare-and-swap-versioned records** at virtual
+paths (one per message, one per summary artifact, one thread metadata
+record holding a durable sequence counter), which makes it the only product
+in the corpus with a real expected-version precondition on the write
+boundary *and* a mutable history.
+
+> IronClaw was researched and added after this synthesis was first frozen.
+> Its evidence revised Convergence #8 (optimistic concurrency), Divergence
+> A (the central axis), Divergence F (multi-host), and Design decisions 3
+> and 6; those revisions are marked inline. Every other claim held.
 
 ## Convergence
 
@@ -45,6 +57,10 @@ durable source of truth." [T3 Code](./products/t3code/index.md) and
 Even [Goose](./products/goose/index.md),
 the corpus's most mutable store, keeps pre-compaction turns as
 `agent_invisible` rows rather than deleting them.
+[IronClaw](./products/ironclaw/index.md) holds the line in one method: summary
+substitution happens only inside `load_context_window`, while
+`list_thread_history` returns the original messages *and* the summary
+artifacts that stand in for them, so only the assembled prompt is lossy.
 
 **2. JSONL append-only transcripts are the majority default for CLI
 products, and the append discipline is remarkably specific.** [Claude Agent
@@ -73,6 +89,15 @@ mutation)." OpenCode's v2 `revert.commit` truncates only the *projection*;
 "the underlying event rows are not deleted." The two exceptions prove the
 axis: Goose's rewind is "a destructive delete" (`truncate_conversation`),
 and Hermes's is an in-place flag flip (`active=0`).
+[IronClaw](./products/ironclaw/index.md) is a third kind of exception, and a
+useful one: it ships **no rewind at all** (no rewind, fork, branch, or
+message edit exists in its transcript trait or design docs), and its single
+retroactive operation is deliberately destructive: `redact_message` nulls
+content, attachments, and the provider-call payload in place, leaving only a
+`redaction_ref`. A product can therefore decline the entire rewind axis and
+pay no visible architectural cost, which reframes rewind as a schedulable
+product feature rather than a property the durable model must be shaped
+around.
 
 **4. Compaction is universally an upstream/agent-loop concern that the
 store merely records, never triggers or understands.** [LangGraph](./products/langgraph/index.md):
@@ -84,7 +109,14 @@ compaction produces "another appended entry," an `isCompactSummary` marker.
 upstream of the store... but leaves a durable marker in the log." Even
 [Goose](./products/goose/index.md), which rewrites rows for compaction, treats the
 summarization call itself as an agent-loop decision the store just
-persists the result of.
+persists the result of. The one partial counterexample is
+[IronClaw](./products/ironclaw/index.md), where compaction is explicitly *not* the
+loop's business: it is host-managed and treated as a security boundary,
+"Host-managed compaction is a typed retention boundary", with secret-leak
+scanning (`Block`/`Redact`/`Warn`) inside the compaction path, a rescan
+before both inference and persistence, and a fail-closed on residual
+matches. The store still only records the artifact, but *who decides to
+compact* moves below the loop rather than above it.
 
 **5. Fork/branch always mints a new identity; nobody reuses the source
 session id.** [Claude Agent SDK](./products/claude-agent-sdk/index.md)'s
@@ -99,6 +131,9 @@ shared-prefix reference." [Goose](./products/goose/index.md) mints a fresh
 `YYYYMMDD_N` id via `copy_session`. Only [LangGraph](./products/langgraph/index.md)
 gets a genuinely cheap fork, because content-addressed channel blobs are
 shared by reference across the copied chain.
+[IronClaw](./products/ironclaw/index.md) abstains: the only `Fork` in the tree is a
+subagent context-seed mode that is "enum variant reserved, unimplemented"
+and denied at runtime if requested.
 
 **6. Subagents are (almost) always a sibling stream/session linked by a
 parent pointer, never entries inlined in the parent's transcript.**
@@ -114,7 +149,14 @@ crash-safe result reconciliation. The sole structural exception is
 [Claude Agent SDK](./products/claude-agent-sdk/index.md), which nests subagent
 `.jsonl` files physically *inside* the parent's session directory rather
 than as a database-level sibling, still a separate transcript, just a
-different addressing scheme.
+different addressing scheme. [IronClaw](./products/ironclaw/index.md) agrees on
+the sibling shape but moves the pointer: the child gets a fresh
+`thread_id` under the parent's exact tenant/agent/project/owner scope, and
+the lineage (`parent_run_id`, `subagent_depth`,
+`spawn_tree_root_run_id`) lives on the **run** record, not the thread. The
+transcript store does not know it is holding a child session at all, which
+is the cleanest separation in the corpus and also the reason IronClaw has no
+parent-to-child enumeration path.
 
 **7. Cascade-on-delete for subagents is inconsistent and mostly unhandled,
 and nobody has a clean answer.** [Codex CLI](./products/codex-cli/index.md): "a
@@ -127,10 +169,16 @@ found... children keep their `parentThreadId` and would be orphaned."
 [Grok Build](./products/grok-build/index.md): "No GC for orphaned subagent
 session directories was found." This is a convergence in the sense that
 every product that has subagents has the *same unresolved gap*.
+[IronClaw](./products/ironclaw/index.md) is the first product in the corpus to
+close *half* of it: a parent cancel that discards an already-finished child
+writes a durable `SubagentResultTombstone { child_run_id, disposition:
+"discarded_by_parent_cancel", terminal_status }`, so a discarded child is a
+recorded fact rather than an orphan. Parent *delete* cascade is still
+unspecified there, so the gap narrows rather than closes.
 
-**8. No product implements true optimistic-concurrency control at the
-store's write boundary, and the exceptions that come closest are the two
-purest event-sourced designs.** [Claude Agent SDK](./products/claude-agent-sdk/index.md):
+**8. Optimistic concurrency at the store's write boundary is rare, and the
+one product that implements it fully does so *without* event sourcing.**
+Revised after IronClaw. [Claude Agent SDK](./products/claude-agent-sdk/index.md):
 "there is no expected-position precondition on `append`." [Goose](./products/goose/index.md):
 "no expected-version precondition anywhere; there is no CAS." [Hermes](./products/hermes-agent/index.md):
 "there is no optimistic-concurrency / expected-position precondition
@@ -144,6 +192,23 @@ conflict-detection teeth; [LangGraph](./products/langgraph/index.md)'s unique
 `(thread_id, checkpoint_id)` key is unrelated to conflict detection, its
 own dossier flags "no expected-version/OCC in the OSS savers" and notes
 `put` is last-write-wins on a given checkpoint id.
+[IronClaw](./products/ironclaw/index.md) is the counterexample that forced this
+convergence to be rewritten: every transcript write carries a
+`CasExpectation` (`Absent` for creates, `Version(RecordVersion)` for
+read-modify-write, `Any` reserved for admin backfills), the version token is
+backend-minted and unforgeable ("Consumers obtain versions only by reading
+existing entries — they cannot fabricate one"), and the retry policy is
+explicit (`FILESYSTEM_CAS_RETRIES = 8`, then a hard error). Its substrate
+contract makes CAS the floor rather than an optimization: "Stores must always
+work with CAS (`put` + `CasExpectation::Version`) as the floor." Two caveats
+keep this from being a free win. First, per-record CAS protects each record,
+not an invariant across records, which is exactly why IronClaw still needs a
+separate durable per-thread active-run lock and an atomic sequence
+reservation; a per-aggregate expected-sequence append folds lost-update
+safety and cross-record ordering into one mechanism, though run ownership
+still has to be modeled as explicit lease transitions on the aggregate rather
+than obtained for free. Second, CAS is a lost-update defense on a mutable
+store, not an immutability guarantee.
 
 ## Divergence
 
@@ -162,7 +227,16 @@ plus a pid registry rather than a store-level contract (Grok Build).
 Mutable row: [Goose](./products/goose/index.md) ("a mutable row plus an
 in-place-editable ordered message table... explicitly not session-as-log")
 and [Hermes](./products/hermes-agent/index.md) ("session-as-mutable-relational-
-record... the least event-sourced of the products studied"). **Our
+record... the least event-sourced of the products studied"). A third pole,
+added after IronClaw: **CAS-versioned record per message**
+([IronClaw](./products/ironclaw/index.md)), where history is mutable in place
+(draft → finalize, status transitions, redaction) but every mutation
+requires the reader's version token, and creates require
+`CasExpectation::Absent`. That combination is worth naming because it
+separates two properties the rest of the corpus conflates: append-only-ness
+(immutability of what was written) and lost-update safety (no writer
+silently clobbers another). IronClaw buys the second without the first.
+**Our
 service must decide: is the append-only guarantee enforced by the store
 (reject any operation that isn't an append), or merely a convention the
 caller can violate?** T3 Code and OpenCode enforce it structurally (no
@@ -194,6 +268,16 @@ sequence column carry order?** The two cleanest event-sourced designs
 (T3 Code, OpenCode) use opaque ids for identity and a *separate* strictly
 monotonic sequence for order; they do not conflate the two concerns the
 way UUIDv7-as-directory-name products do.
+[IronClaw](./products/ironclaw/index.md) lands on the same answer from a different
+direction: `ThreadId` is a *validated string* (≤256 bytes, no path
+separators, no control characters, no reserved `__ironclaw_` prefix, because
+the id becomes a path segment) that the caller may supply and the service
+mints as UUIDv4 only when absent, while order comes from a durable per-thread
+`u64` sequence allocated either by an atomic path-local counter row or by a
+CAS loop on the thread record. Its migration note is the best argument in the
+corpus for keeping identity and order separate: switching an existing thread
+onto the faster counter "would restart at 1 and collide with messages already
+at sequences 1..N", so "No thread ever switches counters mid-stream."
 
 **C. Scope of the store: per-project directory vs single global
 database.** Directory-per-project, no cross-project store: [Claude Agent
@@ -216,6 +300,18 @@ on a plain column; OpenCode is the middle case, still appending a
 `session.next.moved` event that projects into `directory`/`path`/
 `workspace_id` in the same transaction, so relocation stays cheap and
 non-migratory without becoming a bare out-of-band UPDATE).
+[IronClaw](./products/ironclaw/index.md) dissolves the question instead of
+answering it: no working directory, cwd hash, or worktree appears in the key
+at all. The path prefix is a *logical* scope of tenant, agent, optional
+project, owner, and mission over a virtual filesystem that is usually SQL rows,
+so there is no relocation to reconcile, and scoping doubles as an
+authorization boundary (listing "MUST scope the listing by `owner_user_id`
+[...] otherwise a caller could enumerate threads owned by other users in the
+same `(tenant, agent, project)` triple"; reads return the same
+`UnknownThread` for absent and cross-scope threads "so callers cannot use the
+response as an existence oracle"). The cost is that scope is baked into the
+path: re-parenting a thread to a new project or owner has no supported
+operation.
 
 **D. Compaction's durable shape: in-place row rewrite vs external snapshot
 file vs pure append marker.** Rewrite in place: [Goose](./products/goose/index.md)
@@ -230,6 +326,15 @@ closed if the file is missing). Pure append, no external file needed:
 entry in the same log), [Codex CLI](./products/codex-cli/index.md) (`Compacted`
 item with `replacement_history` inline), [T3 Code](./products/t3code/index.md)
 (no compaction of the log at all, it is unbounded and grows forever).
+Sibling record in the same store, addressed by sequence range:
+[IronClaw](./products/ironclaw/index.md) writes a `SummaryArtifact { start_sequence,
+end_sequence, summary_kind, content, model_context_policy }` at
+`summaries/<summary_id>.json` with `CasExpectation::Absent`, validates that
+both range endpoints exist as real messages, and makes replay
+idempotent-by-content (an identical re-compaction returns the existing
+artifact; a different overlapping range is rejected with
+`OverlappingSummaryRange`, and only `ReplaceRangeWhenSelected` summaries are
+overlap-checked at all).
 **Divergence to resolve: does a compaction boundary require a sidecar
 artifact recoverable independently of the log (Grok Build's model, with an
 explicit fail-closed on missing sidecar), or is a same-stream marker
@@ -250,10 +355,22 @@ CLI (`cleanupPeriodDays`, default 30), [Gemini CLI](./products/gemini-cli/index.
 retention story at all, log grows forever: [T3 Code](./products/t3code/index.md)
 ("no retention or log-truncation/snapshotting, the log grows unbounded")
 and [OpenCode](./products/opencode/index.md) ("none found... the log is retained
-indefinitely"). **The two purest event-sourced designs are also the two
-with zero retention story**, an event-sourced Session Store gets rewind
-and audit for free but inherits an explicit obligation to design retention
-deliberately, since nothing in the pattern forces it.
+indefinitely"), and [IronClaw](./products/ironclaw/index.md), which has no
+transcript TTL, lifecycle policy, or sweep, and bounds *reads* (page-size
+caps, byte budgets, a 100k index-row ceiling) instead of stored history. Its
+only retention rule lives on the run-lifecycle store, not the transcript:
+released admission-reservation evidence is kept "only while the corresponding
+terminal run remains within the bounded terminal-record retention window",
+because "active capacity accounting must not scan unbounded released
+history." IronClaw also supplies the corpus's clearest example of what
+un-owned retention costs: its inbound-idempotency records live at
+`/threads/idempotency/<sha256>.json`, *outside* any thread root, so
+`delete_thread` leaves them behind pointing at a deleted message, with no
+sweeper found. **Retention is unowned in the majority of the corpus, and
+dedup state that lives outside the aggregate's key space is where the cost
+shows up first**, an event-sourced Session Store gets rewind and audit for
+free but inherits an explicit obligation to design retention deliberately,
+since nothing in the pattern forces it.
 
 **F. Multi-host / multi-writer posture.** Single-host by design, no
 coordination: [Codex CLI](./products/codex-cli/index.md), [Gemini CLI](./products/gemini-cli/index.md),
@@ -278,10 +395,26 @@ high-water history-fetch API, "a real distributed event-sync design
 layered on the same append-only log").
 Multi-host via a shared database instance: [LangGraph](./products/langgraph/index.md)
 (Postgres backend, content-addressed blob upserts are conflict-free by
-construction). **This is the widest-open axis**: only OpenCode has
-actually solved cross-host replication of an event-sourced session on top
-of an ownership-claim protocol; everyone else either assumes single-host or
-punts the problem to the storage substrate.
+construction). Multi-host as the *default* case, with the local filesystem
+treated as the constrained one: [IronClaw](./products/ironclaw/index.md), added
+after the first freeze. Nothing in its design assumes a shared filesystem:
+backends include libSQL and Postgres, and correctness rests on primitives
+that work across processes: CAS with backend-minted versions, atomic
+path-local sequence reservation, runner leases with lease tokens and
+heartbeats ("Heartbeats only renew metadata for matching, unexpired runner ID/
+lease token"; liveness must use durable lease metadata rather than one event
+per heartbeat), and a durable active-thread lock so crash detection is
+lease-expiry reconciliation rather than a stale-PID heuristic. Its recovery
+stance is the sharpest in the corpus, expiry being terminal rather than
+resumable:
+"Reborn does not automatically retry uncertain side-effecting work after a
+lost lease — expiry is terminal, and the user resubmits explicitly."
+**This axis is narrower than it was**: two products have now designed it
+deliberately rather than assumed it away, and they chose different
+mechanisms. OpenCode chose an ownership-claim replication protocol over an
+append log, IronClaw a lease-plus-lock coordination plane over a CAS store;
+everyone else either assumes single-host or punts the problem to the storage
+substrate.
 
 **G. What "the store" persists vs what it treats as opaque.** Fully
 opaque entries, store is a pure byte-transport: [Claude Agent SDK](./products/claude-agent-sdk/index.md)
@@ -292,7 +425,16 @@ through Effect Schema on both append and read"), [T3 Code](./products/t3code/ind
 (same, via Effect Schema, plus derived `actor_kind`). Partially parsed,
 targeted introspection: [Goose](./products/goose/index.md) ("neither fully
 opaque nor a normalized schema, JSON columns with targeted introspection"
-via `json_extract`/`json_each`). **Divergence: does the Session Store
+via `json_extract`/`json_each`). Typed at the domain layer, opaque at the
+substrate layer, with a declared projection between them:
+[IronClaw](./products/ironclaw/index.md), where the message is a strongly typed
+record (`sequence`, `kind`, `status`, `turn_run_id`, `redaction_ref`) that the
+domain store interprets for every query, while the storage backend is
+forbidden to parse it: "Backends never look inside `body` for indexing;
+everything queryable lives in `indexed`", which is what lets one contract be
+served portably by libSQL, Postgres, local files, and HSM-backed mounts. That
+split is worth stealing independently of the rest of its design.
+**Divergence: does the Session Store
 validate event payloads against a schema at the storage boundary, or does
 it store bytes and leave validation to the caller?** The schema-validating
 designs (T3 Code, OpenCode) get validated event shapes at the storage
@@ -312,6 +454,7 @@ application.
 | session-as-log-of-immutable-snapshots (event-sourcing-adjacent, unit is a state chain not a message stream) | LangGraph |
 | session-as-log with looser discipline (append-only JSONL, no formal OCC contract; projector-contract rigor varies -- Codex CLI's SQLite projection has an explicit rebuild/read-repair cursor) | Claude Agent SDK / Claude Code, Codex CLI, Gemini CLI, Grok Build |
 | session-as-directory (path/filename encodes identity; scope encoding varies -- Codex CLI's path is time-sharded only, with cwd scope applied as a query-time filter, not a path segment) | Claude Agent SDK, Codex CLI, Gemini CLI, Grok Build, OpenCode (legacy) |
+| session-as-record-set (one CAS-versioned record per message/summary under a scoped virtual path; mutable in place but never without an expected-version precondition) | IronClaw |
 | session-as-row (mutable, single record + child table) | Goose, Hermes |
 | session-as-mutable-relational-record (flag-mutation instead of events) | Hermes (Goose achieves a similar visibility effect only via a full delete+re-insert rewrite of the message table, not an in-place flag mutation) |
 | session-as-document (whole-file rewrite, last-write-wins per id) | Gemini CLI (legacy `.json`) |
@@ -330,6 +473,7 @@ the log is the file, and the file's path is the addressing scheme).
 | [Goose](./products/goose/index.md) | mutable SQLite row + message table | the `sessions`/`messages` rows themselves | server date+counter `YYYYMMDD_N`; global DB, no path key | `replace_conversation`: DELETE all rows, re-INSERT with visibility flags | `truncate_conversation`, a destructive delete; fork = `copy_session`, full physical copy | low; explicitly "not session-as-log" |
 | [Grok Build](./products/grok-build/index.md) | append-only JSONL (`updates.jsonl`) + derived caches/index | `updates.jsonl`; cache/summary/FTS all rebuildable | server UUIDv7 session id; path = `sessions/{encoded_cwd}/{id}/` | append marker (`CompactionCheckpoint`) plus external snapshot file, fails closed if missing | `RewindMarker` + dead-branch-filter replay; fork = copy files + lineage fields | high; "event sourcing on the filesystem in all but name" |
 | [Hermes](./products/hermes-agent/index.md) | mutable SQLite row + message table | the `sessions`/`messages` rows | client `{timestamp}_{6hex}` id; global per-profile DB | `active=0, compacted=1` in-place flag flip, content-preserving | `rewind_to_message`: soft-delete via flag flip (reversible); fork = `/branch`, full row copy | low; "least event-sourced of the products studied" |
+| [IronClaw](./products/ironclaw/index.md) *(added post-synthesis)* | set of CAS-versioned records under a scoped virtual path (thread.json + one file per message + one per summary) | the per-record JSON entries; thread/message/ordered indexes are declared rebuildable projections | caller-suppliable validated `ThreadId` (UUIDv4 when absent) + durable per-thread `u64` sequence; path = scope axes (tenant/agent/project/owner/mission) | sibling `SummaryArtifact` record over a `[start_sequence, end_sequence]` range with `ReplaceRangeWhenSelected`; messages untouched | none of either; only `redact_message`, a destructive in-place erase | low as a log, highest in corpus for write-boundary OCC (`CasExpectation::Version`, 8 retries) |
 | [LangGraph](./products/langgraph/index.md) | parent-linked chain of immutable state snapshots | the `checkpoints` table; channel values content-addressed by `(channel, version)` | caller-supplied `thread_id`; checkpoint id = UUID6 | no store-level compaction; `prune`/shallow-saver drop history, `DeltaChannel` snapshots for large channels | rewind = select an older checkpoint (nothing destroyed); fork = new checkpoint sharing ancestor blobs, `copy_thread` | very high; "materially closer to event-sourcing than the transcript products" |
 | [OpenCode](./products/opencode/index.md) | append-only SQLite event log (v2) / mutable JSON-per-path store (legacy) | the `event` table, keyed `(aggregate_id, seq)` | client-minted ULID-like `ses_`/`evt_` ids; per-aggregate `seq` | in-log `compaction.ended` event; model-visible view folds from latest compaction seq | `revert.commit` truncates only the projection, event rows kept; no first-class fork found | very high; "unambiguously session-as-log (event-sourced)" |
 | [T3 Code](./products/t3code/index.md) | append-only SQLite event log | the `orchestration_events` table, keyed `(aggregate_kind, stream_id, stream_version)` | client-supplied `threadId`; server UUIDv4 `eventId`; global `sequence` + per-stream `stream_version` | none; log is never compacted, only view-side caps | `thread.reverted` event filters the projection, log kept; fork = new stream via `ThreadForkService`, O(history) copy | highest in corpus; "the corpus's cleanest event-sourced example" |
@@ -352,7 +496,17 @@ each with the industry's answer where one exists:
    (`replace_conversation`), Hermes via both a destructive DELETE+re-INSERT
    (`replace_messages`, used by /retry, /undo, /compress) and a
    non-destructive flag-flip (`archive_and_compact`) -- both flagged in
-   their own dossiers as crash-risk and history-loss hazards.
+   their own dossiers as crash-risk and history-loss hazards. The
+   requirement that most punishes this decision is redaction, and IronClaw
+   shows the price of answering it destructively: it erases content in place
+   and treats propagation to every derived copy as a hard obligation (the
+   cached sidebar title is cleared non-best-effort; summary content becomes
+   `[redacted]`). An append-only store must reach the same guarantee by
+   indirection, with content referenced rather than inlined so that one
+   payload delete or crypto-erase satisfies redaction across every event that
+   points at it, and must apply IronClaw's non-best-effort rule to
+   projections, since any projection holding a copy of content is a
+   redaction liability.
 
 2. **Separate identity from order: an opaque event/session id for
    addressing, a strictly monotonic per-aggregate sequence for ordering.**
@@ -364,14 +518,26 @@ each with the industry's answer where one exists:
 
 3. **Require an expected-version precondition on every append (real
    optimistic concurrency), not just a single-writer assumption.**
-   Industry's answer: only OpenCode (explicit "Sequence mismatch" check on
-   replay) enforces a real caller-supplied precondition; T3 Code gets
-   OCC-like protection only implicitly, via a single-writer command queue
-   combined with a unique `(aggregate_kind, stream_id, stream_version)`
-   index, with no caller-supplied expected-version check at all; the rest
-   (Claude Agent SDK, Goose, Hermes, Gemini CLI) admit they have none and
-   rely on tolerated multi-writer interleaving or a social single-writer
-   convention.
+   Industry's answer, revised after IronClaw: IronClaw is the strongest
+   precedent, and notably not an event-sourced one: every transcript write
+   carries a `CasExpectation` against a backend-minted, unforgeable
+   `RecordVersion`, with CAS declared the portable floor beneath an optional
+   transaction API. OpenCode (explicit "Sequence mismatch" check on replay)
+   enforces a real caller-supplied precondition on an append log; T3 Code
+   gets OCC-like protection only implicitly, via a single-writer command
+   queue combined with a unique `(aggregate_kind, stream_id,
+   stream_version)` index, with no caller-supplied expected-version check at
+   all; the rest (Claude Agent SDK, Goose, Hermes, Gemini CLI) admit they
+   have none and rely on tolerated multi-writer interleaving or a social
+   single-writer convention. The lesson to carry: per-record CAS is not
+   equivalent to a per-aggregate expected-sequence append. IronClaw needs
+   record CAS plus an atomic sequence reservation to get the lost-update and
+   ordering guarantees one expected-version append on a decider aggregate
+   gives us, which is an argument for our shape rather than against it. Its
+   third mechanism, the active-run lock, is not something the append replaces:
+   lease ownership, heartbeat renewal, expiry, and admission before any
+   model or tool side effect have to become modeled transitions on the
+   aggregate, with the append enforcing them rather than supplying them.
 
 4. **Compaction is upstream: the store persists an event carrying the
    summary/replacement content, it does not trigger, understand, or
@@ -396,27 +562,44 @@ each with the industry's answer where one exists:
 6. **Subagents are sibling streams linked by a parent pointer, and cascade
    behavior on parent delete/rewind must be decided explicitly; the
    industry has not decided it.** Industry's answer: convergence on
-   sibling-stream-plus-pointer (Convergence #6) but zero consistent answer
-   on cascade (Convergence #7); every product either orphans children or
-   doesn't say. This is a genuine gap we get to close rather than copy.
+   sibling-stream-plus-pointer (Convergence #6) but almost no consistent
+   answer on cascade (Convergence #7); every product either orphans children
+   or doesn't say. Revised after IronClaw, which supplies the one partial
+   answer worth copying: link lineage on the *run*, bound the tree with an
+   atomic descendant reservation before anything is queued, and record a
+   discard as a durable `SubagentResultTombstone` naming the disposition
+   rather than dropping it. Transcript-level cascade on parent delete remains
+   a genuine gap we get to close rather than copy.
 
 7. **Retention and log truncation are not solved by event-sourcing and
-   must be designed deliberately, not deferred.** Industry's answer: the
-   two purest event-sourced stores (T3 Code, OpenCode) have *no* retention
-   story at all and grow unbounded; the JSONL products that do have
-   retention treat it as an out-of-store caller responsibility (Claude
+   must be designed deliberately, not deferred. Dedup and idempotency state
+   must live inside the aggregate's key space so retention and deletion
+   cascade to it.** Industry's answer: the two purest event-sourced stores
+   (T3 Code, OpenCode) have *no* retention story at all and grow unbounded,
+   and IronClaw has none for transcripts either; the JSONL products that do
+   have retention treat it as an out-of-store caller responsibility (Claude
    Agent SDK's explicit "the SDK never deletes from your store on its own")
    with concrete but ad hoc defaults (30-90 days) enforced by a sweep, not
-   a store primitive.
+   a store primitive. IronClaw supplies the concrete failure mode for the
+   second half: its SHA-256 inbound-dedup records sit outside the thread
+   root, survive `delete_thread`, and have no sweeper, so a redelivered
+   pre-deletion event replays as an accepted message that no longer exists.
+   Our dedup key belongs in the appended event, not in a sidecar.
 
-8. **Multi-host correctness needs an explicit ownership/claim protocol on
-   the write path, not an assumption of a shared filesystem.** Industry's
-   answer: only OpenCode has one (`events.claim`, `ownerID` +
-   `strictOwner` replay guard, per-aggregate high-water history sync);
-   everyone else either assumes single-host (Codex CLI, Gemini CLI, Goose,
-   T3 Code, Hermes) or pushes the problem to the adapter/storage substrate
-   (Claude Agent SDK's pluggable mirror, Grok Build's per-host SQLite
-   files, LangGraph's shared Postgres).
+8. **Multi-host correctness needs an explicit coordination protocol on the
+   write path, not an assumption of a shared filesystem.** Industry's
+   answer, revised after IronClaw: two products have designed one, with
+   different mechanisms. OpenCode uses ownership-claim replication
+   (`events.claim`, `ownerID` + `strictOwner` replay guard, per-aggregate
+   high-water history sync). IronClaw uses a coordination plane instead:
+   record-level CAS, atomic sequence reservation, runner leases with tokens
+   and heartbeats, a durable active-run lock per thread scope, and terminal
+   (never auto-retried) lease expiry. Everyone else either assumes
+   single-host (Codex CLI, Gemini CLI, Goose, T3 Code, Hermes) or pushes the
+   problem to the adapter/storage substrate (Claude Agent SDK's pluggable
+   mirror, Grok Build's per-host SQLite files, LangGraph's shared Postgres).
+   Worth noting that IronClaw's two mechanisms are separable from its storage
+   model: the lease/lock plane would sit on top of an append log unchanged.
 
 9. **Event payloads should be schema-validated at the storage boundary,
    not treated as opaque bytes.** Industry's answer: split. T3 Code and
@@ -440,15 +623,35 @@ everywhere else with append-only JSONL, which means our job is not to
 invent the pattern but to close the two gaps nobody has closed yet:
 subagent cascade semantics and retention on an unbounded log.
 
+Revised after IronClaw: those two gaps are now one and a half. IronClaw is
+the one product that treats both as first-class design problems and gets
+partway through each, from the opposite end of the spectrum. On cascade, it
+bounds the subagent tree with an atomic descendant reservation taken before
+any child is queued and records a discarded child result as a durable
+`SubagentResultTombstone` naming the disposition, which is more than any
+event-sourced product does, but it still leaves transcript-level cascade on
+parent deletion unaddressed. On retention, it declares a typed redaction
+boundary with a leak-scanning test rather than a growth policy, so
+transcripts still grow without bound while lifecycle records get a bounded
+terminal-retention window. IronClaw also demonstrates that the write-boundary
+concurrency guarantee we want is achievable outside event sourcing, at the
+cost of coordinating separate record, sequence, and lock mechanisms where an
+expected-version append covers the lost-update and ordering half on its own.
+That strengthens rather than weakens the case for our shape, and it means the
+remaining novel work is transcript cascade on delete plus a real growth
+policy.
+
 ## Stage-two results, not yet absorbed above
 
-Everything above is frozen as decision-time input from nine dossiers. Sixteen
-stage-two comparisons have landed since, and this section records what they add
-without rewriting the frozen text around it. Where the two disagree, the
-comparisons are the newer reading and the ADR is authoritative over both.
+Everything above is frozen as decision-time input from the dossiers that
+existed when it was written. The stage-two comparisons landed after it, and
+this section records what they add without rewriting the frozen text around
+it. Where the two disagree, the comparisons are the newer reading and the ADR
+is authoritative over both.
 
-**The design mostly survives contact with the evidence.** Across the
-comparisons' 55 numbered recommendations there are 45 blast-radius statements.
+**The design mostly survives contact with the evidence.** Across the numbered
+recommendations in the comparisons read for this pass, 55 of them, there are 45
+blast-radius statements.
 Eight mention breaking in any form: four are "do not do X later" guardrails
 against regressions we have not committed to (Cline on deterministic child ids,
 Letta on relaxing optimistic concurrency for an `At` transition, OpenHands on a
@@ -482,7 +685,7 @@ into the best-supported precondition in the corpus: any second `trogon-decider`
 implementation must pass a shared conformance suite over every
 `WRITE_PRECONDITION` class before it ships.
 
-**Convergence 8 above survives eighteen more products and gets sharper.** Even
+**Convergence 8 above survives every product added since and gets sharper.** Even
 the two stores that do have optimistic concurrency put it in the wrong place.
 Letta version-checks exactly one ORM model, `Block`, which holds
 memory-configuration data, while the actual per-turn hot pointer
@@ -507,8 +710,8 @@ product validates `SessionHidden`, `RedactionApplied`, or `ArtifactErased`, and
 it is a property of the sample rather than a weakness in the decision.
 
 **The message payload is documented per product and not at all per provider.**
-Twenty-four of twenty-five dossiers carry an entry-structure section, and twelve
-comparisons map the product's message type row by row against `CanonicalMessage`
+All but one dossier carries an entry-structure section, and the comparisons that
+go further map the product's message type row by row against `CanonicalMessage`
 and its seven-arm `ContentBlock` oneof. What no artifact covers is the provider
 side: `ProviderBlock` exists to absorb blocks the typed arms cannot model, and
 nothing in the corpus enumerates what would go through it, so whether seven arms

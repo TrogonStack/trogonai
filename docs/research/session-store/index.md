@@ -21,20 +21,22 @@ evidence rules behind every artifact remain reproducible.
 
 ## Status
 
-Synthesis complete for the first nine products, and the decision record exists
-as draft
+Synthesis complete for the products it was frozen over, and the decision
+record exists as draft
 [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](../../adr/0035-session-store-decider-aggregate.md).
 The fx artifacts (the dossier, the session detail JSON reference, and the
 comparison against our event catalog) were added after the synthesis and are
-not yet folded into it.
+not yet folded into it. The IronClaw dossier was also added after the
+synthesis was frozen, but its evidence is folded in and marked inline
+wherever it revised a frozen claim.
 
-The corpus is being extended to twenty-eight products. The queue, its
+The corpus is still being extended. The queue, its
 ordering, and the verification state of each candidate are in the
 [backlog](./backlog.md). fx was the reference implementation of the stage-two
 prompt; Cline, OpenHands, and Zed were the calibration batch that exercised it
 against fresh dossiers, and the remaining comparisons follow their shape.
 
-Stage-two comparisons now exist for sixteen of those products and are listed
+Stage-two comparisons exist for many of those products and are listed
 under their dossiers below. The synthesis's frozen decision-time text has not
 absorbed them, but its cross-corpus results are recorded in
 [a closing section](./synthesis.md#stage-two-results-not-yet-absorbed-above)
@@ -53,13 +55,13 @@ made about it.
 The mechanical layer is only trustworthy when it is run over the whole corpus
 at once. Run per-artifact as each landed, it reported clean on files that were
 not: a sweep of every artifact with a local clone found flattened paths, wrong
-crates, and bare basenames in six files that individual waves had already
-passed. The current state of that sweep is 1912 citations, all resolved, no
-missing file and no out-of-range line, across all eighteen products whose
-source is checked out locally. The remaining dossiers (fx, Claude Agent SDK,
-Codex CLI, Gemini CLI, Goose, Grok Build, Hermes, LangGraph, OpenCode, T3 Code)
-predate that sweep and were verified by hand only, so they carry weaker
-mechanical guarantees than the number above suggests.
+crates, and bare basenames in files that individual waves had already passed.
+That sweep now resolves every citation it covers, with no missing file and no
+out-of-range line, across every product whose source is checked out locally.
+It does not cover the dossiers that predate it, which were verified by hand
+only and therefore carry weaker mechanical guarantees; a dossier is inside the
+sweep only if its product's source is checked out locally, so the boundary is
+the local clone rather than a list kept here by hand.
 
 The second layer is the one that earns its cost. It is what caught a migration
 ratchet described as content-hashed when the source compares stored text, a
@@ -139,6 +141,7 @@ artifact; this corpus nests because every product here has at least two.
 - [Goose (Block)](./products/goose/index.md)
 - [Grok Build](./products/grok-build/index.md)
 - [Hermes (Nous Research)](./products/hermes-agent/index.md)
+- [IronClaw (NEAR AI)](./products/ironclaw/index.md)
 - [LangGraph (LangChain)](./products/langgraph/index.md)
 - [Letta](./products/letta/index.md)
   - [Letta compared to our session event catalog](./products/letta/vs-session-events.md)

@@ -22,6 +22,7 @@ and evidence rules behind each product dossier remain reproducible.
 - [CrewAI](./products/crewai.md)
 - [Devin](./products/devin.md)
 - [Hermes Agent](./products/hermes-agent.md)
+- [IronClaw (NEAR AI)](./products/ironclaw.md)
 - [Jido](./products/jido.md)
 - [kagent](./products/kagent.md)
 - [LangGraph Platform](./products/langgraph-platform.md)
