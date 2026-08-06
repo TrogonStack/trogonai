@@ -214,17 +214,17 @@ before wiring CredentialState failed to any retry UI. Today, offering a
 "retry" action against a write_failed credential would offer an action the
 decider has no path to accept.
 
-DECIDED (ADR#0042): the hierarchy is organization over project, and the
+DECIDED (ADR#0046): the hierarchy is organization over project, and the
 owner boundary is the project: an immutable project id. Resource names,
 OpenBao paths, and event streams anchor at the project and never embed the
 organization above it. See
-docs/adr/0042-project-anchored-resource-hierarchy.md.
+docs/adr/0046-project-anchored-resource-hierarchy.md.
 
-DECIDED (ADR#0043): the event stream is the source of truth for credential
+DECIDED (ADR#0047): the event stream is the source of truth for credential
 metadata. Operational records live in NATS KV, listing surfaces arrive
 later as projections over the same streams, and no relational store enters
 the first version. See
-docs/adr/0043-event-sourced-credential-metadata.md.
+docs/adr/0047-event-sourced-credential-metadata.md.
 
 DECISION NEEDED (Decisions Still Needed): what default pending-credential
 TTL should apply, separate from the idempotency TTL?
@@ -351,7 +351,7 @@ API does not have.
 
 Every endpoint below is unbuilt. There is no vault, operation, or
 resubmit-secret concept behind any of them today. Paths are parent-scoped
-resource names rooted at the project, following ADR#0042 section 3.
+resource names rooted at the project, following ADR#0046 section 3.
 
 ```text
 POST   /v1/projects/{project}/credential-vaults
@@ -484,16 +484,16 @@ than management-API failures; they belong to the delivery-policy checks
 described in RUNTIME_PROJECTION (allowed_hosts, allowed_runtime_services),
 not to any of the endpoints above.
 
-DECIDED (ADR#0044): a replay of the same idempotency key returns metadata
+DECIDED (ADR#0048): a replay of the same idempotency key returns metadata
 only, never plaintext, even for the caller who originally received it on
 the first, non-replay execution. See
-docs/adr/0044-one-time-plaintext-exposure.md.
+docs/adr/0048-one-time-plaintext-exposure.md.
 
-DECIDED (ADR#0044): no server-side escrow of one-time material exists in
+DECIDED (ADR#0048): no server-side escrow of one-time material exists in
 any form. Recovery from a lost one-time response is reroll
 (Trogonai-issued keys) or resubmission (provider-supplied secrets), never
 recovery of the original value. See
-docs/adr/0044-one-time-plaintext-exposure.md.
+docs/adr/0048-one-time-plaintext-exposure.md.
 
 DECISION NEEDED (Decisions Still Needed): what default idempotency TTL
 should apply on the public API?
@@ -583,11 +583,11 @@ named policies. Keep the current static-token adapter for local dev only.
 
 ## OpenBao Operations (OPENBAO_OPERATIONS)
 
-DECIDED (ADR#0048): production OpenBao must auto-unseal against a cloud KMS
+DECIDED (ADR#0052): production OpenBao must auto-unseal against a cloud KMS
 key (GCP Cloud KMS or AWS KMS expected); the Shamir quorum seal is
 prohibited in production except for deployments whose network cannot reach
 a cloud KMS, and recovery keys exist for break-glass ceremonies only. See
-docs/adr/0048-cloud-kms-production-seal.md.
+docs/adr/0052-cloud-kms-production-seal.md.
 
 ### Path convention (verified in openbao_secret_store.rs)
 
@@ -691,10 +691,10 @@ the recovery worker reads metadata() to recover stuck activations. The
 "during cleanup" pattern has no code yet since cleanup itself is unbuilt
 (see RUNTIME_PROJECTION and PLAN.md Phase 6).
 
-DECIDED (ADR#0042): `trogonai/{owner_id}/credentials/{credential_id}` and
+DECIDED (ADR#0046): `trogonai/{owner_id}/credentials/{credential_id}` and
 its mount are ratified as-is, with owner_id understood as project id.
 Names anchor at the project and never embed the organization above it. See
-docs/adr/0042-project-anchored-resource-hierarchy.md.
+docs/adr/0046-project-anchored-resource-hierarchy.md.
 
 DECISION NEEDED: should revoke() keep soft-deleting every version 1 through
 current, or move to targeting only the version(s) a caller intended to
@@ -830,10 +830,10 @@ RuntimeCredentialProjection (missing fields)
 and the per-kind CredentialRef map today; none of the five planned policy
 fields exist on it.
 
-DECIDED (ADR#0045): target p99 revocation-to-invalidation latency at or
+DECIDED (ADR#0049): target p99 revocation-to-invalidation latency at or
 under 5 seconds under normal operation; page when p99 exceeds 10 seconds
 sustained over 5 minutes. The existing 300s ttl / 30s jitter is ratified as
-the working cache default. See docs/adr/0045-revocation-latency-target.md.
+the working cache default. See docs/adr/0049-revocation-latency-target.md.
 
 DECISION NEEDED: should cache invalidation stay whole-cache-clear on every
 projection merge, or move to per-CredentialRef invalidation now, ahead of
