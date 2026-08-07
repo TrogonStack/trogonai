@@ -18,8 +18,10 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 # AAuth tokens rely on JWS shapes (esp. EC `kid`-based selection) that the
 # crate's parser only models cleanly from jsonwebtoken 10.x; keep the
-# version pin local to this crate so main's other jsonwebtoken 9.3
-# consumers (auth-callout, etc.) are not forced to upgrade in lockstep.
+# version pin local to this crate so the workspace's other jsonwebtoken
+# consumers (auth-callout, on 11.x) are not forced to move in lockstep.
+# The cost is two majors linked into a2a-gateway, which also means
+# verification hardening cannot be shared between the two paths as code.
 jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
 # rustls-tls only, never native-tls, per ADR#0015.
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
