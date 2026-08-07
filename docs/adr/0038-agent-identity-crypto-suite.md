@@ -133,12 +133,13 @@ decision this ADR makes: it is what lets a broken algorithm be survived by
 rebinding a new key and rotating verifier policy rather than by redesigning
 the identity format itself.
 
-### 4. Conditional profiles, added as bound keys, never as root replacements
+### 4. Conditional profiles, each with its trigger, never as root replacements
 
-Two further curves are recorded as conditional profiles, each with the
-trigger that would justify adopting it. Either arrives as an additional key
-bound to the agent's identity through the stream-attested binding of
-Decision 3, never as a replacement for the Ed25519 root:
+Three further profiles are recorded as conditional, each with the trigger that
+would justify adopting it. None of them replaces the Ed25519 root. The two
+curve profiles arrive as an additional key bound to the agent's identity
+through the stream-attested binding of Decision 3; the third is not agent-bound
+at all, and its entry records where it lives instead:
 
 - **P-256 (ES256)**, carried in [COSE](https://www.rfc-editor.org/rfc/rfc9052)
   ([RFC 9052](https://www.rfc-editor.org/rfc/rfc9052) and
@@ -163,11 +164,18 @@ Decision 3, never as a replacement for the Ed25519 root:
   and OKP keys cannot merely sit alongside an added RSA one. Every algorithm
   Decision 1 and the two profiles above name is excluded by that constraint.
   This profile is adopted for one purpose only, signing assertions presented
-  to a third-party IdP, and it never becomes an agent's root anchor; the
-  "only RSA keys" requirement also forces a *separate* published key set
-  rather than an extra key in the AAuth well-known documents, which is why
-  the surface itself is decided in
-  [ADR#0053](./0053-external-oidc-federation-surface.md) rather than here.
+  to a third-party IdP, and it never becomes an agent's root anchor. It is
+  also the one profile here that is *not* bound to an agent identity through
+  Decision 3: the key is signing material belonging to the separate federation
+  issuer of [ADR#0053](./0053-external-oidc-federation-surface.md), whose
+  custody and rotation schedule are the issuer's and are governed apart from
+  agent key management. The agent identity an assertion speaks for travels in
+  that assertion's claims, not in the key that signs it, which is what keeps
+  one issuer key able to serve many agents without becoming any of their
+  anchors. The "only RSA keys" requirement additionally forces a *separate*
+  published key set rather than an extra key in the AAuth well-known
+  documents, which is why the surface itself is decided in ADR#0053 rather
+  than here.
 
 ### 5. Where the implementation currently stands, and where it diverges
 
