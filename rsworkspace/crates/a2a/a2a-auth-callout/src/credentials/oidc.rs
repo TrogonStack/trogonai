@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 
 use crate::constants::OIDC_ALLOWED_ALGORITHMS;
@@ -51,8 +52,14 @@ impl OidcClientId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct BearerToken(String);
+
+impl fmt::Debug for BearerToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("BearerToken").field(&"<redacted>").finish()
+    }
+}
 
 impl BearerToken {
     pub fn new(token: impl Into<String>) -> Self {

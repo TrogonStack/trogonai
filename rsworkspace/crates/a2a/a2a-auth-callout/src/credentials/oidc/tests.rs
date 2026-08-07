@@ -583,3 +583,12 @@ async fn verify_accepts_a_jwk_that_declares_no_purpose_at_all() {
         .expect("absent RFC 7517 members stay permissive");
     assert_eq!(claims.sub.as_str(), "user-guard");
 }
+
+#[test]
+fn bearer_token_debug_does_not_leak_the_assertion() {
+    let token = BearerToken::new("hhh.ppp.sss");
+    let dbg = format!("{token:?}");
+    assert!(!dbg.contains("ppp"), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+    assert_eq!(token.as_str(), "hhh.ppp.sss");
+}

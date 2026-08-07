@@ -2,8 +2,14 @@ use std::fmt;
 
 use crate::jwt::{JwtError, MintedUserJwt};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CallerJwtHeaderValue(String);
+
+impl fmt::Debug for CallerJwtHeaderValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CallerJwtHeaderValue").field(&"<redacted>").finish()
+    }
+}
 
 impl CallerJwtHeaderValue {
     pub fn from_minted(jwt: &MintedUserJwt) -> Self {
