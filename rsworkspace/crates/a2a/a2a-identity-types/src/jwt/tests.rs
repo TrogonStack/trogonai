@@ -125,3 +125,16 @@ fn ensure_fresh_rejects_future_nbf() {
     let err = MintedUserJwt::new(token).unwrap().ensure_fresh().unwrap_err();
     assert!(matches!(err, JwtError::Decode(ref msg) if msg.contains("not yet valid")));
 }
+
+#[test]
+fn debug_does_not_leak_bearer_credentials() {
+    let minted = MintedUserJwt::new("hhh.ppp.sss").expect("valid shape");
+    let minted_dbg = format!("{minted:?}");
+    assert!(!minted_dbg.contains("ppp"), "{minted_dbg}");
+    assert!(minted_dbg.contains("<redacted>"), "{minted_dbg}");
+
+    let header = CallerJwtHeaderValue::from_minted(&minted);
+    let header_dbg = format!("{header:?}");
+    assert!(!header_dbg.contains("ppp"), "{header_dbg}");
+    assert!(header_dbg.contains("<redacted>"), "{header_dbg}");
+}
