@@ -262,18 +262,22 @@ impl JetStreamContext for MockJetStreamContext {
         Ok(())
     }
 
-    /// Upserts by stream name, mirroring the server-side reconcile the real
-    /// context performs, so a test can tell it apart from
-    /// [`Self::get_or_create_stream`] leaving an existing stream alone.
-    async fn create_or_update_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
-        let config = config.into();
+    /// Merges into the stored config for a matching name rather than replacing
+    /// it, so a test can observe that a field the caller does not own survives
+    /// provisioning.
+    async fn create_or_reconcile_stream<S, F>(&self, desired: S, merge: F) -> Result<(), MockError>
+    where
+        S: Into<stream::Config> + Send,
+        F: FnOnce(&mut stream::Config, &stream::Config) + Send,
+    {
+        let desired = desired.into();
         if self.take_failure() {
             return Err(MockError("simulated stream creation failure".to_string()));
         }
         let mut streams = self.created_streams.lock().unwrap();
-        match streams.iter_mut().find(|existing| existing.name == config.name) {
-            Some(existing) => *existing = config,
-            None => streams.push(config),
+        match streams.iter_mut().find(|existing| existing.name == desired.name) {
+            Some(existing) => merge(existing, &desired),
+            None => streams.push(desired),
         }
         Ok(())
     }

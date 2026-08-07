@@ -87,14 +87,22 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Re
     // Reconciled rather than created-if-absent: `duplicate_window` is the
     // replay bound paired with the signature timestamp tolerance below, so a
     // stream provisioned before that pairing existed would otherwise keep
-    // JetStream's default window and leave replays live past it.
-    js.create_or_update_stream(async_nats::jetstream::stream::Config {
-        name: config.stream_name.as_str().to_owned(),
-        subjects: vec![format!("{}.>", config.subject_prefix)],
-        duplicate_window: config.timestamp_tolerance.into(),
-        max_age: config.stream_max_age.into(),
-        ..Default::default()
-    })
+    // JetStream's default window and leave replays live past it. The merge
+    // lists what this source owns; placement and limits stay the operator's.
+    js.create_or_reconcile_stream(
+        async_nats::jetstream::stream::Config {
+            name: config.stream_name.as_str().to_owned(),
+            subjects: vec![format!("{}.>", config.subject_prefix)],
+            duplicate_window: config.timestamp_tolerance.into(),
+            max_age: config.stream_max_age.into(),
+            ..Default::default()
+        },
+        |current, desired| {
+            current.subjects = desired.subjects.clone();
+            current.duplicate_window = desired.duplicate_window;
+            current.max_age = desired.max_age;
+        },
+    )
     .await?;
 
     let stream = config.stream_name.as_str();

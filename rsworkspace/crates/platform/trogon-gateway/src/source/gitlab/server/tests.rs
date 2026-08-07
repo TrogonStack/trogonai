@@ -176,10 +176,14 @@ async fn provision_widens_the_dedup_window_on_an_already_provisioned_stream() {
     let _guard = tracing_guard();
     let js = MockJetStreamContext::new();
     // A deployment that provisioned GITLAB before the dedup window was paired
-    // with the signature tolerance: JetStream's own default, not ours.
+    // with the signature tolerance: JetStream's own default, not ours. The
+    // replica count and storage tier are an operator's, set out of band.
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: "GITLAB".to_owned(),
         duplicate_window: Duration::from_secs(120),
+        num_replicas: 3,
+        storage: async_nats::jetstream::stream::StorageType::Memory,
+        max_bytes: 1_024,
         ..Default::default()
     })
     .await
@@ -191,6 +195,13 @@ async fn provision_widens_the_dedup_window_on_an_already_provisioned_stream() {
     assert_eq!(streams.len(), 1, "reconciled in place rather than duplicated");
     assert_eq!(streams[0].name, "GITLAB");
     assert_eq!(streams[0].duplicate_window, Duration::from_secs(300));
+    assert_eq!(streams[0].num_replicas, 3, "operator-set replica count survives");
+    assert_eq!(
+        streams[0].storage,
+        async_nats::jetstream::stream::StorageType::Memory,
+        "operator-set storage tier survives"
+    );
+    assert_eq!(streams[0].max_bytes, 1_024, "operator-set limit survives");
 }
 
 #[tokio::test]

@@ -39,11 +39,27 @@ impl JetStreamContext for NatsJetStreamClient {
         self.context.get_or_create_stream(config).await
     }
 
-    async fn create_or_update_stream<S: Into<stream::Config> + Send>(
+    async fn create_or_reconcile_stream<S, F>(
         &self,
-        config: S,
-    ) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
-        self.context.create_or_update_stream(config.into()).await?;
+        desired: S,
+        merge: F,
+    ) -> Result<(), async_nats::jetstream::context::CreateStreamError>
+    where
+        S: Into<stream::Config> + Send,
+        F: FnOnce(&mut stream::Config, &stream::Config) + Send,
+    {
+        let desired = desired.into();
+        // A lookup that fails for any reason falls through to create, which
+        // errors on a name already in use. Failing provisioning is the right
+        // outcome for a stream we could not read: the alternative is updating
+        // it from a config we never reconciled against.
+        let Ok(stream) = self.context.get_stream(&desired.name).await else {
+            self.context.create_stream(desired).await?;
+            return Ok(());
+        };
+        let mut current = stream.cached_info().config.clone();
+        merge(&mut current, &desired);
+        self.context.update_stream(&current).await?;
         Ok(())
     }
 }

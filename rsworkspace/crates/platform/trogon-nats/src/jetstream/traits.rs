@@ -21,18 +21,31 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         config: S,
     ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
 
-    /// Reconcile a stream to `config`, creating it when it does not exist.
+    /// Create `desired` when the stream is absent; otherwise read the live
+    /// config, let `merge` copy over the fields this service is authoritative
+    /// for, and write the result back.
     ///
-    /// [`Self::get_or_create_stream`] returns an already-existing stream
+    /// Two behaviours are wrong here and this method is the narrow path
+    /// between them. [`Self::get_or_create_stream`] returns an existing stream
     /// untouched, so a setting that carries a security property -- a
     /// `duplicate_window` sized to a signature timestamp tolerance, say --
-    /// would keep whatever value the stream was first created with and the
-    /// declared config would never take effect. Use this where the config has
-    /// to hold on an existing deployment rather than only on a fresh one.
-    fn create_or_update_stream<S: Into<stream::Config> + Send>(
+    /// keeps whatever value it was first created with and the declared config
+    /// never takes effect. Sending `desired` wholesale to `STREAM.UPDATE`
+    /// instead reconciles the *entire* config, so every field the caller left
+    /// at `Default::default()` overwrites what the operator set: replica
+    /// count, storage tier, and retention limits all roll back on the next
+    /// boot.
+    ///
+    /// `merge` is what separates the two. It names the fields the service
+    /// owns, and everything it does not touch stays as the server reports it.
+    fn create_or_reconcile_stream<S, F>(
         &self,
-        config: S,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+        desired: S,
+        merge: F,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send
+    where
+        S: Into<stream::Config> + Send,
+        F: FnOnce(&mut stream::Config, &stream::Config) + Send;
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {
