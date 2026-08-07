@@ -95,6 +95,100 @@ fn jwk_compatible_with_alg_rejects_mismatched_family() {
     assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::EdDSA));
 }
 
+#[test]
+fn jwk_compatible_with_alg_rejects_encryption_use() {
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
+    assert!(
+        !jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256),
+        "a key published for encryption must not verify signatures"
+    );
+}
+
+#[test]
+fn jwk_compatible_with_alg_rejects_unrecognized_use() {
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Other("tls".into()));
+    assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[test]
+fn jwk_compatible_with_alg_rejects_key_ops_without_verify() {
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.public_key_use = None;
+    ec.jwk.common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
+    assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[test]
+fn jwk_compatible_with_alg_accepts_key_ops_containing_verify() {
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.public_key_use = None;
+    ec.jwk.common.key_operations = Some(vec![
+        jsonwebtoken::jwk::KeyOperations::Verify,
+        jsonwebtoken::jwk::KeyOperations::Encrypt,
+    ]);
+    assert!(jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[test]
+fn jwk_compatible_with_alg_rejects_declared_alg_mismatch() {
+    // Material lines up (EC/P-256 is exactly what ES256 is defined over), so
+    // only the key's own `alg` member can catch this mislabeling.
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::ES384);
+    assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[test]
+fn jwk_compatible_with_alg_rejects_declared_encryption_alg() {
+    // `alg: "ECDH-ES"` is a key-agreement algorithm; jsonwebtoken folds any
+    // algorithm it does not model into UNKNOWN_ALGORITHM, which must not be
+    // treated as "compatible with whatever the header claims".
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::UNKNOWN_ALGORITHM);
+    assert!(!jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[test]
+fn jwk_compatible_with_alg_accepts_absent_purpose_members() {
+    // `use`, `key_ops` and `alg` are all optional in RFC 7517; a JWKS that
+    // omits them stays verifiable, which is what keeps third-party issuers
+    // working.
+    let mut ec = p256_fixture("p256-k1");
+    ec.jwk.common.public_key_use = None;
+    ec.jwk.common.key_operations = None;
+    ec.jwk.common.key_algorithm = None;
+    assert!(jwk_compatible_with_alg(&ec.jwk, Algorithm::ES256));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resource_rejects_key_published_for_encryption() {
+    // End-to-end: an issuer whose only P-256 key is marked `use: enc` has no
+    // key eligible to verify with, even though the curve matches.
+    let mut fixture = p256_fixture("p256-k1");
+    fixture.jwk.common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
+    let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
+    header.typ = Some(TYP_RESOURCE.into());
+    header.kid = Some("p256-k1".into());
+    let claims = serde_json::json!({
+        "iss": "iss.example",
+        "aud": "ps.example",
+        "jti": "j1",
+        "iat": 1000,
+        "exp": 9999999999_i64,
+        "dwk": "aa-resource",
+        "agent": "agent-1",
+        "agent_jkt": "abc",
+        "scope": "read",
+    });
+    let jwt = jsonwebtoken::encode(&header, &claims, &fixture.signing).expect("encode");
+    let jwks = jwks_with_key("iss.example", fixture.jwk);
+    let v = TokenVerifier::new(jwks, SystemTimeSource);
+    let err = v.verify_resource(&jwt, "ps.example").await.unwrap_err();
+    assert!(matches!(err, TokenError::NoCompatibleJwk), "got {err:?}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn assert_freshness_uses_supplied_clock() {
     let now = Arc::new(std::sync::atomic::AtomicI64::new(1000));
