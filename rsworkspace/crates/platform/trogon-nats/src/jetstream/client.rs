@@ -38,6 +38,14 @@ impl JetStreamContext for NatsJetStreamClient {
     ) -> Result<jetstream::stream::Stream, async_nats::jetstream::context::CreateStreamError> {
         self.context.get_or_create_stream(config).await
     }
+
+    async fn create_or_update_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
+        self.context.create_or_update_stream(config.into()).await?;
+        Ok(())
+    }
 }
 
 pub type PublishError = async_nats::jetstream::context::PublishError;

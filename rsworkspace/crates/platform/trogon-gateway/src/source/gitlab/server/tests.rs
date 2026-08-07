@@ -172,6 +172,28 @@ async fn provision_creates_stream() {
 }
 
 #[tokio::test]
+async fn provision_widens_the_dedup_window_on_an_already_provisioned_stream() {
+    let _guard = tracing_guard();
+    let js = MockJetStreamContext::new();
+    // A deployment that provisioned GITLAB before the dedup window was paired
+    // with the signature tolerance: JetStream's own default, not ours.
+    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: "GITLAB".to_owned(),
+        duplicate_window: Duration::from_secs(120),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    provision(&js, &test_config()).await.unwrap();
+
+    let streams = js.created_streams();
+    assert_eq!(streams.len(), 1, "reconciled in place rather than duplicated");
+    assert_eq!(streams[0].name, "GITLAB");
+    assert_eq!(streams[0].duplicate_window, Duration::from_secs(300));
+}
+
+#[tokio::test]
 async fn provision_propagates_error() {
     let _guard = tracing_guard();
     let js = MockJetStreamContext::new();

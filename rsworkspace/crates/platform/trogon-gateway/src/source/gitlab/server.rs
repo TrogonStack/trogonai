@@ -84,7 +84,11 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
 }
 
 pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Result<(), C::Error> {
-    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+    // Reconciled rather than created-if-absent: `duplicate_window` is the
+    // replay bound paired with the signature timestamp tolerance below, so a
+    // stream provisioned before that pairing existed would otherwise keep
+    // JetStream's default window and leave replays live past it.
+    js.create_or_update_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
         duplicate_window: config.timestamp_tolerance.into(),

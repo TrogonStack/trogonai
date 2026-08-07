@@ -20,6 +20,19 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         &self,
         config: S,
     ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
+
+    /// Reconcile a stream to `config`, creating it when it does not exist.
+    ///
+    /// [`Self::get_or_create_stream`] returns an already-existing stream
+    /// untouched, so a setting that carries a security property -- a
+    /// `duplicate_window` sized to a signature timestamp tolerance, say --
+    /// would keep whatever value the stream was first created with and the
+    /// declared config would never take effect. Use this where the config has
+    /// to hold on an existing deployment rather than only on a fresh one.
+    fn create_or_update_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {

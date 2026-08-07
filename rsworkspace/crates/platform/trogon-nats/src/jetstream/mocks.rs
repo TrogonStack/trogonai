@@ -231,6 +231,16 @@ impl MockJetStreamContext {
     pub fn fail_next(&self) {
         *self.should_fail.lock().unwrap() = true;
     }
+
+    fn take_failure(&self) -> bool {
+        let mut flag = self.should_fail.lock().unwrap();
+        if *flag {
+            *flag = false;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for MockJetStreamContext {
@@ -245,19 +255,26 @@ impl JetStreamContext for MockJetStreamContext {
 
     async fn get_or_create_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
         let config = config.into();
-        let should_fail = {
-            let mut flag = self.should_fail.lock().unwrap();
-            if *flag {
-                *flag = false;
-                true
-            } else {
-                false
-            }
-        };
-        if should_fail {
+        if self.take_failure() {
             return Err(MockError("simulated stream creation failure".to_string()));
         }
         self.created_streams.lock().unwrap().push(config);
+        Ok(())
+    }
+
+    /// Upserts by stream name, mirroring the server-side reconcile the real
+    /// context performs, so a test can tell it apart from
+    /// [`Self::get_or_create_stream`] leaving an existing stream alone.
+    async fn create_or_update_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
+        let config = config.into();
+        if self.take_failure() {
+            return Err(MockError("simulated stream creation failure".to_string()));
+        }
+        let mut streams = self.created_streams.lock().unwrap();
+        match streams.iter_mut().find(|existing| existing.name == config.name) {
+            Some(existing) => *existing = config,
+            None => streams.push(config),
+        }
         Ok(())
     }
 }
