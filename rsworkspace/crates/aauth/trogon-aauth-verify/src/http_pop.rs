@@ -324,7 +324,7 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                     .verify_agent(&jwt)
                     .await
                     .map_err(HttpPopError::Agent)?;
-                let cnf_jwk = verified.claims.cnf.jwk.clone();
+                let cnf_jwk = verified.claims.cnf.jwk().clone();
                 let jkt = verified.jkt.clone();
                 (cnf_jwk, jkt, VerifiedPresenter::Agent(verified))
             }
@@ -337,14 +337,14 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                 let cnf = verified.claims.cnf.clone().ok_or(HttpPopError::InvalidConfirmationKey(
                     InvalidConfirmationKeyError::MissingConfirmationClaim,
                 ))?;
-                let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(|e| {
+                let jkt = crate::jkt::jwk_thumbprint(cnf.jwk()).map_err(|e| {
                     HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::StructurallyIncomplete(e))
                 })?;
                 let presenter = VerifiedPresenter::Auth(VerifiedAuthPresenter {
                     auth: verified,
                     jkt: jkt.clone(),
                 });
-                (cnf.jwk, jkt, presenter)
+                (cnf.jwk().clone(), jkt, presenter)
             }
         };
 

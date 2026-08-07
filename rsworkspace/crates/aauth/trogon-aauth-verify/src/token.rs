@@ -175,7 +175,7 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
             .await?;
         let claims: AgentClaims =
             serde_json::from_value(claims_raw.clone()).map_err(|_| TokenError::MissingClaim("agent claims"))?;
-        let jkt = crate::jkt::jwk_thumbprint(&claims.cnf.jwk).map_err(|e| {
+        let jkt = crate::jkt::jwk_thumbprint(claims.cnf.jwk()).map_err(|e| {
             TokenError::InvalidClaim(match e {
                 crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
                 crate::jkt::JktError::MissingField(f) => f,
@@ -273,13 +273,13 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         // None of its error variants indicate key material that parses
         // structurally but is cryptographically invalid -- that case is
         // caught below by `DecodingKey::from_jwk`.
-        let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(RequestContextError::StructurallyIncompleteKey)?;
+        let jkt = crate::jkt::jwk_thumbprint(cnf.jwk()).map_err(RequestContextError::StructurallyIncompleteKey)?;
         // jwk_thumbprint already validates presence of the type-specific
         // required members (crv/x/y for EC, crv/x for OKP, n/e for RSA); a
         // JWK that reaches this point but still cannot be parsed into a
         // `jsonwebtoken` decoding key is invalid key material, not merely
         // structurally incomplete.
-        let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk.clone())
+        let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk().clone())
             .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::Deserialize(e)))?;
         DecodingKey::from_jwk(&parsed_jwk)
             .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::DecodingKey(e)))?;

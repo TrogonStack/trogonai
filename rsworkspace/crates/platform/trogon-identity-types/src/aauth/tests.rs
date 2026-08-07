@@ -44,9 +44,8 @@ fn agent_claims_serde() {
         iat: 100,
         exp: 200,
         dwk: DWK_AGENT.into(),
-        cnf: Cnf {
-            jwk: serde_json::json!({"kty": "EC", "crv": "P-256", "x": "X", "y": "Y"}),
-        },
+        cnf: Cnf::public(serde_json::json!({"kty": "EC", "crv": "P-256", "x": "X", "y": "Y"}))
+            .expect("test fixture is a public jwk"),
         ps: Some("https://ps.example".into()),
     };
     let j = serde_json::to_value(&c).unwrap();
@@ -243,7 +242,7 @@ fn split_header_skips_empty_segments_from_stray_semicolons() {
 fn cnf_public_accepts_an_ec_public_jwk() {
     let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"});
     let cnf = Cnf::public(jwk.clone()).expect("public jwk accepted");
-    assert_eq!(cnf.jwk, jwk);
+    assert_eq!(cnf.jwk(), &jwk);
 }
 
 #[test]
@@ -301,10 +300,74 @@ fn cnf_public_rejects_non_object_jwk() {
 }
 
 #[test]
+fn cnf_public_accepts_the_other_supported_key_types() {
+    for jwk in [
+        serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"}),
+        serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": "AAA"}),
+    ] {
+        Cnf::public(jwk.clone()).unwrap_or_else(|e| panic!("{jwk} must be accepted, got {e}"));
+    }
+}
+
+#[test]
+fn cnf_public_rejects_a_jwk_with_no_kty() {
+    let jwk = serde_json::json!({"crv": "P-256", "x": "AAA", "y": "BBB"});
+    assert_eq!(Cnf::public(jwk).unwrap_err(), CnfError::MissingKeyType);
+    let non_string = serde_json::json!({"kty": 256, "x": "AAA"});
+    assert_eq!(Cnf::public(non_string).unwrap_err(), CnfError::MissingKeyType);
+}
+
+#[test]
+fn cnf_public_rejects_a_key_type_it_cannot_check() {
+    // Anything outside the three known types would sail past the member scan
+    // with nothing verified, so it is refused rather than waved through.
+    let jwk = serde_json::json!({"kty": "ec", "crv": "P-256", "x": "AAA", "y": "BBB"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::UnsupportedKeyType { kty: "ec".to_owned() }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_a_jwk_missing_a_member_its_key_type_needs() {
+    // The failure this guards is silent at issuance: the token verifies, and
+    // every proof of possession against it fails at the resource instead.
+    let cases = [
+        (serde_json::json!({"kty": "EC", "x": "AAA", "y": "BBB"}), "EC", "crv"),
+        (serde_json::json!({"kty": "EC", "crv": "P-256", "y": "BBB"}), "EC", "x"),
+        (serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA"}), "EC", "y"),
+        (serde_json::json!({"kty": "RSA", "e": "AQAB"}), "RSA", "n"),
+        (serde_json::json!({"kty": "RSA", "n": "AAA"}), "RSA", "e"),
+        (serde_json::json!({"kty": "OKP", "x": "AAA"}), "OKP", "crv"),
+        (serde_json::json!({"kty": "OKP", "crv": "Ed25519"}), "OKP", "x"),
+    ];
+    for (jwk, kty, member) in cases {
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::UnusablePublicMember { kty, member },
+            "{kty} without {member} must be refused"
+        );
+    }
+}
+
+#[test]
+fn cnf_public_rejects_a_required_member_that_is_present_but_unusable() {
+    // Present-but-empty and present-but-not-a-string are the same defect as
+    // absent: nothing a verifier can build a key from.
+    for x in [serde_json::json!(""), serde_json::json!(0), serde_json::json!(null)] {
+        let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": x, "y": "BBB"});
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::UnusablePublicMember { kty: "EC", member: "x" }
+        );
+    }
+}
+
+#[test]
 fn cnf_still_deserializes_a_peer_supplied_confirmation_claim() {
     // The verifier read path must stay lenient: rejecting a peer's own `cnf`
     // at parse time is not this type's call, and the guard is issuer-side.
     let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB","d":"THEIRS"}}"#;
     let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
-    assert!(cnf.jwk.get("d").is_some());
+    assert!(cnf.jwk().get("d").is_some());
 }

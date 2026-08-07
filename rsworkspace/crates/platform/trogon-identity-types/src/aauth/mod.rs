@@ -28,38 +28,41 @@ pub mod person_server;
 pub use delegation::Act;
 
 /// Public-key confirmation claim (`cnf`) as carried in `aa-agent+jwt`.
+///
+/// Issuer-side construction goes through [`Cnf::public`], which is the only
+/// constructor; the field is private so no caller can assemble one around it.
+/// Deserialization is deliberately exempt: a peer's inbound `cnf` is parsed as
+/// sent, because what a peer put in its own confirmation claim is not this
+/// type's call to reject, and verification reads only the public parameters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cnf {
     /// Embedded JWK. Stored as serde_json::Value so this crate avoids depending on
     /// `jsonwebtoken`. Verifier-side parses into `jsonwebtoken::jwk::Jwk`.
-    pub jwk: Value,
+    jwk: Value,
 }
 
 impl Cnf {
     /// Build a confirmation claim, refusing any JWK that carries private or
-    /// symmetric key material.
+    /// symmetric key material, or that is missing the public members its key
+    /// type needs to be usable.
     ///
-    /// Issuers must go through this rather than constructing [`Cnf`]
-    /// literally. A `cnf` claim is embedded in a signed token that is handed
-    /// to resource servers by design, so a caller that passes a full keypair
-    /// instead of its public half publishes the private key to every party
-    /// that sees the token, with a valid signature over it. That mistake is
-    /// easy to make (JWK serializers include `d` unless asked not to) and
-    /// impossible to walk back once a token is issued, which is why it is
-    /// checked at the one place every issuer passes through.
-    ///
-    /// The field stays public so the verifier side can still deserialize an
-    /// inbound token: what a peer chose to put in its own `cnf` is not ours
-    /// to reject here, and verification reads only the public parameters.
+    /// Two failures are guarded here and they fail in opposite directions. A
+    /// caller that passes a full keypair instead of its public half publishes
+    /// the private key to every party that sees the token, with a valid
+    /// signature over it; that mistake is easy to make (JWK serializers
+    /// include `d` unless asked not to) and impossible to walk back once a
+    /// token is issued. A caller that passes an incomplete JWK instead mints a
+    /// token whose confirmation key can never satisfy a proof of possession,
+    /// so every request bound to it fails at the resource with no indication
+    /// that the fault is in the token rather than the request.
     pub fn public(jwk: Value) -> Result<Self, CnfError> {
         let Some(members) = jwk.as_object() else {
             return Err(CnfError::NotAnObject);
         };
-        if members
-            .get("kty")
-            .and_then(Value::as_str)
-            .is_some_and(|kty| kty.eq_ignore_ascii_case(crate::constants::KTY_OCT))
-        {
+        let Some(kty) = members.get("kty").and_then(Value::as_str) else {
+            return Err(CnfError::MissingKeyType);
+        };
+        if kty.eq_ignore_ascii_case(crate::constants::KTY_OCT) {
             return Err(CnfError::SymmetricKey);
         }
         for member in crate::constants::JWK_PRIVATE_MEMBERS {
@@ -67,7 +70,26 @@ impl Cnf {
                 return Err(CnfError::PrivateKeyMaterial { member });
             }
         }
+        let (kty, required): (&'static str, &[&'static str]) = match kty {
+            crate::constants::KTY_EC => (crate::constants::KTY_EC, &crate::constants::JWK_REQUIRED_EC_MEMBERS),
+            crate::constants::KTY_RSA => (crate::constants::KTY_RSA, &crate::constants::JWK_REQUIRED_RSA_MEMBERS),
+            crate::constants::KTY_OKP => (crate::constants::KTY_OKP, &crate::constants::JWK_REQUIRED_OKP_MEMBERS),
+            other => {
+                return Err(CnfError::UnsupportedKeyType { kty: other.to_owned() });
+            }
+        };
+        for member in required {
+            if members.get(*member).and_then(Value::as_str).is_none_or(str::is_empty) {
+                return Err(CnfError::UnusablePublicMember { kty, member });
+            }
+        }
         Ok(Self { jwk })
+    }
+
+    /// The embedded JWK, as it will appear in the issued token.
+    #[must_use]
+    pub fn jwk(&self) -> &Value {
+        &self.jwk
     }
 }
 
@@ -76,10 +98,16 @@ impl Cnf {
 pub enum CnfError {
     #[error("cnf.jwk must be a JSON object")]
     NotAnObject,
+    #[error("cnf.jwk must name a kty")]
+    MissingKeyType,
     #[error("cnf.jwk must not be a symmetric key")]
     SymmetricKey,
     #[error("cnf.jwk carries private key material in member {member:?}")]
     PrivateKeyMaterial { member: &'static str },
+    #[error("cnf.jwk names key type {kty:?}, which cannot carry a confirmation key")]
+    UnsupportedKeyType { kty: String },
+    #[error("cnf.jwk of type {kty} needs a non-empty string member {member:?}")]
+    UnusablePublicMember { kty: &'static str, member: &'static str },
 }
 
 /// Claims for an `aa-agent+jwt`. Issued by an Agent Provider at bootstrap.

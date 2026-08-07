@@ -15,6 +15,19 @@ pub const JWK_PRIVATE_MEMBERS: [&str; 8] = ["d", "p", "q", "dp", "dq", "qi", "ot
 /// possession, and publishing it in a token discloses it.
 pub const KTY_OCT: &str = "oct";
 
+/// `kty` values an issuer may put in a confirmation claim.
+pub const KTY_EC: &str = "EC";
+pub const KTY_RSA: &str = "RSA";
+pub const KTY_OKP: &str = "OKP";
+
+/// Public members each key type requires before the JWK can verify anything.
+/// EC per RFC 7518 Section 6.2.1, RSA per Section 6.3.1, OKP per RFC 8037
+/// Section 2. A confirmation key missing any of these is syntactically a JWK
+/// but cannot be used to check a proof of possession.
+pub const JWK_REQUIRED_EC_MEMBERS: [&str; 3] = ["crv", "x", "y"];
+pub const JWK_REQUIRED_RSA_MEMBERS: [&str; 2] = ["n", "e"];
+pub const JWK_REQUIRED_OKP_MEMBERS: [&str; 2] = ["crv", "x"];
+
 /// `typ` header value identifying an agent identity token.
 pub const TYP_AGENT: &str = "aa-agent+jwt";
 /// `typ` header value identifying a resource challenge token.

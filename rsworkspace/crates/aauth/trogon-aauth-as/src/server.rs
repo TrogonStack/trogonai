@@ -273,7 +273,7 @@ fn cnf_jwk_for(verified: &VerifiedRequest) -> serde_json::Value {
         .as_ref()
         .unwrap_or(&verified.agent_claims)
         .cnf
-        .jwk
+        .jwk()
         .clone()
 }
 

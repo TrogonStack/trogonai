@@ -264,7 +264,7 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> NatsPopVerifier<R, C, S> {
         // and a later valid retry from the same agent is wrongly rejected as
         // a replay.
         let canonical = envelope.canonical_base(req.subject, req.reply, &verified_agent.jkt);
-        verify_signature_with_jwk(&verified_agent.claims.cnf.jwk, canonical.as_bytes(), sig)?;
+        verify_signature_with_jwk(verified_agent.claims.cnf.jwk(), canonical.as_bytes(), sig)?;
 
         // Replay protection only fires once the signature has authenticated
         // the request. Derive the TTL using saturating arithmetic and floor

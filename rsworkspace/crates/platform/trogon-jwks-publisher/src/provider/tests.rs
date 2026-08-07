@@ -182,7 +182,7 @@ fn mint_produces_header_and_claims_per_spec() {
     assert_eq!(claims.iss, "https://ap.example");
     assert_eq!(claims.sub, sub.as_str());
     assert_eq!(claims.dwk, DWK_AGENT);
-    assert_eq!(claims.cnf.jwk, test_agent_jwk());
+    assert_eq!(claims.cnf.jwk(), &test_agent_jwk());
     assert_eq!(claims.ps.as_deref(), Some("https://ps.example"));
     assert!(claims.exp > claims.iat);
     assert_eq!(claims.exp - claims.iat, 3600);
