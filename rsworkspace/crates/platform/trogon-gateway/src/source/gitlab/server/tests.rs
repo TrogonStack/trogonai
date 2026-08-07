@@ -168,6 +168,7 @@ async fn provision_creates_stream() {
     assert_eq!(streams[0].name, "GITLAB");
     assert_eq!(streams[0].subjects, vec!["gitlab.>"]);
     assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    assert_eq!(streams[0].duplicate_window, Duration::from_secs(300));
 }
 
 #[tokio::test]
@@ -216,6 +217,14 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
             .headers
             .get(async_nats::header::NATS_MESSAGE_ID)
             .map(|v| v.as_str()),
+        Some("msg_123"),
+    );
+    assert_eq!(
+        messages[0].headers.get(NATS_HEADER_WEBHOOK_ID).map(|v| v.as_str()),
+        Some("msg_123"),
+    );
+    assert_eq!(
+        messages[0].headers.get(NATS_HEADER_IDEMPOTENCY_KEY).map(|v| v.as_str()),
         Some("idem-key-test"),
     );
 }
@@ -359,7 +368,7 @@ async fn empty_body_publishes_successfully() {
 }
 
 #[tokio::test]
-async fn missing_idempotency_key_skips_dedup_id() {
+async fn dedup_id_comes_from_signed_webhook_id_not_idempotency_key() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
 
@@ -385,9 +394,17 @@ async fn missing_idempotency_key_skips_dedup_id() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let messages = publisher.published_messages();
+    assert_eq!(
+        messages[0]
+            .headers
+            .get(async_nats::header::NATS_MESSAGE_ID)
+            .map(|v| v.as_str()),
+        Some("msg_123"),
+        "dedup must not depend on the unsigned Idempotency-Key header"
+    );
     assert!(
-        messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID).is_none(),
-        "should not set Nats-Msg-Id when Idempotency-Key is absent"
+        messages[0].headers.get(NATS_HEADER_IDEMPOTENCY_KEY).is_none(),
+        "absent Idempotency-Key is forwarded as absent"
     );
 }
 

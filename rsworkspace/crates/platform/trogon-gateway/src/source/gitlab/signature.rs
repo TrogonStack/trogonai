@@ -5,7 +5,7 @@ use super::GitLabSigningToken;
 use super::constants::HEADER_NAMES;
 use crate::source::standard_webhooks;
 
-pub use crate::source::standard_webhooks::SignatureError;
+pub use crate::source::standard_webhooks::{SignatureError, VerifiedWebhook};
 #[cfg(test)]
 pub use crate::source::standard_webhooks::{WebhookId, WebhookTimestamp};
 
@@ -14,7 +14,7 @@ pub fn verify(
     body: &[u8],
     signing_token: &GitLabSigningToken,
     timestamp_tolerance: NonZeroDuration,
-) -> Result<(), SignatureError> {
+) -> Result<VerifiedWebhook, SignatureError> {
     standard_webhooks::verify(
         headers,
         body,
@@ -22,7 +22,6 @@ pub fn verify(
         timestamp_tolerance,
         HEADER_NAMES,
     )
-    .map(|_| ())
 }
 
 #[cfg(test)]

@@ -5,8 +5,8 @@ use super::GitLabSigningToken;
 use super::config::GitlabConfig;
 use super::constants::{
     HEADER_EVENT, HEADER_EVENT_UUID, HEADER_IDEMPOTENCY_KEY, HEADER_INSTANCE, HEADER_WEBHOOK_UUID, HTTP_BODY_SIZE_MAX,
-    NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_INSTANCE, NATS_HEADER_REJECT_REASON,
-    NATS_HEADER_WEBHOOK_UUID,
+    NATS_HEADER_EVENT, NATS_HEADER_EVENT_UUID, NATS_HEADER_IDEMPOTENCY_KEY, NATS_HEADER_INSTANCE,
+    NATS_HEADER_REJECT_REASON, NATS_HEADER_WEBHOOK_ID, NATS_HEADER_WEBHOOK_UUID,
 };
 use super::signature;
 use axum::{
@@ -40,12 +40,15 @@ impl RejectReason {
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
     subject_prefix: &NatsToken,
+    verified: &signature::VerifiedWebhook,
     reason: RejectReason,
     body: Bytes,
     ack_timeout: NonZeroDuration,
 ) -> StatusCode {
     let subject = format!("{subject_prefix}.unroutable");
     let mut headers = async_nats::HeaderMap::new();
+    headers.insert(async_nats::header::NATS_MESSAGE_ID, verified.webhook_id.as_str());
+    headers.insert(NATS_HEADER_WEBHOOK_ID, verified.webhook_id.as_str());
     headers.insert(NATS_HEADER_REJECT_REASON, reason.as_str());
 
     let outcome = publisher
@@ -84,6 +87,7 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Re
     js.get_or_create_stream(async_nats::jetstream::stream::Config {
         name: config.stream_name.as_str().to_owned(),
         subjects: vec![format!("{}.>", config.subject_prefix)],
+        duplicate_window: config.timestamp_tolerance.into(),
         max_age: config.stream_max_age.into(),
         ..Default::default()
     })
@@ -135,16 +139,20 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
-    if let Err(e) = signature::verify(&headers, &body, &state.signing_token, state.timestamp_tolerance) {
-        warn!(reason = %e, "GitLab webhook signature validation failed");
-        return StatusCode::UNAUTHORIZED;
-    }
+    let verified = match signature::verify(&headers, &body, &state.signing_token, state.timestamp_tolerance) {
+        Ok(verified) => verified,
+        Err(e) => {
+            warn!(reason = %e, "GitLab webhook signature validation failed");
+            return StatusCode::UNAUTHORIZED;
+        }
+    };
 
     let Some(raw_event) = headers.get(HEADER_EVENT).and_then(|v| v.to_str().ok()) else {
         warn!("Missing X-GitLab-Event header");
         return publish_unroutable(
             &state.publisher,
             &state.subject_prefix,
+            &verified,
             RejectReason::MissingEventHeader,
             body,
             state.nats_ack_timeout,
@@ -163,6 +171,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
         return publish_unroutable(
             &state.publisher,
             &state.subject_prefix,
+            &verified,
             RejectReason::InvalidEventToken,
             body,
             state.nats_ack_timeout,
@@ -187,8 +196,14 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     let mut nats_headers = async_nats::HeaderMap::new();
     nats_headers.insert(NATS_HEADER_EVENT, raw_event);
-    if let Some(id) = idempotency_key {
-        nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, id);
+    // Dedup on the signed `webhook-id`, not on `idempotency-key`. Both
+    // identify a delivery, but only the former is inside the Standard
+    // Webhooks signed content, so it is the only one an attacker replaying a
+    // captured request cannot vary to defeat the JetStream duplicate window.
+    nats_headers.insert(async_nats::header::NATS_MESSAGE_ID, verified.webhook_id.as_str());
+    nats_headers.insert(NATS_HEADER_WEBHOOK_ID, verified.webhook_id.as_str());
+    if let Some(key) = idempotency_key {
+        nats_headers.insert(NATS_HEADER_IDEMPOTENCY_KEY, key);
     }
     if let Some(uuid) = webhook_uuid {
         nats_headers.insert(NATS_HEADER_WEBHOOK_UUID, uuid);
