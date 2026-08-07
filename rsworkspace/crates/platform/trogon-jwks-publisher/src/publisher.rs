@@ -7,7 +7,7 @@
 //! host service mounts at its own root so `GET /.well-known/{dwk}` resolves
 //! against a configured set of `JwkSet`s.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -54,6 +54,10 @@ pub enum PublisherError {
     UnknownDwk(String),
     #[error("dwk filename {0:?} was registered more than once")]
     DuplicateDwk(String),
+    #[error("dwk {dwk:?} publishes key id {kid:?} more than once")]
+    DuplicateKeyId { dwk: String, kid: String },
+    #[error("dwk {dwk:?} publishes {keys} keys and at least one omits `kid`; only a single-key set may omit it")]
+    MissingKeyId { dwk: String, keys: usize },
     #[error("invalid EC PKCS8 PEM for kid {kid:?}: {source}")]
     InvalidPem {
         kid: String,
@@ -69,6 +73,44 @@ fn known_dwk_filenames() -> [&'static str; 4] {
 
 fn is_known_dwk(dwk: &str) -> bool {
     known_dwk_filenames().contains(&dwk)
+}
+
+/// A published set is selected from by `kid`: [`JwkSet::find`] matches the JWT
+/// header's `kid` against `common.key_id`, and `trogon-aauth-verify`'s
+/// `pick_jwk` does the same, falling back to the sole compatible key only when
+/// the set holds exactly one.
+///
+/// That makes two shapes unusable. Keys sharing a `kid` resolve silently to
+/// whichever copy is enumerated first, so a rotation that reuses the previous
+/// `kid` keeps every consumer pinned to the retired key. A key with no `kid`
+/// cannot be selected at all once the set holds more than one, which is exactly
+/// the state a rotation overlap creates. Both fail at the consumer, remotely,
+/// with nothing to see on this side, so they are refused at startup instead --
+/// the same reason the dwk filename is validated here rather than left to
+/// surface as a 404.
+fn validate_selectable_by_kid(dwk: &str, set: &JwkSet) -> Result<(), PublisherError> {
+    let multi_key = set.keys.len() > 1;
+    let mut seen: HashSet<&str> = HashSet::new();
+    for jwk in &set.keys {
+        match jwk.common.key_id.as_deref() {
+            Some(kid) => {
+                if !seen.insert(kid) {
+                    return Err(PublisherError::DuplicateKeyId {
+                        dwk: dwk.to_owned(),
+                        kid: kid.to_owned(),
+                    });
+                }
+            }
+            None if multi_key => {
+                return Err(PublisherError::MissingKeyId {
+                    dwk: dwk.to_owned(),
+                    keys: set.keys.len(),
+                });
+            }
+            None => {}
+        }
+    }
+    Ok(())
 }
 
 /// Build a public EC P-256 JWK from a PKCS8 PEM private key, mirroring
@@ -136,6 +178,7 @@ impl JwksPublisherConfigBuilder {
         if self.entries.contains_key(&dwk) {
             return Err(PublisherError::DuplicateDwk(dwk));
         }
+        validate_selectable_by_kid(&dwk, &set)?;
         self.entries.insert(dwk, set);
         Ok(self)
     }

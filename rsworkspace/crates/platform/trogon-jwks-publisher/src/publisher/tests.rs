@@ -97,3 +97,67 @@ fn cache_max_age_renders_header_value() {
     assert_eq!(max_age.header_value(), "max-age=300");
     assert_eq!(max_age.as_secs(), 300);
 }
+
+fn keyed(kid: &str) -> Jwk {
+    jwk_from_ec_pkcs8_pem(TEST_PEM, kid).expect("valid pem")
+}
+
+fn unkeyed() -> Jwk {
+    let mut jwk = keyed("k1");
+    jwk.common.key_id = None;
+    jwk
+}
+
+#[test]
+fn builder_accepts_a_rotation_overlap_with_distinct_key_ids() {
+    let cfg = JwksPublisherConfigBuilder::new(CacheMaxAge::new(60))
+        .with_jwk_set(
+            DWK_AGENT,
+            JwkSet {
+                keys: vec![keyed("current"), keyed("previous")],
+            },
+        )
+        .expect("distinct kids stay selectable")
+        .build();
+    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").keys.len(), 2);
+}
+
+#[test]
+fn builder_rejects_a_set_that_repeats_a_key_id() {
+    let err = JwksPublisherConfigBuilder::new(CacheMaxAge::new(60))
+        .with_jwk_set(
+            DWK_AGENT,
+            JwkSet {
+                keys: vec![keyed("same"), keyed("same")],
+            },
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&err, PublisherError::DuplicateKeyId { kid, .. } if kid.as_str() == "same"),
+        "{err}"
+    );
+}
+
+#[test]
+fn builder_rejects_a_multi_key_set_holding_an_unidentified_key() {
+    let err = JwksPublisherConfigBuilder::new(CacheMaxAge::new(60))
+        .with_jwk_set(
+            DWK_AGENT,
+            JwkSet {
+                keys: vec![keyed("current"), unkeyed()],
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(&err, PublisherError::MissingKeyId { keys: 2, .. }), "{err}");
+}
+
+#[test]
+fn builder_allows_a_lone_key_without_a_key_id() {
+    // `pick_jwk` resolves a one-key set without consulting `kid`, and RFC 7517
+    // section 4.5 leaves the member optional, so this shape stays publishable.
+    let cfg = JwksPublisherConfigBuilder::new(CacheMaxAge::new(60))
+        .with_jwk_set(DWK_AGENT, JwkSet { keys: vec![unkeyed()] })
+        .expect("a sole key needs no kid")
+        .build();
+    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").keys.len(), 1);
+}
