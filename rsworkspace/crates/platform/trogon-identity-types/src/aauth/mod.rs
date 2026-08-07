@@ -35,6 +35,53 @@ pub struct Cnf {
     pub jwk: Value,
 }
 
+impl Cnf {
+    /// Build a confirmation claim, refusing any JWK that carries private or
+    /// symmetric key material.
+    ///
+    /// Issuers must go through this rather than constructing [`Cnf`]
+    /// literally. A `cnf` claim is embedded in a signed token that is handed
+    /// to resource servers by design, so a caller that passes a full keypair
+    /// instead of its public half publishes the private key to every party
+    /// that sees the token, with a valid signature over it. That mistake is
+    /// easy to make (JWK serializers include `d` unless asked not to) and
+    /// impossible to walk back once a token is issued, which is why it is
+    /// checked at the one place every issuer passes through.
+    ///
+    /// The field stays public so the verifier side can still deserialize an
+    /// inbound token: what a peer chose to put in its own `cnf` is not ours
+    /// to reject here, and verification reads only the public parameters.
+    pub fn public(jwk: Value) -> Result<Self, CnfError> {
+        let Some(members) = jwk.as_object() else {
+            return Err(CnfError::NotAnObject);
+        };
+        if members
+            .get("kty")
+            .and_then(Value::as_str)
+            .is_some_and(|kty| kty.eq_ignore_ascii_case(crate::constants::KTY_OCT))
+        {
+            return Err(CnfError::SymmetricKey);
+        }
+        for member in crate::constants::JWK_PRIVATE_MEMBERS {
+            if members.contains_key(member) {
+                return Err(CnfError::PrivateKeyMaterial { member });
+            }
+        }
+        Ok(Self { jwk })
+    }
+}
+
+/// Rejections from [`Cnf::public`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum CnfError {
+    #[error("cnf.jwk must be a JSON object")]
+    NotAnObject,
+    #[error("cnf.jwk must not be a symmetric key")]
+    SymmetricKey,
+    #[error("cnf.jwk carries private key material in member {member:?}")]
+    PrivateKeyMaterial { member: &'static str },
+}
+
 /// Claims for an `aa-agent+jwt`. Issued by an Agent Provider at bootstrap.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentClaims {

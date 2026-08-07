@@ -4,6 +4,17 @@
 /// Maximum number of entries allowed in an `act` delegation chain.
 pub const MAX_ACT_CHAIN_DEPTH: usize = 8;
 
+/// JWK members that carry private key material, across every key type AAuth
+/// can encounter: `d` for EC (RFC 7518 Section 6.2.2), RSA (Section 6.3.2),
+/// and OKP (RFC 8037 Section 2); the remaining RSA CRT parameters; and `k`,
+/// which *is* the secret for a symmetric `oct` key (Section 6.4.1).
+pub const JWK_PRIVATE_MEMBERS: [&str; 8] = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
+
+/// `kty` value for a symmetric key. Never valid in a confirmation claim: a
+/// proof-of-possession key that both parties must hold is not a proof of
+/// possession, and publishing it in a token discloses it.
+pub const KTY_OCT: &str = "oct";
+
 /// `typ` header value identifying an agent identity token.
 pub const TYP_AGENT: &str = "aa-agent+jwt";
 /// `typ` header value identifying a resource challenge token.

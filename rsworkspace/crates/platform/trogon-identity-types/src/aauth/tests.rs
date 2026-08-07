@@ -238,3 +238,73 @@ fn split_header_skips_empty_segments_from_stray_semicolons() {
     let raw = "requirement=clarification;;  ;";
     assert_eq!(Requirement::parse(raw), Requirement::Clarification);
 }
+
+#[test]
+fn cnf_public_accepts_an_ec_public_jwk() {
+    let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"});
+    let cnf = Cnf::public(jwk.clone()).expect("public jwk accepted");
+    assert_eq!(cnf.jwk, jwk);
+}
+
+#[test]
+fn cnf_public_rejects_ec_private_scalar() {
+    // The mistake this guards: serializing a keypair instead of its public
+    // half puts `d` in a token that is handed to every resource server.
+    let jwk = serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB", "d": "SECRET"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::PrivateKeyMaterial { member: "d" }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_rsa_crt_parameters() {
+    for member in ["p", "q", "dp", "dq", "qi", "oth"] {
+        let mut jwk = serde_json::json!({"kty": "RSA", "n": "AAA", "e": "AQAB"});
+        jwk[member] = serde_json::json!("SECRET");
+        assert_eq!(
+            Cnf::public(jwk).unwrap_err(),
+            CnfError::PrivateKeyMaterial { member },
+            "{member} must be refused"
+        );
+    }
+}
+
+#[test]
+fn cnf_public_rejects_okp_private_scalar() {
+    let jwk = serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": "AAA", "d": "SECRET"});
+    assert_eq!(
+        Cnf::public(jwk).unwrap_err(),
+        CnfError::PrivateKeyMaterial { member: "d" }
+    );
+}
+
+#[test]
+fn cnf_public_rejects_symmetric_keys_by_kty() {
+    // Checked before the member scan so an `oct` key is refused even when
+    // `k` is absent: there is no public half of a symmetric key to carry.
+    let jwk = serde_json::json!({"kty": "oct"});
+    assert_eq!(Cnf::public(jwk).unwrap_err(), CnfError::SymmetricKey);
+    let upper = serde_json::json!({"kty": "OCT", "k": "SECRET"});
+    assert_eq!(Cnf::public(upper).unwrap_err(), CnfError::SymmetricKey);
+}
+
+#[test]
+fn cnf_public_rejects_non_object_jwk() {
+    for value in [
+        serde_json::json!("not-a-jwk"),
+        serde_json::json!(null),
+        serde_json::json!([{"kty": "EC"}]),
+    ] {
+        assert_eq!(Cnf::public(value).unwrap_err(), CnfError::NotAnObject);
+    }
+}
+
+#[test]
+fn cnf_still_deserializes_a_peer_supplied_confirmation_claim() {
+    // The verifier read path must stay lenient: rejecting a peer's own `cnf`
+    // at parse time is not this type's call, and the guard is issuer-side.
+    let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","x":"AAA","y":"BBB","d":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+    assert!(cnf.jwk.get("d").is_some());
+}
