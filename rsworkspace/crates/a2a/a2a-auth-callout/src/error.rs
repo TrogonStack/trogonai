@@ -22,6 +22,23 @@ pub enum CredentialError {
     /// The verifier ran and refused the credential material itself.
     #[error("credential verification failed: {0}")]
     InvalidCredentials(String),
+    /// The token nominated an `alg` outside the verifier's allowlist. Kept
+    /// apart from [`Self::InvalidCredentials`] because an algorithm-confusion
+    /// attempt is a different signal from a merely bad signature, and a
+    /// rejection counter should be able to tell them apart without matching
+    /// on message text.
+    #[error("credential verification failed: unsupported token algorithm {algorithm:?}")]
+    UnsupportedTokenAlgorithm { algorithm: jsonwebtoken::Algorithm },
+    /// The JWK named by `kid` verified as well-formed but its own `alg`,
+    /// `use`, or `key_ops` do not permit verifying signatures with the
+    /// token's algorithm.
+    #[error(
+        "credential verification failed: JWK for kid {kid:?} is not published for verifying {algorithm:?} signatures"
+    )]
+    JwkNotPublishedForVerification {
+        kid: String,
+        algorithm: jsonwebtoken::Algorithm,
+    },
 }
 
 impl From<CredentialError> for AuthCalloutError {

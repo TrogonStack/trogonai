@@ -288,17 +288,13 @@ impl JwksOidcVerifier {
             .find(kid)
             .ok_or_else(|| CredentialError::InvalidCredentials(format!("no JWK for kid {kid}")))?;
         if !OIDC_ALLOWED_ALGORITHMS.contains(&header.alg) {
-            return Err(CredentialError::InvalidCredentials(format!(
-                "unsupported OIDC token algorithm {:?}",
-                header.alg
-            ))
-            .into());
+            return Err(CredentialError::UnsupportedTokenAlgorithm { algorithm: header.alg }.into());
         }
         if !jwk_permits_verification_with(jwk, header.alg) {
-            return Err(CredentialError::InvalidCredentials(format!(
-                "JWK for kid {kid} is not published for verifying {:?} signatures",
-                header.alg
-            ))
+            return Err(CredentialError::JwkNotPublishedForVerification {
+                kid: kid.clone(),
+                algorithm: header.alg,
+            }
             .into());
         }
         let auds: Vec<&str> = self.expected_id_token_audiences.iter().map(String::as_str).collect();

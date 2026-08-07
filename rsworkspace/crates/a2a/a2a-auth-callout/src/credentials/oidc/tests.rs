@@ -355,10 +355,10 @@ async fn verify_fails_with_non_rsa_jwk() {
     let jwks = JwkSet { keys: vec![ec_jwk] };
     let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
 
-    // Craft a fake JWT whose kid matches the EC JWK; decode_header will succeed
-    // but decoding_key_for_jwk must reject the non-RSA key.
-    // We can't sign with the EC key easily, but we can make a header-only token
-    // that references the EC kid.  decode_header just parses the header.
+    // The kid resolves to the EC JWK, but ES256 is outside the deployment's
+    // allow-list, so the token is refused on its algorithm before the key it
+    // points at is ever considered. A header-only token is enough: nothing
+    // past decode_header runs.
     let header_b64 =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"ES256","kid":"ec-kid","typ":"JWT"}"#);
     let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
@@ -368,10 +368,10 @@ async fn verify_fails_with_non_rsa_jwk() {
         .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
         .await
         .unwrap_err();
-    assert!(matches!(
-        err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
-    ));
+    let AuthCalloutError::CredentialVerification(CredentialError::UnsupportedTokenAlgorithm { algorithm }) = err else {
+        panic!("expected UnsupportedTokenAlgorithm, got {err:?}");
+    };
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::ES256);
 }
 
 #[tokio::test]
@@ -473,13 +473,10 @@ async fn verify_rejects_algorithm_outside_the_allowlist() {
         .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
         .await
         .unwrap_err();
-    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
-        panic!("expected InvalidCredentials, got {err:?}");
+    let AuthCalloutError::CredentialVerification(CredentialError::UnsupportedTokenAlgorithm { algorithm }) = err else {
+        panic!("expected UnsupportedTokenAlgorithm, got {err:?}");
     };
-    assert!(
-        msg.contains("unsupported OIDC token algorithm"),
-        "unexpected message: {msg}"
-    );
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::HS256);
 }
 
 #[tokio::test]
@@ -498,10 +495,13 @@ async fn verify_rejects_a_jwk_published_for_encryption() {
         .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
         .await
         .unwrap_err();
-    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
-        panic!("expected InvalidCredentials, got {err:?}");
+    let AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { kid, algorithm }) =
+        err
+    else {
+        panic!("expected JwkNotPublishedForVerification, got {err:?}");
     };
-    assert!(msg.contains("not published for verifying"), "unexpected message: {msg}");
+    assert_eq!(kid, "test-kid");
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::RS256);
 }
 
 #[tokio::test]
@@ -521,7 +521,7 @@ async fn verify_rejects_a_jwk_whose_key_ops_omit_verify() {
         .unwrap_err();
     assert!(matches!(
         err,
-        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+        AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { .. })
     ));
 }
 
@@ -540,10 +540,13 @@ async fn verify_rejects_a_jwk_pinned_to_a_different_rsa_algorithm() {
         .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
         .await
         .unwrap_err();
-    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
-        panic!("expected InvalidCredentials, got {err:?}");
+    let AuthCalloutError::CredentialVerification(CredentialError::JwkNotPublishedForVerification { kid, algorithm }) =
+        err
+    else {
+        panic!("expected JwkNotPublishedForVerification, got {err:?}");
     };
-    assert!(msg.contains("not published for verifying"), "unexpected message: {msg}");
+    assert_eq!(kid, "test-kid");
+    assert_eq!(algorithm, jsonwebtoken::Algorithm::RS256);
 }
 
 #[tokio::test]
