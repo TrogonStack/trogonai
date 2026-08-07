@@ -258,6 +258,61 @@ async fn verify_rejects_stripped_body_against_covered_content_digest() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_a_parameterized_sha256_content_digest_item() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 lets any Dictionary member's Item carry parameters. They are
+    // not part of the Byte Sequence, so a peer that sends them must still
+    // interoperate rather than be read as an unsupported digest.
+    let body = br#"{"scope":"data.read"}"#;
+    let parameterized = format!("sha-256=:{}:;q=1", STANDARD.encode(Sha256::digest(body)));
+    let req = signed_body_request(&fixture, &jwt, body, parameterized);
+
+    verifier.verify(&req).await.expect("parameterized item verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resolves_a_duplicated_sha256_member_to_the_last_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 Dictionary parsing keeps the last member for a repeated key.
+    // Reading the first instead would let a peer show one digest to this
+    // verifier and a different one to every other RFC-compliant component.
+    let body = br#"{"scope":"data.read"}"#;
+    let stale = STANDARD.encode(Sha256::digest(br#"{"scope":"data.write"}"#));
+    let live = STANDARD.encode(Sha256::digest(body));
+    let duplicated = format!("sha-256=:{stale}:, sha-256=:{live}:");
+    let req = signed_body_request(&fixture, &jwt, body, duplicated);
+
+    verifier.verify(&req).await.expect("last duplicate member wins");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_when_the_last_duplicated_sha256_member_mismatches() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // The mirror of the case above: a correct leading member must not rescue
+    // a trailing one that does not match the body.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let stale = STANDARD.encode(Sha256::digest(br#"{"scope":"data.write"}"#));
+    let duplicated = format!("sha-256=:{live}:, sha-256=:{stale}:");
+    let req = signed_body_request(&fixture, &jwt, body, duplicated);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_rejects_content_digest_without_sha256_entry() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");

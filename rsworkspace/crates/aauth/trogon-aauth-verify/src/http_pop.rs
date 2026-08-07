@@ -552,18 +552,34 @@ fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
 /// value, a Structured Fields Dictionary of algorithm keys to Byte Sequences
 /// (`sha-256=:<base64>:`). Other algorithm entries are skipped rather than
 /// rejected, since a peer is free to send additional ones.
+///
+/// Two RFC 8941 Dictionary rules matter for interop and are honoured here.
+/// A member's Item may carry parameters (`sha-256=:...:;q=1`), which are not
+/// part of the Byte Sequence and are ignored. A repeated key resolves to its
+/// *last* occurrence, so the scan cannot return early: taking the first would
+/// make this verifier disagree with any RFC-compliant peer about which digest
+/// a duplicated `sha-256` member names.
+///
+/// This is a targeted reader for one Byte Sequence member, not a general
+/// Structured Fields parser. It does not model Inner Lists, and a parameter
+/// whose value is a String containing `,` or `;` would split wrongly; no
+/// parameter defined for `Content-Digest` takes such a value.
 fn parse_sha256_content_digest(raw: &str) -> Option<Vec<u8>> {
+    let mut last = None;
     for member in raw.split(',') {
-        let Some((algorithm, encoded)) = member.split_once('=') else {
+        let Some((algorithm, value)) = member.split_once('=') else {
             continue;
         };
         if !algorithm.trim().eq_ignore_ascii_case("sha-256") {
             continue;
         }
-        let inner = encoded.trim().strip_prefix(':')?.strip_suffix(':')?;
-        return decode_base64_any_alphabet(inner);
+        // The Byte Sequence ends at its closing colon; anything after that is
+        // the parameter list.
+        let value = value.trim_start();
+        let inner = value.strip_prefix(':')?.split_once(':')?.0;
+        last = Some(decode_base64_any_alphabet(inner)?);
     }
-    None
+    last
 }
 
 /// Decodes a digest that may arrive in any of the base64 alphabets seen in
