@@ -5,6 +5,11 @@
 //! (returns the safer disabled / shorter-deadline default) when the
 //! env value is missing or malformed -- callers should branch on the
 //! resulting state rather than re-parse the env at the dispatch site.
+//!
+//! [`gateway_tier3_signing_pubkey`] is the exception, and deliberately
+//! so: for a code-signing key the disabled default is *not* the safer
+//! one, so it reports a malformed value as its own state instead of
+//! folding it into "not configured".
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -34,26 +39,56 @@ pub fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
     parse_bool_flag(env, ENV_GATEWAY_AUDIT_PUBLISH)
 }
 
-/// Tier-3 wasm bundle signing public key, if configured. Returns
-/// `None` for unset / empty / unparseable values -- the gateway
-/// then refuses to verify signatures rather than half-trusting an
-/// invalid pubkey.
-pub fn gateway_tier3_signing_pubkey<E: ReadEnv>(env: &E) -> Option<Ed25519PublicKey> {
+/// What `A2A_GATEWAY_TIER3_SIGNING_PUBKEY` says about bundle signing.
+///
+/// The three states are kept distinct because two of them look alike
+/// and mean opposite things. "Unset" is an operator who never opted
+/// into signing, and unsigned bundles are the expected posture.
+/// "Invalid" is an operator who *did* opt in and mistyped the key;
+/// collapsing that into "no pubkey configured" would silently execute
+/// unverified wasm on a deployment that asked for verification.
+#[derive(Debug)]
+pub enum Tier3SigningKey {
+    /// Var unset or blank: bundle signing was never requested.
+    NotConfigured,
+    /// A usable verifying key.
+    Configured(Ed25519PublicKey),
+    /// Var set to something that is not a valid ed25519 pubkey.
+    Invalid,
+}
+
+impl Tier3SigningKey {
+    /// The key to hand the wasm substrate, or `None` when signing was
+    /// never configured. [`Self::Invalid`] has no such projection on
+    /// purpose: callers have to handle it before they can get here.
+    pub fn into_configured(self) -> Option<Ed25519PublicKey> {
+        match self {
+            Self::Configured(pubkey) => Some(pubkey),
+            Self::NotConfigured | Self::Invalid => None,
+        }
+    }
+}
+
+/// Reads the tier-3 wasm bundle signing public key.
+///
+/// Unlike the other helpers in this module, an unusable value here is
+/// not folded into the disabled default: see [`Tier3SigningKey`].
+pub fn gateway_tier3_signing_pubkey<E: ReadEnv>(env: &E) -> Tier3SigningKey {
     let Ok(raw) = env.var(ENV_GATEWAY_TIER3_SIGNING_PUBKEY) else {
-        return None;
+        return Tier3SigningKey::NotConfigured;
     };
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return None;
+        return Tier3SigningKey::NotConfigured;
     }
     match Ed25519PublicKey::from_hex(trimmed) {
-        Ok(pubkey) => Some(pubkey),
+        Ok(pubkey) => Tier3SigningKey::Configured(pubkey),
         Err(err) => {
             warn!(
                 error = %err,
-                "{ENV_GATEWAY_TIER3_SIGNING_PUBKEY} invalid; tier-3 bundle signing disabled",
+                "{ENV_GATEWAY_TIER3_SIGNING_PUBKEY} is not a valid ed25519 pubkey",
             );
-            None
+            Tier3SigningKey::Invalid
         }
     }
 }
