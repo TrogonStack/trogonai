@@ -38,7 +38,9 @@ fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, jsonwebtoken::Encodin
     let jwk = Jwk {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
-            key_operations: Some(vec![KeyOperations::Sign]),
+            // `verify`, not `sign`: this is the *public* half of the pair, and
+            // RFC 7517 section 4.3 scopes `key_ops` to what this key can do.
+            key_operations: Some(vec![KeyOperations::Verify]),
             key_id: Some("test-kid".into()),
             x509_url: None,
             x509_chain: None,
@@ -405,4 +407,179 @@ async fn oidc_verifier_trait_delegates_to_verify_internal() {
         .await
         .expect("verify via trait");
     assert_eq!(claims.sub.as_str(), "user-1");
+}
+
+/// Signs `claims` as an RS256 token naming `test-kid`, the shape every guard
+/// test below starts from before varying one thing about the JWK.
+fn rs256_token_for(issuer: &OidcIssuerUrl, enc: &jsonwebtoken::EncodingKey) -> String {
+    #[derive(Serialize)]
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let id = IdClaims {
+        sub: "user-guard".into(),
+        iss: issuer.as_str().to_owned(),
+        aud: "a2a-client".into(),
+        exp: now + 600,
+    };
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+    header.kid = Some("test-kid".into());
+    jsonwebtoken::encode(&header, &id, enc).expect("encode")
+}
+
+fn jwks_with_common(jwks: &JwkSet, mutate: impl FnOnce(&mut CommonParameters)) -> JwkSet {
+    let mut jwk = jwks.keys[0].clone();
+    mutate(&mut jwk.common);
+    JwkSet { keys: vec![jwk] }
+}
+
+#[tokio::test]
+async fn verify_rejects_algorithm_outside_the_allowlist() {
+    let rng = &mut OsRng;
+    let (jwks, _) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer.clone(), vec!["a2a-client".into()], jwks);
+
+    #[derive(Serialize)]
+    struct IdClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let id = IdClaims {
+        sub: "user-hs".into(),
+        iss: issuer.as_str().to_owned(),
+        aud: "a2a-client".into(),
+        exp: now + 600,
+    };
+    let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    header.kid = Some("test-kid".into());
+    let token =
+        jsonwebtoken::encode(&header, &id, &jsonwebtoken::EncodingKey::from_secret(b"shared")).expect("encode hs256");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(
+        msg.contains("unsupported OIDC token algorithm"),
+        "unexpected message: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_published_for_encryption() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.public_key_use = Some(PublicKeyUse::Encryption);
+        common.key_operations = None;
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(msg.contains("not published for verifying"), "unexpected message: {msg}");
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_whose_key_ops_omit_verify() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_operations = Some(vec![KeyOperations::Encrypt]);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(_))
+    ));
+}
+
+#[tokio::test]
+async fn verify_rejects_a_jwk_pinned_to_a_different_rsa_algorithm() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::PS512);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(msg)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(msg.contains("not published for verifying"), "unexpected message: {msg}");
+}
+
+#[tokio::test]
+async fn verify_accepts_a_jwk_that_declares_the_asserted_algorithm() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.key_algorithm = Some(jsonwebtoken::jwk::KeyAlgorithm::RS256);
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let claims = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .expect("declared alg matches the asserted one");
+    assert_eq!(claims.sub.as_str(), "user-guard");
+}
+
+#[tokio::test]
+async fn verify_accepts_a_jwk_that_declares_no_purpose_at_all() {
+    let rng = &mut OsRng;
+    let (jwks, enc) = test_jwks_and_encoding_key(rng);
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let token = rs256_token_for(&issuer, &enc);
+    let jwks = jwks_with_common(&jwks, |common| {
+        common.public_key_use = None;
+        common.key_operations = None;
+        common.key_algorithm = None;
+    });
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["a2a-client".into()], jwks);
+
+    let claims = verifier
+        .verify_internal(&BearerToken::new(token), &AudienceAccount::new("acct"))
+        .await
+        .expect("absent RFC 7517 members stay permissive");
+    assert_eq!(claims.sub.as_str(), "user-guard");
 }
