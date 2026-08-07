@@ -145,9 +145,15 @@ Standing across the boundary is therefore bounded by two things only: the
 assertion TTL, which is kept short and is the primary lever, and deleting the
 binding of Decision 3, which propagates asynchronously through the IdP's own
 caches and is not immediate. Both are measured and neither is presented as
-equivalent to in-platform revocation. Offboarding an agent must revoke on both
-planes; revoking only in-platform leaves a window in which an already-issued
-external resource token still works.
+equivalent to in-platform revocation.
+
+Both levers bound *future* exchanges: they stop the agent obtaining a new
+external resource token. Neither reaches a token the external provider has
+already issued, which stays valid until its own expiry or until that provider
+revokes it, and no action on this platform shortens that. Offboarding an agent
+must therefore revoke on both planes, and the residual window after the
+platform-side revocation is the lifetime of the already-issued external token,
+not the assertion TTL.
 
 ### 6. Assertion validity is scoped, and delegated authority is not implied
 
