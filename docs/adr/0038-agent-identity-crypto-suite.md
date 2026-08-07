@@ -155,8 +155,43 @@ Decision 3, never as a replacement for the Ed25519 root:
   is a governance question, recorded as a stance in
   [ADR#0037](./0037-agent-identity-governance.md), not a decision this ADR
   makes on its own.
+- **RSA-2048 with RS256**, only where an external identity provider's
+  federation surface refuses everything else. This trigger is already met in
+  practice rather than hypothetical: Microsoft Entra's workload identity
+  federation supports only RS256-signed issuers, and additionally requires
+  that the published JWK set contain *nothing but* RSA signing keys, so EC
+  and OKP keys cannot merely sit alongside an added RSA one. Every algorithm
+  Decision 1 and the two profiles above name is excluded by that constraint.
+  This profile is adopted for one purpose only, signing assertions presented
+  to a third-party IdP, and it never becomes an agent's root anchor; the
+  "only RSA keys" requirement also forces a *separate* published key set
+  rather than an extra key in the AAuth well-known documents, which is why
+  the surface itself is decided in
+  [ADR#0053](./0053-external-oidc-federation-surface.md) rather than here.
 
-### 5. Post-quantum path
+### 5. Where the implementation currently stands, and where it diverges
+
+Decision 1 names Ed25519 as the default and the two curves above as
+conditional. The shipped code does not match that yet, and the divergence is
+recorded here rather than left to be discovered:
+
+- `trogon-aauth-verify` admits `ES256 | ES384 | EdDSA`, which is the
+  allowlist Decision 3 requires and a superset of the default. Its PoP path
+  derives the algorithm from the confirmed key's own `kty`/`crv` rather than
+  from the presented header, so algorithm confusion is structurally
+  unavailable there, not merely filtered.
+- `trogon-jwks-publisher` is P-256 only. `jwk_from_ec_pkcs8_pem` hardcodes
+  the curve and the Agent Provider mints with `ES256`. The Agent Provider can
+  therefore issue the *conditional* profile and cannot issue the declared
+  default. Closing this means adding Ed25519 issuance to the publisher, not
+  changing the decision above: P-256 issuance stays supported under its
+  hardware-custody trigger.
+
+Nothing about this divergence is load-bearing for the anchor, precisely
+because Decision 3 makes every key and signature name its own algorithm. It
+is recorded as a gap to close, not as an amendment to the default.
+
+### 6. Post-quantum path
 
 Every elliptic-curve scheme named above, Ed25519, P-256, and secp256k1 alike,
 falls to Shor's algorithm on a cryptographically relevant quantum computer;
@@ -182,6 +217,19 @@ threat timeline, not an emergency response to an already-broken algorithm.
   presumes one fixed curve in the identifier itself, are rejected. Identifiers
   and keys in this platform are always algorithm-tagged, so an identifier
   never has to be reinterpreted if the algorithm it names is later retired.
+- The verifier's allowlist is now enforced on three axes, not one: the key's
+  material (`kty`/`crv`) must match the algorithm's family, and where a
+  publisher declares `use`, `key_ops`, or `alg` on a JWK
+  ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) sections 4.2 to 4.4)
+  those declarations are honored, so a key published for encryption or pinned
+  to a different algorithm is not conscripted into signature verification
+  because its curve happens to line up. Absent members stay permissive, since
+  they are optional in the RFC and a federated deployment resolves key sets
+  this platform did not publish.
+- Adopting the RSA profile of Decision 4 means operating a second published
+  key set with its own rotation, because the IdP constraint that triggers it
+  forbids mixing key types in one document. That cost is the reason the
+  profile is conditional rather than default.
 - Private key custody is unaffected by this ADR and remains on the security
   plane defined by [ADR#0023](./0023-secret-management-and-key-custody-direction.md)
   and [ADR#0033](./0033-two-tier-key-custody-product-model.md). This ADR
@@ -197,8 +245,10 @@ threat timeline, not an emergency response to an already-broken algorithm.
 - [ADR#0036: Agent Self-Certifying Cryptographic Identity](./0036-agent-self-certifying-identity.md)
 - [ADR#0037: Agent Identity Governance](./0037-agent-identity-governance.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
+- [ADR#0053: External OIDC Federation Surface for Agent Identity](./0053-external-oidc-federation-surface.md)
 - [RFC 6979: Deterministic Usage of DSA and ECDSA](https://www.rfc-editor.org/rfc/rfc6979)
 - [RFC 7515: JSON Web Signature (JWS)](https://www.rfc-editor.org/rfc/rfc7515)
+- [RFC 7517: JSON Web Key (JWK)](https://www.rfc-editor.org/rfc/rfc7517)
 - [RFC 7638: JSON Web Key (JWK) Thumbprint](https://www.rfc-editor.org/rfc/rfc7638)
 - [RFC 8032: Edwards-Curve Digital Signature Algorithm (EdDSA)](https://www.rfc-editor.org/rfc/rfc8032)
 - [RFC 8037: CFRG Elliptic Curve Diffie-Hellman and Signatures in JOSE](https://www.rfc-editor.org/rfc/rfc8037)

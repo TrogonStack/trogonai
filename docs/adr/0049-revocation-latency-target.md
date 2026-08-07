@@ -49,6 +49,13 @@ in dashboards.
 - The cache TTL plus jitter (at most 330 seconds) is the hard upper bound on
   staleness when the event path fails entirely; the alert on the event path
   exists precisely so the backstop is never the operative mechanism.
+- The target is scoped to credentials this platform resolves. It does not
+  extend to standing that has been federated to an external identity
+  provider, which never consults this platform's revocation state; that
+  boundary is bounded by assertion TTL plus the remote provider's own cache
+  and is decided in
+  [ADR#0053](./0053-external-oidc-federation-surface.md). An offboarding that
+  must hold on both planes is not complete when this histogram says it is.
 - The numbers are working values. They are revisited once production stream
   metrics exist, and any change lands as an amendment to this ADR.
 

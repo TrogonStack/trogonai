@@ -58,3 +58,4 @@ future implementation work.
 - [ADR#0050: Signed Proof-of-Possession as the Strongly Recommended Caller Authentication](./0050-signed-first-caller-authentication.md)
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
 - [ADR#0052: Cloud KMS Auto-Unseal Is Mandatory for Production OpenBao](./0052-cloud-kms-production-seal.md)
+- [ADR#0053: External OIDC Federation Surface for Agent Identity (Draft)](./0053-external-oidc-federation-surface.md)
