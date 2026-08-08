@@ -168,6 +168,40 @@ async fn provision_creates_stream() {
     assert_eq!(streams[0].name, "GITLAB");
     assert_eq!(streams[0].subjects, vec!["gitlab.>"]);
     assert_eq!(streams[0].max_age, Duration::from_secs(3600));
+    assert_eq!(streams[0].duplicate_window, Duration::from_secs(300));
+}
+
+#[tokio::test]
+async fn provision_widens_the_dedup_window_on_an_already_provisioned_stream() {
+    let _guard = tracing_guard();
+    let js = MockJetStreamContext::new();
+    // A deployment that provisioned GITLAB before the dedup window was paired
+    // with the signature tolerance: JetStream's own default, not ours. The
+    // replica count and storage tier are an operator's, set out of band.
+    js.get_or_create_stream(async_nats::jetstream::stream::Config {
+        name: "GITLAB".to_owned(),
+        duplicate_window: Duration::from_secs(120),
+        num_replicas: 3,
+        storage: async_nats::jetstream::stream::StorageType::Memory,
+        max_bytes: 1_024,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    provision(&js, &test_config()).await.unwrap();
+
+    let streams = js.created_streams();
+    assert_eq!(streams.len(), 1, "reconciled in place rather than duplicated");
+    assert_eq!(streams[0].name, "GITLAB");
+    assert_eq!(streams[0].duplicate_window, Duration::from_secs(300));
+    assert_eq!(streams[0].num_replicas, 3, "operator-set replica count survives");
+    assert_eq!(
+        streams[0].storage,
+        async_nats::jetstream::stream::StorageType::Memory,
+        "operator-set storage tier survives"
+    );
+    assert_eq!(streams[0].max_bytes, 1_024, "operator-set limit survives");
 }
 
 #[tokio::test]
@@ -216,6 +250,14 @@ async fn valid_webhook_publishes_to_nats_and_returns_200() {
             .headers
             .get(async_nats::header::NATS_MESSAGE_ID)
             .map(|v| v.as_str()),
+        Some("msg_123"),
+    );
+    assert_eq!(
+        messages[0].headers.get(NATS_HEADER_WEBHOOK_ID).map(|v| v.as_str()),
+        Some("msg_123"),
+    );
+    assert_eq!(
+        messages[0].headers.get(NATS_HEADER_IDEMPOTENCY_KEY).map(|v| v.as_str()),
         Some("idem-key-test"),
     );
 }
@@ -359,7 +401,7 @@ async fn empty_body_publishes_successfully() {
 }
 
 #[tokio::test]
-async fn missing_idempotency_key_skips_dedup_id() {
+async fn dedup_id_comes_from_signed_webhook_id_not_idempotency_key() {
     let _guard = tracing_guard();
     let publisher = MockJetStreamPublisher::new();
 
@@ -385,9 +427,17 @@ async fn missing_idempotency_key_skips_dedup_id() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     let messages = publisher.published_messages();
+    assert_eq!(
+        messages[0]
+            .headers
+            .get(async_nats::header::NATS_MESSAGE_ID)
+            .map(|v| v.as_str()),
+        Some("msg_123"),
+        "dedup must not depend on the unsigned Idempotency-Key header"
+    );
     assert!(
-        messages[0].headers.get(async_nats::header::NATS_MESSAGE_ID).is_none(),
-        "should not set Nats-Msg-Id when Idempotency-Key is absent"
+        messages[0].headers.get(NATS_HEADER_IDEMPOTENCY_KEY).is_none(),
+        "absent Idempotency-Key is forwarded as absent"
     );
 }
 

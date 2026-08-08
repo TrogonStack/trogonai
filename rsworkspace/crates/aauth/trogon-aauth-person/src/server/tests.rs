@@ -50,9 +50,7 @@ fn mint_agent_jwt(fixture: &KeyFixture, iss: &str, sub: &str, kid: &str) -> Stri
         iat: now - 5,
         exp: now + 600,
         dwk: "aauth-agent.json".to_string(),
-        cnf: Cnf {
-            jwk: fixture.jwk.clone(),
-        },
+        cnf: Cnf::public(fixture.jwk.clone()).expect("test fixture is a public jwk"),
         ps: None,
     };
     let mut header = Header::new(Algorithm::ES256);
@@ -891,9 +889,8 @@ async fn respond_to_clarification_on_terminal_pending_returns_gone() {
             iat: 0,
             exp: 1000,
             dwk: "aauth-agent.json".to_string(),
-            cnf: Cnf {
-                jwk: serde_json::json!({"kty": "EC"}),
-            },
+            cnf: Cnf::public(serde_json::json!({"kty": "EC", "crv": "P-256", "x": "AAA", "y": "BBB"}))
+                .expect("test fixture is a public jwk"),
             ps: None,
         },
         trogon_identity_types::aauth::ResourceClaims {

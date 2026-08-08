@@ -235,10 +235,11 @@ pub enum PersonServerUrlError {
 /// public confirmation key.
 pub struct AgentTokenRequest {
     pub sub: AgentIdentifier,
-    /// Agent's public JWK, embedded verbatim into `cnf.jwk` per RFC 7800.
-    /// Kept as `serde_json::Value` to match `Cnf::jwk`'s type -- this crate
-    /// does not validate JWK shape beyond what the caller already produced
-    /// (e.g. via `trogon-aauth-sdk`'s public key derivation).
+    /// Agent's public JWK, embedded into `cnf.jwk` per RFC 7800. Kept as
+    /// `serde_json::Value` to match `Cnf::jwk`'s type; [`Cnf::public`]
+    /// rejects private and symmetric key material at mint time, but the
+    /// remaining shape is whatever the caller produced (e.g. via
+    /// `trogon-aauth-sdk`'s public key derivation).
     pub agent_jwk: serde_json::Value,
     pub ttl: TokenTtl,
     pub ps: Option<PersonServerUrl>,
@@ -251,6 +252,8 @@ pub enum ProviderError {
     Encode(#[source] jsonwebtoken::errors::Error),
     #[error("system clock is before unix epoch")]
     ClockBeforeEpoch,
+    #[error("confirmation key rejected: {0}")]
+    Cnf(#[from] trogon_identity_types::aauth::CnfError),
 }
 
 /// Agent Provider: mints `aa-agent+jwt` tokens under a fixed signing key,
@@ -288,7 +291,7 @@ impl AgentProvider {
             iat,
             exp,
             dwk: DWK_AGENT.to_string(),
-            cnf: Cnf { jwk: req.agent_jwk },
+            cnf: Cnf::public(req.agent_jwk)?,
             ps: req.ps.map(PersonServerUrl::into_inner),
         };
 

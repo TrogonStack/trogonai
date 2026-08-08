@@ -80,7 +80,7 @@ pub fn mint_agent_jwt(
         "iat": now - 5,
         "exp": now + 600,
         "dwk": DWK_AGENT,
-        "cnf": Cnf { jwk: agent_jwk.clone() },
+        "cnf": Cnf::public(agent_jwk.clone()).expect("test fixture is a public jwk"),
     });
     if let Some(parent) = parent_agent {
         claims["parent_agent"] = serde_json::Value::String(parent.to_string());

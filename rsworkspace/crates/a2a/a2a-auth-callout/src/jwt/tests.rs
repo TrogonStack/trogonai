@@ -417,3 +417,11 @@ fn ensure_fresh_rejects_not_yet_valid_token() {
     let err = token.ensure_fresh().unwrap_err();
     assert!(matches!(err, JwtError::Decode(ref m) if m.contains("not yet valid")));
 }
+
+#[test]
+fn minted_user_jwt_debug_does_not_leak_the_token() {
+    let minted = MintedUserJwt::new("hhh.ppp.sss").expect("valid shape");
+    let dbg = format!("{minted:?}");
+    assert!(!dbg.contains("ppp"), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+}

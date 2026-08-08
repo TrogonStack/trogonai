@@ -94,6 +94,10 @@ These do not change the genesis anchor and are added when needed:
   replicated substrate (relays, a DID method, a transparency log) so parties
   outside this system can resolve it. Until then the agent's event stream is
   the authoritative key record.
+  [ADR#0053](./0053-external-oidc-federation-surface.md) settles the narrower
+  external-verifier case with an OIDC issuer and JWKS, which is what
+  non-AAuth parties actually consume; it does not close this layer, because
+  resolving the *identifier* is the part that still needs a DID method.
 - **Key rotation**: a later signed event authorized by the current key, with
   the identifier held stable by the resolution layer above. Pure self-certifying
   identifiers are immutable, so rotation and resolution arrive together.
@@ -129,5 +133,6 @@ These do not change the genesis anchor and are added when needed:
 - [ADR#0037: Agent Identity Governance: Decentralized Verification under Governed Authority](./0037-agent-identity-governance.md)
 - [ADR#0038: Agent Identity Cryptographic Suite and Crypto-Agility](./0038-agent-identity-crypto-suite.md)
 - [ADR#0039: Self-Authenticating Event Provenance](./0039-self-authenticating-event-provenance.md)
+- [ADR#0053: External OIDC Federation Surface for Agent Identity](./0053-external-oidc-federation-surface.md)
 - [Buzz: Nostr-based agent identity](https://github.com/block/buzz)
 - [ADR index](./index.md)

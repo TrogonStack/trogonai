@@ -41,3 +41,11 @@ fn display_redacts_value() {
     let header = CallerJwtHeaderValue::parse("a.b.c").unwrap();
     assert_eq!(header.to_string(), "<redacted>");
 }
+
+#[test]
+fn debug_does_not_leak_the_token() {
+    let header = CallerJwtHeaderValue::parse("hhh.ppp.sss").unwrap();
+    let dbg = format!("{header:?}");
+    assert!(!dbg.contains("ppp"), "{dbg}");
+    assert!(dbg.contains("<redacted>"), "{dbg}");
+}

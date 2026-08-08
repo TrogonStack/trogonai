@@ -129,9 +129,7 @@ pub fn mint_auth_jwt(
         consent_id: inputs.consent_id.map(str::to_string),
         resource: inputs.resource.map(str::to_string),
         act: inputs.act.clone(),
-        cnf: Some(Cnf {
-            jwk: inputs.cnf_jwk.clone(),
-        }),
+        cnf: Some(Cnf::public(inputs.cnf_jwk.clone())?),
     };
 
     let mut header = Header::new(alg);

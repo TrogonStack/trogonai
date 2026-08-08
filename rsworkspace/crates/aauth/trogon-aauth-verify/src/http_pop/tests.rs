@@ -170,37 +170,239 @@ async fn verify_accepts_ed25519_agent_presenter() {
     assert!(matches!(result, VerifiedPresenter::Agent(_)));
 }
 
+/// Signs a request carrying `body` with a matching, covered `Content-Digest`.
+fn signed_body_request(
+    fixture: &crate::test_support::EcFixture,
+    jwt: &str,
+    body: &[u8],
+    digest: String,
+) -> HttpRequest {
+    let mut req = base_request(&signature_key_header(jwt));
+    req.body = Some(body.to_vec());
+    req.headers.push((headers::CONTENT_DIGEST.to_string(), digest));
+    let mut components = REQUIRED_COMPONENTS.to_vec();
+    components.push("content-digest");
+    sign_request(fixture, &mut req, 1000, &components);
+    req
+}
+
 #[tokio::test(flavor = "current_thread")]
-async fn verify_rejects_tampered_body_content_digest_not_recomputed() {
+async fn verify_accepts_body_matching_content_digest() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
     let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
     let verifier = verifier_at(jwks, 1000, "resource.example");
 
-    let body = br#"{"scope":"data.read"}"#.to_vec();
-    let digest = crate::nats_pop::content_digest_sha256(&body);
-    let mut req = base_request(&signature_key_header(&jwt));
-    req.body = Some(body);
-    req.headers.push((headers::CONTENT_DIGEST.to_string(), digest));
-    let mut components = REQUIRED_COMPONENTS.to_vec();
-    components.push("content-digest");
-    sign_request(&fixture, &mut req, 1000, &components);
+    let body = br#"{"scope":"data.read"}"#;
+    let digest = crate::nats_pop::content_digest_sha256(body);
+    let req = signed_body_request(&fixture, &jwt, body, digest);
 
-    // Tamper with the body after signing without updating content-digest.
-    // The digest header itself is covered and unmodified, so the signature
-    // still verifies -- catching a body/digest mismatch is the caller's
-    // responsibility (recompute and compare), since #covered-components only
-    // requires that content-digest be *covered*, not that this crate
-    // recompute it against a body it is never given as a signed component.
+    let result = verifier.verify(&req).await.expect("matching digest verifies");
+    assert!(matches!(result, VerifiedPresenter::Agent(_)));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_rfc9530_padded_base64_content_digest() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 Byte Sequences are standard padded base64, which is what a
+    // conformant third-party client sends; our own emitter uses URL-safe
+    // unpadded. Both encode the same digest and both must be accepted.
+    let body = br#"{"scope":"data.read"}"#;
+    let padded = format!("sha-256=:{}:", STANDARD.encode(Sha256::digest(body)));
+    let req = signed_body_request(&fixture, &jwt, body, padded);
+
+    verifier.verify(&req).await.expect("padded base64 digest verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_tampered_body_against_covered_content_digest() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let body = br#"{"scope":"data.read"}"#;
+    let digest = crate::nats_pop::content_digest_sha256(body);
+    let mut req = signed_body_request(&fixture, &jwt, body, digest);
+
+    // Swap the body after signing, leaving the covered digest header intact.
+    // The signature still verifies over the untouched header, so only
+    // recomputing the digest against the body catches this.
     req.body = Some(br#"{"scope":"data.write"}"#.to_vec());
-    let recomputed = crate::nats_pop::content_digest_sha256(req.body.as_ref().unwrap());
-    let supplied = req.header(headers::CONTENT_DIGEST).unwrap().to_string();
-    assert_ne!(recomputed, supplied, "tampering must be visible via digest mismatch");
 
-    verifier
-        .verify(&req)
-        .await
-        .expect("signature over untouched digest header still verifies");
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_stripped_body_against_covered_content_digest() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    let body = br#"{"scope":"data.read"}"#;
+    let digest = crate::nats_pop::content_digest_sha256(body);
+    let mut req = signed_body_request(&fixture, &jwt, body, digest);
+
+    // Dropping the body entirely falls out of the has-a-body branch, so a
+    // coverage-only check would let it through.
+    req.body = None;
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_a_parameterized_sha256_content_digest_item() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 lets any Dictionary member's Item carry parameters. They are
+    // not part of the Byte Sequence, so a peer that sends them must still
+    // interoperate rather than be read as an unsupported digest.
+    let body = br#"{"scope":"data.read"}"#;
+    let parameterized = format!("sha-256=:{}:;q=1", STANDARD.encode(Sha256::digest(body)));
+    let req = signed_body_request(&fixture, &jwt, body, parameterized);
+
+    verifier.verify(&req).await.expect("parameterized item verifies");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_a_content_digest_carrying_a_bare_key_member() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 spells a Dictionary member with no `=` as the Boolean true, so
+    // one carries no Byte Sequence to compare a body against. Reading past it
+    // keeps an unknown member from displacing the `sha-256` beside it.
+    let body = br#"{"scope":"data.read"}"#;
+    let with_bare_key = format!("unixsum, sha-256=:{}:", STANDARD.encode(Sha256::digest(body)));
+    let req = signed_body_request(&fixture, &jwt, body, with_bare_key);
+
+    verifier.verify(&req).await.expect("a bare-key member is stepped over");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_bare_sha256_member_trailing_a_readable_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // A trailing bare `sha-256` is the Boolean true, and last-wins hands the
+    // key to it: an RFC-compliant peer is left with no digest to check. Keeping
+    // the earlier Byte Sequence would let a sender show this verifier a body it
+    // has agreed to and every other component nothing at all.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let displaced = format!("sha-256=:{live}:, sha-256");
+    let req = signed_body_request(&fixture, &jwt, body, displaced);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_parameterized_bare_sha256_member() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // The same displacement dressed as a parameterized member: `sha-256;q=1`
+    // splits at the parameter's `=`, so the algorithm has to be read off the
+    // key ahead of the `;` for the member to be recognised as the Boolean it is.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let displaced = format!("sha-256=:{live}:, sha-256;q=1");
+    let req = signed_body_request(&fixture, &jwt, body, displaced);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_resolves_a_duplicated_sha256_member_to_the_last_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 Dictionary parsing keeps the last member for a repeated key.
+    // Reading the first instead would let a peer show one digest to this
+    // verifier and a different one to every other RFC-compliant component.
+    let body = br#"{"scope":"data.read"}"#;
+    let stale = STANDARD.encode(Sha256::digest(br#"{"scope":"data.write"}"#));
+    let live = STANDARD.encode(Sha256::digest(body));
+    let duplicated = format!("sha-256=:{stale}:, sha-256=:{live}:");
+    let req = signed_body_request(&fixture, &jwt, body, duplicated);
+
+    verifier.verify(&req).await.expect("last duplicate member wins");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_when_the_last_duplicated_sha256_member_mismatches() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // The mirror of the case above: a correct leading member must not rescue
+    // a trailing one that does not match the body.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let stale = STANDARD.encode(Sha256::digest(br#"{"scope":"data.write"}"#));
+    let duplicated = format!("sha-256=:{live}:, sha-256=:{stale}:");
+    let req = signed_body_request(&fixture, &jwt, body, duplicated);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::ContentDigestMismatch));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_readable_sha256_member_trailing_an_unreadable_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // Last-wins ranges over the members this verifier can read. RFC 8941
+    // discards a field carrying a member that does not parse, so a `sha-256`
+    // whose Byte Sequence cannot be decoded refuses the request rather than
+    // yielding to whatever follows it. Recovering would let a sender bury an
+    // unreadable member under a trailing readable one.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let unreadable = format!("sha-256=:not base64!:, sha-256=:{live}:");
+    let req = signed_body_request(&fixture, &jwt, body, unreadable);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_content_digest_without_sha256_entry() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // Only algorithms this verifier cannot check: refused rather than
+    // skipped, since skipping is indistinguishable from no body integrity.
+    let body = br#"{"scope":"data.read"}"#;
+    let req = signed_body_request(&fixture, &jwt, body, "sha-512=:YWJj:".to_string());
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
 }
 
 #[tokio::test(flavor = "current_thread")]

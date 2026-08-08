@@ -10,7 +10,7 @@ use bytes::Bytes;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
     JetStreamContext, JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage,
-    JetStreamPublisher,
+    JetStreamPublisher, ProvisionedStreamField, reconciled_stream_config,
 };
 
 #[derive(Clone)]
@@ -37,6 +37,33 @@ impl JetStreamContext for NatsJetStreamClient {
         config: S,
     ) -> Result<jetstream::stream::Stream, async_nats::jetstream::context::CreateStreamError> {
         self.context.get_or_create_stream(config).await
+    }
+
+    async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+    ) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
+        let desired = desired.into();
+        // A lookup that fails for any reason falls through to create, which
+        // errors on a name already in use. Failing provisioning is the right
+        // outcome for a stream we could not read: the alternative is updating
+        // it from a config we never reconciled against.
+        let Ok(stream) = self.context.get_stream(&desired.name).await else {
+            self.context.create_stream(desired).await?;
+            return Ok(());
+        };
+        let live = &stream.cached_info().config;
+        let reconciled = reconciled_stream_config(live, &desired, owned);
+        // An update would send the whole config back, so a stream already
+        // holding what we declare is one we leave alone rather than one we
+        // rewrite identically: no write, no window for an operator's
+        // concurrent edit to fall into.
+        if reconciled == *live {
+            return Ok(());
+        }
+        self.context.update_stream(&reconciled).await?;
+        Ok(())
     }
 }
 

@@ -111,7 +111,7 @@ pub fn verify_auth_claims(
         .cnf
         .as_ref()
         .ok_or(VerifyResponseError::ConfirmationClaimMissing)?;
-    let token_jkt = jwk_thumbprint(&cnf.jwk).map_err(VerifyResponseError::ConfirmationKeyThumbprint)?;
+    let token_jkt = jwk_thumbprint(cnf.jwk()).map_err(VerifyResponseError::ConfirmationKeyThumbprint)?;
     let own_jkt = jwk_thumbprint(own_agent_jwk).map_err(VerifyResponseError::ConfirmationKeyThumbprint)?;
     if token_jkt != own_jkt {
         return Err(VerifyResponseError::ConfirmationKeyMismatch);

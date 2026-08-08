@@ -47,7 +47,13 @@ impl DenialCategory {
             CredentialError::UnknownAccount(_) => Self::UnknownAccount,
             CredentialError::VerifierUnavailable { .. } => Self::VerifierUnavailable,
             CredentialError::InvalidRequest(_) => Self::InvalidRequest,
-            CredentialError::InvalidCredentials(_) => Self::InvalidCredentials,
+            // The algorithm and JWK-policy rejections stay behind the same
+            // wire category as any other bad credential. The typed variants
+            // exist so this side can count them apart, not so a caller can
+            // learn which check refused it.
+            CredentialError::InvalidCredentials(_)
+            | CredentialError::UnsupportedTokenAlgorithm { .. }
+            | CredentialError::JwkNotPublishedForVerification { .. } => Self::InvalidCredentials,
         }
     }
 }

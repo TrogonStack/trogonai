@@ -573,39 +573,47 @@ async fn a_claim_that_cannot_be_read_back_takes_the_conversation_record_with_it(
 /// `ensure_is_idempotent_under_concurrent_creation` races two *identical*
 /// configs, and neither side ever takes this arm: `STREAM.CREATE` only
 /// errors when the stream that beat it has a different config, and an
-/// identical race succeeds silently on both sides. Racing a bare create
-/// against `ensure_bucket`'s own get-then-create for the same bucket name
-/// reliably loses that race instead: the bare create skips the get's extra
-/// round trip, so its differently-configured bucket already exists by the
-/// time this store's own create is rejected.
+/// identical race succeeds silently on both sides. Reaching the arm needs a
+/// differently-configured bucket to exist by the time the create runs, and
+/// which of two concurrent calls the scheduler and the server put first is
+/// not something a test gets to decide, so the halves of `ensure_bucket` are
+/// called in the order the losing interleaving would have produced.
 #[tokio::test]
 async fn a_bucket_created_with_a_different_config_between_the_get_and_the_create_is_still_opened() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;
     let bucket = "conflict".to_string();
 
-    // `ensure_bucket` is private and reachable only through `ChannelStore::ensure`,
-    // so it is called directly here to race a single bucket instead of all four.
-    let racing_create = js.create_key_value(jetstream::kv::Config {
+    // Matched rather than `expect_err`ed because a `Store` is not `Debug`.
+    let Err(missing) = js.get_key_value(&bucket).await else {
+        panic!("the bucket must be absent for the create half to be what runs next");
+    };
+    assert!(
+        is_get_key_value_not_found(&missing),
+        "expected the bucket to read as absent, got {missing:?}"
+    );
+
+    js.create_key_value(jetstream::kv::Config {
         bucket: bucket.clone(),
         history: 1,
         storage: jetstream::stream::StorageType::File,
         ..Default::default()
-    });
+    })
+    .await
+    .expect("the other replica's create must land for there to be anything to recover");
 
-    let (ours, theirs) = tokio::join!(ensure_bucket(&js, bucket.clone()), racing_create);
-
-    ours.expect("ensure_bucket must recover the bucket the race left behind");
-    theirs.expect("the racing create must succeed for there to be anything to recover");
+    create_bucket(&js, bucket.clone())
+        .await
+        .expect("create_bucket must open the bucket the replica that beat it left behind");
 
     let mut stream = js
         .get_stream(format!("KV_{bucket}"))
         .await
-        .expect("the bucket the race created must still be there");
+        .expect("the bucket the other replica created must still be there");
     let info = stream.info().await.expect("stream info");
     assert_eq!(
         info.config.max_messages_per_subject, 1,
-        "the surviving config must be the racing create's, not ensure_bucket's own attempt"
+        "the surviving config must be the winner's, not the rejected create's"
     );
 }
 
@@ -641,12 +649,12 @@ async fn a_bucket_whose_subject_space_is_already_claimed_fails_to_create() {
     );
 }
 
-/// Line 105's arm: the already-exists recovery read can itself fail. Racing
-/// a stream into existence with `max_messages_per_subject` below the minimum
-/// a real KV config ever produces (`kv_to_stream_config` floors it at 1)
-/// forces exactly that: the name conflict sends `ensure_bucket` to recover by
-/// reading the bucket back, and that read rejects what it finds as not a
-/// valid KV store rather than returning it.
+/// `create_bucket`'s already-exists arm recovers by reading the bucket back,
+/// and that read can itself fail. A stream claiming the bucket's name with
+/// `max_messages_per_subject` below the minimum a real KV config ever
+/// produces (`kv_to_stream_config` floors it at 1) forces exactly that: the
+/// name conflict sends the create off to recover, and the recovery read
+/// rejects what it finds as not a valid KV store rather than returning it.
 #[tokio::test]
 async fn a_recovery_read_that_also_fails_surfaces_as_a_bucket_read_failure() {
     let server = JetStreamTestServer::start().await;
@@ -655,19 +663,17 @@ async fn a_recovery_read_that_also_fails_surfaces_as_a_bucket_read_failure() {
 
     // Plain `create_stream`, not `create_key_value`, because the KV wrapper
     // floors `max_messages_per_subject` at 1 and could never produce this.
-    let racing_create = js.create_stream(jetstream::stream::Config {
+    js.create_stream(jetstream::stream::Config {
         name: format!("KV_{bucket}"),
         subjects: vec![format!("$KV.{bucket}.>")],
         max_messages_per_subject: 0,
         ..Default::default()
-    });
+    })
+    .await
+    .expect("the conflicting bucket must exist for there to be a recovery read to fail");
 
-    let (ours, theirs) = tokio::join!(ensure_bucket(&js, bucket.clone()), racing_create);
-
-    theirs.expect("the racing create must win for there to be a conflicting bucket to recover");
-
-    let Err(error) = ours else {
-        panic!("ensure_bucket must fail when its own recovery read also fails");
+    let Err(error) = create_bucket(&js, bucket.clone()).await else {
+        panic!("create_bucket must fail when its own recovery read also fails");
     };
     assert!(
         matches!(error, ChannelStoreError::OpenBucket { .. }),

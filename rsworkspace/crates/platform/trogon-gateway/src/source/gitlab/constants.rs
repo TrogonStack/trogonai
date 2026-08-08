@@ -16,6 +16,8 @@ pub const HEADER_IDEMPOTENCY_KEY: &str = "idempotency-key";
 pub const HEADER_INSTANCE: &str = "x-gitlab-instance";
 
 pub const NATS_HEADER_EVENT: &str = "X-GitLab-Event";
+pub const NATS_HEADER_WEBHOOK_ID: &str = "Webhook-Id";
+pub const NATS_HEADER_IDEMPOTENCY_KEY: &str = "Idempotency-Key";
 pub const NATS_HEADER_WEBHOOK_UUID: &str = "X-GitLab-Webhook-UUID";
 pub const NATS_HEADER_EVENT_UUID: &str = "X-GitLab-Event-UUID";
 pub const NATS_HEADER_INSTANCE: &str = "X-GitLab-Instance";

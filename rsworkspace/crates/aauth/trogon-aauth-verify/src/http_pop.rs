@@ -25,6 +25,17 @@
 //! - `aauth-mission` (OPTIONAL): the raw `AAuth-Mission` header field value,
 //!   required to be covered only when the request carries that header.
 //!
+//! ## Body integrity
+//!
+//! Covering `content-digest` binds the *header value* to the signature; on
+//! its own that says nothing about the bytes in `body`. Whenever the header
+//! is present this verifier therefore also recomputes SHA-256 over the
+//! request body and compares, exactly as [`crate::nats_pop`] does for its
+//! own profile. Without that second half a captured request could have its
+//! body replaced (or removed entirely, which drops it out of the
+//! has-a-body branch) while the untouched digest header kept the signature
+//! valid.
+//!
 //! `Signature-Input`, `Signature`, and `Signature-Key` are parsed only in the
 //! single-member Dictionary shape the draft's examples use throughout
 //! (`sig=(...)`, `sig=:...:`, `sig=jwt;jwt="..."`) -- this verifier does not
@@ -48,7 +59,10 @@
 //! NATS PoP profile ([`crate::nats_pop`]), which mints an explicit nonce
 //! header -- the HTTP profile has none to reuse.
 
+use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD, URL_SAFE_NO_PAD};
 use jsonwebtoken::{Algorithm, DecodingKey, crypto::verify, jwk::Jwk};
+use sha2::{Digest, Sha256};
 use trogon_identity_types::aauth::headers;
 
 use crate::constants::HTTP_SECURITY_HEADERS;
@@ -159,6 +173,15 @@ pub enum HttpPopError {
     /// versa the header is covered but absent.
     #[error("content-digest header required but missing")]
     MissingContentDigest,
+    /// `Content-Digest` was present but carried no `sha-256` entry, or that
+    /// entry was not a decodable Byte Sequence. Refused rather than skipped,
+    /// because skipping an unparseable digest is indistinguishable from
+    /// having no body integrity at all.
+    #[error("content-digest header has no decodable sha-256 entry")]
+    UnsupportedContentDigest,
+    /// `Content-Digest` did not match SHA-256 over the request body.
+    #[error("content-digest does not match the request body")]
+    ContentDigestMismatch,
     /// The `AAuth-Mission` header is covered by the signature but absent
     /// from the request, or present but absent from coverage while a mission
     /// claim is expected -- see [`crate::mission`] for claim-level checks.
@@ -257,8 +280,9 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
     /// (Server)" (#verification): extracts `Signature-Key`, `Signature-Input`,
     /// `Signature`; verifies required component coverage; verifies the JWT
     /// layer of the presented token (agent or auth); verifies the HTTP
-    /// Message Signature against the token's `cnf.jwk`; and enforces
-    /// freshness plus the replay tuple from (#freshness-and-replay).
+    /// Message Signature against the token's `cnf.jwk`; recomputes
+    /// `Content-Digest` over the body; and enforces freshness plus the replay
+    /// tuple from (#freshness-and-replay).
     pub async fn verify(&self, req: &HttpRequest) -> Result<VerifiedPresenter, HttpPopError> {
         if self.max_skew_secs < 0 {
             return Err(HttpPopError::NegativeMaxSkew(self.max_skew_secs));
@@ -300,7 +324,7 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                     .verify_agent(&jwt)
                     .await
                     .map_err(HttpPopError::Agent)?;
-                let cnf_jwk = verified.claims.cnf.jwk.clone();
+                let cnf_jwk = verified.claims.cnf.jwk().clone();
                 let jkt = verified.jkt.clone();
                 (cnf_jwk, jkt, VerifiedPresenter::Agent(verified))
             }
@@ -313,19 +337,20 @@ impl<R: JwksResolver, C: TimeSource, S: ReplayStore> HttpPopVerifier<R, C, S> {
                 let cnf = verified.claims.cnf.clone().ok_or(HttpPopError::InvalidConfirmationKey(
                     InvalidConfirmationKeyError::MissingConfirmationClaim,
                 ))?;
-                let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(|e| {
+                let jkt = crate::jkt::jwk_thumbprint(cnf.jwk()).map_err(|e| {
                     HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::StructurallyIncomplete(e))
                 })?;
                 let presenter = VerifiedPresenter::Auth(VerifiedAuthPresenter {
                     auth: verified,
                     jkt: jkt.clone(),
                 });
-                (cnf.jwk, jkt, presenter)
+                (cnf.jwk().clone(), jkt, presenter)
             }
         };
 
         let base = build_signature_base(req, &parsed_input)?;
         verify_signature_with_jwk(&cnf_jwk, base.as_bytes(), &sig_b64)?;
+        verify_content_digest(req)?;
 
         let replay_key = format!(
             "http-pop:{jkt}:{}:{}:{}:{}",
@@ -500,6 +525,90 @@ fn verify_covered_components(req: &HttpRequest, components: &[String]) -> Result
     }
 
     Ok(())
+}
+
+/// Recomputes SHA-256 over the request body and compares it against the
+/// `Content-Digest` header.
+///
+/// Keyed on the header being *present* rather than on
+/// [`HttpRequest::has_body`], so that stripping the body from a captured
+/// request does not slip past by falling out of the has-a-body branch. The
+/// header cannot itself be stripped: [`verify_covered_components`] requires it
+/// to be covered whenever a body is present, and [`build_signature_base`]
+/// fails to reconstruct the base for a covered field that is missing.
+fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
+    let Some(raw) = req.header(headers::CONTENT_DIGEST) else {
+        return Ok(());
+    };
+    let supplied = parse_sha256_content_digest(raw).ok_or(HttpPopError::UnsupportedContentDigest)?;
+    let expected = Sha256::digest(req.body.as_deref().unwrap_or(&[]));
+    if supplied.as_slice() != expected.as_slice() {
+        return Err(HttpPopError::ContentDigestMismatch);
+    }
+    Ok(())
+}
+
+/// Extracts the raw `sha-256` digest bytes from an RFC 9530 `Content-Digest`
+/// value, a Structured Fields Dictionary of algorithm keys to Byte Sequences
+/// (`sha-256=:<base64>:`). Other algorithm entries are skipped rather than
+/// rejected, since a peer is free to send additional ones.
+///
+/// Two RFC 8941 Dictionary rules matter for interop and are honoured here.
+/// A member's Item may carry parameters (`sha-256=:...:;q=1`), which are not
+/// part of the Byte Sequence and are ignored. A repeated key resolves to its
+/// *last* occurrence, so the scan cannot return early: taking the first would
+/// make this verifier disagree with any RFC-compliant peer about which digest
+/// a duplicated `sha-256` member names.
+///
+/// Last-wins ranges over the members this reader can read. A `sha-256` member
+/// it cannot fails the whole value rather than yielding to a later one, which
+/// is what an RFC-compliant peer does too: RFC 8941 discards a field that does
+/// not parse, and a discarded `Content-Digest` leaves nothing to check the body
+/// against. Skipping ahead would instead let a sender bury a member this
+/// verifier cannot read under a trailing one it can.
+///
+/// So what a member is keyed on, not whether it carries a Byte Sequence,
+/// decides between skipping it and failing. RFC 8941 reads a member with no
+/// `=` as the Boolean true, which is a `sha-256` naming no digest once it wins
+/// last, and a peer is still free to key its own algorithms however it likes.
+///
+/// This is a targeted reader for one Byte Sequence member, not a general
+/// Structured Fields parser. It does not model Inner Lists, and a parameter
+/// whose value is a String containing `,` or `;` would split wrongly; no
+/// parameter defined for `Content-Digest` takes such a value.
+fn parse_sha256_content_digest(raw: &str) -> Option<Vec<u8>> {
+    let mut last = None;
+    for member in raw.split(',') {
+        let (key, value) = match member.split_once('=') {
+            Some((key, value)) => (key, Some(value)),
+            None => (member, None),
+        };
+        // A Boolean member's parameters sit on the key, an Item's on its value.
+        let key = key.split(';').next().unwrap_or(key);
+        if !key.trim().eq_ignore_ascii_case("sha-256") {
+            continue;
+        }
+        // The Byte Sequence ends at its closing colon; anything after that is
+        // the parameter list.
+        let value = value?.trim_start();
+        let inner = value.strip_prefix(':')?.split_once(':')?.0;
+        last = Some(decode_base64_any_alphabet(inner)?);
+    }
+    last
+}
+
+/// Decodes a digest that may arrive in any of the base64 alphabets seen in
+/// practice. RFC 8941 Byte Sequences are standard padded base64, which is
+/// what a conformant third-party client sends, while
+/// [`crate::nats_pop::content_digest_sha256`] emits URL-safe unpadded. Both
+/// have to decode to the same 32 bytes, so comparison happens on the decoded
+/// digest rather than on the header string.
+fn decode_base64_any_alphabet(encoded: &str) -> Option<Vec<u8>> {
+    STANDARD
+        .decode(encoded)
+        .or_else(|_| STANDARD_NO_PAD.decode(encoded))
+        .or_else(|_| URL_SAFE_NO_PAD.decode(encoded))
+        .ok()
 }
 
 /// Builds the RFC 9421 canonical signature base for the supported component

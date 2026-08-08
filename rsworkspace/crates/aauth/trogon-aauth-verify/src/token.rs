@@ -2,7 +2,9 @@
 
 use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
-    jwk::{AlgorithmParameters, EllipticCurve, Jwk, JwkSet},
+    jwk::{
+        AlgorithmParameters, CommonParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
+    },
 };
 use serde::Deserialize;
 use trogon_identity_types::aauth::{AgentClaims, AuthClaims, ResourceClaims, TYP_AGENT, TYP_AUTH, TYP_RESOURCE};
@@ -173,7 +175,7 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
             .await?;
         let claims: AgentClaims =
             serde_json::from_value(claims_raw.clone()).map_err(|_| TokenError::MissingClaim("agent claims"))?;
-        let jkt = crate::jkt::jwk_thumbprint(&claims.cnf.jwk).map_err(|e| {
+        let jkt = crate::jkt::jwk_thumbprint(claims.cnf.jwk()).map_err(|e| {
             TokenError::InvalidClaim(match e {
                 crate::jkt::JktError::MissingKty => "cnf.jwk.kty",
                 crate::jkt::JktError::MissingField(f) => f,
@@ -271,13 +273,13 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         // None of its error variants indicate key material that parses
         // structurally but is cryptographically invalid -- that case is
         // caught below by `DecodingKey::from_jwk`.
-        let jkt = crate::jkt::jwk_thumbprint(&cnf.jwk).map_err(RequestContextError::StructurallyIncompleteKey)?;
+        let jkt = crate::jkt::jwk_thumbprint(cnf.jwk()).map_err(RequestContextError::StructurallyIncompleteKey)?;
         // jwk_thumbprint already validates presence of the type-specific
         // required members (crv/x/y for EC, crv/x for OKP, n/e for RSA); a
         // JWK that reaches this point but still cannot be parsed into a
         // `jsonwebtoken` decoding key is invalid key material, not merely
         // structurally incomplete.
-        let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk.clone())
+        let parsed_jwk: Jwk = serde_json::from_value(cnf.jwk().clone())
             .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::Deserialize(e)))?;
         DecodingKey::from_jwk(&parsed_jwk)
             .map_err(|e| RequestContextError::InvalidKeyMaterial(InvalidKeyMaterialSourceError::DecodingKey(e)))?;
@@ -406,8 +408,62 @@ fn pick_jwk<'a>(set: &'a JwkSet, alg: Algorithm, kid: Option<&str>) -> Option<&'
     None
 }
 
+/// A JWK may verify a signature under `alg` only when its key material matches
+/// that algorithm's family *and* the key's own advertised purpose permits
+/// verification.
+///
+/// RFC 7517 makes `use` (section 4.2), `key_ops` (section 4.3), and `alg`
+/// (section 4.4) optional, so an absent member stays permissive: the AAuth
+/// draft does not require them and a federated deployment resolves JWKS
+/// documents this platform did not publish. But a publisher that *does* set
+/// them has declared what the key is for, and honoring that declaration stops
+/// a key published for encryption, or pinned to a different algorithm, from
+/// being conscripted into signature verification merely because its curve
+/// lines up.
 fn jwk_compatible_with_alg(jwk: &Jwk, alg: Algorithm) -> bool {
-    match (&jwk.algorithm, alg) {
+    jwk_purpose_permits_verification(&jwk.common)
+        && jwk_declared_alg_matches(&jwk.common, alg)
+        && jwk_material_matches_alg(&jwk.algorithm, alg)
+}
+
+/// Rejects a key whose `use` names something other than signatures, or whose
+/// `key_ops` enumerates operations without including `verify`. RFC 7517 says
+/// the two members SHOULD NOT appear together; when a publisher sets both
+/// anyway, each is checked independently and either one can reject.
+fn jwk_purpose_permits_verification(common: &CommonParameters) -> bool {
+    if let Some(public_key_use) = &common.public_key_use
+        && !matches!(public_key_use, PublicKeyUse::Signature)
+    {
+        return false;
+    }
+    if let Some(key_operations) = &common.key_operations
+        && !key_operations.iter().any(|op| matches!(op, KeyOperations::Verify))
+    {
+        return false;
+    }
+    true
+}
+
+/// Rejects a key whose own `alg` names a different algorithm than the one the
+/// JWT header claims, closing the gap where a publisher pins a key to one
+/// algorithm and a token asserts another from the same key family.
+fn jwk_declared_alg_matches(common: &CommonParameters, alg: Algorithm) -> bool {
+    let Some(declared) = common.key_algorithm else {
+        return true;
+    };
+    matches!(
+        (declared, alg),
+        (KeyAlgorithm::ES256, Algorithm::ES256)
+            | (KeyAlgorithm::ES384, Algorithm::ES384)
+            | (KeyAlgorithm::EdDSA, Algorithm::EdDSA)
+    )
+}
+
+/// The key-material check: `kty`/`crv` must be the pair the algorithm is
+/// defined over, which is what blocks cross-family confusion between the
+/// three algorithms [`parse_typ`] admits.
+fn jwk_material_matches_alg(parameters: &AlgorithmParameters, alg: Algorithm) -> bool {
+    match (parameters, alg) {
         (AlgorithmParameters::EllipticCurve(ec), Algorithm::ES256) => ec.curve == EllipticCurve::P256,
         (AlgorithmParameters::EllipticCurve(ec), Algorithm::ES384) => ec.curve == EllipticCurve::P384,
         (AlgorithmParameters::OctetKeyPair(okp), Algorithm::EdDSA) => okp.curve == EllipticCurve::Ed25519,

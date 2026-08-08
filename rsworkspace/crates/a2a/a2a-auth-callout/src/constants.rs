@@ -30,3 +30,19 @@ pub const NATS_JWT_PREFIX: &[u8] = b"eyJ";
 
 /// Default minted user JWT TTL, in seconds, for the `a2a-auth-callout` binary.
 pub const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
+
+/// Signature algorithms an inbound OIDC ID token may assert.
+///
+/// Scoped to the RSA family because [`crate::credentials::oidc`] only builds
+/// decoding keys from RSA JWK components; an allowlist that admitted anything
+/// else would name algorithms that cannot verify here anyway. The list exists
+/// so the algorithm is a deployment decision rather than something the token
+/// under verification chooses for itself.
+pub(crate) const OIDC_ALLOWED_ALGORITHMS: [jsonwebtoken::Algorithm; 6] = [
+    jsonwebtoken::Algorithm::RS256,
+    jsonwebtoken::Algorithm::RS384,
+    jsonwebtoken::Algorithm::RS512,
+    jsonwebtoken::Algorithm::PS256,
+    jsonwebtoken::Algorithm::PS384,
+    jsonwebtoken::Algorithm::PS512,
+];

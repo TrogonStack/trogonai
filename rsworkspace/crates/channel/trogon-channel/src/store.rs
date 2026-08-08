@@ -172,11 +172,17 @@ pub struct ChannelStore {
 /// through would let a momentary read failure reconfigure live storage.
 async fn ensure_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChannelStoreError> {
     match js.get_key_value(&bucket).await {
-        Ok(store) => return Ok(store),
-        Err(source) if is_get_key_value_not_found(&source) => {}
-        Err(source) => return Err(ChannelStoreError::OpenBucket { bucket, source }),
+        Ok(store) => Ok(store),
+        Err(source) if is_get_key_value_not_found(&source) => create_bucket(js, bucket).await,
+        Err(source) => Err(ChannelStoreError::OpenBucket { bucket, source }),
     }
+}
 
+/// The half of [`ensure_bucket`] that runs once the bucket has been found
+/// missing, split out so the interleaving it exists to survive can be staged
+/// rather than raced for: another replica creating the same bucket, with a
+/// config of its own, in the window this call opens.
+async fn create_bucket(js: &jetstream::Context, bucket: String) -> Result<jetstream::kv::Store, ChannelStoreError> {
     info!(bucket = %bucket, "Creating channel KV bucket");
     match js
         .create_key_value(jetstream::kv::Config {

@@ -166,8 +166,14 @@ impl SpiceDbPrincipal {
 }
 
 /// HS256 User JWT minted for bridge/gateway consumption (inner `nats.jwt` on wire responses).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct MintedUserJwt(String);
+
+impl fmt::Debug for MintedUserJwt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("MintedUserJwt").field(&"<redacted>").finish()
+    }
+}
 
 impl MintedUserJwt {
     /// Wrap a token after validating compact-JWT shape (three non-empty

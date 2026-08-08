@@ -32,7 +32,7 @@ use super::traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger,
+    JetStreamPublisher, JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
 };
 use crate::mocks::MockError;
 
@@ -210,10 +210,24 @@ impl JsDoubleAckWith for MockJsMessage {
     }
 }
 
+/// Why a [`MockJetStreamContext`] refused to provision.
+///
+/// Its own type rather than the crate's shared [`MockError`]: a test that
+/// armed `fail_next` should be able to name the refusal it asked for instead
+/// of matching on the prose of a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum MockStreamProvisionError {
+    #[error("simulated stream creation failure")]
+    Creation,
+    #[error("simulated stream reconciliation failure")]
+    Reconciliation,
+}
+
 #[derive(Clone, Debug)]
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
     should_fail: Arc<Mutex<bool>>,
+    stream_writes: Arc<Mutex<usize>>,
 }
 
 impl MockJetStreamContext {
@@ -221,6 +235,7 @@ impl MockJetStreamContext {
         Self {
             created_streams: Arc::new(Mutex::new(Vec::new())),
             should_fail: Arc::new(Mutex::new(false)),
+            stream_writes: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -228,8 +243,25 @@ impl MockJetStreamContext {
         self.created_streams.lock().unwrap().clone()
     }
 
+    /// How many times a stream config was written. A reconcile that finds the
+    /// stream already holding what the caller declares writes nothing, so it
+    /// does not count here.
+    pub fn stream_writes(&self) -> usize {
+        *self.stream_writes.lock().unwrap()
+    }
+
     pub fn fail_next(&self) {
         *self.should_fail.lock().unwrap() = true;
+    }
+
+    fn take_failure(&self) -> bool {
+        let mut flag = self.should_fail.lock().unwrap();
+        if *flag {
+            *flag = false;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -240,24 +272,49 @@ impl Default for MockJetStreamContext {
 }
 
 impl JetStreamContext for MockJetStreamContext {
-    type Error = MockError;
+    type Error = MockStreamProvisionError;
     type Stream = ();
 
-    async fn get_or_create_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), MockStreamProvisionError> {
         let config = config.into();
-        let should_fail = {
-            let mut flag = self.should_fail.lock().unwrap();
-            if *flag {
-                *flag = false;
-                true
-            } else {
-                false
-            }
-        };
-        if should_fail {
-            return Err(MockError("simulated stream creation failure".to_string()));
+        if self.take_failure() {
+            return Err(MockStreamProvisionError::Creation);
         }
         self.created_streams.lock().unwrap().push(config);
+        *self.stream_writes.lock().unwrap() += 1;
+        Ok(())
+    }
+
+    /// Reconciles into the stored config for a matching name rather than
+    /// replacing it, so a test can observe that a field the caller does not
+    /// own survives provisioning, and records no write when the reconcile
+    /// changes nothing.
+    async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+    ) -> Result<(), MockStreamProvisionError> {
+        let desired = desired.into();
+        if self.take_failure() {
+            return Err(MockStreamProvisionError::Reconciliation);
+        }
+        {
+            let mut streams = self.created_streams.lock().unwrap();
+            match streams.iter_mut().find(|existing| existing.name == desired.name) {
+                Some(existing) => {
+                    let reconciled = reconciled_stream_config(existing, &desired, owned);
+                    if reconciled == *existing {
+                        return Ok(());
+                    }
+                    *existing = reconciled;
+                }
+                None => streams.push(desired),
+            }
+        }
+        *self.stream_writes.lock().unwrap() += 1;
         Ok(())
     }
 }
