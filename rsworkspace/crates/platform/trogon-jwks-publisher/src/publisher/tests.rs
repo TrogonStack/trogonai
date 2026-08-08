@@ -137,7 +137,7 @@ fn builder_rejects_a_set_that_repeats_a_key_id() {
             &err,
             PublisherError::Unpublishable {
                 dwk,
-                source: UnpublishableJwkSet::DuplicateKeyId { kid },
+                source: PublishableJwkSetError::DuplicateKeyId { kid },
             } if dwk == DWK_AGENT && kid.as_str() == "same"
         ),
         "{err}"
@@ -153,7 +153,7 @@ fn a_set_that_repeats_a_key_id_cannot_be_built_at_all() {
     })
     .unwrap_err();
     assert!(
-        matches!(&err, UnpublishableJwkSet::DuplicateKeyId { kid } if kid.as_str() == "same"),
+        matches!(&err, PublishableJwkSetError::DuplicateKeyId { kid } if kid.as_str() == "same"),
         "{err}"
     );
 }
@@ -173,7 +173,7 @@ fn builder_rejects_a_multi_key_set_holding_an_unidentified_key() {
             &err,
             PublisherError::Unpublishable {
                 dwk,
-                source: UnpublishableJwkSet::MissingKeyId { keys: 2 },
+                source: PublishableJwkSetError::MissingKeyId { keys: 2 },
             } if dwk == DWK_AGENT
         ),
         "{err}"

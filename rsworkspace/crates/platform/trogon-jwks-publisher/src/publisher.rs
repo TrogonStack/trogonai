@@ -58,7 +58,7 @@ pub enum PublisherError {
     Unpublishable {
         dwk: String,
         #[source]
-        source: UnpublishableJwkSet,
+        source: PublishableJwkSetError,
     },
     #[error("invalid EC PKCS8 PEM for kid {kid:?}: {source}")]
     InvalidPem {
@@ -81,7 +81,7 @@ fn is_known_dwk(dwk: &str) -> bool {
 /// document a set was registered under is the registrar's context, not the
 /// set's own.
 #[derive(Debug, thiserror::Error)]
-pub enum UnpublishableJwkSet {
+pub enum PublishableJwkSetError {
     #[error("key id {kid:?} is published more than once")]
     DuplicateKeyId { kid: String },
     #[error("{keys} keys are published and at least one omits `kid`; only a single-key set may omit it")]
@@ -113,7 +113,7 @@ pub enum UnpublishableJwkSet {
 pub struct PublishableJwkSet(JwkSet);
 
 impl TryFrom<JwkSet> for PublishableJwkSet {
-    type Error = UnpublishableJwkSet;
+    type Error = PublishableJwkSetError;
 
     fn try_from(set: JwkSet) -> Result<Self, Self::Error> {
         let multi_key = set.keys.len() > 1;
@@ -122,11 +122,11 @@ impl TryFrom<JwkSet> for PublishableJwkSet {
             match jwk.common.key_id.as_deref() {
                 Some(kid) => {
                     if !seen.insert(kid) {
-                        return Err(UnpublishableJwkSet::DuplicateKeyId { kid: kid.to_owned() });
+                        return Err(PublishableJwkSetError::DuplicateKeyId { kid: kid.to_owned() });
                     }
                 }
                 None if multi_key => {
-                    return Err(UnpublishableJwkSet::MissingKeyId { keys: set.keys.len() });
+                    return Err(PublishableJwkSetError::MissingKeyId { keys: set.keys.len() });
                 }
                 None => {}
             }
