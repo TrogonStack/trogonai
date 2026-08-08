@@ -227,6 +227,7 @@ pub enum MockStreamProvisionError {
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
     should_fail: Arc<Mutex<bool>>,
+    stream_writes: Arc<Mutex<usize>>,
 }
 
 impl MockJetStreamContext {
@@ -234,11 +235,19 @@ impl MockJetStreamContext {
         Self {
             created_streams: Arc::new(Mutex::new(Vec::new())),
             should_fail: Arc::new(Mutex::new(false)),
+            stream_writes: Arc::new(Mutex::new(0)),
         }
     }
 
     pub fn created_streams(&self) -> Vec<stream::Config> {
         self.created_streams.lock().unwrap().clone()
+    }
+
+    /// How many times a stream config was written. A reconcile that finds the
+    /// stream already holding what the caller declares writes nothing, so it
+    /// does not count here.
+    pub fn stream_writes(&self) -> usize {
+        *self.stream_writes.lock().unwrap()
     }
 
     pub fn fail_next(&self) {
@@ -275,12 +284,14 @@ impl JetStreamContext for MockJetStreamContext {
             return Err(MockStreamProvisionError::Creation);
         }
         self.created_streams.lock().unwrap().push(config);
+        *self.stream_writes.lock().unwrap() += 1;
         Ok(())
     }
 
     /// Reconciles into the stored config for a matching name rather than
     /// replacing it, so a test can observe that a field the caller does not
-    /// own survives provisioning.
+    /// own survives provisioning, and records no write when the reconcile
+    /// changes nothing.
     async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
         &self,
         desired: S,
@@ -290,11 +301,20 @@ impl JetStreamContext for MockJetStreamContext {
         if self.take_failure() {
             return Err(MockStreamProvisionError::Reconciliation);
         }
-        let mut streams = self.created_streams.lock().unwrap();
-        match streams.iter_mut().find(|existing| existing.name == desired.name) {
-            Some(existing) => *existing = reconciled_stream_config(existing, &desired, owned),
-            None => streams.push(desired),
+        {
+            let mut streams = self.created_streams.lock().unwrap();
+            match streams.iter_mut().find(|existing| existing.name == desired.name) {
+                Some(existing) => {
+                    let reconciled = reconciled_stream_config(existing, &desired, owned);
+                    if reconciled == *existing {
+                        return Ok(());
+                    }
+                    *existing = reconciled;
+                }
+                None => streams.push(desired),
+            }
         }
+        *self.stream_writes.lock().unwrap() += 1;
         Ok(())
     }
 }

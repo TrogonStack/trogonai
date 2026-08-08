@@ -90,6 +90,30 @@ async fn mock_context_names_a_reconcile_refusal_apart_from_a_creation_one() {
 }
 
 #[tokio::test]
+async fn reconciling_a_stream_that_already_matches_writes_nothing() {
+    let ctx = MockJetStreamContext::new();
+    let declared = stream::Config {
+        name: "RECONCILED".to_owned(),
+        subjects: vec!["reconciled.>".to_owned()],
+        duplicate_window: Duration::from_secs(300),
+        ..Default::default()
+    };
+    let owned = [
+        ProvisionedStreamField::Subjects,
+        ProvisionedStreamField::DuplicateWindow,
+    ];
+
+    ctx.create_or_reconcile_stream(declared.clone(), &owned).await.unwrap();
+    assert_eq!(ctx.stream_writes(), 1);
+
+    // The second boot finds the stream already holding what it declares. An
+    // update would resend the whole config for nothing, and every resend is a
+    // chance to land on top of an operator's concurrent edit.
+    ctx.create_or_reconcile_stream(declared, &owned).await.unwrap();
+    assert_eq!(ctx.stream_writes(), 1);
+}
+
+#[tokio::test]
 async fn mock_publisher_records_publishes() {
     let pub_mock = MockJetStreamPublisher::new();
     let ack = pub_mock

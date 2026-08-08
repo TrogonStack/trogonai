@@ -77,6 +77,14 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
     ///
     /// [`ProvisionedStreamField`] is what separates the two, and it is a
     /// closed set precisely so a caller cannot widen its own authority.
+    ///
+    /// Implementations must write nothing when every named field already
+    /// matches what the server reports. `STREAM.UPDATE` carries the whole
+    /// config and accepts no expected-revision, so any write races an
+    /// operator editing the same stream and one of the two changes is lost.
+    /// JetStream offers no conditional form that would close that window, so
+    /// not writing is what keeps it shut, and a boot against an
+    /// already-reconciled stream is the case that actually happens.
     fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
         &self,
         desired: S,

@@ -53,7 +53,15 @@ impl JetStreamContext for NatsJetStreamClient {
             self.context.create_stream(desired).await?;
             return Ok(());
         };
-        let reconciled = reconciled_stream_config(&stream.cached_info().config, &desired, owned);
+        let live = &stream.cached_info().config;
+        let reconciled = reconciled_stream_config(live, &desired, owned);
+        // An update would send the whole config back, so a stream already
+        // holding what we declare is one we leave alone rather than one we
+        // rewrite identically: no write, no window for an operator's
+        // concurrent edit to fall into.
+        if reconciled == *live {
+            return Ok(());
+        }
         self.context.update_stream(&reconciled).await?;
         Ok(())
     }
