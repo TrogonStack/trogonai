@@ -375,6 +375,73 @@ async fn verify_fails_with_non_rsa_jwk() {
 }
 
 #[tokio::test]
+async fn verify_fails_with_a_non_rsa_jwk_reached_under_an_allowed_algorithm() {
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let ec_jwk = Jwk {
+        common: CommonParameters {
+            key_id: Some("ec-kid".into()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+            curve: jsonwebtoken::jwk::EllipticCurve::P256,
+            x: "dummyx".into(),
+            y: "dummyy".into(),
+        }),
+    };
+    let jwks = JwkSet { keys: vec![ec_jwk] };
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
+
+    // RS256 is allow-listed and the EC JWK declares no purpose of its own, so
+    // neither guard ahead of the key material refuses this token. What refuses
+    // it is the verifier's own RSA-only support, which the guards must not be
+    // allowed to mask.
+    let header_b64 = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"ec-kid","typ":"JWT"}"#);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(b"{}");
+    let fake_token = format!("{header_b64}.{payload_b64}.sig");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(message)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(message.contains("must be RSA"), "{message}");
+}
+
+#[tokio::test]
+async fn verify_fails_with_an_rsa_jwk_whose_components_do_not_decode() {
+    let issuer = OidcIssuerUrl::parse("https://issuer.example").unwrap();
+    let broken_jwk = Jwk {
+        common: CommonParameters {
+            key_id: Some("broken-kid".into()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
+            key_type: RSAKeyType::RSA,
+            n: "not base64url".into(),
+            e: "AQAB".into(),
+        }),
+    };
+    let jwks = JwkSet { keys: vec![broken_jwk] };
+    let verifier = JwksOidcVerifier::with_static_jwks(issuer, vec!["aud".into()], jwks);
+
+    let header_b64 = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"broken-kid","typ":"JWT"}"#);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(b"{}");
+    let fake_token = format!("{header_b64}.{payload_b64}.sig");
+
+    let err = verifier
+        .verify_internal(&BearerToken::new(fake_token), &AudienceAccount::new("acct"))
+        .await
+        .unwrap_err();
+    let AuthCalloutError::CredentialVerification(CredentialError::InvalidCredentials(message)) = err else {
+        panic!("expected InvalidCredentials, got {err:?}");
+    };
+    assert!(message.contains("invalid RSA JWK components"), "{message}");
+}
+
+#[tokio::test]
 async fn oidc_verifier_trait_delegates_to_verify_internal() {
     // Exercise the OidcVerifier::verify blanket impl on JwksOidcVerifier.
     let rng = &mut OsRng;
