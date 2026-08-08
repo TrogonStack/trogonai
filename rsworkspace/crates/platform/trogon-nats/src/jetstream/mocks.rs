@@ -210,6 +210,19 @@ impl JsDoubleAckWith for MockJsMessage {
     }
 }
 
+/// Why a [`MockJetStreamContext`] refused to provision.
+///
+/// Its own type rather than the crate's shared [`MockError`]: a test that
+/// armed `fail_next` should be able to name the refusal it asked for instead
+/// of matching on the prose of a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum MockStreamProvisionError {
+    #[error("simulated stream creation failure")]
+    Creation,
+    #[error("simulated stream reconciliation failure")]
+    Reconciliation,
+}
+
 #[derive(Clone, Debug)]
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
@@ -250,13 +263,16 @@ impl Default for MockJetStreamContext {
 }
 
 impl JetStreamContext for MockJetStreamContext {
-    type Error = MockError;
+    type Error = MockStreamProvisionError;
     type Stream = ();
 
-    async fn get_or_create_stream<S: Into<stream::Config> + Send>(&self, config: S) -> Result<(), MockError> {
+    async fn get_or_create_stream<S: Into<stream::Config> + Send>(
+        &self,
+        config: S,
+    ) -> Result<(), MockStreamProvisionError> {
         let config = config.into();
         if self.take_failure() {
-            return Err(MockError("simulated stream creation failure".to_string()));
+            return Err(MockStreamProvisionError::Creation);
         }
         self.created_streams.lock().unwrap().push(config);
         Ok(())
@@ -265,14 +281,14 @@ impl JetStreamContext for MockJetStreamContext {
     /// Merges into the stored config for a matching name rather than replacing
     /// it, so a test can observe that a field the caller does not own survives
     /// provisioning.
-    async fn create_or_reconcile_stream<S, F>(&self, desired: S, merge: F) -> Result<(), MockError>
+    async fn create_or_reconcile_stream<S, F>(&self, desired: S, merge: F) -> Result<(), MockStreamProvisionError>
     where
         S: Into<stream::Config> + Send,
         F: FnOnce(&mut stream::Config, &stream::Config) + Send,
     {
         let desired = desired.into();
         if self.take_failure() {
-            return Err(MockError("simulated stream creation failure".to_string()));
+            return Err(MockStreamProvisionError::Reconciliation);
         }
         let mut streams = self.created_streams.lock().unwrap();
         match streams.iter_mut().find(|existing| existing.name == desired.name) {

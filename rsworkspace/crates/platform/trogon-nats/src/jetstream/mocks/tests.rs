@@ -74,8 +74,19 @@ async fn mock_context_records_stream_creation() {
 async fn mock_context_fails_when_configured() {
     let ctx = MockJetStreamContext::new();
     ctx.fail_next();
-    let result = ctx.get_or_create_stream(stream::Config::default()).await;
-    assert!(result.is_err());
+    let err = ctx.get_or_create_stream(stream::Config::default()).await.unwrap_err();
+    assert_eq!(err, MockStreamProvisionError::Creation);
+}
+
+#[tokio::test]
+async fn mock_context_names_a_reconcile_refusal_apart_from_a_creation_one() {
+    let ctx = MockJetStreamContext::new();
+    ctx.fail_next();
+    let err = ctx
+        .create_or_reconcile_stream(stream::Config::default(), |_, _| {})
+        .await
+        .unwrap_err();
+    assert_eq!(err, MockStreamProvisionError::Reconciliation);
 }
 
 #[tokio::test]

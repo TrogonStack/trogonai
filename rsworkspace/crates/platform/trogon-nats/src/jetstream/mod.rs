@@ -46,5 +46,5 @@ pub use mocks::{
     AckKindSnapshot, AckKindValue, MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJetStreamContext,
     MockJetStreamKvClient, MockJetStreamKvStore, MockJetStreamPublishMessage, MockJetStreamPublisher,
     MockJetStreamPurger, MockJetStreamStream, MockJsMessage, MockKvEntryOutcome, MockKvGetOutcome, MockObjectStore,
-    MockPublishedOutboundMessage,
+    MockPublishedOutboundMessage, MockStreamProvisionError,
 };
