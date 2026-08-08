@@ -292,6 +292,45 @@ async fn verify_accepts_a_content_digest_carrying_a_bare_key_member() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_bare_sha256_member_trailing_a_readable_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // A trailing bare `sha-256` is the Boolean true, and last-wins hands the
+    // key to it: an RFC-compliant peer is left with no digest to check. Keeping
+    // the earlier Byte Sequence would let a sender show this verifier a body it
+    // has agreed to and every other component nothing at all.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let displaced = format!("sha-256=:{live}:, sha-256");
+    let req = signed_body_request(&fixture, &jwt, body, displaced);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_parameterized_bare_sha256_member() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // The same displacement dressed as a parameterized member: `sha-256;q=1`
+    // splits at the parameter's `=`, so the algorithm has to be read off the
+    // key ahead of the `;` for the member to be recognised as the Boolean it is.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let displaced = format!("sha-256=:{live}:, sha-256;q=1");
+    let req = signed_body_request(&fixture, &jwt, body, displaced);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_resolves_a_duplicated_sha256_member_to_the_last_one() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");

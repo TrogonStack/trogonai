@@ -567,6 +567,11 @@ fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
 /// against. Skipping ahead would instead let a sender bury a member this
 /// verifier cannot read under a trailing one it can.
 ///
+/// So what a member is keyed on, not whether it carries a Byte Sequence,
+/// decides between skipping it and failing. RFC 8941 reads a member with no
+/// `=` as the Boolean true, which is a `sha-256` naming no digest once it wins
+/// last, and a peer is still free to key its own algorithms however it likes.
+///
 /// This is a targeted reader for one Byte Sequence member, not a general
 /// Structured Fields parser. It does not model Inner Lists, and a parameter
 /// whose value is a String containing `,` or `;` would split wrongly; no
@@ -574,15 +579,18 @@ fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
 fn parse_sha256_content_digest(raw: &str) -> Option<Vec<u8>> {
     let mut last = None;
     for member in raw.split(',') {
-        let Some((algorithm, value)) = member.split_once('=') else {
-            continue;
+        let (key, value) = match member.split_once('=') {
+            Some((key, value)) => (key, Some(value)),
+            None => (member, None),
         };
-        if !algorithm.trim().eq_ignore_ascii_case("sha-256") {
+        // A Boolean member's parameters sit on the key, an Item's on its value.
+        let key = key.split(';').next().unwrap_or(key);
+        if !key.trim().eq_ignore_ascii_case("sha-256") {
             continue;
         }
         // The Byte Sequence ends at its closing colon; anything after that is
         // the parameter list.
-        let value = value.trim_start();
+        let value = value?.trim_start();
         let inner = value.strip_prefix(':')?.split_once(':')?.0;
         last = Some(decode_base64_any_alphabet(inner)?);
     }
