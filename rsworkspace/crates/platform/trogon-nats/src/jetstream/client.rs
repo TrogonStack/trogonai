@@ -10,7 +10,7 @@ use bytes::Bytes;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::traits::{
     JetStreamContext, JetStreamCreateKeyValue, JetStreamGetKeyValue, JetStreamGetStream, JetStreamPublishMessage,
-    JetStreamPublisher,
+    JetStreamPublisher, ProvisionedStreamField, reconciled_stream_config,
 };
 
 #[derive(Clone)]
@@ -39,15 +39,11 @@ impl JetStreamContext for NatsJetStreamClient {
         self.context.get_or_create_stream(config).await
     }
 
-    async fn create_or_reconcile_stream<S, F>(
+    async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
         &self,
         desired: S,
-        merge: F,
-    ) -> Result<(), async_nats::jetstream::context::CreateStreamError>
-    where
-        S: Into<stream::Config> + Send,
-        F: FnOnce(&mut stream::Config, &stream::Config) + Send,
-    {
+        owned: &[ProvisionedStreamField],
+    ) -> Result<(), async_nats::jetstream::context::CreateStreamError> {
         let desired = desired.into();
         // A lookup that fails for any reason falls through to create, which
         // errors on a name already in use. Failing provisioning is the right
@@ -57,9 +53,8 @@ impl JetStreamContext for NatsJetStreamClient {
             self.context.create_stream(desired).await?;
             return Ok(());
         };
-        let mut current = stream.cached_info().config.clone();
-        merge(&mut current, &desired);
-        self.context.update_stream(&current).await?;
+        let reconciled = reconciled_stream_config(&stream.cached_info().config, &desired, owned);
+        self.context.update_stream(&reconciled).await?;
         Ok(())
     }
 }

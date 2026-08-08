@@ -83,7 +83,7 @@ async fn mock_context_names_a_reconcile_refusal_apart_from_a_creation_one() {
     let ctx = MockJetStreamContext::new();
     ctx.fail_next();
     let err = ctx
-        .create_or_reconcile_stream(stream::Config::default(), |_, _| {})
+        .create_or_reconcile_stream(stream::Config::default(), &[ProvisionedStreamField::Subjects])
         .await
         .unwrap_err();
     assert_eq!(err, MockStreamProvisionError::Reconciliation);

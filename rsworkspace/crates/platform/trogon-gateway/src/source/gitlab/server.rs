@@ -17,7 +17,7 @@ use std::pin::Pin;
 use tracing::{info, instrument, warn};
 use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{
-    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
+    ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, ProvisionedStreamField, PublishOutcome,
 };
 use trogon_semconv::span::GITLAB_WEBHOOK;
 use trogon_std::NonZeroDuration;
@@ -87,8 +87,9 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Re
     // Reconciled rather than created-if-absent: `duplicate_window` is the
     // replay bound paired with the signature timestamp tolerance below, so a
     // stream provisioned before that pairing existed would otherwise keep
-    // JetStream's default window and leave replays live past it. The merge
-    // lists what this source owns; placement and limits stay the operator's.
+    // JetStream's default window and leave replays live past it. The listed
+    // fields are what this source owns; placement and limits stay the
+    // operator's.
     js.create_or_reconcile_stream(
         async_nats::jetstream::stream::Config {
             name: config.stream_name.as_str().to_owned(),
@@ -97,11 +98,11 @@ pub async fn provision<C: JetStreamContext>(js: &C, config: &GitlabConfig) -> Re
             max_age: config.stream_max_age.into(),
             ..Default::default()
         },
-        |current, desired| {
-            current.subjects = desired.subjects.clone();
-            current.duplicate_window = desired.duplicate_window;
-            current.max_age = desired.max_age;
-        },
+        &[
+            ProvisionedStreamField::Subjects,
+            ProvisionedStreamField::DuplicateWindow,
+            ProvisionedStreamField::MaxAge,
+        ],
     )
     .await?;
 

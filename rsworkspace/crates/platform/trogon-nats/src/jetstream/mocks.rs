@@ -32,7 +32,7 @@ use super::traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger,
+    JetStreamPublisher, JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
 };
 use crate::mocks::MockError;
 
@@ -278,21 +278,21 @@ impl JetStreamContext for MockJetStreamContext {
         Ok(())
     }
 
-    /// Merges into the stored config for a matching name rather than replacing
-    /// it, so a test can observe that a field the caller does not own survives
-    /// provisioning.
-    async fn create_or_reconcile_stream<S, F>(&self, desired: S, merge: F) -> Result<(), MockStreamProvisionError>
-    where
-        S: Into<stream::Config> + Send,
-        F: FnOnce(&mut stream::Config, &stream::Config) + Send,
-    {
+    /// Reconciles into the stored config for a matching name rather than
+    /// replacing it, so a test can observe that a field the caller does not
+    /// own survives provisioning.
+    async fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+    ) -> Result<(), MockStreamProvisionError> {
         let desired = desired.into();
         if self.take_failure() {
             return Err(MockStreamProvisionError::Reconciliation);
         }
         let mut streams = self.created_streams.lock().unwrap();
         match streams.iter_mut().find(|existing| existing.name == desired.name) {
-            Some(existing) => merge(existing, &desired),
+            Some(existing) => *existing = reconciled_stream_config(existing, &desired, owned),
             None => streams.push(desired),
         }
         Ok(())

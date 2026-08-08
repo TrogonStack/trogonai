@@ -12,6 +12,46 @@ use futures::Stream;
 use std::error::Error;
 use std::future::{Future, IntoFuture};
 
+/// A [`stream::Config`] field a service that provisions a stream is
+/// authoritative for.
+///
+/// Everything absent from this enum belongs to whoever runs the cluster:
+/// placement, storage tier, retention limits. Naming the owned fields as a
+/// closed set, rather than handing reconciliation a merge closure, is what
+/// makes the split hold -- there is no variant for `num_replicas`, so no
+/// provisioning code can write one back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisionedStreamField {
+    Subjects,
+    DuplicateWindow,
+    MaxAge,
+}
+
+impl ProvisionedStreamField {
+    fn reconcile(self, live: &mut stream::Config, declared: &stream::Config) {
+        match self {
+            Self::Subjects => live.subjects.clone_from(&declared.subjects),
+            Self::DuplicateWindow => live.duplicate_window = declared.duplicate_window,
+            Self::MaxAge => live.max_age = declared.max_age,
+        }
+    }
+}
+
+/// The config a stream should hold once the `owned` fields of `declared` are
+/// applied to `live`, leaving every other field as the server reports it.
+#[must_use]
+pub fn reconciled_stream_config(
+    live: &stream::Config,
+    declared: &stream::Config,
+    owned: &[ProvisionedStreamField],
+) -> stream::Config {
+    let mut reconciled = live.clone();
+    for field in owned {
+        field.reconcile(&mut reconciled, declared);
+    }
+    reconciled
+}
+
 pub trait JetStreamContext: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
     type Stream: Send;
@@ -22,8 +62,7 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
     ) -> impl Future<Output = Result<Self::Stream, Self::Error>> + Send;
 
     /// Create `desired` when the stream is absent; otherwise read the live
-    /// config, let `merge` copy over the fields this service is authoritative
-    /// for, and write the result back.
+    /// config, apply the fields named by `owned`, and write the result back.
     ///
     /// Two behaviours are wrong here and this method is the narrow path
     /// between them. [`Self::get_or_create_stream`] returns an existing stream
@@ -36,16 +75,13 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
     /// count, storage tier, and retention limits all roll back on the next
     /// boot.
     ///
-    /// `merge` is what separates the two. It names the fields the service
-    /// owns, and everything it does not touch stays as the server reports it.
-    fn create_or_reconcile_stream<S, F>(
+    /// [`ProvisionedStreamField`] is what separates the two, and it is a
+    /// closed set precisely so a caller cannot widen its own authority.
+    fn create_or_reconcile_stream<S: Into<stream::Config> + Send>(
         &self,
         desired: S,
-        merge: F,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send
-    where
-        S: Into<stream::Config> + Send,
-        F: FnOnce(&mut stream::Config, &stream::Config) + Send;
+        owned: &[ProvisionedStreamField],
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {

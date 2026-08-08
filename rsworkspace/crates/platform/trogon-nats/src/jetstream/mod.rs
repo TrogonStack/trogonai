@@ -38,7 +38,8 @@ pub use traits::{
     JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
     JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
     JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger, JsMessageOf, PurgeOutcome,
+    JetStreamPublisher, JetStreamSubjectPurger, JsMessageOf, ProvisionedStreamField, PurgeOutcome,
+    reconciled_stream_config,
 };
 
 #[cfg(any(test, feature = "test-support"))]
