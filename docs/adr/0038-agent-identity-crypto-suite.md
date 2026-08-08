@@ -174,8 +174,8 @@ at all, and its entry records where it lives instead:
   one issuer key able to serve many agents without becoming any of their
   anchors. The "only RSA keys" requirement additionally forces a *separate*
   published key set rather than an extra key in the AAuth well-known
-  documents, which is why the surface itself is decided in ADR#0053 rather
-  than here.
+  documents, which is why the surface itself is decided in
+  [ADR#0053](./0053-external-oidc-federation-surface.md) rather than here.
 
 ### 5. Where the implementation currently stands, and where it diverges
 
