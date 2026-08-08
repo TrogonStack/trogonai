@@ -591,7 +591,12 @@ async fn verify_accepts_a_jwk_that_declares_no_purpose_at_all() {
 fn bearer_token_debug_does_not_leak_the_assertion() {
     let token = BearerToken::new("hhh.ppp.sss");
     let dbg = format!("{token:?}");
-    assert!(!dbg.contains("ppp"), "{dbg}");
+    assert!(!dbg.contains(token.as_str()), "{dbg}");
+    // Each segment separately: a Debug that printed only the header, or only
+    // the signature, would still disclose the assertion piecewise.
+    for segment in ["hhh", "ppp", "sss"] {
+        assert!(!dbg.contains(segment), "{dbg}");
+    }
     assert!(dbg.contains("<redacted>"), "{dbg}");
     assert_eq!(token.as_str(), "hhh.ppp.sss");
 }
