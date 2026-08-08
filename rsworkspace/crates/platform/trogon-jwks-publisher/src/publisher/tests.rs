@@ -39,7 +39,7 @@ fn builder_allows_empty_jwk_set() {
         .with_jwk_set(DWK_AGENT, empty_set())
         .expect("empty jwk set is legitimate")
         .build();
-    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").keys.len(), 0);
+    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").as_jwk_set().keys.len(), 0);
 }
 
 const TEST_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgevZzL1gdAFr88hb2\nOF/2NxApJCzGCEDdfSp6VQO30hyhRANCAAQRWz+jn65BtOMvdyHKcvjBeBSDZH2r\n1RTwjmYSi9R/zpBnuQ4EiMnCqfMPWiZqB4QdbAd0E7oH50VpuZ1P087G\n-----END PRIVATE KEY-----\n";
@@ -71,7 +71,7 @@ fn builder_with_ec_pkcs8_pem_registers_single_key_set() {
         .expect("valid pem registers")
         .build();
     let set = cfg.entries.get(DWK_AGENT).expect("present");
-    assert_eq!(set.keys.len(), 1);
+    assert_eq!(set.as_jwk_set().keys.len(), 1);
 }
 
 struct UnserializableValue;
@@ -119,7 +119,7 @@ fn builder_accepts_a_rotation_overlap_with_distinct_key_ids() {
         )
         .expect("distinct kids stay selectable")
         .build();
-    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").keys.len(), 2);
+    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").as_jwk_set().keys.len(), 2);
 }
 
 #[test]
@@ -133,7 +133,27 @@ fn builder_rejects_a_set_that_repeats_a_key_id() {
         )
         .unwrap_err();
     assert!(
-        matches!(&err, PublisherError::DuplicateKeyId { kid, .. } if kid.as_str() == "same"),
+        matches!(
+            &err,
+            PublisherError::Unpublishable {
+                dwk,
+                source: UnpublishableJwkSet::DuplicateKeyId { kid },
+            } if dwk == DWK_AGENT && kid.as_str() == "same"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_set_that_repeats_a_key_id_cannot_be_built_at_all() {
+    // The registrar is not the only way in: the invariant belongs to the type,
+    // so converting the set directly refuses it just the same.
+    let err = PublishableJwkSet::try_from(JwkSet {
+        keys: vec![keyed("same"), keyed("same")],
+    })
+    .unwrap_err();
+    assert!(
+        matches!(&err, UnpublishableJwkSet::DuplicateKeyId { kid } if kid.as_str() == "same"),
         "{err}"
     );
 }
@@ -148,7 +168,16 @@ fn builder_rejects_a_multi_key_set_holding_an_unidentified_key() {
             },
         )
         .unwrap_err();
-    assert!(matches!(&err, PublisherError::MissingKeyId { keys: 2, .. }), "{err}");
+    assert!(
+        matches!(
+            &err,
+            PublisherError::Unpublishable {
+                dwk,
+                source: UnpublishableJwkSet::MissingKeyId { keys: 2 },
+            } if dwk == DWK_AGENT
+        ),
+        "{err}"
+    );
 }
 
 #[test]
@@ -159,5 +188,5 @@ fn builder_allows_a_lone_key_without_a_key_id() {
         .with_jwk_set(DWK_AGENT, JwkSet { keys: vec![unkeyed()] })
         .expect("a sole key needs no kid")
         .build();
-    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").keys.len(), 1);
+    assert_eq!(cfg.entries.get(DWK_AGENT).expect("present").as_jwk_set().keys.len(), 1);
 }

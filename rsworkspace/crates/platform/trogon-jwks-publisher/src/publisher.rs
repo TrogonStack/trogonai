@@ -54,10 +54,12 @@ pub enum PublisherError {
     UnknownDwk(String),
     #[error("dwk filename {0:?} was registered more than once")]
     DuplicateDwk(String),
-    #[error("dwk {dwk:?} publishes key id {kid:?} more than once")]
-    DuplicateKeyId { dwk: String, kid: String },
-    #[error("dwk {dwk:?} publishes {keys} keys and at least one omits `kid`; only a single-key set may omit it")]
-    MissingKeyId { dwk: String, keys: usize },
+    #[error("dwk {dwk:?} cannot be published: {source}")]
+    Unpublishable {
+        dwk: String,
+        #[source]
+        source: UnpublishableJwkSet,
+    },
     #[error("invalid EC PKCS8 PEM for kid {kid:?}: {source}")]
     InvalidPem {
         kid: String,
@@ -75,6 +77,19 @@ fn is_known_dwk(dwk: &str) -> bool {
     known_dwk_filenames().contains(&dwk)
 }
 
+/// Why a [`JwkSet`] cannot be published as it stands. Names no dwk: which
+/// document a set was registered under is the registrar's context, not the
+/// set's own.
+#[derive(Debug, thiserror::Error)]
+pub enum UnpublishableJwkSet {
+    #[error("key id {kid:?} is published more than once")]
+    DuplicateKeyId { kid: String },
+    #[error("{keys} keys are published and at least one omits `kid`; only a single-key set may omit it")]
+    MissingKeyId { keys: usize },
+}
+
+/// A [`JwkSet`] every consumer can actually select a key from.
+///
 /// A published set is selected from by `kid`: [`JwkSet::find`] matches the JWT
 /// header's `kid` against `common.key_id`, and `trogon-aauth-verify`'s
 /// `pick_jwk` does the same, falling back to the sole compatible key only when
@@ -86,31 +101,48 @@ fn is_known_dwk(dwk: &str) -> bool {
 /// cannot be selected at all once the set holds more than one, which is exactly
 /// the state a rotation overlap creates. Both fail at the consumer, remotely,
 /// with nothing to see on this side, so they are refused at startup instead --
-/// the same reason the dwk filename is validated here rather than left to
-/// surface as a 404.
-fn validate_selectable_by_kid(dwk: &str, set: &JwkSet) -> Result<(), PublisherError> {
-    let multi_key = set.keys.len() > 1;
-    let mut seen: HashSet<&str> = HashSet::new();
-    for jwk in &set.keys {
-        match jwk.common.key_id.as_deref() {
-            Some(kid) => {
-                if !seen.insert(kid) {
-                    return Err(PublisherError::DuplicateKeyId {
-                        dwk: dwk.to_owned(),
-                        kid: kid.to_owned(),
-                    });
+/// the same reason the dwk filename is checked at registration rather than left
+/// to surface as a 404.
+///
+/// Holding that as a type rather than a check run on the way past means a set
+/// reaching [`JwksPublisherConfig`] has already been through it, and an
+/// unselectable one has no way to be represented there at all. An empty set
+/// (`{"keys":[]}`) is publishable: it is a legitimate discovery state, not a
+/// misconfiguration.
+#[derive(Debug, Clone)]
+pub struct PublishableJwkSet(JwkSet);
+
+impl TryFrom<JwkSet> for PublishableJwkSet {
+    type Error = UnpublishableJwkSet;
+
+    fn try_from(set: JwkSet) -> Result<Self, Self::Error> {
+        let multi_key = set.keys.len() > 1;
+        let mut seen: HashSet<&str> = HashSet::new();
+        for jwk in &set.keys {
+            match jwk.common.key_id.as_deref() {
+                Some(kid) => {
+                    if !seen.insert(kid) {
+                        return Err(UnpublishableJwkSet::DuplicateKeyId { kid: kid.to_owned() });
+                    }
                 }
+                None if multi_key => {
+                    return Err(UnpublishableJwkSet::MissingKeyId { keys: set.keys.len() });
+                }
+                None => {}
             }
-            None if multi_key => {
-                return Err(PublisherError::MissingKeyId {
-                    dwk: dwk.to_owned(),
-                    keys: set.keys.len(),
-                });
-            }
-            None => {}
         }
+        Ok(Self(set))
     }
-    Ok(())
+}
+
+impl PublishableJwkSet {
+    /// The underlying set, for serialization. Borrowed rather than owned so
+    /// the validated value cannot be taken apart and put back together with
+    /// the invariant broken.
+    #[must_use]
+    pub fn as_jwk_set(&self) -> &JwkSet {
+        &self.0
+    }
 }
 
 /// Build a public EC P-256 JWK from a PKCS8 PEM private key, mirroring
@@ -155,7 +187,7 @@ fn base64_url(bytes: impl AsRef<[u8]>) -> String {
 #[derive(Debug, Default)]
 pub struct JwksPublisherConfigBuilder {
     max_age: CacheMaxAge,
-    entries: HashMap<String, JwkSet>,
+    entries: HashMap<String, PublishableJwkSet>,
 }
 
 impl JwksPublisherConfigBuilder {
@@ -167,9 +199,9 @@ impl JwksPublisherConfigBuilder {
         }
     }
 
-    /// Register a pre-built `JwkSet` under a dwk filename. An empty `JwkSet`
-    /// (`{"keys":[]}`) is accepted -- it is a legitimate discovery state, not
-    /// an error.
+    /// Register a pre-built `JwkSet` under a dwk filename. This is the one
+    /// boundary where a raw set is converted into a [`PublishableJwkSet`];
+    /// past here the configuration holds nothing else.
     pub fn with_jwk_set(mut self, dwk: impl Into<String>, set: JwkSet) -> Result<Self, PublisherError> {
         let dwk = dwk.into();
         if !is_known_dwk(&dwk) {
@@ -178,7 +210,10 @@ impl JwksPublisherConfigBuilder {
         if self.entries.contains_key(&dwk) {
             return Err(PublisherError::DuplicateDwk(dwk));
         }
-        validate_selectable_by_kid(&dwk, &set)?;
+        let set = PublishableJwkSet::try_from(set).map_err(|source| PublisherError::Unpublishable {
+            dwk: dwk.clone(),
+            source,
+        })?;
         self.entries.insert(dwk, set);
         Ok(self)
     }
@@ -199,12 +234,12 @@ impl JwksPublisherConfigBuilder {
     }
 }
 
-/// Validated publisher configuration: dwk filename -> `JwkSet`, plus the
-/// `Cache-Control` max-age applied to every discovery response.
+/// Validated publisher configuration: dwk filename -> [`PublishableJwkSet`],
+/// plus the `Cache-Control` max-age applied to every discovery response.
 #[derive(Clone)]
 pub struct JwksPublisherConfig {
     max_age: CacheMaxAge,
-    entries: HashMap<String, JwkSet>,
+    entries: HashMap<String, PublishableJwkSet>,
 }
 
 /// Build the `GET /.well-known/{dwk}` discovery router. Mount this into a
@@ -241,7 +276,7 @@ async fn serve_dwk(State(config): State<JwksPublisherConfig>, Path(dwk): Path<St
     let Some(set) = config.entries.get(&dwk) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    jwks_response(set, &config.max_age)
+    jwks_response(set.as_jwk_set(), &config.max_age)
 }
 
 #[cfg(test)]
