@@ -34,11 +34,31 @@ pub use delegation::Act;
 /// Deserialization is deliberately exempt: a peer's inbound `cnf` is parsed as
 /// sent, because what a peer put in its own confirmation claim is not this
 /// type's call to reject, and verification reads only the public parameters.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cnf {
     /// Embedded JWK. Stored as serde_json::Value so this crate avoids depending on
     /// `jsonwebtoken`. Verifier-side parses into `jsonwebtoken::jwk::Jwk`.
     jwk: Value,
+}
+
+/// Prints only the members that say *which* key this is, never the key.
+///
+/// [`Cnf::public`] refuses private key material, but the deserialization path
+/// above accepts whatever a peer sent, so a `Cnf` reached by that path may hold
+/// a private scalar. Anything that logs a claim set at debug level would then
+/// write it out, and a derived `Debug` gives no warning that this is what it
+/// does. The peer's own key is theirs to mishandle; writing it into this
+/// platform's logs is not.
+impl std::fmt::Debug for Cnf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut out = f.debug_struct("Cnf");
+        for member in crate::constants::JWK_DESCRIPTIVE_MEMBERS {
+            if let Some(value) = self.jwk.get(member) {
+                out.field(member, value);
+            }
+        }
+        out.finish_non_exhaustive()
+    }
 }
 
 impl Cnf {

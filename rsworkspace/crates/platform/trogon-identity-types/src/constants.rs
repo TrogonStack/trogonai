@@ -10,6 +10,13 @@ pub const MAX_ACT_CHAIN_DEPTH: usize = 8;
 /// which *is* the secret for a symmetric `oct` key (Section 6.4.1).
 pub const JWK_PRIVATE_MEMBERS: [&str; 8] = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 
+/// JWK members that describe a key without being any part of one: they name
+/// which key is meant and what it is for, and none of them is key material of
+/// either half. This is an allow-list rather than the inverse of
+/// [`JWK_PRIVATE_MEMBERS`] because a member this crate has never heard of must
+/// stay unprinted by default.
+pub const JWK_DESCRIPTIVE_MEMBERS: [&str; 5] = ["kty", "crv", "kid", "alg", "use"];
+
 /// `kty` value for a symmetric key. Never valid in a confirmation claim: a
 /// proof-of-possession key that both parties must hold is not a proof of
 /// possession, and publishing it in a token discloses it.

@@ -371,3 +371,33 @@ fn cnf_still_deserializes_a_peer_supplied_confirmation_claim() {
     let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
     assert!(cnf.jwk().get("d").is_some());
 }
+
+#[test]
+fn cnf_debug_does_not_print_the_key_it_holds() {
+    // Reached through the lenient inbound path, so `d` is present: this is
+    // exactly the shape whose Debug output must stay clean.
+    let raw = r#"{"jwk":{"kty":"EC","crv":"P-256","kid":"peer-1","x":"PUBX","y":"PUBY","d":"THEIRS"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+
+    let printed = format!("{cnf:?}");
+    for secret in ["THEIRS", "PUBX", "PUBY"] {
+        assert!(!printed.contains(secret), "{printed}");
+    }
+    // Still says which key it is, or the redaction costs every log line its
+    // diagnostic value.
+    assert!(printed.contains("peer-1"), "{printed}");
+    assert!(printed.contains("P-256"), "{printed}");
+}
+
+#[test]
+fn cnf_debug_omits_members_it_does_not_recognise() {
+    // The allow-list is the point: a member added to a future key type must be
+    // withheld until someone decides it is safe to print.
+    let raw = r#"{"jwk":{"kty":"OKP","crv":"Ed25519","x":"AAA","some_future_member":"UNVETTED"}}"#;
+    let cnf: Cnf = serde_json::from_str(raw).expect("inbound cnf parses");
+
+    let printed = format!("{cnf:?}");
+    assert!(!printed.contains("UNVETTED"), "{printed}");
+    assert!(!printed.contains("some_future_member"), "{printed}");
+    assert!(printed.contains(".."), "{printed}");
+}
