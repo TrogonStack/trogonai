@@ -560,6 +560,13 @@ fn verify_content_digest(req: &HttpRequest) -> Result<(), HttpPopError> {
 /// make this verifier disagree with any RFC-compliant peer about which digest
 /// a duplicated `sha-256` member names.
 ///
+/// Last-wins ranges over the members this reader can read. A `sha-256` member
+/// it cannot fails the whole value rather than yielding to a later one, which
+/// is what an RFC-compliant peer does too: RFC 8941 discards a field that does
+/// not parse, and a discarded `Content-Digest` leaves nothing to check the body
+/// against. Skipping ahead would instead let a sender bury a member this
+/// verifier cannot read under a trailing one it can.
+///
 /// This is a targeted reader for one Byte Sequence member, not a general
 /// Structured Fields parser. It does not model Inner Lists, and a parameter
 /// whose value is a String containing `,` or `;` would split wrongly; no

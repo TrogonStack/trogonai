@@ -313,6 +313,27 @@ async fn verify_rejects_when_the_last_duplicated_sha256_member_mismatches() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_rejects_a_readable_sha256_member_trailing_an_unreadable_one() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // Last-wins ranges over the members this verifier can read. RFC 8941
+    // discards a field carrying a member that does not parse, so a `sha-256`
+    // whose Byte Sequence cannot be decoded refuses the request rather than
+    // yielding to whatever follows it. Recovering would let a sender bury an
+    // unreadable member under a trailing readable one.
+    let body = br#"{"scope":"data.read"}"#;
+    let live = STANDARD.encode(Sha256::digest(body));
+    let unreadable = format!("sha-256=:not base64!:, sha-256=:{live}:");
+    let req = signed_body_request(&fixture, &jwt, body, unreadable);
+
+    let err = verifier.verify(&req).await.unwrap_err();
+    assert!(matches!(err, HttpPopError::UnsupportedContentDigest));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_rejects_content_digest_without_sha256_entry() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
