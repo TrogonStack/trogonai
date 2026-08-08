@@ -275,6 +275,23 @@ async fn verify_accepts_a_parameterized_sha256_content_digest_item() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn verify_accepts_a_content_digest_carrying_a_bare_key_member() {
+    let fixture = p256_fixture("k1");
+    let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
+    let jwks = jwks_with_key("agent-provider.example", fixture.jwk.clone());
+    let verifier = verifier_at(jwks, 1000, "resource.example");
+
+    // RFC 8941 spells a Dictionary member with no `=` as the Boolean true, so
+    // one carries no Byte Sequence to compare a body against. Reading past it
+    // keeps an unknown member from displacing the `sha-256` beside it.
+    let body = br#"{"scope":"data.read"}"#;
+    let with_bare_key = format!("unixsum, sha-256=:{}:", STANDARD.encode(Sha256::digest(body)));
+    let req = signed_body_request(&fixture, &jwt, body, with_bare_key);
+
+    verifier.verify(&req).await.expect("a bare-key member is stepped over");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn verify_resolves_a_duplicated_sha256_member_to_the_last_one() {
     let fixture = p256_fixture("k1");
     let jwt = agent_jwt(&fixture, "k1", "agent-provider.example");
