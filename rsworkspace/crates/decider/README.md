@@ -1,12 +1,12 @@
 # Decider crates
 
-Every stream here is driven by a pure `decide`/`evolve` function: a command and the stream's prior
-events go in, a decision comes out, and nothing touches I/O on the way. The log is the source of
-truth, and state is always a replay of it, from the beginning or resumed from a snapshot. A decision
-function that reads nothing outside its own arguments is testable without a broker and deterministic
-on replay.
+Every stream here is driven by a pair of pure functions: `evolve` folds an event into state, and
+`decide` takes that state plus a command and returns a decision. Neither touches I/O. The log is the
+source of truth, and state is always a replay of it, from the beginning or resumed from a snapshot.
+Because `decide` reads nothing outside its own arguments, it is testable without a broker and
+deterministic on replay.
 
-That function is written once and runs two ways: compiled into a Rust process, or compiled to a WASM
+That logic is written once and runs two ways: compiled into a Rust process, or compiled to a WASM
 component and driven by a sandboxed host. Both persist through the same storage-neutral ports, so a
 decider never learns whether it is backed by an in-memory test double or NATS JetStream, nor which
 path is executing it.
