@@ -12,7 +12,7 @@ impl AuthenticateSubject {
 
 impl std::fmt::Display for AuthenticateSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.authenticate", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.authenticate", self.prefix.as_str())
     }
 }
 

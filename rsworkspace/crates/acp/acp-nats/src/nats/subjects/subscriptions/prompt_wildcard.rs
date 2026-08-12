@@ -12,7 +12,7 @@ impl PromptWildcardSubject {
 
 impl std::fmt::Display for PromptWildcardSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.*.agent.prompt", self.prefix.as_str())
+        write!(f, "{}.v1.session.*.agent.prompt", self.prefix.as_str())
     }
 }
 

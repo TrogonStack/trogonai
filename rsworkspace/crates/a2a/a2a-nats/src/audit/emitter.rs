@@ -53,7 +53,7 @@ where
                 crate::audit::envelope::AuditOutcome::Err { .. } => "err",
             };
             let subject = format!(
-                "{}.audit.{}.{}",
+                "{}.v1.audit.{}.{}",
                 prefix.as_str(),
                 outcome_token,
                 envelope.method.replace('/', ".")
@@ -77,7 +77,7 @@ where
         envelope: TaskLifecycleEnvelope,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let subject = format!("{}.audit.lifecycle", prefix.as_str());
+            let subject = format!("{}.v1.audit.lifecycle", prefix.as_str());
             let payload = Bytes::from(serde_json::to_vec(&envelope).unwrap_or_default());
             if let Err(e) = self
                 .nats

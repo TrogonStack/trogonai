@@ -287,6 +287,7 @@ impl AgentProvider {
         let claims = AgentClaims {
             iss: self.key.iss.as_str().to_string(),
             sub: req.sub.as_str().to_string(),
+            // Agent JWT `jti` is a security uniqueness token; keep v4 (not correlation v7).
             jti: uuid::Uuid::new_v4().to_string(),
             iat,
             exp,

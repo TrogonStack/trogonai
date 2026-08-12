@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -9,29 +10,22 @@ pub enum RpcId {
     Null,
 }
 
+impl RpcId {
+    pub fn to_json_value(&self) -> Value {
+        match self {
+            Self::Number(n) => Value::Number((*n).into()),
+            Self::String(s) => Value::String(s.clone()),
+            Self::Null => Value::Null,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct InboundRequest {
     pub id: RpcId,
     pub method: String,
     #[serde(default)]
     pub params: Value,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OutboundResponse {
-    pub jsonrpc: &'static str,
-    pub id: RpcId,
-    pub result: Value,
-}
-
-impl OutboundResponse {
-    pub fn new(id: RpcId, result: Value) -> Self {
-        Self {
-            jsonrpc: "2.0",
-            id,
-            result,
-        }
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -76,12 +70,25 @@ impl OutboundError {
     }
 }
 
+/// Stdio outbound frame. Success responses prefer a validated NATS body
+/// (id rewritten to the edge client id); local errors still use a typed
+/// envelope built via serde.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum OutboundFrame {
-    Response(OutboundResponse),
+    /// Canonical JSON-RPC body bytes after typed validate + id rewrite.
+    #[serde(serialize_with = "serialize_raw_body")]
+    RawBody(Bytes),
     Notification(OutboundNotification),
     Error(OutboundError),
+}
+
+fn serialize_raw_body<S>(body: &Bytes, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let value: Value = serde_json::from_slice(body).map_err(serde::ser::Error::custom)?;
+    value.serialize(serializer)
 }
 
 #[cfg(test)]

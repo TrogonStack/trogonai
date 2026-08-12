@@ -17,7 +17,7 @@ impl std::fmt::Display for TaskStatusSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.tasks",
+            "{}.v1.client.{}.notifications.tasks",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

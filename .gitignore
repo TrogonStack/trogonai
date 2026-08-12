@@ -3,6 +3,21 @@ debug
 /rsworkspace/target/
 /rsworkspace/crates/*/*/target/
 /target/
+# Cargo build output wherever a stray run drops it: a relative CARGO_TARGET_DIR
+# builds into ./target from whatever directory cargo was invoked in, which the
+# path-anchored rules above do not reach. This repo is public and those artifacts
+# embed absolute toolchain paths from the machine that built them.
+#
+# Matched by the artifacts cargo writes, not by directory name, so a Rust source
+# module that happens to be called `target/` stays visible. Directory names in
+# the triple glob cannot collide with a module, since Rust identifiers have no
+# dashes.
+**/target/CACHEDIR.TAG
+**/target/.rustc_info.json
+**/target/debug/
+**/target/release/
+**/target/tmp/
+**/target/*-*/
 **/*.rs.bk
 *.pdb
 *.rlib

@@ -70,10 +70,33 @@ async fn bootstrap_publishes_task_and_then_events() {
 
     let body = parse_published_response(&nats, 0);
     assert_eq!(body["result"]["task"]["id"].as_str(), Some("task-1"));
-    assert_eq!(
-        js.published_subjects(),
-        vec!["a2a.tasks.task-1.events.call-1".to_string()]
-    );
+    assert_eq!(js.published_subjects(), vec!["a2a.v1.tasks.task-1.events".to_string()]);
+}
+
+#[tokio::test]
+async fn every_event_carries_the_request_id_header() {
+    // The subject names only the task, so `Trogon-Req-Id` is what tells two
+    // concurrent subscriptions to the same task apart.
+    let nats = AdvancedMockNatsClient::new();
+    let js = MockJetStreamPublisher::new();
+    let handler = stub();
+    let events: crate::server::handler::TaskEventStream = Box::pin(stream::iter(vec![
+        Ok(working_status_event("task-1")),
+        Ok(working_status_event("task-1")),
+    ]));
+    handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
+
+    let (headers, payload) = stream_payload("call-1");
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
+
+    let published = js.published_messages();
+    assert_eq!(published.len(), 2);
+    for message in published {
+        assert_eq!(
+            message.headers.get(crate::constants::REQ_ID_HEADER).map(|v| v.as_str()),
+            Some("call-1")
+        );
+    }
 }
 
 #[tokio::test]

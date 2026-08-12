@@ -17,7 +17,7 @@ impl std::fmt::Display for DiscoverSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.server.discover",
+            "{}.v1.server.{}.server.discover",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

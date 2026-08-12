@@ -63,8 +63,8 @@ async fn fork_session_publishes_session_ready_to_correct_subject() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     let published = mock.published_messages();
     assert!(
-        published.contains(&"acp.session.forked-session-1.agent.ext.ready".to_string()),
-        "expected publish to acp.session.forked-session-1.agent.ext.ready, got: {:?}",
+        published.contains(&"acp.v1.session.forked-session-1.agent.ext.ready".to_string()),
+        "expected publish to acp.v1.session.forked-session-1.agent.ext.ready, got: {:?}",
         published
     );
 }

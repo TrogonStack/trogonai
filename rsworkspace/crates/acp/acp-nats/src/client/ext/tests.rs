@@ -84,7 +84,7 @@ fn empty_headers() -> HeaderMap {
 fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let raw = RawValue::from_string(params_json.to_string()).unwrap();
     crate::client::test_support::encode_wire_request(
-        &format!("ext/{method}"),
+        &format!("_{method}"),
         RequestId::Number(1),
         &Arc::<RawValue>::from(raw),
     )
@@ -92,7 +92,7 @@ fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>
 
 fn make_ext_wire_notification(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let value: serde_json::Value = serde_json::from_str(params_json).unwrap();
-    crate::client::test_support::encode_wire_notification(&format!("ext/{method}"), &value)
+    crate::client::test_support::encode_wire_notification(&format!("_{method}"), &value)
 }
 
 // --- request/response tests ---
@@ -108,7 +108,7 @@ async fn request_publishes_response_to_reply_subject() {
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     let payloads = nats.published_payloads();
     let parsed: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert!(parsed.get("status").is_some());
+    assert!(parsed["result"].get("status").is_some());
 }
 
 #[tokio::test]
@@ -144,7 +144,7 @@ async fn request_client_error_publishes_error_reply() {
     assert!(published_headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_some());
     let payloads = nats.published_payloads();
     let body: serde_json::Value = serde_json::from_slice(payloads[0].as_ref()).unwrap();
-    assert_eq!(body["message"], "ext method failed");
+    assert_eq!(body["error"]["message"], "ext method failed");
 }
 
 #[tokio::test]

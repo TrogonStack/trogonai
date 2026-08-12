@@ -29,6 +29,7 @@ pub enum SessionAgentMethod {
 }
 
 impl GlobalAgentMethod {
+    /// NATS subject terminal (ADR#0055 projection). Not the body method.
     pub fn wire_method(&self) -> String {
         match self {
             Self::Initialize => "initialize".to_string(),
@@ -40,6 +41,21 @@ impl GlobalAgentMethod {
             Self::ProvidersSet => "providers.set".to_string(),
             Self::ProvidersDisable => "providers.disable".to_string(),
             Self::Ext(name) => format!("ext.{}", name.as_str()),
+        }
+    }
+
+    /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
+    pub fn protocol_method(&self) -> String {
+        match self {
+            Self::Initialize => "initialize".to_string(),
+            Self::Authenticate => "authenticate".to_string(),
+            Self::Logout => "logout".to_string(),
+            Self::SessionNew => "session/new".to_string(),
+            Self::SessionList => "session/list".to_string(),
+            Self::ProvidersList => "providers/list".to_string(),
+            Self::ProvidersSet => "providers/set".to_string(),
+            Self::ProvidersDisable => "providers/disable".to_string(),
+            Self::Ext(name) => format!("_{}", name.as_str()),
         }
     }
 
@@ -62,6 +78,7 @@ impl GlobalAgentMethod {
 }
 
 impl SessionAgentMethod {
+    /// NATS subject terminal (ADR#0055 projection). Not the body method.
     pub fn wire_method(&self) -> &'static str {
         match self {
             Self::Load => "load",
@@ -73,6 +90,21 @@ impl SessionAgentMethod {
             Self::Resume => "resume",
             Self::Close => "close",
             Self::Delete => "delete",
+        }
+    }
+
+    /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
+    pub fn protocol_method(&self) -> &'static str {
+        match self {
+            Self::Load => "session/load",
+            Self::Prompt => "session/prompt",
+            Self::Cancel => "session/cancel",
+            Self::SetMode => "session/set_mode",
+            Self::SetConfigOption => "session/set_config_option",
+            Self::Fork => "session/fork",
+            Self::Resume => "session/resume",
+            Self::Close => "session/close",
+            Self::Delete => "session/delete",
         }
     }
 
@@ -139,14 +171,22 @@ pub enum ClientMethod {
     TerminalOutput,
     TerminalRelease,
     TerminalWaitForExit,
-    ExtSessionPromptResponse,
     ElicitationCreate,
     ElicitationComplete,
     Ext(String),
 }
 
 impl ClientMethod {
+    /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
+    ///
+    /// Subject terminals are the dotted projection of this string (except
+    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses `_{name}`).
     pub fn wire_method(&self) -> String {
+        self.protocol_method()
+    }
+
+    /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
+    pub fn protocol_method(&self) -> String {
         match self {
             Self::FsReadTextFile => "fs/read_text_file".to_string(),
             Self::FsWriteTextFile => "fs/write_text_file".to_string(),
@@ -157,10 +197,9 @@ impl ClientMethod {
             Self::TerminalOutput => "terminal/output".to_string(),
             Self::TerminalRelease => "terminal/release".to_string(),
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
-            Self::ExtSessionPromptResponse => "ext/session/prompt_response".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => format!("ext/{name}"),
+            Self::Ext(name) => format!("_{name}"),
         }
     }
 
@@ -175,7 +214,6 @@ impl ClientMethod {
             "terminal.output" => Some(Self::TerminalOutput),
             "terminal.release" => Some(Self::TerminalRelease),
             "terminal.wait_for_exit" => Some(Self::TerminalWaitForExit),
-            "ext.session.prompt_response" => Some(Self::ExtSessionPromptResponse),
             "elicitation.create" => Some(Self::ElicitationCreate),
             "elicitation.complete" => Some(Self::ElicitationComplete),
             other => {

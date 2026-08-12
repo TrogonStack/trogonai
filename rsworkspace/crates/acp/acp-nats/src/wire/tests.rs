@@ -300,3 +300,45 @@ fn initialize_response_mcp_over_acp_capability_survives_round_trip() {
 
     assert!(decoded.agent_capabilities.mcp_capabilities.acp);
 }
+
+#[test]
+fn req_id_round_trips_through_the_jsonrpc_id_header() {
+    let req_id = ReqId::new();
+    let encoded = encode_request(
+        "session/prompt",
+        RequestId::String(req_id.as_str().to_string()),
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    let recovered = req_id_from_request_headers(&encoded.headers).expect("id header present");
+
+    assert_eq!(recovered.as_str(), req_id.as_str());
+}
+
+#[test]
+fn req_id_strips_the_json_string_quoting() {
+    let mut headers = HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "\"req-1\"");
+
+    let recovered = req_id_from_request_headers(&headers).expect("id header present");
+
+    assert_eq!(recovered.as_str(), "req-1");
+}
+
+#[test]
+fn req_id_renders_a_numeric_id_as_a_bare_subject_token() {
+    let mut headers = HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "7");
+
+    let recovered = req_id_from_request_headers(&headers).expect("id header present");
+
+    assert_eq!(recovered.as_str(), "7");
+}
+
+#[test]
+fn notification_headers_yield_no_req_id() {
+    let encoded = encode_notification("session/cancel", &serde_json::json!({})).unwrap();
+
+    assert!(req_id_from_request_headers(&encoded.headers).is_none());
+}

@@ -14,35 +14,35 @@ For managed NATS infrastructure in production, we recommend <a href="https://syn
 
 ## Subject Layout
 
-Subjects mirror the method-oriented shape used by `acp-nats`, with the MCP role
-and peer ID before the method suffix.
+Subjects mirror the method-oriented shape used by `acp-nats`, with a binding
+version token (`v1`), the MCP role, and peer ID before the method suffix.
 
 Server-bound messages:
 
 ```text
-mcp.server.{server_id}.initialize
-mcp.server.{server_id}.tools.list
-mcp.server.{server_id}.tools.call
-mcp.server.{server_id}.resources.read
-mcp.server.{server_id}.notifications.initialized
+mcp.v1.server.{server_id}.initialize
+mcp.v1.server.{server_id}.tools.list
+mcp.v1.server.{server_id}.tools.call
+mcp.v1.server.{server_id}.resources.read
+mcp.v1.server.{server_id}.notifications.initialized
 ```
 
 Client-bound messages:
 
 ```text
-mcp.client.{client_id}.sampling.create_message
-mcp.client.{client_id}.roots.list
-mcp.client.{client_id}.elicitation.create
-mcp.client.{client_id}.notifications.tools.list_changed
+mcp.v1.client.{client_id}.sampling.create_message
+mcp.v1.client.{client_id}.roots.list
+mcp.v1.client.{client_id}.elicitation.create
+mcp.v1.client.{client_id}.notifications.tools.list_changed
 ```
 
 Wildcard subscriptions:
 
 ```text
-mcp.server.>
-mcp.server.{server_id}.>
-mcp.client.>
-mcp.client.{client_id}.>
+mcp.v1.server.>
+mcp.v1.server.{server_id}.>
+mcp.v1.client.>
+mcp.v1.client.{client_id}.>
 ```
 
 ## Transport

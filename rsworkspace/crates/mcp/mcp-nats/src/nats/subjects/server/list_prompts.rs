@@ -17,7 +17,7 @@ impl std::fmt::Display for ListPromptsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.prompts.list",
+            "{}.v1.server.{}.prompts.list",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

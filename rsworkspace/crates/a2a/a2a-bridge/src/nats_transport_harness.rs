@@ -74,7 +74,7 @@ impl GatewayUnaryPublish for HarnessGatewayUnary {
         let jwt_present = headers.get(CALLER_JWT_HEADER_NAME).is_some();
         *self.last_caller_jwt_present.lock().expect("harness mutex poisoned") = jwt_present;
 
-        let gateway_prefix = format!("{}.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
+        let gateway_prefix = format!("{}.v1.gateway.{}.", self.prefix.as_str(), self.agent_id.as_str());
         let method_dots = subject.strip_prefix(&gateway_prefix).unwrap_or("message.send");
         let method_slashes = method_dots.replace('.', "/");
         let envelope = AuditEnvelope::new(

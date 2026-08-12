@@ -55,7 +55,7 @@ async fn provision_with_events_max_age_override() {
     provision_streams_with_options(&ctx, &p("a2a"), &options).await.unwrap();
     let streams = ctx.created_streams();
     let events = streams.iter().find(|c| c.name == "A2A_EVENTS").expect("A2A_EVENTS");
-    assert_eq!(events.retention, RetentionPolicy::Interest);
+    assert_eq!(events.retention, RetentionPolicy::Limits);
     assert_eq!(events.max_age, std::time::Duration::from_secs(3600));
 }
 

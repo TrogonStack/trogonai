@@ -20,7 +20,7 @@ fn make_status_event(task_id: &str) -> StreamResponse {
 
 fn nats_msg_with_reply(payload: Vec<u8>, reply: Option<&str>) -> async_nats::Message {
     async_nats::Message {
-        subject: "a2a.tasks.t1.events.r1".into(),
+        subject: "a2a.v1.tasks.t1.events.r1".into(),
         reply: reply.map(|s| s.into()),
         payload: Bytes::from(payload),
         headers: None,

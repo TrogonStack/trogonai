@@ -10,7 +10,7 @@ use agent_client_protocol::schema::v1::{AuthenticateRequest, AuthenticateRespons
 async fn authenticate_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = AuthenticateResponse::new();
-    set_wire_json_response(&mock, "acp.agent.authenticate", &expected);
+    set_wire_json_response(&mock, "acp.v1.global.agent.authenticate", &expected);
 
     let request = AuthenticateRequest::new("api-key");
     let result = bridge.authenticate(request).await;
@@ -33,7 +33,7 @@ async fn authenticate_surfaces_structured_agent_error_from_header() {
     let (mock, _js, bridge) = mock_bridge();
     set_wire_agent_error(
         &mock,
-        "acp.agent.authenticate",
+        "acp.v1.global.agent.authenticate",
         i32::from(ErrorCode::MethodNotFound),
         "method not found",
     );
@@ -47,7 +47,7 @@ async fn authenticate_surfaces_structured_agent_error_from_header() {
 #[tokio::test]
 async fn authenticate_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.authenticate", "not json".into());
+    mock.set_response("acp.v1.global.agent.authenticate", "not json".into());
 
     let request = AuthenticateRequest::new("test");
     let err = bridge.authenticate(request).await.unwrap_err();
@@ -59,7 +59,11 @@ async fn authenticate_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn authenticate_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_wire_json_response(&mock, "acp.agent.authenticate", &AuthenticateResponse::default());
+    set_wire_json_response(
+        &mock,
+        "acp.v1.global.agent.authenticate",
+        &AuthenticateResponse::default(),
+    );
 
     let _ = bridge.authenticate(AuthenticateRequest::new("test")).await;
 

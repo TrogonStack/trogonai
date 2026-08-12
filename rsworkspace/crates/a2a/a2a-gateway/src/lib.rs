@@ -26,7 +26,7 @@
 //!   labs-only header-trust fallback gated behind an env flag.
 //! - [`policy`] — shared policy-tier scaffold; later slices layer Tier 1
 //!   declarative, Tier 1 SpiceDB, Tier 2 CEL, and Tier 3 redaction on top.
-//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.push.dlq.>`
+//! - [`push_dlq_mirror`] — pull-consumer that mirrors `{prefix}.v1.push.dlq.>`
 //!   into a tenant-readable `mirror.*` view with in-process dedupe so a
 //!   re-delivered DLQ envelope only publishes once.
 //! - [`runtime`] — boot orchestration; surfaces [`RuntimeError`] as the

@@ -51,9 +51,6 @@ pub const ACP_CLIENT_ELICITATION_CREATE: &str = "acp.client.elicitation.create";
 /// ACP client extension call
 pub const ACP_CLIENT_EXT: &str = "acp.client.ext";
 
-/// ACP client extension session prompt-response handling
-pub const ACP_CLIENT_EXT_SESSION_PROMPT_RESPONSE: &str = "acp.client.ext.session.prompt_response";
-
 /// ACP client fs/read_text_file call
 pub const ACP_CLIENT_FS_READ_TEXT_FILE: &str = "acp.client.fs.read_text_file";
 

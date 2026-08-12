@@ -1,11 +1,11 @@
-//! `{prefix}.gateway.>` ingress dispatch orchestrator.
+//! `{prefix}.v1.gateway.>` ingress dispatch orchestrator.
 //!
 //! Runs each ingress request through the full policy stack in
 //! order: caller-identity resolution -> Tier-1 SpiceDB ->
 //! Tier-1 declarative -> Tier-2 CEL -> Tier-3 redaction. Each
 //! denial path replies on the caller inbox with the matching
 //! JSON-RPC error code and publishes an audit envelope; the
-//! allow path forwards to `{prefix}.agent.{agent}.{method}` and
+//! allow path forwards to `{prefix}.v1.global.agent.{agent}.{method}` and
 //! (when configured) spawns a streaming pump for stream-shaped
 //! methods.
 //!
@@ -201,7 +201,7 @@ async fn dispatch_routed<E: ReadEnv>(
     mut audit_caller_source: Option<String>,
 ) {
     let agent_subject = format!(
-        "{}.agents.{}.{}",
+        "{}.v1.agents.{}.{}",
         config.a2a_prefix.as_str(),
         agent_id.as_str(),
         method_dots
@@ -212,7 +212,7 @@ async fn dispatch_routed<E: ReadEnv>(
     let mut payload: Bytes = msg.payload.clone();
     let started_mono = Instant::now();
     let started_wall_ms = unix_epoch_ms();
-    let trace_id = Uuid::new_v4().to_string();
+    let trace_id = Uuid::now_v7().to_string();
     let audit_enabled = gateway_audit_publish_enabled(env);
     let method_slashes = method_dots.replace('.', "/");
     let _unary_deadline_guard = unary_deadline_for_method(env, method_dots.as_str());
@@ -278,10 +278,10 @@ async fn dispatch_routed<E: ReadEnv>(
                     reason = %deny.reason,
                     "gateway aauth verification rejected ingress envelope",
                 );
-                // Full wire encoding, not just the body: the JSON-RPC-over-
-                // NATS binding discriminates errors via the Jsonrpc-Error-Code
-                // and Jsonrpc-Id headers, so the deny must carry them for
-                // clients to see -32118 at all.
+                // Emit the full wire encoding: body is authoritative (ADR#0056);
+                // derived Jsonrpc-Id / Jsonrpc-Error-Code projections stay for
+                // routing and metrics so clients that only inspect headers still
+                // see -32118.
                 let encoded = match ingress_error_response_wire(
                     &headers_owned,
                     payload.as_ref(),

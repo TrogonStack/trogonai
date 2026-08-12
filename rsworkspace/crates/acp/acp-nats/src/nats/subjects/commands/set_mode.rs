@@ -18,7 +18,7 @@ impl std::fmt::Display for SetModeSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.set_mode",
+            "{}.v1.session.{}.agent.set_mode",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

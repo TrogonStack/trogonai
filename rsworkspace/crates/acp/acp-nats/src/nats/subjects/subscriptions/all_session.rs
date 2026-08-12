@@ -12,7 +12,7 @@ impl AllSessionSubject {
 
 impl std::fmt::Display for AllSessionSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.>", self.prefix.as_str())
+        write!(f, "{}.v1.session.>", self.prefix.as_str())
     }
 }
 

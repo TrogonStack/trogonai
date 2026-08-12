@@ -55,7 +55,7 @@ where
         }
     }
 
-    /// Subscribe to `{prefix}.agents.{agent_id}.>` and dispatch each inbound
+    /// Subscribe to `{prefix}.v1.agents.{agent_id}.>` and dispatch each inbound
     /// request to the matching per-op handler. Returns when `shutdown` is
     /// cancelled or the subscription terminates.
     pub async fn run_with_agent_id(
@@ -65,7 +65,7 @@ where
     ) -> Result<(), BridgeError> {
         let prefix = self.config.a2a_prefix_ref().clone();
         let subject = AgentAllSubject::new(&prefix, agent_id);
-        let prefix_len = format!("{}.agents.{}", prefix.as_str(), agent_id.as_str()).len();
+        let prefix_len = format!("{}.v1.agents.{}", prefix.as_str(), agent_id.as_str()).len();
 
         let mut sub = self
             .nats
@@ -73,7 +73,7 @@ where
             .await
             .map_err(|e| BridgeError::Subscribe(Box::new(e)))?;
 
-        let subscribed_wildcard = format!("{}.agents.{}.>", prefix.as_str(), agent_id.as_str());
+        let subscribed_wildcard = format!("{}.v1.agents.{}.>", prefix.as_str(), agent_id.as_str());
         info!("a2a-nats bridge subscribed to {subscribed_wildcard}");
 
         loop {

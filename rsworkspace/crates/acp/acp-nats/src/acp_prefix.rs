@@ -1,7 +1,7 @@
 //! NATS-safe ACP prefix value object.
 //!
 //! The prefix is embedded in every NATS subject the bridge publishes:
-//! `{prefix}.agent.*`, `{prefix}.session.*`, etc.
+//! `{prefix}.v1.global.agent.*`, `{prefix}.v1.session.*`, etc.
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `my.multi.part`) but rejects
 //! malformed dots (consecutive, leading, trailing). Max 128 bytes. Validity is guaranteed at

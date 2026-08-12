@@ -6,7 +6,6 @@ use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
     SubscribeClient, responses,
 };
-use crate::pending_prompt_waiters::PendingSessionPromptResponseWaiters;
 use crate::telemetry::metrics::Metrics;
 use agent_client_protocol::Result;
 use agent_client_protocol::schema::v1::{
@@ -41,7 +40,6 @@ pub struct Bridge<N, C: GetElapsed, J> {
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
     pub(crate) notification_sender: mpsc::Sender<SessionNotification>,
-    pub(crate) pending_session_prompt_responses: PendingSessionPromptResponseWaiters<C::Instant>,
     pub(crate) background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -61,7 +59,6 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
             config,
             metrics: Metrics::new(meter),
             notification_sender,
-            pending_session_prompt_responses: PendingSessionPromptResponseWaiters::new(),
             background_tasks: Mutex::new(Vec::new()),
         }
     }

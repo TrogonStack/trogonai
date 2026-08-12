@@ -1,8 +1,8 @@
 //! NATS-safe agent identifier value object.
 //!
 //! Agent IDs identify a deployed A2A agent and are embedded as a single NATS subject token:
-//! `{prefix}.agents.{agent_id}.message.send`. Multiple replicas of an agent share the same
-//! agent_id and participate in a NATS queue group on `{prefix}.agents.{agent_id}.>`.
+//! `{prefix}.v1.agents.{agent_id}.message.send`. Multiple replicas of an agent share the same
+//! agent_id and participate in a NATS queue group on `{prefix}.v1.agents.{agent_id}.>`.
 
 use trogon_nats::NatsToken;
 use trogon_nats::SubjectTokenViolationError;

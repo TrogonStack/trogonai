@@ -21,7 +21,7 @@ fn default_permissions_scope_publish_to_gateway() {
     let caller = CallerId::new("usr1").unwrap();
     let perms = IssuedPermissions::default_for_caller(&caller);
     assert_eq!(perms.publish_allow.len(), 1);
-    assert_eq!(perms.publish_allow[0].as_str(), "a2a.gateway.>");
+    assert_eq!(perms.publish_allow[0].as_str(), "a2a.v1.gateway.>");
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn default_permissions_subscribe_to_caller_namespaces() {
     let perms = IssuedPermissions::default_for_caller(&caller);
     let subjects: Vec<&str> = perms.subscribe_allow.iter().map(SubjectPattern::as_str).collect();
     assert!(subjects.contains(&"_INBOX.usr1.>"));
-    assert!(subjects.contains(&"a2a.push.usr1.>"));
+    assert!(subjects.contains(&"a2a.v1.push.usr1.>"));
 }
 
 #[test]

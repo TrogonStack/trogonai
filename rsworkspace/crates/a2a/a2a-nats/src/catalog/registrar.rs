@@ -22,29 +22,29 @@ impl RegistrarSubject {
     }
 
     pub fn wildcard(&self) -> String {
-        format!("{}.catalog.register.*", self.prefix.as_str())
+        format!("{}.v1.catalog.register.*", self.prefix.as_str())
     }
 
     pub fn for_agent(&self, agent_id: &A2aAgentId) -> String {
-        format!("{}.catalog.register.{}", self.prefix.as_str(), agent_id.as_str())
+        format!("{}.v1.catalog.register.{}", self.prefix.as_str(), agent_id.as_str())
     }
 }
 
 impl std::fmt::Display for RegistrarSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.catalog.register.*", self.prefix.as_str())
+        write!(f, "{}.v1.catalog.register.*", self.prefix.as_str())
     }
 }
 
 pub fn register_subject_prefix(prefix: &A2aPrefix) -> String {
-    format!("{}.catalog.register.", prefix.as_str())
+    format!("{}.v1.catalog.register.", prefix.as_str())
 }
 
-/// Why a wire subject failed `{prefix}.catalog.register.{agent_id}` parsing.
+/// Why a wire subject failed `{prefix}.v1.catalog.register.{agent_id}` parsing.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentSuffixError {
-    /// The subject didn't carry the expected `{prefix}.catalog.register.` leader.
-    #[error("subject is not a `{{prefix}}.catalog.register.` register subject")]
+    /// The subject didn't carry the expected `{prefix}.v1.catalog.register.` leader.
+    #[error("subject is not a `{{prefix}}.v1.catalog.register.` register subject")]
     NotARegisterSubject,
     /// Subject had the right leader but no agent-id token after the dot.
     #[error("register subject is missing the `{{agent_id}}` segment")]
@@ -54,7 +54,7 @@ pub enum AgentSuffixError {
     InvalidAgentId(#[source] AgentIdError),
 }
 
-/// Extract a validated `A2aAgentId` from a `{prefix}.catalog.register.{agent_id}` subject.
+/// Extract a validated `A2aAgentId` from a `{prefix}.v1.catalog.register.{agent_id}` subject.
 ///
 /// Returns a typed error instead of an `Option<&str>` so the bad-shape, missing
 /// agent-id, and validation-failed paths each propagate distinctly to the caller.

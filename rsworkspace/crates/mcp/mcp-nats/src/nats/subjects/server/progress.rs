@@ -17,7 +17,7 @@ impl std::fmt::Display for ProgressSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.progress",
+            "{}.v1.client.{}.notifications.progress",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

@@ -18,6 +18,10 @@ fn test_req_id() -> ReqId {
     ReqId::from_test("req-stream-1")
 }
 
+fn test_task_id() -> A2aTaskId {
+    A2aTaskId::new("task-abc").expect("test task id")
+}
+
 fn bootstrap_success(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     let task = Task {
         id: task_id.to_string(),
@@ -66,7 +70,7 @@ fn make_ctx<'a>(
     StreamingRequest {
         nats,
         js,
-        subject: "a2a.agents.bot.message.stream",
+        subject: "a2a.v1.agents.bot.message.stream",
         method: "message/stream",
         req_id,
         prefix,
@@ -79,7 +83,7 @@ fn make_ctx<'a>(
 async fn bootstrap_success_returns_task_and_stream() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("task-abc");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -98,10 +102,31 @@ async fn bootstrap_success_returns_task_and_stream() {
 }
 
 #[tokio::test]
+async fn bootstrap_task_id_that_is_not_a_nats_token_is_rejected() {
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_success("task abc.*");
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    let (consumer, _tx) = MockJetStreamConsumer::new();
+    js.add_consumer(consumer);
+
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let result = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await;
+
+    assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
+}
+
+#[tokio::test]
 async fn bootstrap_error_propagates_as_client_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_error(-32001, "not found");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -142,7 +167,7 @@ async fn nats_transport_failure_returns_transport_error() {
 async fn get_stream_failure_returns_consumer_setup_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("t1");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
@@ -164,9 +189,7 @@ async fn open_task_stream_returns_typed_event_stream() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let req_id = test_req_id();
-
-    let stream = open_task_stream(&js, &test_prefix(), &req_id).await;
+    let stream = open_task_stream(&js, &test_prefix(), &test_task_id()).await;
     assert!(stream.is_ok());
 }
 
@@ -175,9 +198,7 @@ async fn open_task_stream_get_stream_failure_returns_error() {
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
 
-    let req_id = test_req_id();
-
-    let result = open_task_stream(&js, &test_prefix(), &req_id).await;
+    let result = open_task_stream(&js, &test_prefix(), &test_task_id()).await;
     assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
 }
 
@@ -205,7 +226,7 @@ async fn hang_returns_timeout_error() {
 async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("task-gw");
-    nats.set_response_wire("a2a.gateway.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -217,7 +238,7 @@ async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     let ctx = StreamingRequest {
         nats: &nats,
         js: &js,
-        subject: "a2a.gateway.bot.message.stream",
+        subject: "a2a.v1.gateway.bot.message.stream",
         method: "message/stream",
         req_id: &req_id,
         prefix: &prefix,

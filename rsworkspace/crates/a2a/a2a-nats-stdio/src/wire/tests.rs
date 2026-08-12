@@ -1,4 +1,5 @@
 use super::*;
+use bytes::Bytes;
 use serde_json::json;
 
 #[test]
@@ -17,12 +18,14 @@ fn inbound_request_deserializes_string_id() {
 }
 
 #[test]
-fn outbound_response_serializes() {
-    let resp = OutboundResponse::new(RpcId::Number(1), json!({"id": "task-1"}));
-    let v = serde_json::to_value(&resp).unwrap();
+fn outbound_raw_body_rewrites_via_serde() {
+    let body =
+        Bytes::from(serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport","result":{"id":"task-1"}})).unwrap());
+    let frame = OutboundFrame::RawBody(body);
+    let v = serde_json::to_value(&frame).unwrap();
     assert_eq!(v["jsonrpc"], "2.0");
-    assert_eq!(v["id"], 1);
-    assert!(v["result"]["id"] == "task-1");
+    assert_eq!(v["id"], "transport");
+    assert_eq!(v["result"]["id"], "task-1");
 }
 
 #[test]

@@ -48,16 +48,11 @@ pub fn default_a2a_prefix() -> A2aPrefix {
 #[must_use]
 pub fn build_gateway_subject(prefix: &A2aPrefix, agent_id: &str, method: &str) -> String {
     format!(
-        "{}.gateway.{}.{}",
+        "{}.v1.gateway.{}.{}",
         prefix.as_str(),
         agent_id,
         gateway_method_to_subject_dots(method)
     )
-}
-
-#[must_use]
-pub fn task_events_wild_subject(prefix: &A2aPrefix, task_id: &str) -> String {
-    format!("{}.task.{task_id}.events.>", prefix.as_str())
 }
 
 pub fn is_sse_jsonrpc_method(method: &str) -> bool {
@@ -264,7 +259,7 @@ impl<G: GatewayUnaryPublish + 'static> InboundGatewayPublish for GatewayInboundP
 
 #[derive(Clone, Debug)]
 pub enum SseConsumePlan {
-    MessageStreamBootstrap { req_id: ReqId },
+    MessageStreamBootstrap { task_id: A2aTaskId },
     TasksResubscribe { task_id: A2aTaskId, last_seq: u64 },
 }
 
@@ -341,7 +336,7 @@ impl TaskJetStreamPort for AsyncNatsTokenTaskJetstream {
             .await
             .map_err(|e| BridgeError::JetStreamConsume(format!("get_stream {stream_name}: {e}")))?;
         let pull_cfg = match plan {
-            SseConsumePlan::MessageStreamBootstrap { ref req_id } => stream_events_consumer(prefix, req_id),
+            SseConsumePlan::MessageStreamBootstrap { ref task_id } => stream_events_consumer(prefix, task_id),
             SseConsumePlan::TasksResubscribe { ref task_id, last_seq } => {
                 resubscribe_consumer(prefix, task_id, last_seq)
             }
@@ -604,17 +599,35 @@ fn resub_task_and_seq(body: &Value) -> Result<(A2aTaskId, u64), BridgeError> {
     Ok((task_id, extract_last_sequence(params).unwrap_or(0)))
 }
 
-fn sse_plan(method: &str, body: &Value, req_id: ReqId) -> Result<SseConsumePlan, BridgeError> {
+/// The consumer plan for a streaming method, or `None` when no events can follow.
+///
+/// `message/stream` may answer with a bare `Message` instead of a `Task`. There is no
+/// task to scope a consumer to and nothing will be published, so the caller gets the
+/// bootstrap line alone rather than a consumer on a subject nobody writes.
+fn sse_plan(method: &str, body: &Value, bootstrap_reply: &[u8]) -> Result<Option<SseConsumePlan>, BridgeError> {
     match method {
-        "message/stream" => Ok(SseConsumePlan::MessageStreamBootstrap { req_id }),
+        "message/stream" => {
+            Ok(bootstrap_task_id(bootstrap_reply)?.map(|task_id| SseConsumePlan::MessageStreamBootstrap { task_id }))
+        }
         "tasks/resubscribe" => {
             let (task_id, last_seq) = resub_task_and_seq(body)?;
-            Ok(SseConsumePlan::TasksResubscribe { task_id, last_seq })
+            Ok(Some(SseConsumePlan::TasksResubscribe { task_id, last_seq }))
         }
         other => Err(BridgeError::StreamingParams(format!(
             "unsupported streaming method {other}"
         ))),
     }
+}
+
+/// The task id carried by a `message/stream` bootstrap reply, if it carries one.
+fn bootstrap_task_id(reply: &[u8]) -> Result<Option<A2aTaskId>, BridgeError> {
+    let envelope: Value = serde_json::from_slice(reply).map_err(BridgeError::Deserialize)?;
+    let Some(raw) = envelope.pointer("/result/id").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    A2aTaskId::new(raw)
+        .map(Some)
+        .map_err(|e| BridgeError::StreamingParams(format!("agent returned an invalid task id: {e}")))
 }
 
 /// True when the gateway unary reply is a well-formed JSON-RPC error
@@ -654,24 +667,17 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
         return Err(BridgeError::MissingJsonRpcMethod);
     };
     let subject = build_gateway_subject(&state.prefix, agent_id.as_str(), method);
-    // The correlation id must be computed ONCE per request — for
-    // streaming methods the gateway publish and the JetStream consumer
-    // must agree on the same ReqId; computing it twice when the
-    // JSON-RPC id is absent/null minted two fresh ReqIds and SSE never
-    // delivered task events.
+    // Computed once per request: when the JSON-RPC id is absent or null this mints a
+    // fresh one, so calling it twice would publish under a different correlation id
+    // than the one the rest of the request reports.
     let req_id = json_rpc_corr_id(&v);
 
     if is_sse_jsonrpc_method(method) {
-        // Attach the JetStream consumer BEFORE the gateway unary
-        // publish. The events stream uses interest retention, so any
-        // task event the gateway emits before a consumer exists is
-        // dropped at the stream — flipping the order here would create
-        // a window where the very first task events vanish.
-        let plan = sse_plan(method, &v, req_id.clone())?;
-        let payloads = state
-            .jetstream
-            .task_event_payload_stream(&jwt, &state.prefix, plan)
-            .await?;
+        // The unary publish comes BEFORE the JetStream consumer. Task event
+        // subjects are scoped to the task (ADR#0055), and the bootstrap reply is
+        // where the task id comes from. Nothing is lost in the gap, because
+        // `A2A_EVENTS` retains by limits and the consumer delivers from the start
+        // of the stream.
         let nats_headers = gateway_publish_headers(req_id, &jwt, caller_id.as_deref())?;
         let unary_reply = state
             .publisher
@@ -681,15 +687,21 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
             // Match the unary path / a2a-nats-http: a JSON-RPC error
             // from the gateway is the caller's failure to read in the
             // returned envelope, not a bridge-layer transport failure.
-            // Drop the SSE stream we just attached and return the
-            // envelope verbatim as HTTP 200.
-            drop(payloads);
             return Response::builder()
                 .status(StatusCode::OK)
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(axum::body::Body::from(unary_reply))
                 .map_err(|e| BridgeError::ResponseBuild(e.to_string()));
         }
+        let payloads = match sse_plan(method, &v, &unary_reply)? {
+            Some(plan) => {
+                state
+                    .jetstream
+                    .task_event_payload_stream(&jwt, &state.prefix, plan)
+                    .await?
+            }
+            None => Box::pin(futures_util::stream::empty()),
+        };
         let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads);
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
     }

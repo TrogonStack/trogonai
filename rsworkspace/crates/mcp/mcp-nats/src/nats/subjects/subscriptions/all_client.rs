@@ -11,7 +11,7 @@ impl AllClientSubject {
 
 impl std::fmt::Display for AllClientSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.client.>", self.prefix.as_str())
+        write!(f, "{}.v1.client.>", self.prefix.as_str())
     }
 }
 

@@ -123,7 +123,7 @@ fn validate_caller_segment(s: &str) -> Result<(), JwtError> {
         return Err(JwtError::InvalidCallerId);
     }
     // Reject anything that would break out of a NATS subject segment — the
-    // caller id is interpolated into `_INBOX.{caller}.>`, `a2a.push.{caller}.>`
+    // caller id is interpolated into `_INBOX.{caller}.>`, `a2a.v1.push.{caller}.>`
     // and similar patterns, so dots and NATS wildcards (`*` / `>`) would
     // expand the subscribe scope. Also reject whitespace which collapses
     // visually identical ids into different strings.

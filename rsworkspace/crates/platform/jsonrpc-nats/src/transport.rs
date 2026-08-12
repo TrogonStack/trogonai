@@ -1,8 +1,8 @@
 //! Shared JSON-RPC over NATS transport helpers.
 //!
 //! Domain crates supply subject routing and encoded bodies. These helpers own
-//! header merge, core request/reply, and fire-and-forget publish for both legacy
-//! content-mode and canonical encodings.
+//! header merge, core request/reply, and fire-and-forget publish over the
+//! canonical encoding (ADR#0056).
 
 use std::time::Duration;
 
@@ -89,8 +89,11 @@ where
     Ok((response.headers.unwrap_or_default(), response.payload))
 }
 
-/// Core NATS request/reply for a JSON-RPC call in content-mode encoding,
+/// Core NATS request/reply for a JSON-RPC call in canonical encoding (ADR#0056),
 /// returning the decoded generic [`Message`].
+///
+/// `method` is the protocol method string written into the body (not the subject
+/// terminal projection).
 pub async fn jsonrpc_request_with_timeout<N>(
     client: &N,
     subject: &str,

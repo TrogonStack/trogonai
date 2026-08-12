@@ -18,7 +18,7 @@ impl std::fmt::Display for OneClientSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.>",
+            "{}.v1.session.{}.client.>",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

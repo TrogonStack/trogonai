@@ -1,4 +1,4 @@
-//! Client-side JSON-RPC content-mode wire helpers.
+//! Client-side canonical JSON-RPC wire helpers (ADR#0056).
 
 pub use crate::wire::{WireError, decode_response, encode_request, merge_jsonrpc_headers};
 

@@ -70,7 +70,14 @@ async fn resolve_nats_with_off_mode_returns_anonymous() {
     };
     let ingress = AAuthIngress::new_in_memory(cfg);
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("off-mode short-circuits");
     assert!(res.agent_id.is_none());
@@ -104,7 +111,14 @@ async fn resolve_nats_shadow_mode_swallows_pop_failure_to_anonymous() {
     // so production traffic isn't blocked while operators evaluate.
     let ingress = AAuthIngress::new_in_memory(shadow_cfg());
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("shadow mode never errors");
     assert!(res.agent_id.is_none());
@@ -117,7 +131,14 @@ async fn resolve_nats_enforce_mode_denies_without_jkt_carries_no_challenge() {
     // challenge=None rather than panicking or fabricating one.
     let ingress = AAuthIngress::new_in_memory(enforce_cfg());
     let err = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect_err("enforce mode denies");
     assert_eq!(err.code, AAUTH_REQUIRED_CODE);
@@ -302,7 +323,14 @@ async fn resolve_nats_records_capabilities_header_on_resolution() {
     // any capabilities when the header is absent).
     let ingress = AAuthIngress::new_in_memory(shadow_cfg());
     let res = ingress
-        .resolve_nats("a2a.gateway.bot.message.send", None, b"{}", &[], None, "message.send")
+        .resolve_nats(
+            "a2a.v1.gateway.bot.message.send",
+            None,
+            b"{}",
+            &[],
+            None,
+            "message.send",
+        )
         .await
         .expect("shadow mode never errors");
     assert!(res.capabilities.is_none());

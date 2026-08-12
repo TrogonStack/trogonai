@@ -12,7 +12,7 @@ impl SessionListSubject {
 
 impl std::fmt::Display for SessionListSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.session.list", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.session.list", self.prefix.as_str())
     }
 }
 

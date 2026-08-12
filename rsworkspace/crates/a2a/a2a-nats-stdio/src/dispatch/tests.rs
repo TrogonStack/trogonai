@@ -77,7 +77,7 @@ async fn dispatch(
 async fn tasks_get_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t1");
-    nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -86,7 +86,7 @@ async fn tasks_get_success() {
         json!({"id": "t1", "tenant": ""}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -108,7 +108,7 @@ async fn tasks_get_error_maps_to_rpc_error() {
 async fn tasks_cancel_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("tc");
-    nats.set_response_wire("a2a.agents.bot.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.cancel", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -117,14 +117,14 @@ async fn tasks_cancel_success() {
         json!({"id": "tc", "tenant": ""}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
 async fn message_send_success() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms");
-    nats.set_response_wire("a2a.agents.bot.message.send", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.send", headers, body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -134,7 +134,7 @@ async fn message_send_success() {
     )
     .await;
     assert!(
-        matches!(frame, OutboundFrame::Response(_)),
+        matches!(frame, OutboundFrame::RawBody(_)),
         "got: {}",
         serde_json::to_string(&frame).unwrap()
     );
@@ -147,7 +147,7 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
     // the JetStream loop (which would ack events the caller never saw).
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms-drop");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -177,7 +177,7 @@ async fn message_stream_returns_when_bootstrap_send_fails() {
 async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("rsub-drop");
-    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -205,7 +205,7 @@ async fn tasks_resubscribe_returns_when_bootstrap_send_fails() {
 async fn message_stream_emits_bootstrap_then_events() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms2");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -225,14 +225,14 @@ async fn message_stream_emits_bootstrap_then_events() {
     drop(chan_tx);
 
     let first = chan_rx.recv().await.expect("bootstrap frame");
-    assert!(matches!(first, OutboundFrame::Response(_)));
+    assert!(matches!(first, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
 async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("task1");
-    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -252,7 +252,7 @@ async fn tasks_resubscribe_emits_snapshot_then_empty_stream() {
     drop(chan_tx);
 
     let first = chan_rx.recv().await.expect("expected bootstrap frame");
-    assert!(matches!(first, OutboundFrame::Response(_)));
+    assert!(matches!(first, OutboundFrame::RawBody(_)));
     assert!(chan_rx.recv().await.is_none());
 }
 
@@ -280,7 +280,7 @@ async fn agent_card_success() {
         result: serde_json::json!(card),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.card", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.card", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -289,7 +289,7 @@ async fn agent_card_success() {
         json!({}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -357,10 +357,10 @@ async fn tasks_list_success() {
         result: serde_json::json!(list),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.tasks.list", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.list", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(&client, RpcId::Number(1), "tasks/list", json!({})).await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -379,7 +379,7 @@ async fn push_set_success() {
         result: serde_json::json!(cfg),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.push.set", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.push.set", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -388,7 +388,7 @@ async fn push_set_success() {
         json!({"url":"https://example.com","id":"c","taskId":"t1"}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -407,7 +407,7 @@ async fn push_get_success() {
         result: serde_json::json!(cfg),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.push.get", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.push.get", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -416,7 +416,7 @@ async fn push_get_success() {
         json!({"taskId":"t1","id":"c"}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -431,7 +431,7 @@ async fn push_list_success() {
         result: serde_json::json!(resp),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.push.list", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.push.list", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -440,7 +440,7 @@ async fn push_list_success() {
         json!({"taskId":"t1"}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -451,7 +451,7 @@ async fn push_delete_success() {
         result: serde_json::json!(null),
     })
     .unwrap();
-    nats.set_response_wire("a2a.agents.bot.push.delete", encoded.headers, encoded.body);
+    nats.set_response_wire("a2a.v1.agents.bot.push.delete", encoded.headers, encoded.body);
     let client = make_client(nats, MockJetStreamConsumerFactory::new());
     let frame = dispatch(
         &client,
@@ -460,7 +460,7 @@ async fn push_delete_success() {
         json!({"taskId":"t1","id":"c"}),
     )
     .await;
-    assert!(matches!(frame, OutboundFrame::Response(_)));
+    assert!(matches!(frame, OutboundFrame::RawBody(_)));
 }
 
 #[tokio::test]
@@ -507,7 +507,7 @@ async fn client_err_to_frame_maps_every_typed_variant() {
     for (input, expected) in cases {
         let nats = AdvancedMockNatsClient::new();
         let (headers, body) = err_response(input, "x");
-        nats.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+        nats.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
         let client = make_client(nats, MockJetStreamConsumerFactory::new());
         let frame = dispatch(
             &client,
@@ -536,37 +536,41 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
     // through that method's Err arm.
     let cases = [
         (
-            "a2a.agents.bot.message.send",
+            "a2a.v1.agents.bot.message.send",
             "message/send",
             json!({"message": {"messageId": "m", "role": "ROLE_USER", "parts": []}}),
         ),
-        ("a2a.agents.bot.tasks.list", "tasks/list", json!({})),
+        ("a2a.v1.agents.bot.tasks.list", "tasks/list", json!({})),
         (
-            "a2a.agents.bot.tasks.cancel",
+            "a2a.v1.agents.bot.tasks.cancel",
             "tasks/cancel",
             json!({"id": "t", "tenant": ""}),
         ),
         (
-            "a2a.agents.bot.push.set",
+            "a2a.v1.agents.bot.push.set",
             "tasks/pushNotificationConfig/set",
             json!({"url":"https://example.com","id":"c","taskId":"t1"}),
         ),
         (
-            "a2a.agents.bot.push.get",
+            "a2a.v1.agents.bot.push.get",
             "tasks/pushNotificationConfig/get",
             json!({"taskId":"t1","id":"c"}),
         ),
         (
-            "a2a.agents.bot.push.list",
+            "a2a.v1.agents.bot.push.list",
             "tasks/pushNotificationConfig/list",
             json!({"taskId":"t1"}),
         ),
         (
-            "a2a.agents.bot.push.delete",
+            "a2a.v1.agents.bot.push.delete",
             "tasks/pushNotificationConfig/delete",
             json!({"taskId":"t1","id":"c"}),
         ),
-        ("a2a.agents.bot.card", "agent/getAuthenticatedExtendedCard", json!({})),
+        (
+            "a2a.v1.agents.bot.card",
+            "agent/getAuthenticatedExtendedCard",
+            json!({}),
+        ),
     ];
     for (subject, method, params) in cases {
         let nats = AdvancedMockNatsClient::new();
@@ -582,7 +586,7 @@ async fn agent_error_routes_to_outbound_error_for_every_typed_method() {
 async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = err_response(a2a_nats::error::AGENT_UNAVAILABLE, "down");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -601,7 +605,7 @@ async fn message_stream_error_at_bootstrap_routes_to_outbound_error() {
 async fn tasks_resubscribe_error_at_snapshot_routes_to_outbound_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = err_response(a2a_nats::error::TASK_NOT_FOUND, "gone");
-    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -640,7 +644,7 @@ use trogon_nats::jetstream::mocks::MockJsMessage;
 
 fn js_msg(payload: Vec<u8>) -> MockJsMessage {
     let inner = async_nats::Message {
-        subject: "a2a.tasks.task1.events.req".into(),
+        subject: "a2a.v1.tasks.task1.events.req".into(),
         reply: Some("$JS.ACK.A2A_EVENTS.consumer.1.1.1.0.0".into()),
         payload: Bytes::from(payload),
         headers: None,
@@ -668,7 +672,7 @@ fn status_event(task_id: &str) -> a2a::event::StreamResponse {
 async fn message_stream_forwards_status_events_as_notifications() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = send_message_response("ms3");
-    nats.set_response_wire("a2a.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -687,7 +691,7 @@ async fn message_stream_forwards_status_events_as_notifications() {
     .await;
     drop(chan_tx);
     let first = chan_rx.recv().await.expect("bootstrap");
-    assert!(matches!(first, OutboundFrame::Response(_)));
+    assert!(matches!(first, OutboundFrame::RawBody(_)));
     let second = chan_rx.recv().await.expect("event notification");
     match second {
         OutboundFrame::Notification(n) => assert_eq!(n.method, "message/stream"),
@@ -699,7 +703,7 @@ async fn message_stream_forwards_status_events_as_notifications() {
 async fn tasks_resubscribe_forwards_status_events_under_resubscribe_method() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("rsub");
-    nats.set_response_wire("a2a.agents.bot.tasks.resubscribe", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.tasks.resubscribe", headers, body);
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
@@ -718,7 +722,7 @@ async fn tasks_resubscribe_forwards_status_events_under_resubscribe_method() {
     .await;
     drop(chan_tx);
     let first = chan_rx.recv().await.expect("snapshot");
-    assert!(matches!(first, OutboundFrame::Response(_)));
+    assert!(matches!(first, OutboundFrame::RawBody(_)));
     let second = chan_rx.recv().await.expect("event notification");
     match second {
         // Notification method MUST be tasks/resubscribe, not message/stream.

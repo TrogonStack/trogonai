@@ -8,7 +8,7 @@ use agent_client_protocol::schema::v1::{ListProvidersRequest, ListProvidersRespo
 async fn list_providers_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = ListProvidersResponse::new(vec![]);
-    set_json_response(&mock, "acp.agent.providers.list", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.providers.list", &expected);
 
     let request = ListProvidersRequest::new();
     let result = bridge.list_providers(request).await;
@@ -30,7 +30,7 @@ async fn list_providers_returns_error_when_nats_fails() {
 #[tokio::test]
 async fn list_providers_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.providers.list", "not json".into());
+    mock.set_response("acp.v1.global.agent.providers.list", "not json".into());
 
     let request = ListProvidersRequest::new();
     let err = bridge.list_providers(request).await.unwrap_err();
@@ -41,7 +41,11 @@ async fn list_providers_returns_error_when_response_is_invalid_json() {
 #[tokio::test]
 async fn list_providers_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
-    set_json_response(&mock, "acp.agent.providers.list", &ListProvidersResponse::new(vec![]));
+    set_json_response(
+        &mock,
+        "acp.v1.global.agent.providers.list",
+        &ListProvidersResponse::new(vec![]),
+    );
 
     let _ = bridge.list_providers(ListProvidersRequest::new()).await;
 

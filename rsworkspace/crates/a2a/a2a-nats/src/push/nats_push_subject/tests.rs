@@ -2,8 +2,8 @@ use super::*;
 
 #[test]
 fn accepts_dotted_subject() {
-    let subject = NatsPushSubject::new("a2a.push.acme.caller-42.task-9").unwrap();
-    assert_eq!(subject.as_str(), "a2a.push.acme.caller-42.task-9");
+    let subject = NatsPushSubject::new("a2a.v1.push.acme.caller-42.task-9").unwrap();
+    assert_eq!(subject.as_str(), "a2a.v1.push.acme.caller-42.task-9");
 }
 
 #[test]
@@ -13,13 +13,13 @@ fn rejects_empty() {
 
 #[test]
 fn rejects_wildcards() {
-    assert!(NatsPushSubject::new("a2a.push.*").is_err());
+    assert!(NatsPushSubject::new("a2a.v1.push.*").is_err());
 }
 
 #[test]
 fn wire_form_prefixes_subject() {
-    let subject = NatsPushSubject::new("a2a.push.t.caller.task").unwrap();
-    assert_eq!(subject.wire_form(), "subject:a2a.push.t.caller.task");
+    let subject = NatsPushSubject::new("a2a.v1.push.t.caller.task").unwrap();
+    assert_eq!(subject.wire_form(), "subject:a2a.v1.push.t.caller.task");
 }
 
 #[test]
@@ -30,6 +30,6 @@ fn error_display_includes_violation() {
 
 #[test]
 fn display_renders_inner_token() {
-    let subject = NatsPushSubject::new("a2a.push.bot.caller.task").unwrap();
-    assert_eq!(subject.to_string(), "a2a.push.bot.caller.task");
+    let subject = NatsPushSubject::new("a2a.v1.push.bot.caller.task").unwrap();
+    assert_eq!(subject.to_string(), "a2a.v1.push.bot.caller.task");
 }

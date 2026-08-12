@@ -16,7 +16,7 @@ impl ExtNotifySubject {
 
 impl std::fmt::Display for ExtNotifySubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.ext.{}", self.prefix.as_str(), self.method)
+        write!(f, "{}.v1.global.agent.ext.{}", self.prefix.as_str(), self.method)
     }
 }
 

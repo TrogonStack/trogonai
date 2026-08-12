@@ -261,7 +261,7 @@ async fn resolve_nats_happy_path_with_matching_auth_token() {
     let _ = ap_jwk;
     let ingress = Arc::new(build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce));
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -324,7 +324,7 @@ async fn resolve_nats_rejects_auth_token_bound_to_different_agent() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -395,7 +395,7 @@ async fn resolve_nats_enforce_mode_denies_scope_not_covering_method() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -459,7 +459,7 @@ async fn resolve_nats_mission_header_matches_auth_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let mut pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -525,7 +525,7 @@ async fn resolve_nats_denies_mission_claim_without_header() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     // No AAuth-Mission header on the request: a mission-scoped token must
@@ -600,7 +600,7 @@ async fn resolve_nats_denies_malformed_mission_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -672,7 +672,7 @@ async fn resolve_nats_denies_expired_auth_token_with_valid_pop() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);
@@ -746,7 +746,7 @@ async fn resolve_nats_denies_mission_header_mismatching_claim() {
     };
     let ingress = build_ingress(ap_public_jwk, ap_iss, resource_iss, AAuthMode::Enforce);
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.x.1";
     let payload = b"{}".to_vec();
     let mut pop = pop_headers(&agent, &agent_jwt, subject, reply, &payload, now);

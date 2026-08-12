@@ -18,7 +18,7 @@ impl std::fmt::Display for ForkSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.fork",
+            "{}.v1.session.{}.agent.fork",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

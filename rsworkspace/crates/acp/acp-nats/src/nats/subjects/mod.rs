@@ -9,4 +9,6 @@ pub mod subscriptions;
 pub use stream::{AcpStream, StreamAssignment};
 
 #[cfg(test)]
+mod conformance;
+#[cfg(test)]
 mod tests;

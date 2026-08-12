@@ -357,8 +357,6 @@ pub enum Operation {
     SessionReady,
     /// Client-directed operation
     Client,
-    /// Client extension prompt-response operation
-    ClientExtSessionPromptResponse,
 }
 
 impl Operation {
@@ -373,7 +371,6 @@ impl Operation {
             Self::SessionValidate => "session_validate",
             Self::SessionReady => "session_ready",
             Self::Client => "client",
-            Self::ClientExtSessionPromptResponse => "client.ext.session.prompt_response",
         }
     }
 }
@@ -463,10 +460,6 @@ pub enum Reason {
     SessionReadyPublishFailed,
     /// Rejected due to client backpressure
     ClientBackpressureRejected,
-    /// Prompt id was missing
-    MissingPromptId,
-    /// Parsing the prompt response failed
-    PromptResponseParseFailed,
 }
 
 impl Reason {
@@ -486,8 +479,6 @@ impl Reason {
             Self::PromptTimeout => "prompt_timeout",
             Self::SessionReadyPublishFailed => "session_ready_publish_failed",
             Self::ClientBackpressureRejected => "client_backpressure_rejected",
-            Self::MissingPromptId => "missing_prompt_id",
-            Self::PromptResponseParseFailed => "prompt_response_parse_failed",
         }
     }
 }

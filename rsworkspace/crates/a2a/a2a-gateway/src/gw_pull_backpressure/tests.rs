@@ -60,26 +60,31 @@ fn pull_consumer_hints_default_matches_baseline() {
 }
 
 #[test]
-fn parse_task_events_subject_extracts_ids() {
+fn parse_task_events_subject_extracts_task_id() {
     // JetStream task event subjects use the plural `tasks` segment, not
     // `task` — regression test for the wrong-prefix bug.
-    let (task_id, req_id) = parse_task_events_subject("a2a", "a2a.tasks.t1.events.r1").expect("parsed");
+    let task_id = parse_task_events_subject("a2a", "a2a.v1.tasks.t1.events").expect("parsed");
     assert_eq!(task_id.as_str(), "t1");
-    assert_eq!(req_id.as_str(), "r1");
 }
 
 #[test]
 fn parse_task_events_subject_rejects_singular_task_segment() {
     // Anti-regression: the wrong prefix Term'd every pulled message.
-    assert!(parse_task_events_subject("a2a", "a2a.task.t1.events.r1").is_none());
+    assert!(parse_task_events_subject("a2a", "a2a.task.t1.events").is_none());
 }
 
 #[test]
 fn parse_task_events_subject_rejects_unrelated() {
-    assert!(parse_task_events_subject("a2a", "a2a.gateway.bot.message.send").is_none());
-    assert!(parse_task_events_subject("a2a", "other.tasks.t1.events.r1").is_none());
-    // Missing the `.events.` infix.
-    assert!(parse_task_events_subject("a2a", "a2a.tasks.t1.r1").is_none());
+    assert!(parse_task_events_subject("a2a", "a2a.v1.gateway.bot.message.send").is_none());
+    assert!(parse_task_events_subject("a2a", "other.tasks.t1.events").is_none());
+    // Missing the `.events` suffix.
+    assert!(parse_task_events_subject("a2a", "a2a.v1.tasks.t1").is_none());
+}
+
+#[test]
+fn parse_task_events_subject_rejects_a_trailing_request_id_segment() {
+    // The retired shape. Accepting it would leave the old subject working.
+    assert!(parse_task_events_subject("a2a", "a2a.v1.tasks.t1.events.r1").is_none());
 }
 
 #[test]
@@ -94,12 +99,12 @@ fn planner_forward_disposition_retries_then_terms() {
 }
 
 #[test]
-fn planner_message_stream_plan_filters_by_req_id() {
+fn planner_message_stream_plan_filters_every_task() {
+    // The gateway never sees the bootstrap reply that names the task, so it
+    // cannot narrow the filter; `Trogon-Req-Id` is what picks its own events out.
     let planner = BaselineTaskEventsEgressPlanner::new();
-    let plan = planner
-        .plan_message_stream(&prefix(), &ReqId::from_header("req-1"))
-        .expect("plan");
-    assert_eq!(plan.filter_subject, "a2a.tasks.*.events.req-1");
+    let plan = planner.plan_message_stream(&prefix()).expect("plan");
+    assert_eq!(plan.filter_subject, "a2a.v1.tasks.*.events");
 }
 
 #[test]
@@ -107,7 +112,7 @@ fn planner_resubscribe_plan_filters_by_task_id_and_advances_seq() {
     let planner = BaselineTaskEventsEgressPlanner::new();
     let task_id = A2aTaskId::new("task-9").expect("task");
     let plan = planner.plan_resubscribe(&prefix(), &task_id, 41).expect("plan");
-    assert_eq!(plan.filter_subject, "a2a.tasks.task-9.events.*");
+    assert_eq!(plan.filter_subject, "a2a.v1.tasks.task-9.events");
     assert_eq!(plan.start_sequence, 42);
 }
 
@@ -176,9 +181,20 @@ fn config_from_env_clamps_zero_max_inflight() {
 }
 
 #[test]
-fn gateway_egress_subject_includes_req_id() {
-    let req_id = ReqId::from_header("req-1");
-    assert_eq!(gateway_egress_subject(&prefix(), &req_id), "a2a.gateway.egress.req-1");
+fn gateway_egress_subject_is_caller_scoped() {
+    let caller = EgressCallerId::new("caller-1").expect("caller");
+    assert_eq!(
+        gateway_egress_subject(&prefix(), &caller),
+        "a2a.v1.gateway.caller-1.events"
+    );
+}
+
+#[test]
+fn egress_caller_id_rejects_values_that_would_rewrite_the_subject() {
+    assert!(EgressCallerId::new("caller.a").is_err());
+    assert!(EgressCallerId::new("*").is_err());
+    assert!(EgressCallerId::new(">").is_err());
+    assert!(EgressCallerId::new("").is_err());
 }
 
 #[test]
@@ -250,10 +266,10 @@ fn caller_inflight_gate_recovers_from_poisoned_lock() {
 #[test]
 fn pull_cycle_error_display_carries_subject() {
     let err = PullCycleError::Ack {
-        subject: "a2a.tasks.t.events.r".to_string(),
+        subject: "a2a.v1.tasks.t.events.r".to_string(),
         source: "boom".into(),
     };
-    assert!(format!("{err}").contains("a2a.tasks.t.events.r"));
+    assert!(format!("{err}").contains("a2a.v1.tasks.t.events.r"));
 }
 
 #[test]
@@ -294,23 +310,54 @@ fn forward_attempts_clear_is_idempotent() {
 async fn forward_task_event_publishes_to_gateway_egress_subject() {
     let mock = trogon_nats::AdvancedMockNatsClient::new();
     let prefix = prefix();
+    let caller = EgressCallerId::new("caller-9").expect("caller");
     let req_id = ReqId::from_header("req-9");
     let payload = bytes::Bytes::from_static(b"event-payload");
-    forward_task_event(&mock, &prefix, &req_id, &payload)
+    forward_task_event(&mock, &prefix, &caller, &req_id, &payload)
         .await
         .expect("publish succeeds");
     let subjects = mock.published_messages();
-    assert_eq!(subjects, vec!["a2a.gateway.egress.req-9"]);
+    assert_eq!(subjects, vec!["a2a.v1.gateway.caller-9.events"]);
     let payloads = mock.published_payloads();
     assert_eq!(payloads, vec![payload]);
+}
+
+#[tokio::test]
+async fn forward_task_event_carries_the_request_id_in_a_header() {
+    // The subject no longer names the request, so the header is the only thing
+    // that tells one subscription's events from another's on a shared inbox.
+    let mock = trogon_nats::AdvancedMockNatsClient::new();
+    let caller = EgressCallerId::new("caller-9").expect("caller");
+    forward_task_event(
+        &mock,
+        &prefix(),
+        &caller,
+        &ReqId::from_header("req-9"),
+        &bytes::Bytes::new(),
+    )
+    .await
+    .expect("publish succeeds");
+    let headers = mock.published_headers();
+    let sent = headers.first().expect("one publish");
+    assert_eq!(
+        sent.get(a2a_nats::constants::REQ_ID_HEADER).map(|v| v.as_str()),
+        Some("req-9")
+    );
 }
 
 #[tokio::test]
 async fn forward_task_event_surfaces_publish_failure_as_string() {
     let mock = trogon_nats::AdvancedMockNatsClient::new();
     mock.fail_next_publish();
-    let err = forward_task_event(&mock, &prefix(), &ReqId::from_header("r"), &bytes::Bytes::new())
-        .await
-        .expect_err("publish fails");
+    let caller = EgressCallerId::new("c").expect("caller");
+    let err = forward_task_event(
+        &mock,
+        &prefix(),
+        &caller,
+        &ReqId::from_header("r"),
+        &bytes::Bytes::new(),
+    )
+    .await
+    .expect_err("publish fails");
     assert!(!err.is_empty(), "error string is non-empty for log surface");
 }

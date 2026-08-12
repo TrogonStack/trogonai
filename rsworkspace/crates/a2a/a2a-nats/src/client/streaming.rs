@@ -14,9 +14,12 @@ use crate::jetstream::streams::events_stream_name;
 use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
 
+use crate::task_id::A2aTaskId;
+
 use super::error::ClientError;
-use super::event_stream::{TypedEventStream, build_event_stream};
+use super::event_stream::{TypedEventStream, build_event_stream, empty_event_stream};
 use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
+use super::validated::ValidatedRpc;
 use super::wire::{decode_client_response, encode_client_request, merge_jsonrpc_headers};
 
 pub struct StreamingRequest<'a, N, J> {
@@ -45,6 +48,25 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
     Req: Serialize,
 {
+    let (validated, stream) = send_streaming_validated(ctx, params).await?;
+    Ok((validated.value, stream))
+}
+
+pub async fn send_streaming_validated<N, J, Req>(
+    ctx: StreamingRequest<'_, N, J>,
+    params: &Req,
+) -> Result<(ValidatedRpc<SendMessageResponse>, TypedEventStream), ClientError>
+where
+    N: RequestClient,
+    J: JetStreamGetStream,
+    JsMessageOf<J>: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
+    <J as JetStreamGetStream>::Stream: Send + 'static,
+    <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer: Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::Messages: Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
+    <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
+    Req: Serialize,
+{
     let StreamingRequest {
         nats,
         js,
@@ -57,8 +79,6 @@ where
     } = ctx;
     let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
         .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
-
-    let event_stream = open_task_stream(js, prefix, req_id).await?;
 
     let headers = match gateway_caller_jwt {
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
@@ -77,18 +97,34 @@ where
     .map_err(|e| ClientError::Transport(e.to_string()))?;
 
     let response_headers = msg.headers.unwrap_or_default();
-    match decode_client_response::<SendMessageResponse>(&response_headers, &msg.payload)
+    let body = msg.payload.clone();
+    let result = match decode_client_response::<SendMessageResponse>(&response_headers, &body)
         .map_err(|e| ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?
     {
-        Ok(result) => Ok((result, event_stream)),
-        Err((code, message)) => Err(ClientError::from_jsonrpc_code(code, message)),
-    }
+        Ok(result) => result,
+        Err((code, message)) => return Err(ClientError::from_jsonrpc_code(code, message)),
+    };
+
+    // The consumer is opened after the reply, not before it: task event subjects
+    // are scoped to the task (ADR#0055), and the bootstrap reply is where the task
+    // id comes from. Nothing is missed in the gap, because `A2A_EVENTS` retains by
+    // limits and the consumer delivers from sequence 0.
+    let event_stream = match &result {
+        SendMessageResponse::Task(task) => {
+            let task_id = A2aTaskId::new(task.id.clone())
+                .map_err(|e| ClientError::ConsumerSetup(format!("agent returned an invalid task id: {e}")))?;
+            open_task_stream(js, prefix, &task_id).await?
+        }
+        SendMessageResponse::Message(_) => empty_event_stream(),
+    };
+
+    Ok((ValidatedRpc::new(result, body), event_stream))
 }
 
 pub async fn open_task_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
-    req_id: &ReqId,
+    task_id: &A2aTaskId,
 ) -> Result<TypedEventStream, ClientError>
 where
     J: JetStreamGetStream,
@@ -105,7 +141,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = stream_events_consumer(prefix, req_id);
+    let consumer_config = stream_events_consumer(prefix, task_id);
 
     let last_seq = Arc::new(Mutex::new(0u64));
 

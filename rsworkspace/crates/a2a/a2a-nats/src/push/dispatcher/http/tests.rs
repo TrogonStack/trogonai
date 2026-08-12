@@ -19,7 +19,7 @@ fn parse_http_target_accepts_http_and_https() {
 
 #[test]
 fn parse_http_target_rejects_non_http_target() {
-    let err = parse_http_target("subject:a2a.push.t.caller.task").unwrap_err();
+    let err = parse_http_target("subject:a2a.v1.push.t.caller.task").unwrap_err();
     assert!(matches!(err, DispatchError::InvalidTarget(_)));
 }
 
@@ -27,7 +27,7 @@ fn parse_http_target_rejects_non_http_target() {
 async fn dispatch_returns_invalid_target_for_non_http_scheme() {
     let dispatcher = HttpPushDispatcher::new(reqwest::Client::new());
     let config = TaskPushNotificationConfig {
-        url: "subject:a2a.push.t.caller.task".into(),
+        url: "subject:a2a.v1.push.t.caller.task".into(),
         id: Some("cfg-1".into()),
         task_id: String::new(),
         token: None,

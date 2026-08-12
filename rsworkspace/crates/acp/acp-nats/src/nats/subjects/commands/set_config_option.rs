@@ -18,7 +18,7 @@ impl std::fmt::Display for SetConfigOptionSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.set_config_option",
+            "{}.v1.session.{}.agent.set_config_option",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

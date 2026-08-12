@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::Config;
-use jsonrpc_nats::{Message, ResponseId, encode};
+use jsonrpc_nats::{Message, encode};
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::mocks::*;
@@ -17,32 +17,50 @@ fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> asyn
     }
 }
 
-fn make_wire_success_msg<Res: serde::Serialize>(req_id: &str, result: &Res) -> async_nats::Message {
-    let encoded = encode(&Message::Success {
-        id: ResponseId::String(req_id.to_string()),
-        result: serde_json::to_value(result).unwrap(),
-    })
-    .unwrap();
-    make_nats_msg(&encoded.body, Some(encoded.headers))
-}
-
-fn make_wire_error_msg(req_id: &str, error: &Error) -> async_nats::Message {
-    let encoded = encode(&Message::Error {
-        id: ResponseId::String(req_id.to_string()),
-        code: i32::from(error.code),
-        message: error.message.clone(),
-        data: error.data.clone(),
-    })
-    .unwrap();
-    make_nats_msg(&encoded.body, Some(encoded.headers))
-}
-
 fn make_wire_notification_msg<Req: serde::Serialize>(notification: &Req) -> async_nats::Message {
     let encoded = crate::wire::encode_notification("session/update", notification).unwrap();
     make_nats_msg(&encoded.body, Some(encoded.headers))
 }
 
-use crate::agent::test_support::MockJs;
+use crate::agent::test_support::{MockJs, reply_when_published};
+
+type RespTx = futures::channel::mpsc::UnboundedSender<Result<MockJsMessage, trogon_nats::mocks::MockError>>;
+
+fn reply_success_when_published<Res: serde::Serialize>(js: &MockJs, tx: RespTx, result: &Res) {
+    let result = serde_json::to_value(result).unwrap();
+    reply_when_published(&js.publisher, tx, move |request_headers| {
+        let encoded = encode(&Message::Success {
+            id: crate::wire::response_id_from_request_headers(&request_headers),
+            result,
+        })
+        .unwrap();
+        (encoded.headers, encoded.body)
+    });
+}
+
+fn reply_error_when_published(js: &MockJs, tx: RespTx, error: &Error) {
+    let (code, message, data) = (i32::from(error.code), error.message.clone(), error.data.clone());
+    reply_when_published(&js.publisher, tx, move |request_headers| {
+        let encoded = encode(&Message::Error {
+            id: crate::wire::response_id_from_request_headers(&request_headers),
+            code,
+            message,
+            data,
+        })
+        .unwrap();
+        (encoded.headers, encoded.body)
+    });
+}
+
+fn reply_raw_when_published(js: &MockJs, tx: RespTx, payload: &'static [u8]) {
+    reply_when_published(&js.publisher, tx, move |request_headers| {
+        let mut headers = async_nats::HeaderMap::new();
+        if let Some(literal) = request_headers.get(jsonrpc_nats::HEADER_ID) {
+            headers.insert(jsonrpc_nats::HEADER_ID, literal.as_str());
+        }
+        (headers, bytes::Bytes::from_static(payload))
+    });
+}
 
 fn mock_bridge() -> (
     AdvancedMockNatsClient,
@@ -87,9 +105,7 @@ async fn prompt_js_success() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let response = PromptResponse::new(StopReason::EndTurn);
-    let msg = MockJsMessage::new(make_wire_success_msg("req-placeholder", &response));
-    resp_tx.unbounded_send(Ok(msg)).unwrap();
+    reply_success_when_published(&js, resp_tx, &PromptResponse::new(StopReason::EndTurn));
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
 
@@ -179,9 +195,7 @@ async fn prompt_js_notification_forwarding() {
     let notif_msg = MockJsMessage::new(make_wire_notification_msg(&notification));
     notif_tx.unbounded_send(Ok(notif_msg)).unwrap();
 
-    let response = PromptResponse::new(StopReason::EndTurn);
-    let resp_msg = MockJsMessage::new(make_wire_success_msg("req-placeholder", &response));
-    resp_tx.unbounded_send(Ok(resp_msg)).unwrap();
+    reply_success_when_published(&js, resp_tx, &PromptResponse::new(StopReason::EndTurn));
     let _notif_keeper = notif_tx;
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
@@ -218,8 +232,7 @@ async fn prompt_js_bad_response_payload() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let msg = MockJsMessage::new(make_nats_msg(b"not json", None));
-    resp_tx.unbounded_send(Ok(msg)).unwrap();
+    reply_raw_when_published(&js, resp_tx, b"not json");
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());
@@ -238,8 +251,7 @@ async fn prompt_js_agent_error_response() {
     js.consumer_factory.add_consumer(resp_consumer);
 
     let agent_err = Error::new(ErrorCode::InternalError.into(), "agent blew up");
-    let msg = MockJsMessage::new(make_wire_error_msg("req-placeholder", &agent_err));
-    resp_tx.unbounded_send(Ok(msg)).unwrap();
+    reply_error_when_published(&js, resp_tx, &agent_err);
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
     assert!(result.is_err());

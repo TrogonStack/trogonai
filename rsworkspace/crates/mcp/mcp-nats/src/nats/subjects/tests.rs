@@ -13,7 +13,7 @@ fn peer(s: &str) -> McpPeerId {
 fn server_initialize_subject_matches_acp_style() {
     assert_eq!(
         server::InitializeSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
-        "mcp.server.filesystem.initialize"
+        "mcp.v1.server.filesystem.initialize"
     );
 }
 
@@ -21,11 +21,11 @@ fn server_initialize_subject_matches_acp_style() {
 fn server_tool_request_subjects_match_mcp_method_groups() {
     assert_eq!(
         server::ListToolsSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
-        "mcp.server.filesystem.tools.list"
+        "mcp.v1.server.filesystem.tools.list"
     );
     assert_eq!(
         server::CallToolSubject::new(&p("mcp"), &peer("filesystem")).to_string(),
-        "mcp.server.filesystem.tools.call"
+        "mcp.v1.server.filesystem.tools.call"
     );
 }
 
@@ -57,24 +57,24 @@ fn all_server_request_subjects_are_method_shaped() {
     assert_eq!(
         subjects,
         [
-            "mcp.server.filesystem.initialize",
-            "mcp.server.filesystem.ping",
-            "mcp.server.filesystem.server.discover",
-            "mcp.server.filesystem.completion.complete",
-            "mcp.server.filesystem.logging.set_level",
-            "mcp.server.filesystem.prompts.list",
-            "mcp.server.filesystem.prompts.get",
-            "mcp.server.filesystem.resources.list",
-            "mcp.server.filesystem.resources.templates.list",
-            "mcp.server.filesystem.resources.read",
-            "mcp.server.filesystem.subscriptions.listen",
-            "mcp.server.filesystem.resources.subscribe",
-            "mcp.server.filesystem.resources.unsubscribe",
-            "mcp.server.filesystem.tools.list",
-            "mcp.server.filesystem.tools.call",
-            "mcp.server.filesystem.tasks.get",
-            "mcp.server.filesystem.tasks.update",
-            "mcp.server.filesystem.tasks.cancel",
+            "mcp.v1.server.filesystem.initialize",
+            "mcp.v1.server.filesystem.ping",
+            "mcp.v1.server.filesystem.server.discover",
+            "mcp.v1.server.filesystem.completion.complete",
+            "mcp.v1.server.filesystem.logging.set_level",
+            "mcp.v1.server.filesystem.prompts.list",
+            "mcp.v1.server.filesystem.prompts.get",
+            "mcp.v1.server.filesystem.resources.list",
+            "mcp.v1.server.filesystem.resources.templates.list",
+            "mcp.v1.server.filesystem.resources.read",
+            "mcp.v1.server.filesystem.subscriptions.listen",
+            "mcp.v1.server.filesystem.resources.subscribe",
+            "mcp.v1.server.filesystem.resources.unsubscribe",
+            "mcp.v1.server.filesystem.tools.list",
+            "mcp.v1.server.filesystem.tools.call",
+            "mcp.v1.server.filesystem.tasks.get",
+            "mcp.v1.server.filesystem.tasks.update",
+            "mcp.v1.server.filesystem.tasks.cancel",
         ]
     );
 }
@@ -83,7 +83,7 @@ fn all_server_request_subjects_are_method_shaped() {
 fn server_notifications_target_client_namespace() {
     assert_eq!(
         server::ToolListChangedSubject::new(&p("mcp"), &peer("desktop")).to_string(),
-        "mcp.client.desktop.notifications.tools.list_changed"
+        "mcp.v1.client.desktop.notifications.tools.list_changed"
     );
 }
 
@@ -106,15 +106,15 @@ fn all_server_notification_subjects_are_peer_targeted() {
     assert_eq!(
         subjects,
         [
-            "mcp.client.desktop.notifications.cancelled",
-            "mcp.client.desktop.notifications.progress",
-            "mcp.client.desktop.notifications.message",
-            "mcp.client.desktop.notifications.resources.updated",
-            "mcp.client.desktop.notifications.resources.list_changed",
-            "mcp.client.desktop.notifications.tools.list_changed",
-            "mcp.client.desktop.notifications.prompts.list_changed",
-            "mcp.client.desktop.notifications.subscriptions.acknowledged",
-            "mcp.client.desktop.notifications.tasks",
+            "mcp.v1.client.desktop.notifications.cancelled",
+            "mcp.v1.client.desktop.notifications.progress",
+            "mcp.v1.client.desktop.notifications.message",
+            "mcp.v1.client.desktop.notifications.resources.updated",
+            "mcp.v1.client.desktop.notifications.resources.list_changed",
+            "mcp.v1.client.desktop.notifications.tools.list_changed",
+            "mcp.v1.client.desktop.notifications.prompts.list_changed",
+            "mcp.v1.client.desktop.notifications.subscriptions.acknowledged",
+            "mcp.v1.client.desktop.notifications.tasks",
         ]
     );
 }
@@ -123,11 +123,11 @@ fn all_server_notification_subjects_are_peer_targeted() {
 fn client_request_subjects_match_mcp_method_groups() {
     assert_eq!(
         client::CreateMessageSubject::new(&p("mcp"), &peer("desktop")).to_string(),
-        "mcp.client.desktop.sampling.create_message"
+        "mcp.v1.client.desktop.sampling.create_message"
     );
     assert_eq!(
         client::ListRootsSubject::new(&p("mcp"), &peer("desktop")).to_string(),
-        "mcp.client.desktop.roots.list"
+        "mcp.v1.client.desktop.roots.list"
     );
 }
 
@@ -150,14 +150,14 @@ fn all_client_subjects_are_peer_targeted() {
     assert_eq!(
         subjects,
         [
-            "mcp.client.desktop.ping",
-            "mcp.client.desktop.sampling.create_message",
-            "mcp.client.desktop.roots.list",
-            "mcp.client.desktop.elicitation.create",
-            "mcp.server.filesystem.notifications.cancelled",
-            "mcp.server.filesystem.notifications.progress",
-            "mcp.server.filesystem.notifications.initialized",
-            "mcp.server.filesystem.notifications.roots.list_changed",
+            "mcp.v1.client.desktop.ping",
+            "mcp.v1.client.desktop.sampling.create_message",
+            "mcp.v1.client.desktop.roots.list",
+            "mcp.v1.client.desktop.elicitation.create",
+            "mcp.v1.server.filesystem.notifications.cancelled",
+            "mcp.v1.server.filesystem.notifications.progress",
+            "mcp.v1.server.filesystem.notifications.initialized",
+            "mcp.v1.server.filesystem.notifications.roots.list_changed",
         ]
     );
 }
@@ -166,14 +166,14 @@ fn all_client_subjects_are_peer_targeted() {
 fn wildcards_match_acp_export_pattern() {
     assert_eq!(
         subscriptions::AllServerSubject::new(&p("mcp")).to_string(),
-        "mcp.server.>"
+        "mcp.v1.server.>"
     );
     assert_eq!(
         subscriptions::AllClientSubject::new(&p("mcp")).to_string(),
-        "mcp.client.>"
+        "mcp.v1.client.>"
     );
     assert_eq!(
         subscriptions::OneClientSubject::new(&p("mcp"), &peer("desktop")).to_string(),
-        "mcp.client.desktop.>"
+        "mcp.v1.client.desktop.>"
     );
 }

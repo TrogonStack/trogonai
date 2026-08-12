@@ -2,39 +2,33 @@ use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
 use crate::acp_prefix::AcpPrefix;
-use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 
-pub fn prompt_notifications_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: &ReqId) -> Config {
+/// Consumers below filter on a session-scoped subject, so they see every
+/// in-flight request's traffic for that session and the caller demuxes on the
+/// `Jsonrpc-Id` header (ADR#0055).
+///
+/// `DeliverPolicy::New` rather than `All`: the consumer is created before the
+/// request is published, so nothing is missed, and a session-wide filter under
+/// `All` would replay the session's entire history on every new request.
+pub fn prompt_notifications_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId) -> Config {
     let pfx = prefix.as_str();
     let sid = session_id.as_str();
     Config {
-        filter_subject: format!("{pfx}.session.{sid}.agent.update.{req_id}"),
-        deliver_policy: DeliverPolicy::All,
+        filter_subject: format!("{pfx}.v1.session.{sid}.agent.update"),
+        deliver_policy: DeliverPolicy::New,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()
     }
 }
 
-pub fn prompt_response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: &ReqId) -> Config {
+pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId) -> Config {
     let pfx = prefix.as_str();
     let sid = session_id.as_str();
     Config {
-        filter_subject: format!("{pfx}.session.{sid}.agent.prompt.response.{req_id}"),
-        deliver_policy: DeliverPolicy::All,
-        ack_policy: AckPolicy::Explicit,
-        replay_policy: ReplayPolicy::Instant,
-        ..Default::default()
-    }
-}
-
-pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId, req_id: &ReqId) -> Config {
-    let pfx = prefix.as_str();
-    let sid = session_id.as_str();
-    Config {
-        filter_subject: format!("{pfx}.session.{sid}.agent.response.{req_id}"),
-        deliver_policy: DeliverPolicy::All,
+        filter_subject: format!("{pfx}.v1.session.{sid}.agent.response"),
+        deliver_policy: DeliverPolicy::New,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()

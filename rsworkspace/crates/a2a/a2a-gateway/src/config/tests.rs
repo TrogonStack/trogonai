@@ -21,7 +21,7 @@ fn config_from_args_rejects_invalid_prefix() {
 fn config_gateway_subscribe_subject_uses_prefix() {
     let env = InMemoryEnv::new();
     let (config, _) = config_from_args(args("localhost:4222", "a2a", Some("gateways")), &env).expect("valid args");
-    assert_eq!(config.gateway_subscribe_subject(), "a2a.gateway.>");
+    assert_eq!(config.gateway_subscribe_subject(), "a2a.v1.gateway.>");
     assert_eq!(config.queue_group.as_ref().map(QueueGroup::as_str), Some("gateways"));
 }
 

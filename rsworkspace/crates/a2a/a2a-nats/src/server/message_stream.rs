@@ -4,7 +4,9 @@ use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
 
 use crate::a2a_prefix::A2aPrefix;
-use crate::constants::MESSAGE_STREAM_METHOD as METHOD;
+use crate::constants::{
+    GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER, MESSAGE_STREAM_METHOD as METHOD, REQ_ID_HEADER,
+};
 use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
@@ -90,7 +92,8 @@ pub async fn handle<H, N, J>(
         return;
     }
 
-    let events_subject = TaskEventsSubject::new(prefix, &task_id, &req_id).to_string();
+    let events_subject = TaskEventsSubject::new(prefix, &task_id).to_string();
+    let event_headers = event_headers(headers, &req_id);
     while let Some(item) = events.next().await {
         let payload = match item {
             Ok(event) => match serde_json::to_vec(&event) {
@@ -106,14 +109,28 @@ pub async fn handle<H, N, J>(
             }
         };
         let subject = async_nats::Subject::from(events_subject.as_str());
-        if let Err(e) = js
-            .publish_with_headers(subject, async_nats::HeaderMap::new(), payload)
-            .await
-        {
+        if let Err(e) = js.publish_with_headers(subject, event_headers.clone(), payload).await {
             warn!(error = %e, "failed to publish task event to JetStream; ending stream");
             return;
         }
     }
+}
+
+/// Correlation and caller identity for every event of one subscription.
+///
+/// The subject only names the task, so `Trogon-Req-Id` is what tells concurrent
+/// subscribers of that task apart (ADR#0055). Caller identity rides along because
+/// the gateway's egress pump gates per caller and can no longer recover it from
+/// the subject either.
+fn event_headers(request_headers: &async_nats::header::HeaderMap, req_id: &ReqId) -> async_nats::header::HeaderMap {
+    let mut headers = async_nats::header::HeaderMap::new();
+    headers.insert(REQ_ID_HEADER, req_id.as_str());
+    for name in [GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER] {
+        if let Some(value) = request_headers.get(name) {
+            headers.insert(name, value.as_str());
+        }
+    }
+    headers
 }
 
 async fn prepare_bootstrap<H: A2aExecutor>(

@@ -1,27 +1,34 @@
 //! JetStream consumer configs for A2A task event delivery.
 //!
-//! Two flavors:
-//! - `stream_events_consumer`: filters on `{req_id}` across any task_id and
-//!   delivers everything from sequence 0. Used by `message/stream` on initial
-//!   subscription, when the caller has no prior cursor.
-//! - `resubscribe_consumer`: filters on `{task_id}` (any `req_id`) and uses
-//!   `ByStartSequence` from a client-supplied `last_seq + 1`. Used by `tasks/resubscribe`
-//!   for reconnect-after-disconnect — skips already-seen events without re-replaying them.
+//! Task event subjects are scoped to the task, not the request (ADR#0055), so a
+//! filter narrows delivery by `task_id` and concurrent subscribers of the same
+//! task are told apart in process by the `Trogon-Req-Id` header.
+//!
+//! Three flavors:
+//! - `stream_events_consumer`: filters on one `{task_id}` and delivers everything
+//!   from sequence 0. Used by `message/stream` once the bootstrap reply has named
+//!   the task.
+//! - `gateway_stream_events_consumer`: the gateway never sees the bootstrap reply,
+//!   because the agent answers the caller's inbox directly, so it cannot narrow by
+//!   `task_id` and filters every task instead, demuxing on `Trogon-Req-Id`.
+//! - `resubscribe_consumer`: filters on one `{task_id}` and uses `ByStartSequence`
+//!   from a client-supplied `last_seq + 1`. Used by `tasks/resubscribe` for
+//!   reconnect-after-disconnect, skipping already-seen events without replaying.
 
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::constants::INACTIVE_THRESHOLD;
-use crate::req_id::ReqId;
+use crate::nats::subjects::subscriptions::TaskAllEventsSubject;
+use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::task_id::A2aTaskId;
 
 /// Durable gateway egress consumer on the full task-events filter.
 pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_pending: i64) -> Config {
-    let pfx = prefix.as_str();
     Config {
         durable_name: Some(durable_name.to_string()),
-        filter_subject: format!("{pfx}.tasks.*.events.*"),
+        filter_subject: TaskAllEventsSubject::new(prefix).to_string(),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -31,14 +38,25 @@ pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_p
     }
 }
 
-pub fn stream_events_consumer(prefix: &A2aPrefix, req_id: &ReqId) -> Config {
-    gateway_stream_events_consumer(prefix, req_id, 256)
+pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Config {
+    Config {
+        filter_subject: TaskEventsSubject::new(prefix, task_id).to_string(),
+        deliver_policy: DeliverPolicy::All,
+        ack_policy: AckPolicy::Explicit,
+        replay_policy: ReplayPolicy::Instant,
+        max_ack_pending: 256,
+        inactive_threshold: INACTIVE_THRESHOLD,
+        ..Default::default()
+    }
 }
 
-pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, req_id: &ReqId, max_ack_pending: i64) -> Config {
-    let pfx = prefix.as_str();
+/// Gateway-side `message/stream` consumer.
+///
+/// Unlike [`stream_events_consumer`] this one has no `task_id` to filter on, so it
+/// sees every task's events and the pump drops what is not its request.
+pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, max_ack_pending: i64) -> Config {
     Config {
-        filter_subject: format!("{pfx}.tasks.*.events.{req_id}"),
+        filter_subject: TaskAllEventsSubject::new(prefix).to_string(),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -58,9 +76,8 @@ pub fn resubscribe_consumer_with_flow(
     last_seq: u64,
     max_ack_pending: i64,
 ) -> Config {
-    let pfx = prefix.as_str();
     Config {
-        filter_subject: format!("{pfx}.tasks.{task_id}.events.*"),
+        filter_subject: TaskEventsSubject::new(prefix, task_id).to_string(),
         deliver_policy: DeliverPolicy::ByStartSequence {
             start_sequence: last_seq.saturating_add(1),
         },

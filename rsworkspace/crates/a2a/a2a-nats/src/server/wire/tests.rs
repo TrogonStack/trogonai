@@ -39,7 +39,7 @@ fn encode_success_reply_sets_result_body_only() {
     )
     .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["ok"], true);
+    assert_eq!(body["result"]["ok"], true);
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
 }
 
@@ -74,7 +74,7 @@ fn encode_success_reply_with_no_id_header_produces_null_id() {
     let headers = HeaderMap::new();
     let encoded = encode_success_reply(&headers, &serde_json::json!({"result": true})).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["result"], true);
+    assert_eq!(body["result"]["result"], true);
 }
 
 #[test]

@@ -2,7 +2,8 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 
 /// `message/stream` — bootstrap subject. The agent responds with the task envelope
-/// (containing `task_id`) and then publishes events to `{prefix}.tasks.{task_id}.events.{req_id}`.
+/// (containing `task_id`) and then publishes events to
+/// `{prefix}.v1.tasks.{task_id}.events`, each stamped with the caller's `Trogon-Req-Id`.
 #[derive(Debug)]
 pub struct MessageStreamSubject {
     prefix: A2aPrefix,
@@ -22,7 +23,7 @@ impl std::fmt::Display for MessageStreamSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.message.stream",
+            "{}.v1.agents.{}.message.stream",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

@@ -19,7 +19,8 @@ struct DummyResult {
 fn encode_client_request_puts_id_in_header_and_params_in_body() {
     let encoded = encode_client_request("tasks/get", JsonRpcId::Number(1), &DummyParams { value: "x".into() }).unwrap();
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_some());
-    let params: DummyParams = serde_json::from_slice(&encoded.body).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
+    let params: DummyParams = serde_json::from_value(body["params"].clone()).unwrap();
     assert_eq!(params.value, "x");
 }
 
@@ -68,7 +69,7 @@ fn roundtrip_reconstructs_canonical_json_at_edge() {
 #[test]
 fn merge_headers_overlays_jsonrpc_fields() {
     let mut base = HeaderMap::new();
-    base.insert("X-Req-Id", "transport");
+    base.insert("Trogon-Req-Id", "transport");
     let encoded = encode(&Message::Request {
         id: RequestId::String("abc".into()),
         method: "tasks/get".into(),
@@ -76,7 +77,7 @@ fn merge_headers_overlays_jsonrpc_fields() {
     })
     .unwrap();
     let merged = merge_jsonrpc_headers(base, encoded.headers);
-    assert_eq!(merged.get("X-Req-Id").unwrap().as_str(), "transport");
+    assert_eq!(merged.get("Trogon-Req-Id").unwrap().as_str(), "transport");
     assert!(merged.get(jsonrpc_nats::HEADER_ID).is_some());
 }
 

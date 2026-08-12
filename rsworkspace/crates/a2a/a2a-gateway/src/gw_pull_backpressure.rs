@@ -168,7 +168,7 @@ pub trait TaskEventsEgressPlanner {
 
     fn pull_hints(&self) -> PullConsumerHints;
 
-    fn plan_message_stream(&self, prefix: &A2aPrefix, req_id: &ReqId) -> Result<MessageStreamEgressPlan, Self::Error>;
+    fn plan_message_stream(&self, prefix: &A2aPrefix) -> Result<MessageStreamEgressPlan, Self::Error>;
 
     fn plan_resubscribe(
         &self,
@@ -200,9 +200,12 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
         self.hints
     }
 
-    fn plan_message_stream(&self, prefix: &A2aPrefix, req_id: &ReqId) -> Result<MessageStreamEgressPlan, Self::Error> {
+    /// No `req_id` to narrow on: the agent answers the caller's inbox directly, so
+    /// the gateway never learns the `task_id` either. The filter takes every task
+    /// and the pump drops what `Trogon-Req-Id` says is not its request.
+    fn plan_message_stream(&self, prefix: &A2aPrefix) -> Result<MessageStreamEgressPlan, Self::Error> {
         Ok(MessageStreamEgressPlan {
-            filter_subject: format!("{}.tasks.*.events.{req_id}", prefix.as_str()),
+            filter_subject: format!("{}.v1.tasks.*.events", prefix.as_str()),
             hints: self.hints,
         })
     }
@@ -214,7 +217,7 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
         last_seq: u64,
     ) -> Result<ResubscribeEgressPlan, Self::Error> {
         Ok(ResubscribeEgressPlan {
-            filter_subject: format!("{}.tasks.{task_id}.events.*", prefix.as_str()),
+            filter_subject: format!("{}.v1.tasks.{task_id}.events", prefix.as_str()),
             start_sequence: last_seq.saturating_add(1),
         })
     }
@@ -306,19 +309,41 @@ pub fn gateway_events_pull_enabled<E: ReadEnv>(env: &E) -> bool {
     matches!(flag.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
-pub fn gateway_egress_subject(prefix: &A2aPrefix, req_id: &ReqId) -> String {
-    format!("{}.gateway.egress.{}", prefix.as_str(), req_id.as_str())
+/// The caller an egressed task event belongs to, validated as a single NATS token.
+///
+/// Caller identity arrives on an externally supplied header, so it cannot be
+/// interpolated into a subject unchecked; a value carrying a dot or a wildcard
+/// would rewrite the address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EgressCallerId(trogon_nats::NatsToken);
+
+impl EgressCallerId {
+    pub fn new(raw: impl AsRef<str>) -> Result<Self, trogon_nats::SubjectTokenViolationError> {
+        trogon_nats::NatsToken::new(raw).map(Self)
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
 }
 
-pub fn parse_task_events_subject(prefix: &str, subject: &str) -> Option<(A2aTaskId, ReqId)> {
-    // JetStream task event subjects are `{prefix}.tasks.{task_id}.events.{req_id}`.
+/// Caller-scoped egress fanout: `{prefix}.v1.gateway.{caller_id}.events`.
+///
+/// Scoped to the caller rather than the request (ADR#0055); the request an event
+/// belongs to travels in `Trogon-Req-Id` on the message.
+pub fn gateway_egress_subject(prefix: &A2aPrefix, caller_id: &EgressCallerId) -> String {
+    format!("{}.v1.gateway.{}.events", prefix.as_str(), caller_id.as_str())
+}
+
+pub fn parse_task_events_subject(prefix: &str, subject: &str) -> Option<A2aTaskId> {
+    // JetStream task event subjects are `{prefix}.v1.tasks.{task_id}.events`.
     // Earlier versions of this helper stripped `.task.` (singular) and
     // dropped every pulled message via Term — coverage above hits both
     // happy and reject paths now.
-    let expected = format!("{prefix}.tasks.");
+    let expected = format!("{prefix}.v1.tasks.");
     let rest = subject.strip_prefix(&expected)?;
-    let (task_id, req_id) = rest.split_once(".events.")?;
-    Some((A2aTaskId::new(task_id).ok()?, ReqId::from_header(req_id)))
+    let task_id = rest.strip_suffix(".events")?;
+    A2aTaskId::new(task_id).ok()
 }
 
 #[cfg_attr(coverage, allow(dead_code))]
@@ -557,7 +582,12 @@ async fn run_fetch_cycle(
             source,
         })?;
         let subject = message.subject.as_str();
-        let Some((_task_id, req_id)) = parse_task_events_subject(prefix.as_str(), subject) else {
+        // Term what cannot be routed. The event subject no longer names the
+        // request or the caller (ADR#0055), so both now come from the headers,
+        // and an event carrying neither has no egress address at all.
+        let routing = parse_task_events_subject(prefix.as_str(), subject)
+            .and_then(|_task_id| egress_routing_from_message_headers(&message));
+        let Some((caller_id, req_id)) = routing else {
             message
                 .ack_with(AckKind::Term)
                 .await
@@ -568,13 +598,11 @@ async fn run_fetch_cycle(
             continue;
         };
 
-        // Gate on the originating caller's identity (carried on the event
-        // headers), not on `req_id`. Keying by `req_id` would let one caller
-        // open many concurrent streams (distinct `req_id`s) and consume the
-        // limit per stream, defeating the per-caller cap. When the header
-        // is absent (legacy publisher or stripped en route) we fall back to
-        // `req_id` so the gate degrades gracefully instead of opening up.
-        let caller_key = caller_key_from_message_headers(&message).unwrap_or_else(|| req_id.as_str().to_string());
+        // Gate on the originating caller's identity, not on `req_id`. Keying by
+        // `req_id` would let one caller open many concurrent streams (distinct
+        // `req_id`s) and consume the limit per stream, defeating the per-caller
+        // cap.
+        let caller_key = caller_id.as_str().to_string();
         // `try_acquire` (not wait): when the per-caller gate is full, NAK
         // immediately with a short delay so the JetStream ack-pending slot
         // is freed for other callers. Waiting inside a spawned task would
@@ -607,7 +635,8 @@ async fn run_fetch_cycle(
             // Identify this logical message across redeliveries so gate-NAK
             // redeliveries don't tick the forward attempt counter.
             let sequence = message.info().map(|i| i.stream_sequence).unwrap_or(0);
-            let forward_result = forward_task_event(&client_handle, &prefix_handle, &req_id, &message.payload).await;
+            let forward_result =
+                forward_task_event(&client_handle, &prefix_handle, &caller_id, &req_id, &message.payload).await;
             let attempt = if forward_result.is_err() {
                 attempts_handle.record_attempt(sequence)
             } else {
@@ -713,33 +742,39 @@ impl ForwardAttempts {
 async fn forward_task_event<C: trogon_nats::PublishClient>(
     client: &C,
     prefix: &A2aPrefix,
+    caller_id: &EgressCallerId,
     req_id: &ReqId,
     payload: &bytes::Bytes,
 ) -> Result<(), String> {
-    let subject = gateway_egress_subject(prefix, req_id);
+    let subject = gateway_egress_subject(prefix, caller_id);
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(a2a_nats::constants::REQ_ID_HEADER, req_id.as_str());
     client
-        .publish_with_headers(subject, async_nats::HeaderMap::new(), payload.clone())
+        .publish_with_headers(subject, headers, payload.clone())
         .await
         .map_err(|e| e.to_string())
 }
 
-/// Extract the originating caller identity from a JetStream task-event
-/// message. Reads `X-A2a-Caller-Id` (preferred — set by the bridge ingress
-/// path and propagated through the agent backend) and falls back to the
-/// principal header so the per-caller inflight cap can't be circumvented
-/// just by stripping one header. Returns `None` when neither is present;
-/// callers should fall back to `req_id` to keep the gate non-bypassable
-/// rather than opening up to unlimited concurrency on missing headers.
-#[cfg(not(coverage))]
-fn caller_key_from_message_headers(message: &async_nats::jetstream::Message) -> Option<String> {
+/// The caller and request an egressed event belongs to, both read from headers.
+///
+/// Caller identity prefers `X-A2a-Caller-Id` (set by the bridge ingress path and
+/// propagated through the agent backend) and falls back to the principal header
+/// so the per-caller inflight cap can't be circumvented just by stripping one
+/// header. Returns `None` when either half is missing or is not a single NATS
+/// token, because the event then has no address to egress on.
+#[cfg_attr(coverage, allow(dead_code))]
+fn egress_routing_from_message_headers(message: &async_nats::jetstream::Message) -> Option<(EgressCallerId, ReqId)> {
     let headers = message.message.headers.as_ref()?;
     let read = |name| {
         headers
             .get(name)
-            .map(|v| v.as_str().trim().to_string())
+            .map(|v: &async_nats::HeaderValue| v.as_str().trim().to_string())
             .filter(|s| !s.is_empty())
     };
-    read(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER).or_else(|| read(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER))
+    let caller = read(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER)
+        .or_else(|| read(a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER))?;
+    let req_id = read(a2a_nats::constants::REQ_ID_HEADER)?;
+    Some((EgressCallerId::new(caller).ok()?, ReqId::from_header(req_id)))
 }
 
 #[cfg(test)]

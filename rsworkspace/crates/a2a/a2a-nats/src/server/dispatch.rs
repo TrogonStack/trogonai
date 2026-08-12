@@ -1,7 +1,7 @@
 //! A2A method inferred from the last dotted tokens of a NATS subject.
 //!
-//! The agent subscribes to `{prefix}.agents.{agent_id}.>` and dispatches based on
-//! the suffix after `{prefix}.agents.{agent_id}`.
+//! The agent subscribes to `{prefix}.v1.agents.{agent_id}.>` and dispatches based on
+//! the suffix after `{prefix}.v1.agents.{agent_id}`.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum A2aMethod {
@@ -36,7 +36,7 @@ impl A2aMethod {
     }
 
     /// Resolve the method from the full NATS subject string and the known
-    /// `{prefix}.agents.{agent_id}` byte-length component.
+    /// `{prefix}.v1.agents.{agent_id}` byte-length component.
     pub fn from_subject(subject: &str, prefix_len: usize) -> Option<Self> {
         let suffix = subject.get(prefix_len..)?.strip_prefix('.')?;
         Self::from_dotted_suffix(suffix)
@@ -46,7 +46,7 @@ impl A2aMethod {
     /// (e.g. `"message.send"`, `"tasks.get"`, `"card"`).
     ///
     /// Callers that have already split a subject into its
-    /// `{prefix}.agents.{agent_id}.{method_dots}` parts — for example,
+    /// `{prefix}.v1.agents.{agent_id}.{method_dots}` parts — for example,
     /// [`crate::gateway_ingress::gateway_ingress_agent_and_method_dots`]
     /// returns `method_dots` as a `&str` — should use this entry point
     /// instead of rebuilding a full subject just to call

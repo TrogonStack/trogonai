@@ -49,7 +49,7 @@ fn error_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn tasks_cancel_targets_agent_subject_by_default() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-1", TaskState::Canceled);
-    nats.set_response_wire("a2a.agents.test-agent.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.cancel", headers, body);
     let client = A2aClient::new(prefix(), agent_id(), nats, ());
     let task = client.tasks_cancel(&cancel_task_request("t-1")).await.unwrap();
     assert_eq!(task.status.state, TaskState::Canceled);
@@ -59,7 +59,7 @@ async fn tasks_cancel_targets_agent_subject_by_default() {
 async fn tasks_cancel_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-gw", TaskState::Canceled);
-    nats.set_response_wire("a2a.gateway.test-agent.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.tasks.cancel", headers, body);
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
     let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
     client.tasks_cancel(&cancel_task_request("t-gw")).await.unwrap();
@@ -69,7 +69,7 @@ async fn tasks_cancel_targets_gateway_subject_under_gateway_routing() {
 async fn tasks_cancel_propagates_task_not_cancelable() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response(-32002, "terminal");
-    nats.set_response_wire("a2a.agents.test-agent.tasks.cancel", headers, body);
+    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.cancel", headers, body);
     let client = A2aClient::new(prefix(), agent_id(), nats, ());
     assert!(matches!(
         client.tasks_cancel(&cancel_task_request("t")).await,

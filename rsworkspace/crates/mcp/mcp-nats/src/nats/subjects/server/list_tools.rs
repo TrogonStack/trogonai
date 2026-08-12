@@ -17,7 +17,7 @@ impl std::fmt::Display for ListToolsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.tools.list",
+            "{}.v1.server.{}.tools.list",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

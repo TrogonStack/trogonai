@@ -14,6 +14,7 @@ use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::mocks::MockError;
 
 use crate::McpTransportHeaders;
+use crate::nats::subjects::{METHOD_TABLE, method_from_suffix, method_suffix};
 
 fn wire_payload_client(item: &TxJsonRpcMessage<RoleClient>) -> (HeaderMap, Vec<u8>) {
     let encoded = wire::encode_tx::<RoleClient>(item).expect("wire encode");
@@ -120,7 +121,7 @@ async fn client_transport_sends_requests_to_server_method_subject() {
     let nats = AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
     let response = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(7));
-    set_wire_response_server(&nats, "mcp.server.filesystem.tools.list", &response);
+    set_wire_response_server(&nats, "mcp.v1.server.filesystem.tools.list", &response);
     let mut transport: NatsTransport<RoleClient, AdvancedMockNatsClient> = NatsTransport::for_client(
         nats.clone(),
         &config(),
@@ -152,7 +153,10 @@ async fn client_transport_sends_requests_to_server_method_subject() {
         headers.get("Mcp-Param-region").map(|value| value.as_str()),
         Some("us-west1")
     );
-    assert!(headers.get(jsonrpc_nats::HEADER_ID).is_none());
+    assert_eq!(
+        headers.get(jsonrpc_nats::HEADER_ID).map(|value| value.as_str()),
+        Some("7")
+    );
     assert!(headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
     let body: serde_json::Value = serde_json::from_slice(&nats.requested_payloads()[0]).unwrap();
     assert_eq!(body["jsonrpc"], "2.0");
@@ -186,7 +190,7 @@ async fn client_transport_publishes_notifications_to_server_method_subject() {
 
     assert_eq!(
         nats.published_messages(),
-        vec!["mcp.server.filesystem.notifications.initialized"]
+        vec!["mcp.v1.server.filesystem.notifications.initialized"]
     );
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&nats.published_payloads()[0]).unwrap(),
@@ -213,7 +217,7 @@ async fn client_transport_publishes_notifications_to_server_method_subject() {
 }
 
 #[test]
-fn mcp_wire_uses_complete_canonical_bodies_without_legacy_jsonrpc_headers() {
+fn mcp_wire_uses_complete_canonical_bodies_with_derived_jsonrpc_headers() {
     let request = list_tools_request(7);
     let request_wire = wire::encode_tx::<RoleClient>(&request).unwrap();
     let request_body: serde_json::Value = serde_json::from_slice(&request_wire.body).unwrap();
@@ -221,7 +225,13 @@ fn mcp_wire_uses_complete_canonical_bodies_without_legacy_jsonrpc_headers() {
     assert_eq!(request_body["id"], 7);
     assert_eq!(request_body["method"], "tools/list");
     assert!(request_body["params"].is_object());
-    assert!(request_wire.headers.get(jsonrpc_nats::HEADER_ID).is_none());
+    assert_eq!(
+        request_wire
+            .headers
+            .get(jsonrpc_nats::HEADER_ID)
+            .map(|value| value.as_str()),
+        Some("7")
+    );
     assert!(request_wire.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
 
     let success = ServerJsonRpcMessage::response(ServerResult::empty(()), RequestId::Number(7));
@@ -230,7 +240,13 @@ fn mcp_wire_uses_complete_canonical_bodies_without_legacy_jsonrpc_headers() {
     assert_eq!(success_body["jsonrpc"], "2.0");
     assert_eq!(success_body["id"], 7);
     assert!(success_body.get("result").is_some());
-    assert!(success_wire.headers.get(jsonrpc_nats::HEADER_ID).is_none());
+    assert_eq!(
+        success_wire
+            .headers
+            .get(jsonrpc_nats::HEADER_ID)
+            .map(|value| value.as_str()),
+        Some("7")
+    );
 
     let error = ServerJsonRpcMessage::error(
         ErrorData::internal_error("request failed", None),
@@ -241,8 +257,20 @@ fn mcp_wire_uses_complete_canonical_bodies_without_legacy_jsonrpc_headers() {
     assert_eq!(error_body["jsonrpc"], "2.0");
     assert_eq!(error_body["id"], 7);
     assert_eq!(error_body["error"]["code"], -32603);
-    assert!(error_wire.headers.get(jsonrpc_nats::HEADER_ID).is_none());
-    assert!(error_wire.headers.get(jsonrpc_nats::HEADER_ERROR_CODE).is_none());
+    assert_eq!(
+        error_wire
+            .headers
+            .get(jsonrpc_nats::HEADER_ID)
+            .map(|value| value.as_str()),
+        Some("7")
+    );
+    assert_eq!(
+        error_wire
+            .headers
+            .get(jsonrpc_nats::HEADER_ERROR_CODE)
+            .map(|value| value.as_str()),
+        Some("-32603")
+    );
 }
 
 #[test]
@@ -279,7 +307,7 @@ async fn server_transport_receives_client_request_from_subscription() {
         ClientJsonRpcMessage::request(ClientRequest::PingRequest(PingRequest::default()), RequestId::Number(9));
 
     inbound
-        .unbounded_send(message_wire_client("mcp.server.filesystem.ping", &request))
+        .unbounded_send(message_wire_client("mcp.v1.server.filesystem.ping", &request))
         .unwrap();
 
     assert!(matches!(
@@ -305,7 +333,7 @@ async fn server_transport_publishes_response_to_remembered_reply_subject() {
 
     inbound
         .unbounded_send(message_with_reply_wire_client(
-            "mcp.server.filesystem.ping",
+            "mcp.v1.server.filesystem.ping",
             "_INBOX.desktop.1",
             &request,
         ))
@@ -345,7 +373,7 @@ async fn server_transport_keeps_reply_subject_until_response_publish_succeeds() 
 
     inbound
         .unbounded_send(message_with_reply_wire_client(
-            "mcp.server.filesystem.ping",
+            "mcp.v1.server.filesystem.ping",
             "_INBOX.desktop.retry",
             &request,
         ))
@@ -385,7 +413,7 @@ async fn server_transport_publishes_error_to_remembered_reply_subject() {
 
     inbound
         .unbounded_send(message_with_reply_wire_client(
-            "mcp.server.filesystem.ping",
+            "mcp.v1.server.filesystem.ping",
             "_INBOX.desktop.2",
             &request,
         ))
@@ -425,7 +453,7 @@ async fn server_transport_publishes_notifications_to_client_method_subject() {
 
     assert_eq!(
         nats.published_messages(),
-        vec!["mcp.client.desktop.notifications.tools.list_changed"]
+        vec!["mcp.v1.client.desktop.notifications.tools.list_changed"]
     );
 }
 
@@ -470,7 +498,7 @@ async fn server_transport_receives_client_notification_without_reply_subject() {
 
     inbound
         .unbounded_send(message_wire_client(
-            "mcp.server.filesystem.notifications.initialized",
+            "mcp.v1.server.filesystem.notifications.initialized",
             &notification,
         ))
         .unwrap();
@@ -515,10 +543,10 @@ async fn transport_skips_invalid_subscription_payloads() {
     );
 
     inbound
-        .unbounded_send(message("mcp.server.filesystem.ping", b"not-json".to_vec()))
+        .unbounded_send(message("mcp.v1.server.filesystem.ping", b"not-json".to_vec()))
         .unwrap();
     inbound
-        .unbounded_send(message_wire_client("mcp.server.filesystem.ping", &request))
+        .unbounded_send(message_wire_client("mcp.v1.server.filesystem.ping", &request))
         .unwrap();
 
     assert!(matches!(
@@ -683,7 +711,7 @@ async fn client_transport_routes_custom_notification_with_canonical_method() {
     let expected_suffix = method_suffix(method).unwrap();
     assert_eq!(
         nats.published_messages(),
-        vec![format!("mcp.server.filesystem.{expected_suffix}")]
+        vec![format!("mcp.v1.server.filesystem.{expected_suffix}")]
     );
     let body: serde_json::Value = serde_json::from_slice(&nats.published_payloads()[0]).unwrap();
     assert_eq!(body["method"], method);
@@ -711,7 +739,7 @@ async fn server_transport_receives_custom_request_from_encoded_subject() {
 
     inbound
         .unbounded_send(message_wire_client(
-            &format!("mcp.server.filesystem.{suffix}"),
+            &format!("mcp.v1.server.filesystem.{suffix}"),
             &request,
         ))
         .unwrap();
@@ -820,40 +848,40 @@ fn transport_error_display_and_source_are_specific() {
     assert!(std::error::Error::source(&subscribe).is_some());
 
     let request = NatsTransportError::Request {
-        subject: "mcp.server.filesystem.ping".to_string(),
+        subject: "mcp.v1.server.filesystem.ping".to_string(),
         source: Box::new(MockError("nats".to_string())),
     };
     assert_eq!(
         request.to_string(),
-        "failed to request MCP NATS subject mcp.server.filesystem.ping"
+        "failed to request MCP NATS subject mcp.v1.server.filesystem.ping"
     );
     assert!(std::error::Error::source(&request).is_some());
 
     let timeout = NatsTransportError::RequestTimedOut {
-        subject: "mcp.server.filesystem.ping".to_string(),
+        subject: "mcp.v1.server.filesystem.ping".to_string(),
     };
     assert_eq!(
         timeout.to_string(),
-        "timed out requesting MCP NATS subject mcp.server.filesystem.ping"
+        "timed out requesting MCP NATS subject mcp.v1.server.filesystem.ping"
     );
     assert!(std::error::Error::source(&timeout).is_none());
 
     let publish = NatsTransportError::Publish {
-        subject: "mcp.server.filesystem.notifications.initialized".to_string(),
+        subject: "mcp.v1.server.filesystem.notifications.initialized".to_string(),
         source: Box::new(MockError("nats".to_string())),
     };
     assert_eq!(
         publish.to_string(),
-        "failed to publish MCP NATS subject mcp.server.filesystem.notifications.initialized"
+        "failed to publish MCP NATS subject mcp.v1.server.filesystem.notifications.initialized"
     );
     assert!(std::error::Error::source(&publish).is_some());
 
     let publish_timeout = NatsTransportError::PublishTimedOut {
-        subject: "mcp.server.filesystem.notifications.initialized".to_string(),
+        subject: "mcp.v1.server.filesystem.notifications.initialized".to_string(),
     };
     assert_eq!(
         publish_timeout.to_string(),
-        "timed out publishing MCP NATS subject mcp.server.filesystem.notifications.initialized"
+        "timed out publishing MCP NATS subject mcp.v1.server.filesystem.notifications.initialized"
     );
     assert!(std::error::Error::source(&publish_timeout).is_none());
 

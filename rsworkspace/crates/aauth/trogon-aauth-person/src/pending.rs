@@ -33,7 +33,7 @@ impl std::fmt::Display for PendingId {
 /// crate for one call site.
 /// CSPRNG-backed: the pending id is the sole credential needed to poll a
 /// pending record, including the minted auth token once granted, so it must
-/// be unguessable.
+/// be unguessable. Keep UUID v4 (not v7): fewer timestamp bits, more entropy.
 fn uuid_like() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }

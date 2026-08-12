@@ -1,6 +1,6 @@
 //! NATS-safe session ID value object.
 //!
-//! Session IDs are embedded as a single NATS subject token: `{prefix}.{session_id}.agent.*`.
+//! Session IDs are embedded as a single NATS subject token: `{prefix}.{session_id}.v1.global.agent.*`.
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! ASCII only (recommended), rejecting `.` `*` `>` and whitespace (forbidden). Validity is
 //! guaranteed at construction.

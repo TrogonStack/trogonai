@@ -59,6 +59,23 @@ where
     }
 }
 
+/// A stream that is already finished.
+///
+/// `message/stream` may answer with a bare `Message` instead of a `Task`. There is
+/// no task to scope a consumer to and no events will follow, so the caller gets a
+/// stream that ends immediately rather than a consumer on a subject nobody writes.
+pub fn empty_event_stream() -> TypedEventStream {
+    let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
+    drop(tx);
+    let join = tokio::spawn(std::future::ready(()));
+
+    TypedEventStream {
+        receiver,
+        last_seq: Arc::new(Mutex::new(0)),
+        abort: join.abort_handle(),
+    }
+}
+
 async fn pull_loop<C>(
     consumer: C,
     tx: mpsc::UnboundedSender<Result<StreamResponse, ClientError>>,

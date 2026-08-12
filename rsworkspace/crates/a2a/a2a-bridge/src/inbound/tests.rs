@@ -33,15 +33,7 @@ fn build_gateway_subject_formats_expected_subject() {
     let prefix = default_a2a_prefix();
     assert_eq!(
         build_gateway_subject(&prefix, "planner", "message/send"),
-        "a2a.gateway.planner.message.send"
-    );
-}
-
-#[test]
-fn task_events_wild_subject_includes_prefix_and_task_id() {
-    assert_eq!(
-        task_events_wild_subject(&default_a2a_prefix(), "task-1"),
-        "a2a.task.task-1.events.>"
+        "a2a.v1.gateway.planner.message.send"
     );
 }
 
@@ -86,19 +78,42 @@ fn gateway_reply_is_jsonrpc_error_detects_error_envelope() {
 
 #[test]
 fn sse_plan_builds_message_stream_and_resubscribe_plans() {
-    let req_id = ReqId::from_header("corr-1");
     let stream_body = json!({"method": "message/stream", "params": {}});
-    assert!(matches!(
-        sse_plan("message/stream", &stream_body, req_id.clone()).unwrap(),
-        SseConsumePlan::MessageStreamBootstrap { .. }
-    ));
+    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"task","id":"task-7"}}"#;
+    let plan = sse_plan("message/stream", &stream_body, bootstrap)
+        .unwrap()
+        .expect("a task means a consumer");
+    match plan {
+        SseConsumePlan::MessageStreamBootstrap { task_id } => assert_eq!(task_id.as_str(), "task-7"),
+        other => panic!("expected a bootstrap plan, got {other:?}"),
+    }
 
     let resub_body = json!({
         "method": "tasks/resubscribe",
         "params": { "taskId": "task-1", "lastSequence": 3 }
     });
-    let plan = sse_plan("tasks/resubscribe", &resub_body, req_id).unwrap();
-    assert!(matches!(plan, SseConsumePlan::TasksResubscribe { last_seq: 3, .. }));
+    let plan = sse_plan("tasks/resubscribe", &resub_body, b"").unwrap();
+    assert!(matches!(
+        plan,
+        Some(SseConsumePlan::TasksResubscribe { last_seq: 3, .. })
+    ));
+}
+
+#[test]
+fn sse_plan_returns_no_consumer_when_the_reply_carries_no_task() {
+    // `message/stream` may answer with a bare `Message`; no task means no
+    // events, so opening a consumer would just leak one.
+    let body = json!({"method": "message/stream", "params": {}});
+    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"message","messageId":"m-1"}}"#;
+    assert!(sse_plan("message/stream", &body, bootstrap).unwrap().is_none());
+}
+
+#[test]
+fn sse_plan_rejects_a_task_id_that_is_not_a_nats_token() {
+    let body = json!({"method": "message/stream", "params": {}});
+    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"task","id":"task.*"}}"#;
+    let err = sse_plan("message/stream", &body, bootstrap).unwrap_err();
+    assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 
 #[test]
@@ -208,7 +223,7 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         publisher.peek_subject().as_deref(),
-        Some("a2a.gateway.planner.tasks.get")
+        Some("a2a.v1.gateway.planner.tasks.get")
     );
 }
 
@@ -244,7 +259,7 @@ fn resub_task_and_seq_defaults_last_seq_to_zero() {
 
 #[test]
 fn sse_plan_rejects_unsupported_streaming_method() {
-    let err = sse_plan("tasks/subscribe", &json!({}), ReqId::from_header("corr")).unwrap_err();
+    let err = sse_plan("tasks/subscribe", &json!({}), b"").unwrap_err();
     assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 

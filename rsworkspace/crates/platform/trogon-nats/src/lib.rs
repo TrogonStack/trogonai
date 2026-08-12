@@ -50,6 +50,7 @@ pub mod lease;
 pub mod messaging;
 pub mod nats_token;
 pub mod server_info;
+pub mod subject_conformance;
 pub mod subject_token_violation;
 pub(crate) mod telemetry;
 #[cfg(feature = "test-support")]
@@ -75,6 +76,10 @@ pub use messaging::{
 };
 pub use nats_token::{DottedNatsToken, NatsToken};
 pub use server_info::{ServerInfoSource, ServerInfoTimeoutError, wait_for_server_info};
+pub use subject_conformance::{
+    MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS, SubjectViolationError, looks_like_request_id, validate_binding_version,
+    validate_no_request_id_tokens, validate_published_subject, validate_subject_pattern,
+};
 pub use subject_token_violation::SubjectTokenViolationError;
 
 #[cfg(any(test, feature = "test-support"))]

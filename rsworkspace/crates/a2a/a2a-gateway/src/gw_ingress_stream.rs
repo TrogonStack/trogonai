@@ -367,13 +367,15 @@ async fn run_streaming_ingress_pump(
         }
     };
 
-    let consumer_config = match &spawn.kind {
-        StreamingIngressKind::MessageStream { req_id } => {
-            gateway_stream_events_consumer(&prefix, req_id, config.max_ack_pending.as_i64())
-        }
-        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => {
-            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64())
-        }
+    let (consumer_config, demux_req_id) = match &spawn.kind {
+        StreamingIngressKind::MessageStream { req_id } => (
+            gateway_stream_events_consumer(&prefix, config.max_ack_pending.as_i64()),
+            Some(req_id),
+        ),
+        StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. } => (
+            resubscribe_consumer_with_flow(&prefix, task_id, *last_seq, config.max_ack_pending.as_i64()),
+            None,
+        ),
     };
 
     let consumer = match stream.create_consumer(consumer_config).await {
@@ -421,6 +423,20 @@ async fn run_streaming_ingress_pump(
             }
         };
 
+        // A `message/stream` consumer cannot filter by task, because the agent
+        // answers the caller's inbox directly and the gateway never sees the
+        // bootstrap reply that names it. So it sees every task's events and
+        // drops what `Trogon-Req-Id` says belongs to another request.
+        // `tasks/resubscribe` is exempt: its consumer is already task-filtered, and
+        // the events carry the `req_id` of the original subscription, not of the
+        // resubscribe request.
+        if let Some(req_id) = demux_req_id
+            && !event_belongs_to(&message, req_id)
+        {
+            let _ = message.ack().await;
+            continue;
+        }
+
         // JetStream tracks per-message delivery attempts; carry that count
         // so a permanently failing publish (bad reply subject, ACL, etc.)
         // doesn't NAK-loop forever — match the egress path's 3-attempt
@@ -458,6 +474,20 @@ async fn run_streaming_ingress_pump(
     }
 
     debug!(reply = %spawn.reply, "gateway streaming ingress pump stopped");
+}
+
+/// True when a task event carries the `Trogon-Req-Id` of this subscription.
+///
+/// An event with no `Trogon-Req-Id` at all is treated as not ours rather than as
+/// everyone's: forwarding it would cross-talk one caller's stream into another's.
+#[cfg_attr(coverage, allow(dead_code))]
+fn event_belongs_to(message: &async_nats::jetstream::Message, req_id: &ReqId) -> bool {
+    message
+        .message
+        .headers
+        .as_ref()
+        .and_then(|h| h.get(a2a_nats::constants::REQ_ID_HEADER))
+        .is_some_and(|value| value.as_str().trim() == req_id.as_str())
 }
 
 /// Wire shape of the `tasks/resubscribe` request params. Parsing through a
