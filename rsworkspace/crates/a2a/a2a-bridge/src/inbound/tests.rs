@@ -17,6 +17,40 @@ use crate::identity::BridgeUserJwt;
 
 use super::*;
 
+/// Bootstrap replies are built from the SDK response type rather than hand-written
+/// JSON: `SendMessageResponse` nests the payload under a variant key, and a fixture
+/// that spells the shape by hand can drift from the wire without failing.
+fn bootstrap_reply(response: a2a::types::SendMessageResponse) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": "corr-1",
+        "result": serde_json::to_value(response).unwrap(),
+    }))
+    .unwrap()
+}
+
+fn bootstrap_task(task_id: &str) -> Vec<u8> {
+    bootstrap_reply(a2a::types::SendMessageResponse::Task(a2a::types::Task {
+        id: task_id.to_string(),
+        context_id: String::new(),
+        status: a2a::types::TaskStatus {
+            state: a2a::types::TaskState::Working,
+            message: None,
+            timestamp: None,
+        },
+        artifacts: None,
+        history: None,
+        metadata: None,
+    }))
+}
+
+fn bootstrap_bare_message() -> Vec<u8> {
+    bootstrap_reply(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(
+        a2a::types::Role::Agent,
+        vec![a2a::types::Part::text("done")],
+    )))
+}
+
 #[test]
 fn default_a2a_prefix_constructs() {
     assert_eq!(default_a2a_prefix().as_str(), "a2a");
@@ -79,8 +113,8 @@ fn gateway_reply_is_jsonrpc_error_detects_error_envelope() {
 #[test]
 fn sse_plan_builds_message_stream_and_resubscribe_plans() {
     let stream_body = json!({"method": "message/stream", "params": {}});
-    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"task","id":"task-7"}}"#;
-    let plan = sse_plan("message/stream", &stream_body, bootstrap)
+    let bootstrap = bootstrap_task("task-7");
+    let plan = sse_plan("message/stream", &stream_body, &bootstrap)
         .unwrap()
         .expect("a task means a consumer");
     match plan {
@@ -104,15 +138,15 @@ fn sse_plan_returns_no_consumer_when_the_reply_carries_no_task() {
     // `message/stream` may answer with a bare `Message`; no task means no
     // events, so opening a consumer would just leak one.
     let body = json!({"method": "message/stream", "params": {}});
-    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"message","messageId":"m-1"}}"#;
-    assert!(sse_plan("message/stream", &body, bootstrap).unwrap().is_none());
+    let bootstrap = bootstrap_bare_message();
+    assert!(sse_plan("message/stream", &body, &bootstrap).unwrap().is_none());
 }
 
 #[test]
 fn sse_plan_rejects_a_task_id_that_is_not_a_nats_token() {
     let body = json!({"method": "message/stream", "params": {}});
-    let bootstrap = br#"{"jsonrpc":"2.0","id":"corr-1","result":{"kind":"task","id":"task.*"}}"#;
-    let err = sse_plan("message/stream", &body, bootstrap).unwrap_err();
+    let bootstrap = bootstrap_task("task.*");
+    let err = sse_plan("message/stream", &body, &bootstrap).unwrap_err();
     assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 

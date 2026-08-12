@@ -620,9 +620,14 @@ fn sse_plan(method: &str, body: &Value, bootstrap_reply: &[u8]) -> Result<Option
 }
 
 /// The task id carried by a `message/stream` bootstrap reply, if it carries one.
+///
+/// `SendMessageResponse` serializes as a single-key map naming the variant, so a
+/// task-shaped reply nests the task one level under `result`. A `Message`-shaped
+/// reply has no `task` key at all, which is the `None` that tells the caller not
+/// to open a consumer.
 fn bootstrap_task_id(reply: &[u8]) -> Result<Option<A2aTaskId>, BridgeError> {
     let envelope: Value = serde_json::from_slice(reply).map_err(BridgeError::Deserialize)?;
-    let Some(raw) = envelope.pointer("/result/id").and_then(Value::as_str) else {
+    let Some(raw) = envelope.pointer("/result/task/id").and_then(Value::as_str) else {
         return Ok(None);
     };
     A2aTaskId::new(raw)

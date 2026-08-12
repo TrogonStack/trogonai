@@ -44,6 +44,7 @@ name = "a2a-bridge"
 version = "0.1.0"
 dependencies = [
  "a2a-auth-callout",
+ "a2a-lf",
  "a2a-nats",
  "async-nats",
  "async-trait",
