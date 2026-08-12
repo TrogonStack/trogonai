@@ -17,21 +17,8 @@
 //! where ADR#0055's "tokens are lower_snake and case-consistent" is checkable,
 //! so patterns get the stricter pass.
 
+use crate::constants::{ESCAPE_TOKEN, MAX_SUBJECT_BYTES, MAX_SUBJECT_TOKENS};
 use crate::subject_token_violation::SubjectTokenViolationError;
-
-/// ADR#0055 Limits: at most 16 tokens per subject.
-///
-/// The hard ceiling before NATS escapes to the heap is 32; 16 is the budget
-/// this profile spends, leaving room for method arity and durable suffixes.
-pub const MAX_SUBJECT_TOKENS: usize = 16;
-
-/// ADR#0055 Limits: at most 256 bytes per subject.
-pub const MAX_SUBJECT_BYTES: usize = 256;
-
-/// The reserved token introducing ADR#0055's method-to-terminal escape encoding
-/// (`custom.{base64url}`). The token following it is the sole exemption from
-/// lower_snake; the wildcard, token-count, and byte limits still bind it.
-pub const ESCAPE_TOKEN: &str = "custom";
 
 /// Why a subject failed ADR#0055 conformance.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -174,6 +161,9 @@ fn validate(subject: &str, role: Role) -> Result<(), SubjectViolationError> {
     if subject.is_empty() {
         return Err(SubjectViolationError::Empty);
     }
+    // Every way to spell an empty token is a leading, trailing, or doubled dot,
+    // so rejecting those here is what lets `validate_token` assume a non-empty
+    // token.
     if crate::token::has_consecutive_or_boundary_dots(subject) {
         return Err(SubjectViolationError::MalformedDots);
     }
@@ -204,14 +194,6 @@ fn validate_token(
     role: Role,
     preceded_by_escape: bool,
 ) -> Result<(), SubjectViolationError> {
-    if token.is_empty() {
-        return Err(SubjectViolationError::Token {
-            index,
-            token: token.to_owned(),
-            source: SubjectTokenViolationError::Empty,
-        });
-    }
-
     if token == "*" || token == ">" {
         return match role {
             Role::Published => Err(SubjectViolationError::WildcardInPublishedSubject { index }),

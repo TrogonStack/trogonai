@@ -10,6 +10,6 @@ pub use methods::{McpRole, PeerSubject, method_from_suffix, method_suffix};
 pub use methods::METHOD_TABLE;
 
 #[cfg(test)]
-mod conformance;
+mod conformance_tests;
 #[cfg(test)]
 mod tests;

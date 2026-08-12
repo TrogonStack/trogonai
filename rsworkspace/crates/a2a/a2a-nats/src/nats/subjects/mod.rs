@@ -15,4 +15,4 @@ pub mod tasks;
 pub use stream::{A2aStream, StreamAssignment};
 
 #[cfg(test)]
-mod conformance;
+mod conformance_tests;
