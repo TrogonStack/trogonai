@@ -181,11 +181,6 @@ impl ClientMethod {
     ///
     /// Subject terminals are the dotted projection of this string (except
     /// [`Self::Ext`], which projects to `ext.{name}` while the body uses `_{name}`).
-    pub fn wire_method(&self) -> String {
-        self.protocol_method()
-    }
-
-    /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
     pub fn protocol_method(&self) -> String {
         match self {
             Self::FsReadTextFile => "fs/read_text_file".to_string(),

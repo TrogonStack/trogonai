@@ -44,6 +44,19 @@ fn bootstrap_success(task_id: &str) -> (async_nats::HeaderMap, Bytes) {
     (encoded.headers, encoded.body)
 }
 
+fn bootstrap_bare_message() -> (async_nats::HeaderMap, Bytes) {
+    let response = SendMessageResponse::Message(a2a::types::Message::new(
+        a2a::types::Role::Agent,
+        vec![a2a::types::Part::text("done")],
+    ));
+    let encoded = encode(&Message::Success {
+        id: ResponseId::String("req-stream-1".into()),
+        result: serde_json::to_value(response).unwrap(),
+    })
+    .unwrap();
+    (encoded.headers, encoded.body)
+}
+
 fn bootstrap_error(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
     let encoded = encode(&Message::Error {
         id: ResponseId::String("req-stream-1".into()),
@@ -255,4 +268,26 @@ fn wire_bootstrap_response_decodes_from_headers() {
     let message = jsonrpc_nats::decode(Direction::Response, None, &headers, &body).unwrap();
     let value = to_json_value(&message);
     assert_eq!(value["id"], "req-stream-1");
+}
+
+#[tokio::test]
+async fn bare_message_reply_yields_an_already_finished_stream() {
+    // No task id in the reply means no task-scoped subject to consume from, so
+    // the caller gets a stream that ends rather than a consumer nobody feeds.
+    let nats = AdvancedMockNatsClient::new();
+    let (headers, body) = bootstrap_bare_message();
+    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+
+    let js = MockJetStreamConsumerFactory::new();
+    let req_id = test_req_id();
+    let prefix = test_prefix();
+    let (envelope, mut stream) = send_streaming(
+        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        &TestParams { dummy: "hi".into() },
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(envelope, SendMessageResponse::Message(_)));
+    assert!(futures::StreamExt::next(&mut stream).await.is_none());
 }

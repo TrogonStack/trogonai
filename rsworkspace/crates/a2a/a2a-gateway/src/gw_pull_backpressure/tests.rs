@@ -361,3 +361,77 @@ async fn forward_task_event_surfaces_publish_failure_as_string() {
     .expect_err("publish fails");
     assert!(!err.is_empty(), "error string is non-empty for log surface");
 }
+
+fn headers(pairs: &[(&str, &str)]) -> async_nats::HeaderMap {
+    let mut headers = async_nats::HeaderMap::new();
+    for (name, value) in pairs {
+        headers.insert(*name, *value);
+    }
+    headers
+}
+
+#[test]
+fn egress_routing_reads_caller_and_req_id_from_headers() {
+    let h = headers(&[
+        (a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "bot"),
+        (a2a_nats::constants::REQ_ID_HEADER, "req-1"),
+    ]);
+    let (caller, req_id) = egress_routing_from_headers(Some(&h)).expect("routing");
+    assert_eq!(caller.as_str(), "bot");
+    assert_eq!(req_id.as_str(), "req-1");
+}
+
+#[test]
+fn egress_routing_falls_back_to_principal_when_caller_id_absent() {
+    let h = headers(&[
+        (a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER, "principal"),
+        (a2a_nats::constants::REQ_ID_HEADER, "req-2"),
+    ]);
+    let (caller, _) = egress_routing_from_headers(Some(&h)).expect("routing");
+    assert_eq!(caller.as_str(), "principal");
+}
+
+#[test]
+fn egress_routing_treats_blank_caller_as_absent() {
+    let h = headers(&[
+        (a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "   "),
+        (a2a_nats::constants::GATEWAY_PRINCIPAL_HEADER, "principal"),
+        (a2a_nats::constants::REQ_ID_HEADER, "req-3"),
+    ]);
+    let (caller, _) = egress_routing_from_headers(Some(&h)).expect("routing");
+    assert_eq!(caller.as_str(), "principal");
+}
+
+#[test]
+fn egress_routing_rejects_events_with_no_headers_at_all() {
+    assert_eq!(egress_routing_from_headers(None), None);
+}
+
+#[test]
+fn egress_routing_rejects_events_missing_caller_identity() {
+    let h = headers(&[(a2a_nats::constants::REQ_ID_HEADER, "req-4")]);
+    assert_eq!(egress_routing_from_headers(Some(&h)), None);
+}
+
+#[test]
+fn egress_routing_rejects_events_missing_req_id() {
+    let h = headers(&[(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "bot")]);
+    assert_eq!(egress_routing_from_headers(Some(&h)), None);
+}
+
+#[test]
+fn egress_routing_rejects_a_caller_id_that_is_not_a_single_token() {
+    // A dotted caller id would rewrite the egress address rather than address a
+    // caller within it.
+    let h = headers(&[
+        (a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "bot.evil"),
+        (a2a_nats::constants::REQ_ID_HEADER, "req-5"),
+    ]);
+    assert_eq!(egress_routing_from_headers(Some(&h)), None);
+}
+
+#[test]
+fn egress_caller_id_rejects_wildcards() {
+    assert!(EgressCallerId::new("*").is_err());
+    assert!(EgressCallerId::new(">").is_err());
+}

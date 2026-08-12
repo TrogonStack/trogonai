@@ -586,7 +586,7 @@ async fn run_fetch_cycle(
         // request or the caller (ADR#0055), so both now come from the headers,
         // and an event carrying neither has no egress address at all.
         let routing = parse_task_events_subject(prefix.as_str(), subject)
-            .and_then(|_task_id| egress_routing_from_message_headers(&message));
+            .and_then(|_task_id| egress_routing_from_headers(message.message.headers.as_ref()));
         let Some((caller_id, req_id)) = routing else {
             message
                 .ack_with(AckKind::Term)
@@ -762,9 +762,11 @@ async fn forward_task_event<C: trogon_nats::PublishClient>(
 /// so the per-caller inflight cap can't be circumvented just by stripping one
 /// header. Returns `None` when either half is missing or is not a single NATS
 /// token, because the event then has no address to egress on.
+// The only caller is the fetch cycle, which is `cfg(not(coverage))`, so under
+// coverage this is reachable from tests but not from the crate itself.
 #[cfg_attr(coverage, allow(dead_code))]
-fn egress_routing_from_message_headers(message: &async_nats::jetstream::Message) -> Option<(EgressCallerId, ReqId)> {
-    let headers = message.message.headers.as_ref()?;
+fn egress_routing_from_headers(headers: Option<&async_nats::HeaderMap>) -> Option<(EgressCallerId, ReqId)> {
+    let headers = headers?;
     let read = |name| {
         headers
             .get(name)

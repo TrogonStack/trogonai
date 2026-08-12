@@ -242,3 +242,10 @@ fn through_poison_recovers_from_poisoned_lock() {
     drop(g);
     assert_eq!(*through_poison(m.lock()), 5);
 }
+
+#[tokio::test]
+async fn empty_event_stream_is_already_finished() {
+    let mut stream = empty_event_stream();
+    assert_eq!(stream.last_seq(), 0);
+    assert!(stream.next().await.is_none(), "no events ever follow a bare Message");
+}

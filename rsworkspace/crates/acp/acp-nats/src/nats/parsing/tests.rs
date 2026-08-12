@@ -398,6 +398,8 @@ fn global_agent_protocol_methods_match_acp_vocabulary() {
         "providers/disable"
     );
     assert_eq!(GlobalAgentMethod::Initialize.protocol_method(), "initialize");
+    assert_eq!(GlobalAgentMethod::Authenticate.protocol_method(), "authenticate");
+    assert_eq!(GlobalAgentMethod::Logout.protocol_method(), "logout");
     let ext = GlobalAgentMethod::Ext(crate::ext_method_name::ExtMethodName::new("custom").unwrap());
     assert_eq!(ext.wire_method(), "ext.custom");
     assert_eq!(ext.protocol_method(), "_custom");

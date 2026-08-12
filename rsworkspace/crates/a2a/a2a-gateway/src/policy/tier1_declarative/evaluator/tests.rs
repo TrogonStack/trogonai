@@ -346,14 +346,14 @@ fn nats_star_matches_exactly_one_token() {
         "a2a.v1.gateway.*.message.send",
         "a2a.v1.gateway.tenant.planner.message.send"
     ));
-    assert!(!nats_subject_matches("a2a.v1.gateway.*", "a2a.gateway"));
+    assert!(!nats_subject_matches("a2a.v1.gateway.*", "a2a.v1.gateway"));
 }
 
 #[test]
 fn nats_greater_than_matches_one_or_more_trailing_tokens() {
     assert!(nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway.x.y"));
     assert!(nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway.x"));
-    assert!(!nats_subject_matches("a2a.v1.gateway.>", "a2a.gateway"));
+    assert!(!nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway"));
 }
 
 #[test]

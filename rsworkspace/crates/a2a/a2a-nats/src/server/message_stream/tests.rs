@@ -211,3 +211,37 @@ async fn invalid_task_id_from_handler_returns_invalid_agent_response() {
         Some(i64::from(crate::error::INVALID_AGENT_RESPONSE))
     );
 }
+
+#[tokio::test]
+async fn events_carry_the_callers_identity_forward_from_the_request() {
+    // The gateway's egress pump gates per caller and can no longer recover the
+    // caller from the subject, so identity has to ride the event headers.
+    let nats = AdvancedMockNatsClient::new();
+    let js = MockJetStreamPublisher::new();
+    let handler = stub();
+    let events: crate::server::handler::TaskEventStream =
+        Box::pin(stream::iter(vec![Ok(working_status_event("task-1"))]));
+    handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
+
+    let (mut headers, payload) = stream_payload("call-1");
+    headers.insert(crate::constants::GATEWAY_CALLER_ID_HEADER, "bot");
+    headers.insert(crate::constants::GATEWAY_PRINCIPAL_HEADER, "principal");
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
+
+    let published = js.published_messages();
+    let event = published.first().expect("one event");
+    assert_eq!(
+        event
+            .headers
+            .get(crate::constants::GATEWAY_CALLER_ID_HEADER)
+            .map(|v| v.as_str()),
+        Some("bot")
+    );
+    assert_eq!(
+        event
+            .headers
+            .get(crate::constants::GATEWAY_PRINCIPAL_HEADER)
+            .map(|v| v.as_str()),
+        Some("principal")
+    );
+}

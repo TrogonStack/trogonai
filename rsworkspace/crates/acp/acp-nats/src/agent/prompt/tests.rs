@@ -495,3 +495,41 @@ async fn prompt_js_notification_stream_closed() {
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("notification stream closed"));
 }
+
+#[tokio::test]
+async fn prompt_js_skips_a_reply_belonging_to_another_request_on_the_session() {
+    // The response consumer is session-scoped, so a second prompt in flight on
+    // the same session lands on it too. Matching on `Jsonrpc-Id` is what keeps
+    // one prompt from resolving with another's answer.
+    let (mock, js, bridge) = mock_bridge();
+
+    let _cancel_tx = mock.inject_messages();
+
+    let (notif_consumer, notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(notif_consumer);
+
+    let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(resp_consumer);
+
+    let foreign = encode(&Message::Success {
+        id: jsonrpc_nats::ResponseId::String("some-other-prompt".into()),
+        result: serde_json::to_value(PromptResponse::new(StopReason::Cancelled)).unwrap(),
+    })
+    .unwrap();
+    resp_tx
+        .unbounded_send(Ok(MockJsMessage::new(make_nats_msg(
+            &foreign.body,
+            Some(foreign.headers),
+        ))))
+        .unwrap();
+
+    reply_success_when_published(&js, resp_tx, &PromptResponse::new(StopReason::EndTurn));
+
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
+
+    drop(notif_tx);
+    assert_eq!(
+        result.expect("expected Ok prompt response").stop_reason,
+        StopReason::EndTurn
+    );
+}

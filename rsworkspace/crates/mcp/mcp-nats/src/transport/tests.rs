@@ -689,6 +689,36 @@ fn custom_method_suffix_round_trips_without_collisions() {
     assert_eq!(method_from_suffix(&method_suffix("").unwrap()).unwrap(), "");
 }
 
+#[test]
+fn unknown_suffix_without_the_custom_escape_has_no_method() {
+    // A subject terminal that is neither a table suffix nor the escape names no
+    // method at all, so the inverse mapping refuses rather than inventing one.
+    let err = method_from_suffix("not.a.known.terminal").expect_err("no method");
+    assert!(matches!(
+        err,
+        crate::nats::subjects::methods::MethodMapError::UnsupportedMethod { ref method } if method == "not.a.known.terminal"
+    ));
+}
+
+#[test]
+fn custom_suffix_that_is_not_base64url_is_rejected() {
+    let err = method_from_suffix("custom.!!not-base64!!").expect_err("undecodable");
+    assert!(matches!(
+        err,
+        crate::nats::subjects::methods::MethodMapError::InvalidCustomMethodSuffix { .. }
+    ));
+}
+
+#[test]
+fn custom_suffix_that_decodes_to_invalid_utf8_is_rejected() {
+    // `_w` is valid base64url for the byte 0xFF, which is not valid UTF-8.
+    let err = method_from_suffix("custom._w").expect_err("not utf-8");
+    assert!(matches!(
+        err,
+        crate::nats::subjects::methods::MethodMapError::InvalidCustomMethodSuffix { .. }
+    ));
+}
+
 #[tokio::test]
 async fn client_transport_routes_custom_notification_with_canonical_method() {
     let nats = AdvancedMockNatsClient::new();

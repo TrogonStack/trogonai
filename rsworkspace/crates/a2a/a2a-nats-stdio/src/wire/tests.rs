@@ -50,3 +50,10 @@ fn outbound_frame_error_variant_serializes() {
     let v = serde_json::to_value(&frame).unwrap();
     assert_eq!(v["error"]["code"], -32600);
 }
+
+#[test]
+fn rpc_id_projects_every_json_rpc_id_shape() {
+    assert_eq!(RpcId::Number(7).to_json_value(), json!(7));
+    assert_eq!(RpcId::String("abc".into()).to_json_value(), json!("abc"));
+    assert_eq!(RpcId::Null.to_json_value(), Value::Null);
+}

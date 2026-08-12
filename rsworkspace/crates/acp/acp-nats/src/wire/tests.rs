@@ -342,3 +342,52 @@ fn notification_headers_yield_no_req_id() {
 
     assert!(req_id_from_request_headers(&encoded.headers).is_none());
 }
+
+#[test]
+fn req_id_is_absent_when_the_id_header_is_not_a_json_literal() {
+    let mut headers = HeaderMap::new();
+    headers.insert(jsonrpc_nats::HEADER_ID, "req-1");
+
+    assert!(req_id_from_request_headers(&headers).is_none());
+}
+
+#[test]
+fn notification_params_decoding_rejects_a_request_body() {
+    let encoded = encode_request(
+        "session/cancel",
+        RequestId::Number(1),
+        &serde_json::json!({ "sessionId": "s1" }),
+    )
+    .unwrap();
+
+    let decoded = decode_notification_params::<serde_json::Value>("session/cancel", &encoded.headers, &encoded.body);
+
+    assert!(matches!(decoded, Err(WireError::UnexpectedMessage)));
+}
+
+#[test]
+fn request_params_decoding_rejects_a_notification_body() {
+    let encoded = encode_notification("session/cancel", &serde_json::json!({ "sessionId": "s1" })).unwrap();
+
+    let decoded = decode_request_params::<serde_json::Value>("session/cancel", &encoded.headers, &encoded.body);
+
+    assert!(matches!(decoded, Err(WireError::UnexpectedMessage)));
+}
+
+#[test]
+fn request_ids_round_trip_between_the_acp_and_json_rpc_spellings() {
+    for (rpc, acp) in [
+        (
+            ResponseId::Number(7),
+            agent_client_protocol::schema::v1::RequestId::Number(7),
+        ),
+        (
+            ResponseId::String("req-1".into()),
+            agent_client_protocol::schema::v1::RequestId::Str("req-1".into()),
+        ),
+        (ResponseId::Null, agent_client_protocol::schema::v1::RequestId::Null),
+    ] {
+        assert_eq!(acp_request_id(&rpc), acp);
+        assert_eq!(response_id_from_acp(&acp), rpc);
+    }
+}

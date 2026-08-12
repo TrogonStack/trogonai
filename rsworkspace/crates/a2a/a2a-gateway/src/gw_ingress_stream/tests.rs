@@ -300,3 +300,19 @@ fn caller_inflight_gate_drop_removes_empty_bucket() {
     drop(permit);
     assert!(!gate.inflight.lock().unwrap().contains_key("bot"));
 }
+
+#[test]
+fn event_belongs_to_matches_the_subscriptions_req_id() {
+    let mut h = async_nats::HeaderMap::new();
+    h.insert(a2a_nats::constants::REQ_ID_HEADER, " req-1 ");
+    assert!(event_belongs_to(Some(&h), &ReqId::from_header("req-1")));
+    assert!(!event_belongs_to(Some(&h), &ReqId::from_header("req-2")));
+}
+
+#[test]
+fn event_belongs_to_rejects_events_carrying_no_req_id() {
+    // Not ours rather than everyone's: forwarding would cross-talk streams.
+    assert!(!event_belongs_to(None, &ReqId::from_header("req-1")));
+    let empty = async_nats::HeaderMap::new();
+    assert!(!event_belongs_to(Some(&empty), &ReqId::from_header("req-1")));
+}

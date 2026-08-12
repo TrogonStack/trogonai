@@ -173,16 +173,17 @@ pub fn reply_when_published<F>(
 {
     let publisher = publisher.clone();
     tokio::spawn(async move {
-        let request_headers = loop {
-            let published = publisher
+        // Yield before looking: this task is spawned before the caller
+        // publishes, so the request is not on the publisher yet.
+        let mut request = None;
+        while request.is_none() {
+            tokio::task::yield_now().await;
+            request = publisher
                 .published_messages()
                 .into_iter()
                 .find(|m| m.headers.get(jsonrpc_nats::HEADER_ID).is_some());
-            match published {
-                Some(m) => break m.headers,
-                None => tokio::task::yield_now().await,
-            }
-        };
+        }
+        let request_headers = request.map(|m| m.headers).unwrap_or_default();
 
         let (headers, payload) = build(request_headers);
         let _ = tx.unbounded_send(Ok(trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {

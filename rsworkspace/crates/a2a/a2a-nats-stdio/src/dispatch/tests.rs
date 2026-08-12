@@ -764,3 +764,19 @@ fn make_with_id_overwrites_error_id_and_passes_through_non_error_frames() {
         assert_eq!(n.id, RpcId::Number(1));
     }
 }
+
+#[test]
+fn a_body_that_cannot_be_rewritten_becomes_an_internal_error_frame() {
+    // The id rewrite is the last step before the frame leaves for stdio, so a
+    // body that will not parse has to surface as a JSON-RPC error rather than
+    // reach the client as a malformed envelope.
+    let validated = ValidatedRpc::new((), Bytes::from_static(b"not json"));
+    let frame = forward_validated(&RpcId::Number(1), validated);
+    match frame {
+        OutboundFrame::Error(err) => {
+            assert_eq!(err.id, RpcId::Number(1));
+            assert_eq!(err.error.code, -32603);
+        }
+        other => panic!("expected an error frame, got {other:?}"),
+    }
+}

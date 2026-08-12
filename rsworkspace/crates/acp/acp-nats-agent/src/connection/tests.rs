@@ -1205,17 +1205,21 @@ async fn dispatch_js_message_cancel_notification_handler_error_ack_failure() {
 
     let nats = MockNatsClient::new();
     let agent = MockAgent::failing_cancel();
-    let payload = serialize(&CancelNotification::new("s1"));
+    let encoded = wire_encode_notification("session/cancel", &CancelNotification::new("s1"));
     let js_msg = MockJsMessage::with_failing_signals(async_nats::Message {
         subject: "acp.v1.session.s1.agent.cancel".into(),
         reply: None,
-        payload: Bytes::copy_from_slice(&payload),
-        headers: None,
+        payload: Bytes::copy_from_slice(&encoded.body),
+        headers: Some(encoded.headers),
         status: None,
         description: None,
-        length: payload.len(),
+        length: encoded.body.len(),
     });
     dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    assert!(
+        agent.cancelled.lock().unwrap().is_empty(),
+        "the failing handler must not have recorded the cancel"
+    );
 }
 
 fn init_handler_error(_: InitializeRequest) -> std::future::Ready<agent_client_protocol::Result<InitializeResponse>> {

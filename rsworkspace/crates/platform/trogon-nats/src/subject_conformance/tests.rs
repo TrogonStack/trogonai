@@ -108,6 +108,11 @@ fn rejects_malformed_dots() {
             Err(SubjectViolationError::MalformedDots),
             "{subject}"
         );
+        assert_eq!(
+            validate_subject_pattern(subject),
+            Err(SubjectViolationError::MalformedDots),
+            "{subject}"
+        );
     }
 }
 
