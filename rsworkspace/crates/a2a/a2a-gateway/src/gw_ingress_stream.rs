@@ -464,7 +464,7 @@ async fn run_streaming_ingress_pump(
         // the events carry the `req_id` of the original subscription, not of the
         // resubscribe request.
         if let Some(req_id) = demux_req_id
-            && !event_belongs_to(message.message.headers.as_ref(), req_id)
+            && !req_id.matches_event_headers(message.message.headers.as_ref())
         {
             let _ = message.ack().await;
             continue;
@@ -507,19 +507,6 @@ async fn run_streaming_ingress_pump(
     }
 
     debug!(reply = %spawn.reply, "gateway streaming ingress pump stopped");
-}
-
-/// True when a task event carries the `Trogon-Req-Id` of this subscription.
-///
-/// An event with no `Trogon-Req-Id` at all is treated as not ours rather than as
-/// everyone's: forwarding it would cross-talk one caller's stream into another's.
-// The only caller is the JetStream pump, which is `cfg(not(coverage))`, so under
-// coverage this is reachable from tests but not from the crate itself.
-#[cfg_attr(coverage, allow(dead_code))]
-fn event_belongs_to(headers: Option<&async_nats::HeaderMap>, req_id: &ReqId) -> bool {
-    headers
-        .and_then(|h| h.get(a2a_nats::constants::REQ_ID_HEADER))
-        .is_some_and(|value| value.as_str().trim() == req_id.as_str())
 }
 
 /// Wire shape of the `tasks/resubscribe` request params. Parsing through a

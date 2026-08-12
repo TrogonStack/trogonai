@@ -202,7 +202,7 @@ async fn open_task_stream_returns_typed_event_stream() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let stream = open_task_stream(&js, &test_prefix(), &test_task_id()).await;
+    let stream = open_task_stream(&js, &test_prefix(), &test_task_id(), &ReqId::from_test("req-1")).await;
     assert!(stream.is_ok());
 }
 
@@ -211,7 +211,7 @@ async fn open_task_stream_get_stream_failure_returns_error() {
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
 
-    let result = open_task_stream(&js, &test_prefix(), &test_task_id()).await;
+    let result = open_task_stream(&js, &test_prefix(), &test_task_id(), &ReqId::from_test("req-1")).await;
     assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
 }
 

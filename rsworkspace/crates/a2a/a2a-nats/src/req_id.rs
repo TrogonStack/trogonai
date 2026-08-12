@@ -19,6 +19,18 @@ impl ReqId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// True when a task event belongs to the subscription this id identifies.
+    ///
+    /// Task event subjects name only the task (ADR#0055), so `Trogon-Req-Id` is the
+    /// only thing separating concurrent subscriptions to one task. An event carrying
+    /// no id at all is nobody's rather than everybody's: forwarding it would
+    /// cross-talk one caller's stream into another's.
+    pub fn matches_event_headers(&self, headers: Option<&async_nats::HeaderMap>) -> bool {
+        headers
+            .and_then(|h| h.get(crate::constants::REQ_ID_HEADER))
+            .is_some_and(|value| value.as_str().trim() == self.0)
+    }
 }
 
 impl Default for ReqId {

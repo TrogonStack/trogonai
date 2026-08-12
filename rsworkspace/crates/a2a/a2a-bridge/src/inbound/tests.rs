@@ -114,11 +114,14 @@ fn gateway_reply_is_jsonrpc_error_detects_error_envelope() {
 fn sse_plan_builds_message_stream_and_resubscribe_plans() {
     let stream_body = json!({"method": "message/stream", "params": {}});
     let bootstrap = bootstrap_task("task-7");
-    let plan = sse_plan("message/stream", &stream_body, &bootstrap)
+    let plan = sse_plan("message/stream", &stream_body, &bootstrap, &ReqId::from_header("req-9"))
         .unwrap()
         .expect("a task means a consumer");
     match plan {
-        SseConsumePlan::MessageStreamBootstrap { task_id } => assert_eq!(task_id.as_str(), "task-7"),
+        SseConsumePlan::MessageStreamBootstrap { task_id, req_id } => {
+            assert_eq!(task_id.as_str(), "task-7");
+            assert_eq!(req_id.as_str(), "req-9");
+        }
         other => panic!("expected a bootstrap plan, got {other:?}"),
     }
 
@@ -126,11 +129,41 @@ fn sse_plan_builds_message_stream_and_resubscribe_plans() {
         "method": "tasks/resubscribe",
         "params": { "taskId": "task-1", "lastSequence": 3 }
     });
-    let plan = sse_plan("tasks/resubscribe", &resub_body, b"").unwrap();
+    let plan = sse_plan("tasks/resubscribe", &resub_body, b"", &ReqId::from_header("req-9")).unwrap();
     assert!(matches!(
         plan,
         Some(SseConsumePlan::TasksResubscribe { last_seq: 3, .. })
     ));
+}
+
+#[test]
+fn plan_consumer_demuxes_a_live_subscription_but_not_a_resume() {
+    let prefix = default_a2a_prefix();
+    let task_id = A2aTaskId::new("task-7").unwrap();
+
+    let (_cfg, demux) = SseConsumePlan::MessageStreamBootstrap {
+        task_id: task_id.clone(),
+        req_id: ReqId::from_header("req-9"),
+    }
+    .consumer(&prefix);
+    assert_eq!(demux.map(|r| r.as_str().to_owned()), Some("req-9".to_owned()));
+
+    let (_cfg, demux) = SseConsumePlan::TasksResubscribe { task_id, last_seq: 4 }.consumer(&prefix);
+    assert!(demux.is_none(), "a resume replays events of the original request");
+}
+
+#[test]
+fn event_forwards_only_when_it_carries_the_subscriptions_req_id() {
+    let req_id = ReqId::from_header("req-9");
+    let mut mine = async_nats::HeaderMap::new();
+    mine.insert(REQ_ID_HEADER, "req-9");
+    let mut theirs = async_nats::HeaderMap::new();
+    theirs.insert(REQ_ID_HEADER, "req-other");
+
+    assert!(event_forwards_to_caller(Some(&req_id), Some(&mine)));
+    assert!(!event_forwards_to_caller(Some(&req_id), Some(&theirs)));
+    assert!(!event_forwards_to_caller(Some(&req_id), None));
+    assert!(event_forwards_to_caller(None, Some(&theirs)));
 }
 
 #[test]
@@ -139,14 +172,18 @@ fn sse_plan_returns_no_consumer_when_the_reply_carries_no_task() {
     // events, so opening a consumer would just leak one.
     let body = json!({"method": "message/stream", "params": {}});
     let bootstrap = bootstrap_bare_message();
-    assert!(sse_plan("message/stream", &body, &bootstrap).unwrap().is_none());
+    assert!(
+        sse_plan("message/stream", &body, &bootstrap, &ReqId::from_header("req-9"))
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
 fn sse_plan_rejects_a_task_id_that_is_not_a_nats_token() {
     let body = json!({"method": "message/stream", "params": {}});
     let bootstrap = bootstrap_task("task.*");
-    let err = sse_plan("message/stream", &body, &bootstrap).unwrap_err();
+    let err = sse_plan("message/stream", &body, &bootstrap, &ReqId::from_header("req-9")).unwrap_err();
     assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 
@@ -293,7 +330,7 @@ fn resub_task_and_seq_defaults_last_seq_to_zero() {
 
 #[test]
 fn sse_plan_rejects_unsupported_streaming_method() {
-    let err = sse_plan("tasks/subscribe", &json!({}), b"").unwrap_err();
+    let err = sse_plan("tasks/subscribe", &json!({}), b"", &ReqId::from_header("req-9")).unwrap_err();
     assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 

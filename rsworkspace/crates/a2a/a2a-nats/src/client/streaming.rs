@@ -108,12 +108,14 @@ where
     // The consumer is opened after the reply, not before it: task event subjects
     // are scoped to the task (ADR#0055), and the bootstrap reply is where the task
     // id comes from. Nothing is missed in the gap, because `A2A_EVENTS` retains by
-    // limits and the consumer delivers from sequence 0.
+    // limits and the consumer delivers from sequence 0. The subject no longer names
+    // the request, so the pump filters on `Trogon-Req-Id` to keep another caller's
+    // subscription to the same task out of this stream.
     let event_stream = match &result {
         SendMessageResponse::Task(task) => {
             let task_id = A2aTaskId::new(task.id.clone())
                 .map_err(|e| ClientError::ConsumerSetup(format!("agent returned an invalid task id: {e}")))?;
-            open_task_stream(js, prefix, &task_id).await?
+            open_task_stream(js, prefix, &task_id, req_id).await?
         }
         SendMessageResponse::Message(_) => empty_event_stream(),
     };
@@ -125,6 +127,7 @@ pub async fn open_task_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
     task_id: &A2aTaskId,
+    req_id: &ReqId,
 ) -> Result<TypedEventStream, ClientError>
 where
     J: JetStreamGetStream,
@@ -150,7 +153,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("create consumer: {e}")))?;
 
-    Ok(build_event_stream(consumer, last_seq))
+    Ok(build_event_stream(consumer, last_seq, Some(req_id.clone())))
 }
 
 #[cfg(test)]

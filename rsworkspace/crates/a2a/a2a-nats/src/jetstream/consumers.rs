@@ -18,6 +18,11 @@
 //!   reconnect-after-disconnect, skipping already-seen events without replaying.
 
 use async_nats::jetstream::consumer::pull::Config;
+
+/// The consumer shape every constructor here returns, re-exported so callers can
+/// name it without reaching into `async_nats`' module path themselves.
+pub type PullConfig = Config;
+
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
 use crate::a2a_prefix::A2aPrefix;
@@ -40,6 +45,13 @@ pub fn gateway_events_consumer(prefix: &A2aPrefix, durable_name: &str, max_ack_p
     }
 }
 
+/// Caller-side `message/stream` consumer, opened once the bootstrap reply names the task.
+///
+/// Delivery starts at the beginning of the task's history rather than at the head,
+/// because the consumer can only be created after the reply and the agent may already
+/// have published. What that replays is bounded to one task, and the reader demuxes on
+/// `Trogon-Req-Id`, so events of earlier or concurrent subscriptions to the same task
+/// are dropped instead of reaching this caller.
 pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Config {
     Config {
         filter_subject: TaskEventsSubject::new(prefix, task_id).to_string(),

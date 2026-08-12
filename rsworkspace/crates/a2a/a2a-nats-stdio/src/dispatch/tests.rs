@@ -642,17 +642,39 @@ async fn invalid_params_returned_for_every_typed_method() {
 
 use trogon_nats::jetstream::mocks::MockJsMessage;
 
-fn js_msg(payload: Vec<u8>) -> MockJsMessage {
+fn js_msg(payload: Vec<u8>, req_id: &str) -> MockJsMessage {
+    let mut headers = async_nats::HeaderMap::new();
+    headers.insert(a2a_nats::constants::REQ_ID_HEADER, req_id);
     let inner = async_nats::Message {
-        subject: "a2a.v1.tasks.task1.events.req".into(),
+        subject: "a2a.v1.tasks.task1.events".into(),
         reply: Some("$JS.ACK.A2A_EVENTS.consumer.1.1.1.0.0".into()),
         payload: Bytes::from(payload),
-        headers: None,
+        headers: Some(headers),
         status: None,
         description: None,
         length: 0,
     };
     MockJsMessage::new(inner)
+}
+
+/// The correlation id the client minted for its own request, read back off the wire.
+///
+/// Task event subjects name only the task, so a live subscription keeps just the
+/// events stamped with its own id. The client mints that id internally rather than
+/// taking one from the caller, which leaves the request it sent as the only place a
+/// test can learn it.
+async fn minted_req_id(nats: &AdvancedMockNatsClient) -> String {
+    for _ in 0..1000 {
+        if let Some(value) = nats
+            .requested_headers()
+            .iter()
+            .find_map(|headers| headers.get(a2a_nats::constants::REQ_ID_HEADER))
+        {
+            return value.as_str().to_string();
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("the client never sent a request carrying a correlation id")
 }
 
 fn status_event(task_id: &str) -> a2a::event::StreamResponse {
@@ -676,9 +698,12 @@ async fn message_stream_forwards_status_events_as_notifications() {
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
-    let event_payload = serde_json::to_vec(&status_event("task-stream")).unwrap();
-    evt_tx.unbounded_send(Ok(js_msg(event_payload))).unwrap();
-    drop(evt_tx);
+    let wire = nats.clone();
+    tokio::spawn(async move {
+        let req_id = minted_req_id(&wire).await;
+        let event_payload = serde_json::to_vec(&status_event("task-stream")).unwrap();
+        evt_tx.unbounded_send(Ok(js_msg(event_payload, &req_id))).unwrap();
+    });
     let client = make_client(nats, js);
     let (chan_tx, mut chan_rx) = mpsc::channel(16);
     dispatch_request(
@@ -708,7 +733,11 @@ async fn tasks_resubscribe_forwards_status_events_under_resubscribe_method() {
     let (consumer, evt_tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
     let event_payload = serde_json::to_vec(&status_event("rsub")).unwrap();
-    evt_tx.unbounded_send(Ok(js_msg(event_payload))).unwrap();
+    // A replay carries the correlation id of the subscription that first asked for
+    // these events, and a resume is entitled to them all the same.
+    evt_tx
+        .unbounded_send(Ok(js_msg(event_payload, "req-of-the-original-subscription")))
+        .unwrap();
     drop(evt_tx);
     let client = make_client(nats, js);
     let (chan_tx, mut chan_rx) = mpsc::channel(16);
