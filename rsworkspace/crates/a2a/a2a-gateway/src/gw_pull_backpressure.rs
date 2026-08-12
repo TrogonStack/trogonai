@@ -160,6 +160,7 @@ pub struct ResubscribeEgressPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageStreamEgressPlan {
     pub filter_subject: String,
+    pub start_sequence: u64,
     pub hints: PullConsumerHints,
 }
 
@@ -168,7 +169,10 @@ pub trait TaskEventsEgressPlanner {
 
     fn pull_hints(&self) -> PullConsumerHints;
 
-    fn plan_message_stream(&self, prefix: &A2aPrefix) -> Result<MessageStreamEgressPlan, Self::Error>;
+    /// `last_seq` is the events stream head read before the request was forwarded.
+    /// The filter spans every task, so delivery has to resume past it rather than
+    /// replay from the beginning of the stream.
+    fn plan_message_stream(&self, prefix: &A2aPrefix, last_seq: u64) -> Result<MessageStreamEgressPlan, Self::Error>;
 
     fn plan_resubscribe(
         &self,
@@ -203,9 +207,10 @@ impl TaskEventsEgressPlanner for BaselineTaskEventsEgressPlanner {
     /// No `req_id` to narrow on: the agent answers the caller's inbox directly, so
     /// the gateway never learns the `task_id` either. The filter takes every task
     /// and the pump drops what `Trogon-Req-Id` says is not its request.
-    fn plan_message_stream(&self, prefix: &A2aPrefix) -> Result<MessageStreamEgressPlan, Self::Error> {
+    fn plan_message_stream(&self, prefix: &A2aPrefix, last_seq: u64) -> Result<MessageStreamEgressPlan, Self::Error> {
         Ok(MessageStreamEgressPlan {
             filter_subject: format!("{}.v1.tasks.*.events", prefix.as_str()),
+            start_sequence: last_seq.saturating_add(1),
             hints: self.hints,
         })
     }

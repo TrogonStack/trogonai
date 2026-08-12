@@ -103,8 +103,15 @@ fn planner_message_stream_plan_filters_every_task() {
     // The gateway never sees the bootstrap reply that names the task, so it
     // cannot narrow the filter; `Trogon-Req-Id` is what picks its own events out.
     let planner = BaselineTaskEventsEgressPlanner::new();
-    let plan = planner.plan_message_stream(&prefix()).expect("plan");
+    let plan = planner.plan_message_stream(&prefix(), 0).expect("plan");
     assert_eq!(plan.filter_subject, "a2a.v1.tasks.*.events");
+}
+
+#[test]
+fn planner_message_stream_plan_starts_past_the_observed_head() {
+    let planner = BaselineTaskEventsEgressPlanner::new();
+    let plan = planner.plan_message_stream(&prefix(), 41).expect("plan");
+    assert_eq!(plan.start_sequence, 42);
 }
 
 #[test]

@@ -38,7 +38,9 @@ use uuid::Uuid;
 
 use crate::aauth::{AAuthMode, GatewayAAuthIngress};
 use crate::config::Config;
-use crate::gw_ingress_stream::{CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate};
+use crate::gw_ingress_stream::{
+    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, events_stream_last_seq,
+};
 use crate::jwt_caller_identity::{
     GatewayCallerIdentityPolicy, JwtHeaderCallerIdentitySource, gateway_audit_caller_attribution,
     resolve_gateway_caller_identity,
@@ -69,13 +71,13 @@ use crate::runtime::streaming::maybe_spawn_streaming_ingress_pump;
 use crate::runtime::tier1::{enrich_audit_caller, tier1_declarative_context_from_ingress};
 use crate::runtime::tier1_denial::{Tier1DenialCtx, deny_tier1};
 
-use crate::constants::MESSAGE_SEND_METHOD_DOTS;
 use crate::constants::{
     ANONYMOUS_CALLER_SLUG, ATTR_AAUTH_AGENT_ID, ATTR_AGENT_SUBJECT, ATTR_CALLER_ID, ATTR_ROUTING_OUTCOME,
     ENV_GATEWAY_JWT_AUDIENCE, ROUTING_AAUTH_DENIED, ROUTING_DEADLINE_EXCEEDED, ROUTING_FORWARD_FAILED,
     ROUTING_FORWARDED, ROUTING_IGNORED_NO_REPLY, ROUTING_INGRESS_ERROR, ROUTING_POLICY_DENIED, ROUTING_TIER1_DENIED,
     ROUTING_TIER3_ENGINE_ERROR, ROUTING_TIER3_REFUSED, SPAN_GATEWAY_INGRESS_DISPATCH,
 };
+use crate::constants::{MESSAGE_SEND_METHOD_DOTS, MESSAGE_STREAM_METHOD_DOTS};
 
 /// Run a single ingress envelope through the full gateway dispatch
 /// chain. Returns once the reply (or detached audit publish) has
@@ -665,6 +667,15 @@ async fn dispatch_routed<E: ReadEnv>(
         "gateway forwarding to agent subject",
     );
 
+    // Anchor the streaming pump before the agent can publish anything: the pump is
+    // spawned after the forward and creates its consumer asynchronously, so the
+    // start position has to be read from this side of the publish.
+    let events_last_seq = if streaming_ingress_enabled && method_dots.as_str() == MESSAGE_STREAM_METHOD_DOTS {
+        events_stream_last_seq(client, &config.a2a_prefix).await
+    } else {
+        None
+    };
+
     let disposition = forward_to_agent(
         client,
         env,
@@ -700,6 +711,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     payload.as_ref(),
                     reply.clone(),
                     caller_key,
+                    events_last_seq,
                 );
             }
             spawn_gateway_audit_publish(

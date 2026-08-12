@@ -35,11 +35,43 @@ fn stream_events_consumer_delivers_all() {
 
 #[test]
 fn gateway_stream_events_consumer_filters_every_task() {
-    let config = gateway_stream_events_consumer(&p("a2a"), 512);
+    let config = gateway_stream_events_consumer(&p("a2a"), 0, 512);
     assert_eq!(config.filter_subject, "a2a.v1.tasks.*.events");
     assert_eq!(config.max_ack_pending, 512);
-    assert_eq!(config.deliver_policy, DeliverPolicy::All);
     assert!(config.durable_name.is_none());
+}
+
+#[test]
+fn gateway_stream_events_consumer_starts_past_the_observed_head() {
+    // The filter spans every task, so replaying from the start of the stream would
+    // make each new subscription walk and ack every other task's history first.
+    let config = gateway_stream_events_consumer(&p("a2a"), 41, 512);
+    assert_eq!(
+        config.deliver_policy,
+        DeliverPolicy::ByStartSequence { start_sequence: 42 }
+    );
+    assert_eq!(config.ack_policy, AckPolicy::Explicit);
+    assert_eq!(config.replay_policy, ReplayPolicy::Instant);
+}
+
+#[test]
+fn gateway_stream_events_consumer_starts_at_one_on_an_empty_stream() {
+    let config = gateway_stream_events_consumer(&p("a2a"), 0, 512);
+    assert_eq!(
+        config.deliver_policy,
+        DeliverPolicy::ByStartSequence { start_sequence: 1 }
+    );
+}
+
+#[test]
+fn gateway_stream_events_consumer_saturates_rather_than_wrapping_past_the_head() {
+    let config = gateway_stream_events_consumer(&p("a2a"), u64::MAX, 512);
+    assert_eq!(
+        config.deliver_policy,
+        DeliverPolicy::ByStartSequence {
+            start_sequence: u64::MAX
+        }
+    );
 }
 
 #[test]
@@ -108,7 +140,7 @@ fn no_consumer_filter_carries_a_request_id() {
     for filter in [
         gateway_events_consumer(&p("a2a"), "D", 1).filter_subject,
         stream_events_consumer(&p("a2a"), &tid("t1")).filter_subject,
-        gateway_stream_events_consumer(&p("a2a"), 1).filter_subject,
+        gateway_stream_events_consumer(&p("a2a"), 0, 1).filter_subject,
         resubscribe_consumer(&p("a2a"), &tid("t1"), 0).filter_subject,
     ] {
         for token in filter.split('.') {

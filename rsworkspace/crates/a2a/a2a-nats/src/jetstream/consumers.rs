@@ -10,7 +10,9 @@
 //!   the task.
 //! - `gateway_stream_events_consumer`: the gateway never sees the bootstrap reply,
 //!   because the agent answers the caller's inbox directly, so it cannot narrow by
-//!   `task_id` and filters every task instead, demuxing on `Trogon-Req-Id`.
+//!   `task_id` and filters every task instead, demuxing on `Trogon-Req-Id`. It
+//!   starts from the stream head observed when the request was admitted, because a
+//!   filter that wide cannot afford to replay.
 //! - `resubscribe_consumer`: filters on one `{task_id}` and uses `ByStartSequence`
 //!   from a client-supplied `last_seq + 1`. Used by `tasks/resubscribe` for
 //!   reconnect-after-disconnect, skipping already-seen events without replaying.
@@ -53,11 +55,17 @@ pub fn stream_events_consumer(prefix: &A2aPrefix, task_id: &A2aTaskId) -> Config
 /// Gateway-side `message/stream` consumer.
 ///
 /// Unlike [`stream_events_consumer`] this one has no `task_id` to filter on, so it
-/// sees every task's events and the pump drops what is not its request.
-pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, max_ack_pending: i64) -> Config {
+/// sees every task's events and the pump drops what is not its request. `last_seq`
+/// is the events stream head read before the request was forwarded: delivery
+/// resumes at the next sequence, so the pump never walks and acks history that
+/// predates its own request, and nothing published after admission can slip past
+/// the consumer while it is being created.
+pub fn gateway_stream_events_consumer(prefix: &A2aPrefix, last_seq: u64, max_ack_pending: i64) -> Config {
     Config {
         filter_subject: TaskAllEventsSubject::new(prefix).to_string(),
-        deliver_policy: DeliverPolicy::All,
+        deliver_policy: DeliverPolicy::ByStartSequence {
+            start_sequence: last_seq.saturating_add(1),
+        },
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         max_ack_pending,

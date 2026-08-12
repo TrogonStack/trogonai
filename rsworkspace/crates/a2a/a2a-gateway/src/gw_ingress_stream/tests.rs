@@ -243,6 +243,7 @@ fn try_acquire_streaming_permit_passes_when_capacity_available() {
     let spawn = StreamingIngressSpawn {
         kind: StreamingIngressKind::MessageStream {
             req_id: ReqId::from_header("r-1"),
+            last_seq: 0,
         },
         reply: async_nats::Subject::from_static("reply.x"),
         caller_key: CallerKey::new("bot").unwrap(),
@@ -259,6 +260,7 @@ fn try_acquire_streaming_permit_returns_per_caller_limit_when_full() {
     let spawn = StreamingIngressSpawn {
         kind: StreamingIngressKind::MessageStream {
             req_id: ReqId::from_header("r-1"),
+            last_seq: 0,
         },
         reply: async_nats::Subject::from_static("reply.x"),
         caller_key: CallerKey::new("bot").unwrap(),
