@@ -59,3 +59,6 @@ future implementation work.
 - [ADR#0051: Fully Bound Per-Request Signing Contract](./0051-fully-bound-request-signing.md)
 - [ADR#0052: Cloud KMS Auto-Unseal Is Mandatory for Production OpenBao](./0052-cloud-kms-production-seal.md)
 - [ADR#0053: External OIDC Federation Surface for Agent Identity (Draft)](./0053-external-oidc-federation-surface.md)
+- [ADR#0054: NATS Protocol Binding Documentation (Draft)](./0054-nats-protocol-binding-documentation.md)
+- [ADR#0055: NATS Subject Design for JSON-RPC Protocol Bindings (Draft)](./0055-nats-subject-design-jsonrpc-bindings.md)
+- [ADR#0056: Canonical JSON-RPC Bodies over NATS (Draft)](./0056-canonical-jsonrpc-bodies-over-nats.md)
