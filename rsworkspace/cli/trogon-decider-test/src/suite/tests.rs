@@ -180,6 +180,23 @@ fn to_ir_maps_trap_true_and_carries_budget_overrides() {
 }
 
 #[test]
+fn to_ir_rejects_trap_true_without_a_budget_override() {
+    let scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(Then::Trap { trap: true }),
+        None,
+    );
+    let error = scenario.to_ir(schedules_registry()).unwrap_err().to_string();
+    assert!(
+        error.contains("requires a scenario-level `budget` override"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn to_ir_rejects_trap_false() {
     let scenario = scenario(
         Some(serde_json::json!({

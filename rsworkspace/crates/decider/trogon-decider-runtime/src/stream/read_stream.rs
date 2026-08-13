@@ -82,6 +82,11 @@ pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
     /// default implementation delegates to [`StreamRead::read_stream`], so
     /// existing implementations keep compiling and behave exactly as before
     /// until they opt into a real bound by overriding this method.
+    ///
+    /// `max_events` is therefore a request, not a guarantee: a caller cannot
+    /// assume the response holds at most `max_events` events, only that a
+    /// store which overrode this method stopped fetching there. Callers that
+    /// need the cap enforced must check the returned length themselves.
     fn read_stream_bounded(
         &self,
         request: ReadStreamRequest<'_, StreamId>,

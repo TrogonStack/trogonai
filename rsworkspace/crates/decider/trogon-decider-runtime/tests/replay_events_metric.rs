@@ -73,8 +73,11 @@ impl EventDecode for RecordEvent {
 #[test]
 fn replay_events_metric_records_replayed_count() {
     let exporter = InMemoryMetricExporter::default();
+    // The interval is long enough that only the explicit `force_flush` below collects. A short
+    // interval could export between the two commands, and that collection records the first
+    // command's zero replayed events.
     let reader = PeriodicReader::builder(exporter.clone())
-        .with_interval(Duration::from_millis(50))
+        .with_interval(Duration::from_secs(3600))
         .build();
     let provider = SdkMeterProvider::builder().with_reader(reader).build();
     opentelemetry::global::set_meter_provider(provider.clone());
@@ -95,17 +98,19 @@ fn replay_events_metric_records_replayed_count() {
     provider.force_flush().expect("metrics flush");
     let finished_metrics = exporter.get_finished_metrics().expect("metrics exported");
 
+    // The counter is cumulative, so the last collection carries the total across both commands.
     let data_point = finished_metrics
         .iter()
         .flat_map(|resource_metrics| resource_metrics.scope_metrics())
         .flat_map(|scope_metrics| scope_metrics.metrics())
-        .find(|recorded| recorded.name() == metric::DECIDER_REPLAY_EVENTS)
-        .and_then(|recorded| match recorded.data() {
+        .filter(|recorded| recorded.name() == metric::DECIDER_REPLAY_EVENTS)
+        .filter_map(|recorded| match recorded.data() {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => {
                 sum.data_points().map(|data_point| data_point.value()).next()
             }
             _ => None,
-        });
+        })
+        .last();
 
     assert_eq!(data_point, Some(1));
 }

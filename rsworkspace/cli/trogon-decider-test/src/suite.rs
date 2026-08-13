@@ -151,7 +151,17 @@ impl Scenario {
                 Then::Rejected { rejected: true } => ExpectedOutcome::Rejected,
                 Then::Rejected { rejected: false } => ExpectedOutcome::Accepted,
                 Then::Error { error } => ExpectedOutcome::Error(error.expected()?),
-                Then::Trap { trap: true } => ExpectedOutcome::Trap,
+                Then::Trap { trap: true } => {
+                    if self.budget.is_none() {
+                        bail!(
+                            "scenario '{}': `then.trap: true` requires a scenario-level `budget` override that \
+                             starves the resource under test; under the default production budget the guest \
+                             will not trap and the step reports a plain expectation mismatch instead",
+                            self.name
+                        );
+                    }
+                    ExpectedOutcome::Trap
+                }
                 Then::Trap { trap: false } => bail!(
                     "scenario '{}': `then.trap: false` is not a meaningful expectation; use \
                      `then.rejected`, `then.events`, or `then.error` instead",
@@ -190,6 +200,8 @@ pub enum Then {
     Trap {
         /// Whether the guest call must trap. Must be `true`; `false` is rejected in
         /// [`Scenario::to_ir`] since it is not a meaningful expectation on its own.
+        /// [`Scenario::to_ir`] also rejects `true` without the paired `budget`, since
+        /// nothing starves the guest under the default production budget.
         trap: bool,
     },
 }
