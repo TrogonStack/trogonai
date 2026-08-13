@@ -11,6 +11,7 @@ use super::{Decider, Decision, DecisionError, DecisionResult};
 /// The chain is monomorphized at compile time (each `execute` returns a new typestate
 /// type), and the whole chain is boxed exactly once when it is converted into a
 /// [`Decision::Act`].
+#[must_use = "act chains must be completed with .execute(...) and then .into()"]
 pub struct ActBuilder<C>
 where
     C: Decider,
@@ -59,6 +60,7 @@ where
 }
 
 #[doc(hidden)]
+#[must_use = "act chains must be completed with .into() to produce a Decision"]
 pub struct ActChain<C, S>
 where
     C: Decider,

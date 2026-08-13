@@ -1,0 +1,16 @@
+error: unused `ActBuilder` that must be used
+  --> tests/ui/fail/unused_act_builder.rs:10:5
+   |
+10 |     Decision::<TestCommand>::act();
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: act chains must be completed with .execute(...) and then .into()
+note: the lint level is defined here
+  --> tests/ui/fail/unused_act_builder.rs:1:9
+   |
+ 1 | #![deny(unused_must_use)]
+   |         ^^^^^^^^^^^^^^^
+help: use `let _ = ...` to ignore the resulting value
+   |
+10 |     let _ = Decision::<TestCommand>::act();
+   |     +++++++
