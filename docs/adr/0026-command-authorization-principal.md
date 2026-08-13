@@ -70,14 +70,24 @@ language.
 Add a `CommandAuthorizer<C: Decider>` trait with one method that takes the
 principal and the command and returns either `Ok(())` or a typed denial.
 `CommandExecution`/`WasmCommandExecution` gain an optional builder slot for
-an authorizer, defaulting to an `AllowAll` no-op so existing callers keep
-compiling and behaving exactly as they do today -- the same opt-in shape
-`WithoutSnapshots` already uses for the snapshot builder slot. When an
+an authorizer, defaulting to an `AllowAll` no-op -- the same opt-in shape
+`WithoutSnapshots` already uses for the snapshot builder slot. `AllowAll`
+preserves runtime behavior only: existing call sites keep building and
+behaving exactly as they do today, but the `Unauthorized` variant Decision 5
+adds to the shared error enums is source-breaking for any exhaustive match on
+them, including in consumers that never configure an authorizer. When an
 authorizer is configured, `execute()` calls it after the command's stream id
 and the loaded state are available (an authorizer may need to know the
 target stream) but strictly before `evaluate_decision`/`decide` runs, so a
-denied command never reaches domain logic and never spends replay or, on the
-WASM path, guest [fuel](../glossary/fuel) on work that will be rejected.
+denied command never reaches domain logic and never appends.
+
+What a denial avoids is path-specific, and the two guarantees are not
+interchangeable. On the native path the state an authorizer sees is the
+replayed state, so a denial still pays the stream read and the fold; only
+`decide` and the append are skipped. Decision 3's WASM placement is the one
+that runs before any replay, so a WASM denial additionally avoids guest
+session creation and the guest [fuel](../glossary/fuel) that replay and
+`decide` would spend.
 
 ### 3. Both native and WASM dispatch paths
 
@@ -255,9 +265,10 @@ then; any reference to them must be hedged as a proposal.
 
 - `CommandExecution` and `WasmCommandExecution` gain a new builder slot and,
   once populated, a new phase in the execution pipeline; the default no-op
-  authorizer keeps every existing call site compiling and behaving unchanged.
+  authorizer keeps every existing call site behaving unchanged at runtime.
 - `CommandError`/`WasmCommandError` gain an `Unauthorized` variant, additive
-  but breaking for exhaustive matches on those enums, consistent with how
+  but immediately source-breaking for exhaustive matches on those enums
+  whether or not a caller ever configures an authorizer, consistent with how
   every other execution phase already gets its own variant.
 - Enforcement is opt-in per call site. This ADR does not retroactively close
   the "anyone can submit any command" gap the audit identified; it closes it

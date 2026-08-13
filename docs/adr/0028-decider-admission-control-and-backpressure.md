@@ -153,10 +153,13 @@ them as existing or scheduled surface until acceptance.
    answered against the decider crates' business-agnostic, domain-level
    admission bar before acceptance.
 2. **Default behavior.** Opt-in no-op slot versus mandatory-on with a
-   default bound. The first keeps every existing caller byte-identical; the
-   second actually protects hosts whose operators never tuned the knob. The
-   choice also decides whether adding `Overloaded` to the shared error
-   enums is a latent or an immediate breaking change for callers.
+   default bound. The first leaves every existing caller's runtime behavior
+   unchanged; the second actually protects hosts whose operators never tuned
+   the knob. The choice does not move source compatibility either way: adding
+   `Overloaded` to the shared error enums is immediately source-breaking for
+   exhaustive matches under both readings. What the choice decides is only
+   whether the runtime path that can produce the variant is live on every
+   execution or only where a caller opted in.
 
 ## Consequences
 
