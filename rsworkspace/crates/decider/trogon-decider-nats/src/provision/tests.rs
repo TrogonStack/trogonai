@@ -1,11 +1,14 @@
+use std::time::Duration;
+
 use async_nats::jetstream;
 use async_nats::jetstream::kv;
 use async_nats::jetstream::stream::RetentionPolicy;
 use trogon_nats::test_support::JetStreamTestServer;
 
 use super::{
-    EnsureBucketError, EnsureStreamError, KvConfigMismatchError, StreamConfigMismatchError, ensure_bucket,
-    ensure_stream,
+    DuplicateWindow, DuplicateWindowExceedsMaxAgeError, EnsureBucketError, EnsureStreamError,
+    InvalidDuplicateWindowError, KvConfigMismatchError, StreamConfigMismatchError, apply_duplicate_window,
+    ensure_bucket, ensure_stream,
 };
 
 fn stream_config(name: &str, subject: &str) -> jetstream::stream::Config {
@@ -195,4 +198,96 @@ async fn ensure_bucket_is_idempotent_under_concurrent_creation() {
 
     first.expect("first racer should succeed");
     second.expect("second racer should succeed");
+}
+
+#[test]
+fn duplicate_window_rejects_zero() {
+    let error = DuplicateWindow::try_new(Duration::ZERO).expect_err("zero should be rejected");
+
+    assert_eq!(error, InvalidDuplicateWindowError::Zero);
+}
+
+#[test]
+fn duplicate_window_rejects_below_minimum() {
+    let value = Duration::from_millis(50);
+
+    let error = DuplicateWindow::try_new(value).expect_err("below-minimum window should be rejected");
+
+    assert_eq!(
+        error,
+        InvalidDuplicateWindowError::BelowMinimum {
+            value,
+            minimum: DuplicateWindow::MINIMUM,
+        }
+    );
+}
+
+#[test]
+fn duplicate_window_accepts_the_minimum() {
+    let window = DuplicateWindow::try_new(DuplicateWindow::MINIMUM).expect("minimum window should be accepted");
+
+    assert_eq!(window.as_duration(), DuplicateWindow::MINIMUM);
+}
+
+#[test]
+fn duplicate_window_accepts_values_above_the_minimum() {
+    let value = Duration::from_secs(120);
+
+    let window = DuplicateWindow::try_new(value).expect("window above the minimum should be accepted");
+
+    assert_eq!(window.as_duration(), value);
+}
+
+#[test]
+fn apply_duplicate_window_sets_the_field_when_max_age_is_unset() {
+    let config = stream_config("DUP_STREAM", "dup.stream.>");
+    let window = DuplicateWindow::try_new(Duration::from_secs(30)).expect("valid window");
+
+    let config = apply_duplicate_window(config, window).expect("an unset max_age accepts any window");
+
+    assert_eq!(config.duplicate_window, Duration::from_secs(30));
+}
+
+#[test]
+fn apply_duplicate_window_accepts_a_window_at_or_below_max_age() {
+    let mut config = stream_config("DUP_STREAM", "dup.stream.>");
+    config.max_age = Duration::from_secs(60);
+    let window = DuplicateWindow::try_new(Duration::from_secs(60)).expect("valid window");
+
+    let config = apply_duplicate_window(config, window).expect("a window equal to max_age should be accepted");
+
+    assert_eq!(config.duplicate_window, Duration::from_secs(60));
+}
+
+#[test]
+fn apply_duplicate_window_rejects_a_window_wider_than_max_age() {
+    let mut config = stream_config("DUP_STREAM", "dup.stream.>");
+    config.max_age = Duration::from_secs(30);
+    let window = DuplicateWindow::try_new(Duration::from_secs(60)).expect("valid window");
+
+    let error = apply_duplicate_window(config, window).expect_err("a window wider than max_age should be rejected");
+
+    assert_eq!(
+        error,
+        DuplicateWindowExceedsMaxAgeError {
+            duplicate_window: Duration::from_secs(60),
+            max_age: Duration::from_secs(30),
+        }
+    );
+}
+
+#[cfg(not(coverage))]
+#[tokio::test]
+async fn ensure_stream_provisions_a_stream_carrying_the_configured_duplicate_window() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let window = DuplicateWindow::try_new(Duration::from_secs(45)).expect("valid window");
+    let config = apply_duplicate_window(stream_config("DUP_WINDOW_STREAM", "dup.window.stream.>"), window)
+        .expect("an unset max_age accepts any window");
+
+    let stream = ensure_stream(&js, config)
+        .await
+        .expect("stream with a configured duplicate window should be created");
+
+    assert_eq!(stream.cached_info().config.duplicate_window, Duration::from_secs(45));
 }
