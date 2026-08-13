@@ -53,9 +53,12 @@ observed stream position rather than a revision count, enforced server-side via 
 expected-last-subject-sequence guard and tracked as `at` in the `write_precondition`
 telemetry attribute. `WRITE_PRECONDITION` is a compile-time `const`, so a decider can never
 supply the position `At` needs; only `CommandExecution`, which has already read the stream,
-can. When a decider declares no `WRITE_PRECONDITION`, `CommandExecution` resolves the
-effective guard to `At(current_position)` if the stream already has events or `NoStream` if
-it does not, so real optimistic concurrency ships by default without any decider opting in.
+can. The effective guard resolves in three steps: `C::WRITE_PRECONDITION` wins if the decider
+declares one; otherwise the value passed to `.with_write_precondition(...)` applies if the
+caller set one; only when neither is present does `CommandExecution` fall back to
+`At(current_position)` if the stream already has events or `NoStream` if it does not. That
+last step is why real optimistic concurrency ships by default without any decider or caller
+opting in, and it never overrides an explicit builder value.
 [ADR#0035](../adr/0035-session-store-decider-aggregate.md) rejects adding a trait-level
 `At(N)` variant to `WritePrecondition` for exactly this reason: it could only let a decider
 weaken the default guard, never strengthen it.
@@ -139,11 +142,19 @@ back to the unbounded `read_stream` for implementations that have not opted into
 bound; `trogon-decider-nats` has). If the capped read comes back with more events than the
 limit, the command fails with `CommandError::ReplayLimitExceeded` before any folding happens,
 so a decider that forgets or misconfigures snapshotting fails loudly instead of silently
-growing per-command latency with the stream, and a stream far past the limit is never read in
-full. A discard-and-replay snapshot recovery is bounded by the same limit: its full replay
-from the beginning is otherwise a deliberate one-off that ends by overwriting the discarded
-snapshot, but a stream that has grown far beyond the configured limit still fails loudly
-instead of replaying without bound. The default is unlimited.
+growing per-command latency with the stream. A discard-and-replay snapshot recovery is
+bounded by the same limit: its full replay from the beginning is otherwise a deliberate
+one-off that ends by overwriting the discarded snapshot, but a stream that has grown far
+beyond the configured limit still fails loudly instead of replaying without bound.
+
+What the limit bounds depends on the store. The loud failure and the skipped fold hold for
+every `StreamRead` implementation. The I/O and memory bound holds only for implementations
+that override `read_stream_bounded` with a real capped fetch: a store still on the default
+fallback reads the whole stream first and only then discovers it exceeded the limit, so
+`ReplayLimitExceeded` protects folding time but not wire traffic or peak memory there.
+Nothing forces the override when a limit is configured, so "a stream far past the limit is
+never read in full" is a property of the store, not of `ReplayLimit`. The default is
+unlimited.
 
 `CommandError<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError,
 EventTypeError, PayloadEncodeError, DecodeError>` normalizes failures by phase

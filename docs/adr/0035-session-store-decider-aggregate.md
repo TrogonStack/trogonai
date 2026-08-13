@@ -331,8 +331,20 @@ re-replays, sees the key already folded, and no-ops.
 
 Publish dedup closes the write side: the append sets the NATS header
 `Nats-Msg-Id` to the event id, and a duplicate acknowledgement inside the
-JetStream dedup window must read as idempotent success for session appends.
-Today `trogon-decider-nats` maps a duplicate ack to a typed append error, so
+JetStream dedup window must read as idempotent success for session appends --
+but only where the duplicate really is the same command. The formula above
+deliberately excludes command content, so a caller that reuses one key for a
+*different* payload under the same session and command type derives the same
+event id, and a bare duplicate ack would report success while the second
+command's content is silently dropped. Key reuse with different content is a
+contract violation, not a duplicate, and must surface as a typed key-reuse
+conflict: the append boundary carries a canonical digest of the command the key
+was first used for, and reads a duplicate ack as idempotent success only when
+the incoming command's digest matches it. Folding the digest into the UUIDv5
+inputs instead was considered and rejected -- it gives the two commands
+distinct ids, so both append under one key on the `Any` path, trading a
+detectable conflict for a silent one. Today `trogon-decider-nats` maps a
+duplicate ack to a typed append error, so
 this is a required behavior change to shared code, and whether it lands as a
 global semantic flip for every consumer or as an opt-in per-store mode is
 undecided (see the substrate obligations below); the difference is every
@@ -404,7 +416,12 @@ platform, not by this ADR):
   A behavior flip to `trogon-decider-nats`'s append acknowledgment path.
   Global-versus-opt-in is undecided (see above); a global flip changes every
   consumer's observable append semantics and cannot ride in on a session
-  prerequisite list.
+  prerequisite list. The flip is not unconditional: reading a duplicate ack as
+  success requires the canonical command digest above to be recoverable at the
+  ack, so where that digest is carried and compared is part of this obligation.
+  Without it the append path cannot tell an idempotent retry from key reuse
+  with different content, and the typed key-reuse conflict has nothing to fire
+  on.
 
 Low-risk additions that stand on their own regardless of the above:
 
