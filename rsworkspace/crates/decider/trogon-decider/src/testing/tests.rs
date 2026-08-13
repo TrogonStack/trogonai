@@ -170,7 +170,10 @@ impl Decider for TestCommand {
                     })
                 })
                 .into(),
-            (TestAction::RegisterThenDisable, _) => Decision::act()
+            (TestAction::RegisterThenDisable, TestState::Present { .. }) => Err(TestCommandError::AlreadyRegistered {
+                id: command.id.to_string(),
+            }),
+            (TestAction::RegisterThenDisable, TestState::Missing) => Decision::act()
                 .execute(|_: &TestState, command: &TestCommand| {
                     Decision::event(TestEvent::Registered {
                         id: command.id.to_string(),

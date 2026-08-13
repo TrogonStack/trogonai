@@ -32,6 +32,6 @@ pub use native::{
 };
 #[cfg(feature = "test-support")]
 pub use parity::{ParityError, assert_parity};
-pub use scenario::{ScenarioError, SimScenario};
+pub use scenario::{GuestDomainError, ScenarioError, SimScenario};
 pub use session::SimSession;
 pub use trogon_decider_wasm_runtime::{ModuleName, ModuleNameError, WasmEngineConfig, WasmEngineError};

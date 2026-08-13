@@ -57,6 +57,33 @@ fn then_trap_completes_a_step() {
 }
 
 #[test]
+fn a_trap_on_the_last_step_is_accepted() {
+    let mut scenario = SimScenario::new()
+        .when(command("a"))
+        .then_accepted()
+        .when(command("b"))
+        .then_trap();
+    let mut steps = std::mem::take(&mut scenario.steps);
+    scenario.current.flush_into(&mut steps);
+    assert!(check_trap_is_final(&steps).is_ok());
+}
+
+#[test]
+fn a_trap_before_the_last_step_is_rejected() {
+    let mut scenario = SimScenario::new()
+        .when(command("a"))
+        .then_trap()
+        .when(command("b"))
+        .then_accepted();
+    let mut steps = std::mem::take(&mut scenario.steps);
+    scenario.current.flush_into(&mut steps);
+    assert!(matches!(
+        check_trap_is_final(&steps),
+        Err(ScenarioError::TrapNotFinalStep { index: 0, remaining: 1 })
+    ));
+}
+
+#[test]
 fn when_then_when_then_flushes_the_first_step_and_buffers_the_second() {
     let scenario = SimScenario::new()
         .when(command("a"))

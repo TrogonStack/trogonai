@@ -2,9 +2,49 @@ use trogon_decider_wit::host;
 
 use crate::host::SimInstance;
 
+/// A guest-reported [`host::DomainError`], kept whole.
+///
+/// The WIT record carries a `details` source chain alongside `code` and `message`, so splitting
+/// it into two strings at the error boundary drops the causes a failing scenario most needs. This
+/// wrapper keeps the record intact and renders the chain in its `Display`.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{}: {}{}", .0.code, .0.message, format_details(&.0.details))]
+pub struct GuestDomainError(host::DomainError);
+
+impl GuestDomainError {
+    /// The domain error's stable, machine-readable code.
+    pub fn code(&self) -> &str {
+        &self.0.code
+    }
+
+    /// The domain error's human-readable message.
+    pub fn message(&self) -> &str {
+        &self.0.message
+    }
+
+    /// The error's source chain as ordered key/value pairs, most specific cause last.
+    pub fn details(&self) -> &[(String, String)] {
+        &self.0.details
+    }
+}
+
+impl From<host::DomainError> for GuestDomainError {
+    fn from(error: host::DomainError) -> Self {
+        Self(error)
+    }
+}
+
+/// Renders a domain error's source chain as a trailing ` (key: value)` sequence.
+fn format_details(details: &[(String, String)]) -> String {
+    details
+        .iter()
+        .map(|(key, value)| format!(" ({key}: {value})"))
+        .collect()
+}
+
 /// Typed failure from running a [`SimScenario`]: a Wasmtime/session fault, an evolve error, or a
 /// then-expectation mismatch. Each variant keeps its structured context (the source Wasmtime error
-/// or the domain error's code/message) instead of flattening it into a string.
+/// or the whole [`GuestDomainError`]) instead of flattening it into a string.
 #[derive(Debug, thiserror::Error)]
 pub enum ScenarioError {
     /// `.run(...)` was called without ever setting a command via `.when(...)`.
@@ -42,34 +82,28 @@ pub enum ScenarioError {
         source: wasmtime::Error,
     },
     /// Folding `given` or a step's forwarded events was rejected by the decider's domain logic.
-    #[error("evolve failed: {code}: {message}")]
+    #[error("evolve failed: {error}")]
     Evolve {
-        /// The domain error's stable code.
-        code: String,
-        /// The domain error's human-readable message.
-        message: String,
+        /// The domain error the guest reported.
+        error: GuestDomainError,
     },
     /// `.then_error(...)` expected a specific error but the command was rejected with a
     /// different code or message.
-    #[error("expected error '{expected}', got rejection: {code}: {message}")]
+    #[error("expected error '{expected}', got rejection: {error}")]
     ErrorGotRejection {
         /// The error code or message `.then_error(...)` expected.
         expected: String,
-        /// The rejection's actual code.
-        code: String,
-        /// The rejection's actual message.
-        message: String,
+        /// The rejection the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_error(...)` expected a specific error but the command faulted with a different
     /// code or message.
-    #[error("expected error '{expected}', got fault: {code}: {message}")]
+    #[error("expected error '{expected}', got fault: {error}")]
     ErrorGotFault {
         /// The error code or message `.then_error(...)` expected.
         expected: String,
-        /// The fault's actual code.
-        code: String,
-        /// The fault's actual message.
-        message: String,
+        /// The fault the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_error(...)` expected the command to error but it was accepted instead.
     #[error("expected error '{expected}', got {count} event(s)")]
@@ -86,44 +120,34 @@ pub enum ScenarioError {
         count: usize,
     },
     /// `.then_rejected()` expected a rejection but the command faulted instead.
-    #[error("expected rejection, got fault: {code}: {message}")]
+    #[error("expected rejection, got fault: {error}")]
     RejectionGotFault {
-        /// The fault's actual code.
-        code: String,
-        /// The fault's actual message.
-        message: String,
+        /// The fault the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_accepted()` expected the command to be accepted but it was rejected instead.
-    #[error("expected acceptance, got rejection: {code}: {message}")]
+    #[error("expected acceptance, got rejection: {error}")]
     AcceptanceGotRejection {
-        /// The rejection's actual code.
-        code: String,
-        /// The rejection's actual message.
-        message: String,
+        /// The rejection the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_accepted()` expected the command to be accepted but it faulted instead.
-    #[error("expected acceptance, got fault: {code}: {message}")]
+    #[error("expected acceptance, got fault: {error}")]
     AcceptanceGotFault {
-        /// The fault's actual code.
-        code: String,
-        /// The fault's actual message.
-        message: String,
+        /// The fault the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_events(...)` expected specific events but the command was rejected instead.
-    #[error("rejected: {code}: {message}")]
+    #[error("rejected: {error}")]
     EventsGotRejection {
-        /// The rejection's actual code.
-        code: String,
-        /// The rejection's actual message.
-        message: String,
+        /// The rejection the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_events(...)` expected specific events but the command faulted instead.
-    #[error("faulted: {code}: {message}")]
+    #[error("faulted: {error}")]
     EventsGotFault {
-        /// The fault's actual code.
-        code: String,
-        /// The fault's actual message.
-        message: String,
+        /// The fault the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_events(...)` expected a different number of events than the command produced.
     #[error("expected {expected} event(s), got {actual}")]
@@ -157,20 +181,25 @@ pub enum ScenarioError {
         count: usize,
     },
     /// `.then_trap()` expected the guest call to trap but the command was rejected instead.
-    #[error("expected a trap, got rejection: {code}: {message}")]
+    #[error("expected a trap, got rejection: {error}")]
     TrapGotRejection {
-        /// The rejection's actual code.
-        code: String,
-        /// The rejection's actual message.
-        message: String,
+        /// The rejection the guest actually reported.
+        error: GuestDomainError,
     },
     /// `.then_trap()` expected the guest call to trap but the command faulted instead.
-    #[error("expected a trap, got fault: {code}: {message}")]
+    #[error("expected a trap, got fault: {error}")]
     TrapGotFault {
-        /// The fault's actual code.
-        code: String,
-        /// The fault's actual message.
-        message: String,
+        /// The fault the guest actually reported.
+        error: GuestDomainError,
+    },
+    /// `.then_trap()` was declared on a step that is not the scenario's last. A trap abandons
+    /// the session, so no later step could run against it.
+    #[error("step {index}: .then_trap() must be the scenario's last step, but {remaining} step(s) follow it")]
+    TrapNotFinalStep {
+        /// The zero-based index of the trap step.
+        index: usize,
+        /// The number of steps declared after the trap step.
+        remaining: usize,
     },
     /// A step in a multi-step scenario failed. `index` is the zero-based
     /// position of the failing step in the scenario's ordered step sequence.
@@ -376,6 +405,7 @@ impl SimScenario {
         if self.steps.is_empty() {
             return Err(ScenarioError::MissingWhen);
         }
+        check_trap_is_final(&self.steps)?;
 
         let mut session = instance
             .open_session(None)
@@ -385,10 +415,7 @@ impl SimScenario {
             session
                 .evolve(&self.given)
                 .map_err(|source| ScenarioError::EvolveCall { source })?
-                .map_err(|err| ScenarioError::Evolve {
-                    code: err.code,
-                    message: err.message,
-                })?;
+                .map_err(|err| ScenarioError::Evolve { error: err.into() })?;
         }
 
         let wrap_per_step = self.steps.len() > 1;
@@ -399,21 +426,14 @@ impl SimScenario {
                 session
                     .evolve(&forwarded)
                     .map_err(|source| wrap_step(index, wrap_per_step, ScenarioError::EvolveCall { source }))?
-                    .map_err(|err| {
-                        wrap_step(
-                            index,
-                            wrap_per_step,
-                            ScenarioError::Evolve {
-                                code: err.code,
-                                message: err.message,
-                            },
-                        )
-                    })?;
+                    .map_err(|err| wrap_step(index, wrap_per_step, ScenarioError::Evolve { error: err.into() }))?;
                 forwarded.clear();
             }
 
             let decide_result = session.decide(&step.when);
-            if matches!(step.expectation, Expectation::Trap) && decide_result.is_err() {
+            if matches!(step.expectation, Expectation::Trap)
+                && matches!(decide_result.as_ref(), Err(source) if source.downcast_ref::<wasmtime::Trap>().is_some())
+            {
                 // The guest call trapped as expected. The component-model resource-borrow
                 // tracker leaves the session unrecoverable after a mid-call trap, so this
                 // mirrors production's `drop_session_discarding_trap`: abandon the session
@@ -449,6 +469,27 @@ fn wrap_step(index: usize, wrap: bool, error: ScenarioError) -> ScenarioError {
     }
 }
 
+/// Rejects a scenario that declares `.then_trap()` anywhere but on its last step.
+///
+/// A confirmed trap abandons the session, so the runner cannot execute a successor step against
+/// it. Failing the whole scenario up front keeps an ill-formed scenario from passing on the
+/// strength of steps that were never asserted.
+fn check_trap_is_final(steps: &[ScenarioStep]) -> Result<(), ScenarioError> {
+    let Some((_, preceding)) = steps.split_last() else {
+        return Ok(());
+    };
+    match preceding
+        .iter()
+        .position(|step| matches!(step.expectation, Expectation::Trap))
+    {
+        Some(index) => Err(ScenarioError::TrapNotFinalStep {
+            index,
+            remaining: steps.len() - index - 1,
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Checks one step's `decide` outcome against its expectation, returning the
 /// events actually emitted so the caller can fold them into the next step.
 fn check_outcome(
@@ -464,13 +505,11 @@ fn check_outcome(
                 }
                 Err(host::DecideError::Rejected(err)) => Err(ScenarioError::ErrorGotRejection {
                     expected,
-                    code: err.code,
-                    message: err.message,
+                    error: err.into(),
                 }),
                 Err(host::DecideError::Faulted(err)) => Err(ScenarioError::ErrorGotFault {
                     expected,
-                    code: err.code,
-                    message: err.message,
+                    error: err.into(),
                 }),
                 Ok(events) => Err(ScenarioError::ErrorGotEvents {
                     expected,
@@ -481,32 +520,17 @@ fn check_outcome(
         Expectation::Rejected => match outcome {
             Err(host::DecideError::Rejected(_)) => Ok(Vec::new()),
             Ok(events) => Err(ScenarioError::RejectionGotEvents { count: events.len() }),
-            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::RejectionGotFault {
-                code: err.code,
-                message: err.message,
-            }),
+            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::RejectionGotFault { error: err.into() }),
         },
         Expectation::Accepted => match outcome {
             Ok(events) => Ok(events),
-            Err(host::DecideError::Rejected(err)) => Err(ScenarioError::AcceptanceGotRejection {
-                code: err.code,
-                message: err.message,
-            }),
-            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::AcceptanceGotFault {
-                code: err.code,
-                message: err.message,
-            }),
+            Err(host::DecideError::Rejected(err)) => Err(ScenarioError::AcceptanceGotRejection { error: err.into() }),
+            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::AcceptanceGotFault { error: err.into() }),
         },
         Expectation::Events(expected) => {
             let actual = outcome.map_err(|err| match err {
-                host::DecideError::Rejected(err) => ScenarioError::EventsGotRejection {
-                    code: err.code,
-                    message: err.message,
-                },
-                host::DecideError::Faulted(err) => ScenarioError::EventsGotFault {
-                    code: err.code,
-                    message: err.message,
-                },
+                host::DecideError::Rejected(err) => ScenarioError::EventsGotRejection { error: err.into() },
+                host::DecideError::Faulted(err) => ScenarioError::EventsGotFault { error: err.into() },
             })?;
             if actual.len() != expected.len() {
                 return Err(ScenarioError::EventCountMismatch {
@@ -529,14 +553,8 @@ fn check_outcome(
         }
         Expectation::Trap => match outcome {
             Ok(events) => Err(ScenarioError::TrapGotEvents { count: events.len() }),
-            Err(host::DecideError::Rejected(err)) => Err(ScenarioError::TrapGotRejection {
-                code: err.code,
-                message: err.message,
-            }),
-            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::TrapGotFault {
-                code: err.code,
-                message: err.message,
-            }),
+            Err(host::DecideError::Rejected(err)) => Err(ScenarioError::TrapGotRejection { error: err.into() }),
+            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::TrapGotFault { error: err.into() }),
         },
     }
 }

@@ -362,7 +362,7 @@ fn then_error_reports_rejection_mismatch() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::ErrorGotRejection { code, .. } if code.as_str() == "rejected"),
+        matches!(&error, ScenarioError::ErrorGotRejection { error, .. } if error.code() == "rejected"),
         "{error}"
     );
 }
@@ -378,7 +378,7 @@ fn then_error_reports_fault_mismatch() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::ErrorGotFault { code, .. } if code.as_str() == "invalid-command"),
+        matches!(&error, ScenarioError::ErrorGotFault { error, .. } if error.code() == "invalid-command"),
         "{error}"
     );
 }
@@ -483,7 +483,7 @@ fn then_events_reports_fault() {
         .run(&mut instance)
         .unwrap_err();
     assert!(
-        matches!(&error, ScenarioError::EventsGotFault { code, .. } if code.as_str() == "invalid-command"),
+        matches!(&error, ScenarioError::EventsGotFault { error, .. } if error.code() == "invalid-command"),
         "{error}"
     );
 }

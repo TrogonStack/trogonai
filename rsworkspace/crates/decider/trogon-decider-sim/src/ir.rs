@@ -289,10 +289,7 @@ impl ScenarioIr {
             session
                 .evolve(&given)
                 .map_err(|source| ScenarioError::EvolveCall { source })?
-                .map_err(|err| ScenarioError::Evolve {
-                    code: err.code,
-                    message: err.message,
-                })?;
+                .map_err(|err| ScenarioError::Evolve { error: err.into() })?;
         }
 
         let mut outcomes = Vec::with_capacity(self.steps.len());
@@ -303,10 +300,7 @@ impl ScenarioIr {
                 session
                     .evolve(&forwarded)
                     .map_err(|source| ScenarioError::EvolveCall { source })?
-                    .map_err(|err| ScenarioError::Evolve {
-                        code: err.code,
-                        message: err.message,
-                    })?;
+                    .map_err(|err| ScenarioError::Evolve { error: err.into() })?;
                 forwarded.clear();
             }
 
