@@ -396,6 +396,7 @@ pub(crate) async fn read_subject_stream(
 /// Bounds the fetch itself rather than the full `[from_sequence, to_sequence]`
 /// range, so a caller that only needs to know whether the subject holds more
 /// than `max_events` events does not pay for reading the rest of the range.
+#[cfg(any(test, not(coverage)))]
 pub(crate) async fn read_subject_stream_bounded(
     stream: &jetstream::stream::Stream,
     stream_id: &str,

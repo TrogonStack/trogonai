@@ -9,6 +9,8 @@
 use trogon_decider::{Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode, EventType};
 use trogon_decider_guest_sdk::export_decider;
 
+pub mod constants;
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunTwoStepPlan {
     pub stream_id: String,
@@ -49,16 +51,6 @@ impl buffa::Message for RunTwoStepPlan {
         self.stream_id.clear();
     }
 }
-
-/// Event type name for [`PlanEvent::StepOneApplied`].
-pub const STEP_ONE_EVENT_TYPE: &str = "trogon.decider.wasm_runtime.fixtures.act_chain.v1.StepOneApplied";
-/// Event type name for [`PlanEvent::StepTwoApplied`].
-pub const STEP_TWO_EVENT_TYPE: &str = "trogon.decider.wasm_runtime.fixtures.act_chain.v1.StepTwoApplied";
-/// Wire type URL for [`RunTwoStepPlan`].
-pub const RUN_TWO_STEP_PLAN_TYPE_URL: &str =
-    "type.googleapis.com/trogon.decider.wasm_runtime.fixtures.act_chain.v1.RunTwoStepPlan";
-/// Snapshot schema version for [`PlanState`].
-pub const PLAN_STATE_SCHEMA_VERSION: &str = "wasm_runtime_fixtures.act_chain.v1.PlanState";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanState {
@@ -127,8 +119,8 @@ impl EventType for PlanEvent {
 
     fn event_type(&self) -> Result<&'static str, Self::Error> {
         Ok(match self {
-            Self::StepOneApplied => STEP_ONE_EVENT_TYPE,
-            Self::StepTwoApplied { .. } => STEP_TWO_EVENT_TYPE,
+            Self::StepOneApplied => constants::STEP_ONE_EVENT_TYPE,
+            Self::StepTwoApplied { .. } => constants::STEP_TWO_EVENT_TYPE,
         })
     }
 }
@@ -149,8 +141,8 @@ impl EventDecode for PlanEvent {
 
     fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
         match event.event_type {
-            STEP_ONE_EVENT_TYPE => Ok(EventDecodeOutcome::Decoded(Self::StepOneApplied)),
-            STEP_TWO_EVENT_TYPE => {
+            constants::STEP_ONE_EVENT_TYPE => Ok(EventDecodeOutcome::Decoded(Self::StepOneApplied)),
+            constants::STEP_TWO_EVENT_TYPE => {
                 let bytes: [u8; 4] = event.payload.try_into().map_err(|_| StepTwoDecodeError {
                     actual: event.payload.len(),
                 })?;
@@ -200,9 +192,9 @@ impl Decider for RunTwoStepPlan {
 }
 
 export_decider!(RunTwoStepPlan {
-    type_url = RUN_TWO_STEP_PLAN_TYPE_URL,
+    type_url = constants::RUN_TWO_STEP_PLAN_TYPE_URL,
     proto = RunTwoStepPlan,
     module = "wasm_runtime_fixtures.act_chain",
     version = "0.1.0",
-    state_schema_version = PLAN_STATE_SCHEMA_VERSION,
+    state_schema_version = constants::PLAN_STATE_SCHEMA_VERSION,
 });
