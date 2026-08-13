@@ -184,3 +184,7 @@ jobs:
       - name: Run wasm decider runtime tests
         run: cargo test -p trogon-decider-wasm-runtime
         working-directory: rsworkspace
+
+      - name: Run trogon-decider-nats live JetStream tests
+        run: cargo test -p trogon-decider-nats
+        working-directory: rsworkspace
