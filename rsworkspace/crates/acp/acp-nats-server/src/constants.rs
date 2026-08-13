@@ -32,6 +32,3 @@ pub(crate) const MAX_INSPECTED_BODY: usize = 1024 * 1024;
 /// connection, which is already how an id this layer never saw initialize is
 /// treated. The cost of eviction is a missed check, not a rejected request.
 pub(crate) const MAX_TRACKED_CONNECTIONS: usize = 4096;
-
-/// Matches the capacity the hand-rolled transport used for the same channel.
-pub(crate) const NOTIFICATION_CHANNEL_CAPACITY: usize = 64;

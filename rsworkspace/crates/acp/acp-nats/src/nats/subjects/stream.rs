@@ -9,17 +9,15 @@ pub enum AcpStream {
     Commands,
     Responses,
     ClientOps,
-    Notifications,
     Global,
     GlobalExt,
 }
 
 impl AcpStream {
-    pub const ALL: [AcpStream; 6] = [
+    pub const ALL: [AcpStream; 5] = [
         Self::Commands,
         Self::Responses,
         Self::ClientOps,
-        Self::Notifications,
         Self::Global,
         Self::GlobalExt,
     ];
@@ -29,7 +27,6 @@ impl AcpStream {
             Self::Commands => "COMMANDS",
             Self::Responses => "RESPONSES",
             Self::ClientOps => "CLIENT_OPS",
-            Self::Notifications => "NOTIFICATIONS",
             Self::Global => "GLOBAL",
             Self::GlobalExt => "GLOBAL_EXT",
         }
@@ -59,7 +56,6 @@ impl AcpStream {
                 format!("{p}.v1.session.*.agent.cancelled"),
             ],
             Self::ClientOps => vec![format!("{p}.v1.session.*.client.>")],
-            Self::Notifications => vec![format!("{p}.v1.session.*.agent.update")],
             Self::Global => vec![
                 format!("{p}.v1.global.agent.initialize"),
                 format!("{p}.v1.global.agent.authenticate"),
@@ -82,7 +78,7 @@ impl AcpStream {
         }
     }
 
-    pub fn all_configs(prefix: &AcpPrefix) -> [Config; 6] {
+    pub fn all_configs(prefix: &AcpPrefix) -> [Config; 5] {
         Self::ALL.map(|s| s.config(prefix))
     }
 }

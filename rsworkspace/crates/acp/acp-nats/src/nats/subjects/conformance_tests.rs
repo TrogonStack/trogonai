@@ -65,7 +65,6 @@ fn published(p: &AcpPrefix) -> Vec<(&'static str, String)> {
         ("CancelledSubject", responses::CancelledSubject::new(p, &s).to_string()),
         ("ExtReadySubject", responses::ExtReadySubject::new(p, &s).to_string()),
         ("ResponseSubject", responses::ResponseSubject::new(p, &s).to_string()),
-        ("UpdateSubject", responses::UpdateSubject::new(p, &s).to_string()),
         (
             "SessionUpdateSubject",
             client_ops::SessionUpdateSubject::new(p, &s).to_string(),

@@ -201,14 +201,6 @@ fn session_agent_ext_ready() {
 }
 
 #[test]
-fn session_agent_update() {
-    assert_eq!(
-        responses::UpdateSubject::new(&p("acp"), &sid("s1")).to_string(),
-        "acp.v1.session.s1.agent.update"
-    );
-}
-
-#[test]
 fn session_agent_response() {
     assert_eq!(
         responses::ResponseSubject::new(&p("acp"), &sid("s1")).to_string(),
@@ -402,7 +394,6 @@ fn stream_assignments() {
     assert_eq!(responses::CancelledSubject::STREAM, Some(AcpStream::Responses));
     assert_eq!(responses::ExtReadySubject::STREAM, Some(AcpStream::Responses));
     assert_eq!(responses::ResponseSubject::STREAM, Some(AcpStream::Responses));
-    assert_eq!(responses::UpdateSubject::STREAM, Some(AcpStream::Notifications));
 
     assert_eq!(client_ops::FsReadTextFileSubject::STREAM, Some(AcpStream::ClientOps));
     assert_eq!(client_ops::FsWriteTextFileSubject::STREAM, Some(AcpStream::ClientOps));
@@ -441,7 +432,6 @@ fn acp_stream_display() {
     assert_eq!(AcpStream::Commands.to_string(), "COMMANDS");
     assert_eq!(AcpStream::Responses.to_string(), "RESPONSES");
     assert_eq!(AcpStream::ClientOps.to_string(), "CLIENT_OPS");
-    assert_eq!(AcpStream::Notifications.to_string(), "NOTIFICATIONS");
     assert_eq!(AcpStream::Global.to_string(), "GLOBAL");
     assert_eq!(AcpStream::GlobalExt.to_string(), "GLOBAL_EXT");
 }

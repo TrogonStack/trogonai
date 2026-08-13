@@ -21,7 +21,6 @@ pub fn mock_bridge() -> (
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     );
     (mock, js, bridge)
 }
@@ -89,7 +88,6 @@ pub fn mock_bridge_with_metrics() -> (
         trogon_std::time::SystemClock,
         &meter,
         Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     );
     (mock, js, bridge, exporter, provider)
 }

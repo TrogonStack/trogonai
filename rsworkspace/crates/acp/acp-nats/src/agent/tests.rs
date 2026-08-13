@@ -5,10 +5,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::MockJs;
 use crate::config::Config;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{
-    ExtNotification, ExtRequest, PromptRequest, PromptResponse, SessionNotification, StopReason,
-};
-use tokio::sync::mpsc;
+use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, PromptRequest, PromptResponse, StopReason};
 use trogon_nats::AdvancedMockNatsClient;
 
 fn mock_bridge() -> (
@@ -18,14 +15,12 @@ fn mock_bridge() -> (
 ) {
     let mock = AdvancedMockNatsClient::new();
     let js = MockJs::new();
-    let (tx, _rx) = mpsc::channel::<SessionNotification>(64);
     let bridge = Bridge::new(
         mock.clone(),
         js.clone(),
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
-        tx,
     );
     (mock, js, bridge)
 }
@@ -54,10 +49,6 @@ async fn prompt_via_agent_trait_returns_done() {
 
     // cancel sub for core NATS
     let _cancel_tx = mock.inject_messages();
-
-    // notification consumer
-    let (notif_consumer, _notif_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    js.consumer_factory.add_consumer(notif_consumer);
 
     // response consumer
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();

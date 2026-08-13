@@ -3,8 +3,7 @@
 mod config;
 
 use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary};
-use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::schema::v1::SessionNotification;
+use acp_nats::{agent::Bridge, client};
 use std::sync::Arc;
 use tracing::{error, info};
 use trogon_std::time::SystemClock;
@@ -73,22 +72,15 @@ where
     R: futures::AsyncRead + Send + Unpin + 'static,
 {
     let meter = trogon_telemetry::meter("acp-io-bridge-nats");
-    let (notification_tx, notification_rx) = tokio::sync::mpsc::channel::<SessionNotification>(64);
     let bridge = Arc::new(Bridge::new(
         nats_client.clone(),
         js_client,
         SystemClock,
         &meter,
         config.clone(),
-        notification_tx,
     ));
 
     let boundary_result = connect_agent_boundary(bridge.clone(), stdout, stdin, async move |cx| {
-        let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
-            ConnectionClient::new(cx.clone()),
-            notification_rx,
-        ));
-
         let mut client_task = AbortOnDrop::new(tokio::spawn(client::run(
             nats_client,
             Arc::new(ConnectionClient::new(cx)),

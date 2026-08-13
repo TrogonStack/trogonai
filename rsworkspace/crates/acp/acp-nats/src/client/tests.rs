@@ -123,7 +123,6 @@ fn make_bridge(nats: MockNatsClient) -> Arc<Bridge<MockNatsClient, SystemClock, 
         SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         crate::config::Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     ))
 }
 
@@ -136,7 +135,6 @@ fn make_bridge_advanced(
         SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         crate::config::Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     ))
 }
 

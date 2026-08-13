@@ -16,7 +16,6 @@ fn stream_names_use_uppercase_prefix() {
     assert_eq!(AcpStream::Commands.stream_name(&prefix), "ACP_COMMANDS");
     assert_eq!(AcpStream::Responses.stream_name(&prefix), "ACP_RESPONSES");
     assert_eq!(AcpStream::ClientOps.stream_name(&prefix), "ACP_CLIENT_OPS");
-    assert_eq!(AcpStream::Notifications.stream_name(&prefix), "ACP_NOTIFICATIONS");
     assert_eq!(AcpStream::Global.stream_name(&prefix), "ACP_GLOBAL");
     assert_eq!(AcpStream::GlobalExt.stream_name(&prefix), "ACP_GLOBAL_EXT");
 }
@@ -77,12 +76,6 @@ fn client_ops_subjects() {
 }
 
 #[test]
-fn notifications_subjects() {
-    let config = AcpStream::Notifications.config(&p("acp"));
-    assert_eq!(config.subjects, vec!["acp.v1.session.*.agent.update"]);
-}
-
-#[test]
 fn all_streams_use_file_storage() {
     let prefix = p("acp");
     for stream in AcpStream::ALL {
@@ -110,12 +103,6 @@ fn all_streams_use_limits_retention() {
     for config in all_configs(&p("acp")) {
         assert_eq!(config.retention, RetentionPolicy::Limits);
     }
-}
-
-#[test]
-fn notifications_stream_name_formats_correctly() {
-    assert_eq!(notifications_stream_name(&p("acp")), "ACP_NOTIFICATIONS");
-    assert_eq!(notifications_stream_name(&p("myapp")), "MYAPP_NOTIFICATIONS");
 }
 
 #[test]
@@ -174,8 +161,8 @@ fn global_ext_stream_name_formats_correctly() {
 }
 
 #[test]
-fn all_configs_returns_six_streams() {
-    assert_eq!(all_configs(&p("acp")).len(), 6);
+fn all_configs_returns_five_streams() {
+    assert_eq!(all_configs(&p("acp")).len(), 5);
 }
 
 fn nats_pattern_matches(pattern: &str, subject: &str) -> bool {

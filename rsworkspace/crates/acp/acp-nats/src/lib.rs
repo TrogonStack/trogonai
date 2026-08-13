@@ -27,7 +27,7 @@ pub use client_proxy::NatsClientProxy;
 pub use config::{Config, DEFAULT_ACP_PREFIX, ENV_ACP_PREFIX, apply_timeout_overrides, nats_connect_timeout};
 pub use error::AGENT_UNAVAILABLE;
 pub use ext_method_name::ExtMethodName;
-pub use nats::responses::{ResponseSubject, UpdateSubject};
+pub use nats::responses::ResponseSubject;
 pub use nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 pub use req_id::ReqId;
 pub use session_id::AcpSessionId;
@@ -36,19 +36,6 @@ pub use trogon_nats::jetstream::NatsJetStreamClient;
 pub use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher};
 pub use trogon_nats::{NatsAuth, NatsConfig};
 pub use trogon_std::StdJsonSerialize;
-
-pub fn spawn_notification_forwarder(
-    client: impl crate::ClientHandler + Send + 'static,
-    mut rx: tokio::sync::mpsc::Receiver<agent_client_protocol::schema::v1::SessionNotification>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        while let Some(notif) = rx.recv().await {
-            if client.session_notification(notif).await.is_err() {
-                break;
-            }
-        }
-    })
-}
 
 #[cfg(test)]
 mod tests;

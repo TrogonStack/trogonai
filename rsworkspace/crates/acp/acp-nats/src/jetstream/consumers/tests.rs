@@ -9,20 +9,6 @@ fn sid(s: &str) -> AcpSessionId {
 }
 
 #[test]
-fn prompt_notifications_consumer_filter() {
-    let config = prompt_notifications_consumer(&p("acp"), &sid("sess-1"));
-    assert_eq!(config.filter_subject, "acp.v1.session.sess-1.agent.update");
-}
-
-#[test]
-fn prompt_notifications_consumer_delivers_new() {
-    let config = prompt_notifications_consumer(&p("acp"), &sid("s1"));
-    assert_eq!(config.deliver_policy, DeliverPolicy::New);
-    assert_eq!(config.ack_policy, AckPolicy::Explicit);
-    assert_eq!(config.replay_policy, ReplayPolicy::Instant);
-}
-
-#[test]
 fn commands_observer_delivers_all() {
     let config = commands_observer();
     assert_eq!(config.deliver_policy, DeliverPolicy::All);
@@ -57,17 +43,11 @@ fn response_consumer_custom_prefix() {
 
 #[test]
 fn consumer_filters_carry_no_request_id() {
-    let p = p("acp");
-    let s = sid("sess-1");
-    for filter in [
-        response_consumer(&p, &s).filter_subject,
-        prompt_notifications_consumer(&p, &s).filter_subject,
-    ] {
-        assert!(
-            !filter
-                .split('.')
-                .any(trogon_nats::subject_conformance::looks_like_request_id),
-            "{filter}"
-        );
-    }
+    let filter = response_consumer(&p("acp"), &sid("sess-1")).filter_subject;
+    assert!(
+        !filter
+            .split('.')
+            .any(trogon_nats::subject_conformance::looks_like_request_id),
+        "{filter}"
+    );
 }
