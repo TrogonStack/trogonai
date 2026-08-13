@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use a2a::types::SendMessageResponse;
+use jsonrpc_nats::RequestId;
 use serde::Serialize;
 use tokio::time::timeout;
 use trogon_nats::RequestClient;
@@ -11,7 +12,6 @@ use a2a_identity_types::MintedUserJwt;
 use crate::a2a_prefix::A2aPrefix;
 use crate::jetstream::consumers::stream_events_consumer;
 use crate::jetstream::streams::events_stream_name;
-use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
 
 use crate::task_id::A2aTaskId;
@@ -77,7 +77,7 @@ where
         op_timeout,
         gateway_caller_jwt,
     } = ctx;
-    let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
+    let encoded = encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params)
         .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
 
     let headers = match gateway_caller_jwt {

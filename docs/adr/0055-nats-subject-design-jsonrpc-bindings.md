@@ -282,7 +282,7 @@ the configured prefix, and no ACP or A2A code reads a protocol version at the
 transport layer today. Record the rule now; skip the implementation.
 
 **Revisit trigger.** The first time a durable stream must survive a protocol
-version bump. ACP's `COMMANDS`, `RESPONSES`, and `NOTIFICATIONS` streams are
+version bump. ACP's `COMMANDS`, `RESPONSES`, and `CLIENT_OPS` streams are
 `Limits` retention with `max_age`, so stored messages outlive their connection.
 If a payload shape changes across an ACP version, a replaying consumer has no
 way to pick the right schema, and `v{major}` cannot help because it versions
@@ -309,9 +309,16 @@ MUST NOT mint a per-request subject such as `...response.{req_id}`.
 
 ACP terminal durable results use one subject shape:
 `{prefix}.v{major}.session.{session_id}.agent.response`. The historical
-`...agent.prompt.response.{req_id}` path collapses into that subject; mid-flight
-prompt progress remains on `...agent.update`. Partitioning terminal results by
-method is unnecessary once demux is on the correlation token.
+`...agent.prompt.response.{req_id}` path collapses into that subject. Partitioning
+terminal results by method is unnecessary once demux is on the correlation token.
+
+Mid-flight progress is *not* a durable agent response. `session/update` is a
+client-directed notification under the ACP method surface, so it takes the
+client-op terminal `{prefix}.v{major}.session.{session_id}.client.session.update`
+alongside every other agent-to-client call, and rides the `CLIENT_OPS` stream.
+Routing it under `...agent.update` instead would fork one method across two role
+segments and scope progress to prompts only, which drops the `session/load`
+replay that emits the same notification.
 
 ### Streams
 
@@ -369,21 +376,27 @@ this ADR's cardinality, `v{major}`, limits, and left-prefix rules. They use an
 - Entity tokens stay long-lived (agent, caller, task). Per-request identifiers
   remain forbidden.
 
-#### Audit subject defects (current code)
+#### Audit subject defects
 
-Today's audit emitters are non-conformant and MUST be corrected as part of
-baseline alignment:
+Audit subjects MUST be entity-scoped with fixed terminals, for example
+`a2a.v1.audit.{agent_id}.{outcome}` (method in the payload or a header), not
+method-led growth without an entity token. Two defects motivated the rule:
 
 - `a2a.audit.{outcome}.{method}` grows with the method set and embeds the method
   as a subject token, defeating the fixed-terminal rule.
-- The emitter accepts `agent_id` and then drops it (`let _ = agent_id`), so audit
-  traffic cannot be filtered per agent.
+- An emitter that accepts `agent_id` and then drops it (`let _ = agent_id`)
+  leaves audit traffic unfilterable per agent.
 
-Target shape is entity-scoped, for example
-`a2a.v1.audit.{agent_id}.{outcome}` (fixed outcome terminals; method in the
-payload or a header), not method-led growth without an entity token. Exact
-terminals are an implementation detail under this profile; the defects above are
-the conformance requirement.
+Exact terminals are an implementation detail under this profile; the two defects
+above are the conformance requirement.
+
+The A2A emitter (`a2a-nats::audit::emitter`) now conforms, publishing
+`{prefix}.v1.audit.{agent_id}.{ok|err}` and
+`{prefix}.v1.audit.{agent_id}.lifecycle`. The gateway's ingress audit builder
+(`a2a-gateway::audit_ingress::ingress_audit_subject`) still emits
+`{prefix}.a2a.audit.{outcome}.ingress.{skill}` — duplicated root, no `v{major}`,
+skill as a growing terminal, no entity token. It has no production caller today,
+so it is corrected when the ingress audit path is wired rather than ahead of it.
 
 ### Limits
 
@@ -437,10 +450,13 @@ non-conformant with this standard; they are not the standard:
   prefix.
 - **Request id in ACP response and update subjects**
   (`...agent.response.{req_id}`, `...agent.update.{req_id}`) and the prompt-
-  specific `...agent.prompt.response.{req_id}`. Replace with entity-scoped
-  `...agent.response` and `...agent.update`, correlating on ACP's
-  transport-minted JSON-RPC `id`. Collapse the prompt-specific terminal into
-  `...agent.response`.
+  specific `...agent.prompt.response.{req_id}`. Replace with the entity-scoped
+  `...agent.response`, correlating on ACP's transport-minted JSON-RPC `id`, and
+  collapse the prompt-specific terminal into it.
+- **Duplicate ACP progress subject.** `...agent.update` and
+  `...client.session.update` both claimed `session/update`, and only the latter
+  had a publisher. Remove `...agent.update` and its `NOTIFICATIONS` stream;
+  progress rides the client-op subtree.
 - **Request id in A2A task event subjects**
   (`...tasks.{task_id}.events.{req_id}`). Replace with
   `...tasks.{task_id}.events` plus `Trogon-Req-Id` (A2A ids are peer-supplied). This

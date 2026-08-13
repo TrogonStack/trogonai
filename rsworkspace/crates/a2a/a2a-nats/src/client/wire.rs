@@ -6,17 +6,10 @@ use async_nats::header::HeaderMap;
 use jsonrpc_nats::{Encoded, RequestId};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::jsonrpc::JsonRpcId;
+use crate::client::error::ClientError;
 
-pub fn encode_client_request<Req: Serialize>(method: &str, id: JsonRpcId, params: &Req) -> Result<Encoded, WireError> {
-    let request_id = match id {
-        JsonRpcId::Number(n) => RequestId::Number(n),
-        JsonRpcId::String(s) => RequestId::String(s),
-        JsonRpcId::Null => {
-            return Err(WireError::Codec(jsonrpc_nats::CodecError::RequestWithoutId));
-        }
-    };
-    encode_request(method, request_id, params)
+pub fn encode_client_request<Req: Serialize>(method: &str, id: RequestId, params: &Req) -> Result<Encoded, WireError> {
+    encode_request(method, id, params)
 }
 
 pub fn decode_client_response<Res: DeserializeOwned>(
@@ -24,6 +17,13 @@ pub fn decode_client_response<Res: DeserializeOwned>(
     body: &[u8],
 ) -> Result<Result<Res, (i32, String)>, WireError> {
     decode_response(headers, body)
+}
+
+pub fn map_wire_error(error: WireError) -> ClientError {
+    match error {
+        WireError::Deserialize(e) => ClientError::Deserialize(e),
+        other => ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{other}"))),
+    }
 }
 
 #[cfg(test)]

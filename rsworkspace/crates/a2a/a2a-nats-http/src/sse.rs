@@ -9,20 +9,18 @@ use futures::StreamExt;
 pub fn typed_event_stream_to_sse(
     stream: TypedEventStream,
     jsonrpc_id: serde_json::Value,
-    method: &'static str,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     stream.map(move |item| {
         let data = match item {
             Ok(response) => {
-                // Stream events ride as JSON-RPC notifications tagged with the
-                // originating method so callers can route incremental events,
-                // matching the a2a-nats-stdio wire shape. Errors keep the
-                // result-or-error envelope shape with the request id for
-                // correlation.
+                // The A2A spec streams every chunk as a JSON-RPC success response
+                // repeating the request id, terminated by the one whose result is
+                // final. The id is the caller's, not the transport's, because the
+                // caller correlates against the id they sent.
                 let envelope = serde_json::json!({
                     "jsonrpc": "2.0",
-                    "method": method,
-                    "params": response,
+                    "id": jsonrpc_id,
+                    "result": response,
                 });
                 serde_json::to_string(&envelope).unwrap_or_else(|e| {
                     // Server-side serialization failure is `-32603` Internal,

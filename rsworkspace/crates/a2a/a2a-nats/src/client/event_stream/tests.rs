@@ -18,6 +18,17 @@ fn make_status_event(task_id: &str) -> StreamResponse {
     })
 }
 
+/// The wire body of a task event: a JSON-RPC success response repeating the
+/// request id, with the `StreamResponse` as its result.
+fn event_body(id: &str, event: &StreamResponse) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": event,
+    }))
+    .unwrap()
+}
+
 fn nats_msg_with_reply(payload: Vec<u8>, reply: Option<&str>) -> async_nats::Message {
     async_nats::Message {
         subject: "a2a.v1.tasks.t1.events".into(),
@@ -40,8 +51,7 @@ async fn stream_yields_deserialized_events() {
     let last_seq = Arc::new(Mutex::new(0u64));
     let mut stream = build_event_stream(consumer, last_seq.clone(), None);
 
-    let event = make_status_event("task-1");
-    let payload = serde_json::to_vec(&event).unwrap();
+    let payload = event_body("req-1", &make_status_event("task-1"));
     tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, None))))
         .unwrap();
     drop(tx);
@@ -52,7 +62,7 @@ async fn stream_yields_deserialized_events() {
 }
 
 fn event_stamped_for(req_id: &str) -> async_nats::Message {
-    let payload = serde_json::to_vec(&make_status_event(req_id)).unwrap();
+    let payload = event_body(req_id, &make_status_event(req_id));
     let mut message = nats_msg_with_reply(payload, Some(&ack_reply(1)));
     let mut headers = async_nats::HeaderMap::new();
     headers.insert(crate::constants::REQ_ID_HEADER, req_id);
@@ -139,6 +149,39 @@ async fn stream_yields_error_on_bad_payload() {
 }
 
 #[tokio::test]
+async fn stream_yields_error_on_bare_result_payload() {
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    let last_seq = Arc::new(Mutex::new(0u64));
+    let mut stream = build_event_stream(consumer, last_seq, None);
+
+    let payload = serde_json::to_vec(&make_status_event("task-1")).unwrap();
+    tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, None))))
+        .unwrap();
+    drop(tx);
+
+    assert!(matches!(stream.next().await, Some(Err(ClientError::Deserialize(_)))));
+}
+
+#[tokio::test]
+async fn stream_maps_a_jsonrpc_error_event_to_a_typed_error() {
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    let last_seq = Arc::new(Mutex::new(0u64));
+    let mut stream = build_event_stream(consumer, last_seq, None);
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "req-1",
+        "error": { "code": crate::constants::TASK_NOT_FOUND, "message": "Task not found" },
+    }))
+    .unwrap();
+    tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, None))))
+        .unwrap();
+    drop(tx);
+
+    assert!(matches!(stream.next().await, Some(Err(ClientError::TaskNotFound))));
+}
+
+#[tokio::test]
 async fn stream_yields_error_on_consumer_stream_error() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     let last_seq = Arc::new(Mutex::new(0u64));
@@ -168,8 +211,7 @@ async fn last_seq_advances_only_after_successful_downstream_send() {
     let last_seq = Arc::new(Mutex::new(0u64));
     let mut stream = build_event_stream(consumer, last_seq.clone(), None);
 
-    let event = make_status_event("task-1");
-    let payload = serde_json::to_vec(&event).unwrap();
+    let payload = event_body("req-1", &make_status_event("task-1"));
     let reply = ack_reply(7);
     tx.unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, Some(&reply)))))
         .unwrap();
@@ -186,8 +228,7 @@ async fn ack_failure_does_not_stop_delivery() {
     let last_seq = Arc::new(Mutex::new(0u64));
     let mut stream = build_event_stream(consumer, last_seq.clone(), None);
 
-    let event = make_status_event("task-1");
-    let payload = serde_json::to_vec(&event).unwrap();
+    let payload = event_body("req-1", &make_status_event("task-1"));
     let reply = ack_reply(3);
     tx.unbounded_send(Ok(MockJsMessage::with_failing_signals(nats_msg_with_reply(
         payload,
@@ -212,8 +253,7 @@ async fn pull_loop_returns_early_when_receiver_dropped() {
     let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
     drop(receiver); // Channel closed before pull_loop sees the message.
 
-    let event = make_status_event("task-1");
-    let payload = serde_json::to_vec(&event).unwrap();
+    let payload = event_body("req-1", &make_status_event("task-1"));
     let reply = ack_reply(42);
     msg_tx
         .unbounded_send(Ok(MockJsMessage::new(nats_msg_with_reply(payload, Some(&reply)))))

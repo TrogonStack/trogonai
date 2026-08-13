@@ -11,6 +11,7 @@ use trogon_nats::jetstream::{JetStreamConsumer, JsAck, JsMessageRef};
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
+use super::wire::{decode_response, map_wire_error};
 
 pub struct TypedEventStream {
     receiver: mpsc::UnboundedReceiver<Result<StreamResponse, ClientError>>,
@@ -127,11 +128,9 @@ async fn pull_loop<C>(
                 }
 
                 let stream_seq = stream_sequence_from_reply(js_msg.message().reply.as_deref());
-                let payload = js_msg.message().payload.as_ref();
-                let send_result = match serde_json::from_slice::<StreamResponse>(payload) {
-                    Ok(event) => tx.unbounded_send(Ok(event)),
-                    Err(e) => tx.unbounded_send(Err(ClientError::Deserialize(e))),
-                };
+                let message = js_msg.message();
+                let event_headers = message.headers.clone().unwrap_or_default();
+                let send_result = tx.unbounded_send(decode_event(&event_headers, message.payload.as_ref()));
 
                 if send_result.is_err() {
                     return;
@@ -149,6 +148,17 @@ async fn pull_loop<C>(
                 }
             }
         }
+    }
+}
+
+/// Each task event on the wire is a full JSON-RPC success response repeating the
+/// request id, which is the shape the A2A spec puts on `message/stream` and
+/// `tasks/resubscribe`. The result member is the `StreamResponse` the reader wants.
+fn decode_event(headers: &async_nats::header::HeaderMap, payload: &[u8]) -> Result<StreamResponse, ClientError> {
+    match decode_response::<StreamResponse>(headers, payload) {
+        Ok(Ok(event)) => Ok(event),
+        Ok(Err((code, message))) => Err(ClientError::from_jsonrpc_code(code, message)),
+        Err(e) => Err(map_wire_error(e)),
     }
 }
 

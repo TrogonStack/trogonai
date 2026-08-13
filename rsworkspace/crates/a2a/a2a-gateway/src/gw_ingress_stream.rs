@@ -579,11 +579,20 @@ fn parse_last_event_id_as_u64(value: serde_json::Value) -> Option<u64> {
     }
 }
 
+/// Correlation id for a streaming ingress envelope. A JSON-RPC `null` id
+/// yields `None` for the same reason as [`crate::runtime::env::json_rpc_audit_req_id`]:
+/// no caller correlation is possible, and a synthesized `"null"` token would
+/// alias unrelated envelopes onto one stream pump.
 pub fn req_id_from_headers_or_payload(headers: &async_nats::HeaderMap, payload: &[u8]) -> Option<ReqId> {
     if let Some(value) = headers.get(a2a_nats::constants::REQ_ID_HEADER) {
         return Some(ReqId::from_header(value.as_str()));
     }
-    a2a_nats::jsonrpc::extract_request_id_from_body(payload).map(|id| ReqId::from_header(id.to_string()))
+    let text = match a2a_nats::jsonrpc::extract_request_id_from_body(payload)? {
+        a2a_nats::ResponseId::Null => return None,
+        a2a_nats::ResponseId::Number(n) => n.to_string(),
+        a2a_nats::ResponseId::String(s) => s,
+    };
+    Some(ReqId::from_header(text))
 }
 
 #[cfg(test)]

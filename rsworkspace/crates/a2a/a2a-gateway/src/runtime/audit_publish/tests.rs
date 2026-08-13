@@ -74,18 +74,18 @@ async fn enabled_publish_targets_ok_audit_subject() {
     spawn_gateway_audit_publish(true, nats.clone(), prefix(), agent(), ok_envelope());
     wait_for_publish(&nats, 1).await;
     let subjects = nats.published_messages();
-    assert_eq!(subjects, vec!["a2a.v1.audit.ok.message.send".to_owned()]);
+    assert_eq!(subjects, vec!["a2a.v1.audit.planner.ok".to_owned()]);
 }
 
 #[tokio::test]
 async fn enabled_publish_targets_err_audit_subject() {
-    // Outcome::Err must route to the `.err.` subject so consumers
+    // Outcome::Err must route to the `err` terminal so consumers
     // can subscribe to denials independently of allow-throughs.
     let nats = MockNatsClient::new();
     spawn_gateway_audit_publish(true, nats.clone(), prefix(), agent(), err_envelope());
     wait_for_publish(&nats, 1).await;
     let subjects = nats.published_messages();
-    assert_eq!(subjects, vec!["a2a.v1.audit.err.tasks.get".to_owned()]);
+    assert_eq!(subjects, vec!["a2a.v1.audit.planner.err".to_owned()]);
 }
 
 #[tokio::test]

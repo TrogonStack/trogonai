@@ -30,7 +30,7 @@ async fn nats_emitter_publishes_ok_subject() {
     emitter
         .publish(&prefix(), &agent(), make_envelope(AuditOutcome::Ok))
         .await;
-    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.ok.message.send"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.bot.ok"]);
 }
 
 #[tokio::test]
@@ -47,7 +47,24 @@ async fn nats_emitter_publishes_err_subject() {
             }),
         )
         .await;
-    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.err.message.send"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.bot.err"]);
+}
+
+#[tokio::test]
+async fn nats_emitter_scopes_the_subject_to_the_agent_and_keeps_the_method_off_it() {
+    // Guards the ADR#0055 operational profile: the emitter used to drop
+    // `agent_id` and spend the terminal on the method instead, so audit
+    // traffic could not be filtered per agent.
+    let nats = AdvancedMockNatsClient::new();
+    let emitter = NatsAuditEmitter::new(nats.clone());
+    let other = A2aAgentId::new("planner").unwrap();
+    emitter
+        .publish(&prefix(), &other, make_envelope(AuditOutcome::Ok))
+        .await;
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.planner.ok"]);
+    let payloads = nats.published_payloads();
+    let v: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
+    assert_eq!(v["method"], "message/send");
 }
 
 #[tokio::test]
@@ -76,7 +93,7 @@ async fn nats_emitter_task_lifecycle_publishes_lifecycle_subject() {
         4000,
     );
     emitter.publish_task_lifecycle(&prefix(), &agent(), env).await;
-    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.lifecycle"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.bot.lifecycle"]);
     let payloads = nats.published_payloads();
     let v: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
     assert_eq!(v["task_id"], "task-xyz");

@@ -200,6 +200,15 @@ fn req_id_from_payload_when_header_absent() {
 }
 
 #[test]
+fn req_id_is_none_for_a_null_json_rpc_id() {
+    // A `"null"` string would collapse every null-id envelope onto one
+    // correlation key, so the pump is not spawned at all.
+    let headers = async_nats::HeaderMap::new();
+    let payload = br#"{"jsonrpc":"2.0","id":null,"method":"x"}"#;
+    assert!(req_id_from_headers_or_payload(&headers, payload).is_none());
+}
+
+#[test]
 fn streaming_ingress_kind_resubscribe_requires_task_id_by_type() {
     // Compile-only check: the variant has `task_id` as a non-optional
     // field, so a typo or missing-field bug surfaces at the call site

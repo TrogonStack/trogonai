@@ -11,6 +11,10 @@ use crate::audit::task_lifecycle::TaskLifecycleEnvelope;
 type BoxFuture<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub trait AuditEmitter: Send + Sync {
+    /// Published on `{prefix}.v1.audit.{agent_id}.{ok|err}` per ADR#0055's
+    /// operational profile: entity-scoped, fixed terminals. The JSON-RPC method
+    /// travels in the payload rather than as a subject token so the subject
+    /// vocabulary does not grow with the method set.
     fn publish<'a>(
         &'a self,
         prefix: &'a A2aPrefix,
@@ -18,7 +22,8 @@ pub trait AuditEmitter: Send + Sync {
         envelope: AuditEnvelope,
     ) -> BoxFuture<'a, ()>;
 
-    /// Published on each [`TaskLifecycleEnvelope`] emitted from the streaming task pump (`message/stream`).
+    /// Published on `{prefix}.v1.audit.{agent_id}.lifecycle` for each
+    /// [`TaskLifecycleEnvelope`] emitted from the streaming task pump (`message/stream`).
     fn publish_task_lifecycle<'a>(
         &'a self,
         prefix: &'a A2aPrefix,
@@ -52,12 +57,7 @@ where
                 crate::audit::envelope::AuditOutcome::Ok => "ok",
                 crate::audit::envelope::AuditOutcome::Err { .. } => "err",
             };
-            let subject = format!(
-                "{}.v1.audit.{}.{}",
-                prefix.as_str(),
-                outcome_token,
-                envelope.method.replace('/', ".")
-            );
+            let subject = format!("{}.v1.audit.{}.{}", prefix.as_str(), agent_id.as_str(), outcome_token);
             let payload = Bytes::from(serde_json::to_vec(&envelope).unwrap_or_default());
             if let Err(e) = self
                 .nats
@@ -66,7 +66,6 @@ where
             {
                 tracing::warn!(error = %e, "failed to publish audit envelope");
             }
-            let _ = agent_id;
         })
     }
 
@@ -77,7 +76,7 @@ where
         envelope: TaskLifecycleEnvelope,
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
-            let subject = format!("{}.v1.audit.lifecycle", prefix.as_str());
+            let subject = format!("{}.v1.audit.{}.lifecycle", prefix.as_str(), agent_id.as_str());
             let payload = Bytes::from(serde_json::to_vec(&envelope).unwrap_or_default());
             if let Err(e) = self
                 .nats
@@ -86,7 +85,6 @@ where
             {
                 tracing::warn!(error = %e, "failed to publish task lifecycle audit envelope");
             }
-            let _ = agent_id;
         })
     }
 }

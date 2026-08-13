@@ -96,7 +96,7 @@ async fn deny_tier1_writes_reply_and_audit_when_publishing_enabled() {
     wait_for(&nats, 2).await;
     let subjects = nats.published_messages();
     assert!(subjects.contains(&"_INBOX.reply".to_owned()));
-    assert!(subjects.iter().any(|s| s == "a2a.v1.audit.err.message.send"));
+    assert!(subjects.iter().any(|s| s == "a2a.v1.audit.planner.err"));
 }
 
 #[tokio::test]

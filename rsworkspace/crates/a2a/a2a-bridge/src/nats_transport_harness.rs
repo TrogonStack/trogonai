@@ -122,7 +122,12 @@ pub fn build_nats_transport_app_state(
     let harness = Arc::new(HarnessGatewayUnary::new(nats, prefix.clone(), agent));
     let publisher = GatewayInboundPublisher::new(harness.clone());
     let jetstream: Arc<dyn TaskJetStreamPort> = Arc::new(ScriptedTaskJetstream::single_ok(
-        json!({ "event": "task-status", "taskId": "task-sse-1" }).to_string(),
+        json!({
+            "jsonrpc": "2.0",
+            "id": "corr-1",
+            "result": { "statusUpdate": { "taskId": "task-sse-1" } }
+        })
+        .to_string(),
     ));
 
     let tenant = BridgeTenantAccount::new(HARNESS_TENANT).expect("harness tenant");

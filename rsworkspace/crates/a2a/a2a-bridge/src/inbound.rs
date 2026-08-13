@@ -29,7 +29,7 @@ use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
-use crate::constants::AGENT_ID_HEADER;
+use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR};
 use crate::error::BridgeError;
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
 
@@ -475,32 +475,34 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
     }
 }
 
-fn sse_gateway_line(body: &[u8]) -> Event {
-    Event::default()
-        .event("gateway-bootstrap")
-        .data(String::from_utf8_lossy(body))
+/// Every A2A SSE frame is an unnamed `data:` line carrying a JSON-RPC response
+/// that repeats the caller's request id. Naming the events instead would put the
+/// bootstrap and the task chunks on distinct SSE event types, which a spec client
+/// never subscribes to, and the bodies already say which is which.
+fn sse_data_line(body: &[u8]) -> Event {
+    Event::default().data(String::from_utf8_lossy(body))
 }
 
-fn sse_task_line(body: &Bytes) -> Event {
-    Event::default()
-        .event("task-event")
-        .data(String::from_utf8_lossy(body.as_ref()))
-}
-
-fn sse_error_line(err: &BridgeError) -> Event {
-    Event::default().event("error").data(err.to_string())
+fn sse_error_line(caller_id: &Value, err: &BridgeError) -> Event {
+    let envelope = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": caller_id,
+        "error": { "code": INTERNAL_ERROR, "message": err.to_string() },
+    });
+    Event::default().data(envelope.to_string())
 }
 
 fn sse_from_bootstrap_and_payloads(
     bootstrap_owned: Vec<u8>,
     tail: Pin<Box<dyn Stream<Item = Result<Bytes, BridgeError>> + Send>>,
+    caller_id: Value,
 ) -> BoxStream<'static, Result<Event, Infallible>> {
-    let head_event = sse_gateway_line(&bootstrap_owned);
+    let head_event = sse_data_line(&bootstrap_owned);
     let head = futures_util::stream::once(futures_util::future::ready(Ok::<Event, Infallible>(head_event)));
-    let tail_mapped = tail.map(|item| {
+    let tail_mapped = tail.map(move |item| {
         Ok::<Event, Infallible>(match item {
-            Ok(chunk) => sse_task_line(&chunk),
-            Err(ref err) => sse_error_line(err),
+            Ok(chunk) => sse_data_line(chunk.as_ref()),
+            Err(ref err) => sse_error_line(&caller_id, err),
         })
     });
 
@@ -744,7 +746,8 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
             }
             None => Box::pin(futures_util::stream::empty()),
         };
-        let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads);
+        let caller_id = v.get("id").cloned().unwrap_or(Value::Null);
+        let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads, caller_id);
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
     }
 

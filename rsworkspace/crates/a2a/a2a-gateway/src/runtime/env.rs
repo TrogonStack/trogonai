@@ -146,8 +146,9 @@ pub fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
 /// unrelated envelopes onto the same audit row.
 pub fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
     match a2a_nats::jsonrpc::extract_request_id_from_body(payload)? {
-        a2a_nats::JsonRpcId::Null => None,
-        id => Some(id.to_string()),
+        a2a_nats::ResponseId::Null => None,
+        a2a_nats::ResponseId::Number(n) => Some(n.to_string()),
+        a2a_nats::ResponseId::String(s) => Some(s),
     }
 }
 

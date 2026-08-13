@@ -74,6 +74,30 @@ async fn bootstrap_publishes_task_and_then_events() {
 }
 
 #[tokio::test]
+async fn every_event_is_a_jsonrpc_response_repeating_the_request_id() {
+    let nats = AdvancedMockNatsClient::new();
+    let js = MockJetStreamPublisher::new();
+    let handler = stub();
+    let events: crate::server::handler::TaskEventStream =
+        Box::pin(stream::iter(vec![Ok(working_status_event("task-1"))]));
+    handler.lock().unwrap().message_stream_result = Some(Ok((task("task-1"), events)));
+
+    let (headers, payload) = stream_payload("call-1");
+    handle(&handler, &headers, &payload, Some("r".into()), &nats, &js, &prefix()).await;
+
+    let published = js.published_messages();
+    let event = published.first().expect("one event");
+    let body: serde_json::Value = serde_json::from_slice(&event.payload).expect("json body");
+    assert_eq!(body["jsonrpc"], "2.0");
+    assert_eq!(body["id"], "call-1");
+    assert_eq!(body["result"]["statusUpdate"]["taskId"], "task-1");
+    assert_eq!(
+        event.headers.get(jsonrpc_nats::HEADER_ID).map(|v| v.as_str()),
+        Some("\"call-1\"")
+    );
+}
+
+#[tokio::test]
 async fn every_event_carries_the_request_id_header() {
     // The subject names only the task, so `Trogon-Req-Id` is what tells two
     // concurrent subscriptions to the same task apart.
