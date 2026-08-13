@@ -41,12 +41,19 @@ concept the store or the resolver contract has any way to check against.
 
 ### 1. A `Tenant` value object
 
-Introduce `Tenant` as a validated, non-empty identifier type in
-`trogon_decider_runtime`, alongside the crate's existing value objects
-(`StreamPosition`, `EventId`). A `Tenant` is constructed once, at the
-application boundary that knows which tenant is operating, the same place
-that already assembles `Headers` and a `CommandPrincipal`
-([ADR#0026](./0026-command-authorization-principal.md)) before execution.
+Introduce `Tenant` as a validated, non-empty identifier type. A `Tenant` is
+constructed once, at the application boundary that knows which tenant is
+operating, the same place that already assembles `Headers` and would
+assemble draft [ADR#0026](./0026-command-authorization-principal.md)'s
+proposed `CommandPrincipal` before execution.
+
+Where `Tenant` lives is Open Question 1, not part of this decision.
+`trogon_decider_runtime` is the placement this draft proposes, but grouping
+tenancy with the crate's domain-neutral value objects (`StreamPosition`,
+`EventId`) begs the question: those are storage positions every consumer
+has, while tenancy is deployment topology -- an application-level concern
+the decider crates' business-agnostic, domain-level admission bar does not
+obviously admit. A consumer-owned layer is the unweighed alternative below.
 
 ### 2. Tenant-aware resolution, verified at the store boundary
 
@@ -110,6 +117,20 @@ see, the same reasoning [ADR#0023](./0023-secret-management-and-key-custody-dire
 applies to keeping OpenBao access behind a single trusted client rather than
 relying on network policy alone.
 
+### Keep `Tenant` and its validation in a consumer-owned layer, outside the decider crates
+
+Unresolved; the alternatives above only compare in-crate placement against
+NATS ACLs, never against this. A multi-tenant consumer could own the
+`Tenant` type and compose a tenant-verifying resolver around the store
+(wrap `StreamSubjectResolver`, validate the resolved subject before handing
+it over), leaving the shared crates free of a tenancy concept that
+single-tenant consumers never need and that the crates' domain-level
+admission bar arguably excludes. Its cost: the store itself can no longer
+verify that the resolver honored the tenant, which is the exact guarantee
+Decision 2 exists to buy, and each multi-tenant consumer re-owns that
+verification. This is the altitude question the ADR must answer before
+acceptance (Open Question 1).
+
 ## Non-Goals
 
 - Designing per-tenant NATS accounts, credentials, or ACL policy. That is an
@@ -122,11 +143,30 @@ relying on network policy alone.
   storage-resolution concept; associating a caller's authorization principal
   with a tenant is left to the application boundary.
 
+## Open Questions
+
+This ADR is a draft: the Decision sections above are proposals, `Tenant`
+and `TenantBinding` do not exist, and no other document may treat them as
+existing or scheduled surface until acceptance.
+
+1. **Placement.** Does a tenancy primitive belong in the decider crates at
+   all? The crates are reusable, business-agnostic, and domain-level;
+   tenancy is deployment topology. The consumer-owned-layer alternative
+   above has to be rebutted, not assumed away, before the in-crate Decision
+   stands.
+2. **The breaking resolver change.** Requiring `Tenant` on
+   `StreamSubjectResolver` and the snapshot-key surface breaks every
+   existing resolver implementation, including single-tenant consumers who
+   gain nothing from it. Whether that cost is acceptable, or the contract
+   must instead avoid breaking existing callers, is an explicit trade-off
+   requiring sign-off, not a consequence to note.
+
 ## Consequences
 
 - `StreamSubjectResolver` and the snapshot key resolution surface gain a
   required `Tenant` parameter -- a breaking change for existing resolver
-  implementations, mitigated by the single-static-tenant migration path.
+  implementations, mitigated by the single-static-tenant migration path but
+  unaccepted as a trade-off (Open Question 2).
 - `JetStreamStoreError` gains a tenant-scope-mismatch variant that existing
   callers must add to their match arms.
 - Operators gain the option of per-tenant physical isolation, which adds
