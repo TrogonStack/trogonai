@@ -74,4 +74,20 @@ pub trait StreamRead<StreamId: ?Sized>: Send + Sync {
         &self,
         request: ReadStreamRequest<'_, StreamId>,
     ) -> impl std::future::Future<Output = Result<ReadStreamResponse, Self::Error>> + Send;
+
+    /// Reads at most `max_events` events from the requested stream.
+    ///
+    /// Lets a caller that only needs to know whether a stream has more than
+    /// `max_events` events avoid paying for a full unbounded read. The
+    /// default implementation delegates to [`StreamRead::read_stream`], so
+    /// existing implementations keep compiling and behave exactly as before
+    /// until they opt into a real bound by overriding this method.
+    fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, StreamId>,
+        max_events: u64,
+    ) -> impl std::future::Future<Output = Result<ReadStreamResponse, Self::Error>> + Send {
+        let _ = max_events;
+        self.read_stream(request)
+    }
 }

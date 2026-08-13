@@ -567,6 +567,45 @@ async fn read_subject_stream_respects_from_and_to_sequence_bounds() {
 }
 
 #[tokio::test]
+async fn read_subject_stream_bounded_caps_the_fetched_event_count() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let stream = create_events_stream(&js, "BOUNDED_TEST", "bounded.test.>").await;
+
+    let subject = "bounded.test.alpha";
+    let mut positions = Vec::new();
+    for index in 0..5u128 {
+        let position = append_stream(
+            &js,
+            make_subject(subject),
+            None,
+            &[make_event(index, format!("event-{index}").as_bytes())],
+        )
+        .await
+        .expect("publish event");
+        positions.push(position);
+    }
+    let to_sequence = positions.last().unwrap().as_u64();
+
+    let capped = super::read_subject_stream_bounded(&stream, "alpha", subject, positions[0].as_u64(), to_sequence, 2)
+        .await
+        .expect("bounded replay should succeed");
+
+    assert_eq!(
+        capped.len(),
+        2,
+        "the bounded read must stop at max_events instead of fetching the whole five-event range"
+    );
+    assert_eq!(capped[0].stream_position, positions[0]);
+    assert_eq!(capped[1].stream_position, positions[1]);
+
+    let unbounded = super::read_subject_stream(&stream, "alpha", subject, positions[0].as_u64(), to_sequence)
+        .await
+        .expect("unbounded replay should still return the full range");
+    assert_eq!(unbounded.len(), 5);
+}
+
+#[tokio::test]
 async fn read_subject_stream_uses_caller_stream_id() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;

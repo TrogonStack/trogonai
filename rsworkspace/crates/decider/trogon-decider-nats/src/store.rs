@@ -28,7 +28,9 @@ use trogon_semconv::{attribute, metric, span};
 use crate::snapshot_store::{NatsSnapshotConfig, SnapshotStoreError};
 use crate::stream_store::StreamStoreError;
 #[cfg(not(coverage))]
-use crate::stream_store::{StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream};
+use crate::stream_store::{
+    StreamSubjectResolver, append_stream as append_subject_stream, read_subject_stream, read_subject_stream_bounded,
+};
 #[cfg(not(coverage))]
 use tracing::Instrument;
 
@@ -247,6 +249,43 @@ where
             subject_state.subject.as_str(),
             from_sequence,
             to_sequence,
+        )
+        .await
+        .map_err(JetStreamStoreError::ReadStream)?;
+
+        Ok(ReadStreamResponse {
+            current_position: Some(current_position),
+            events,
+        })
+    }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, StreamId>,
+        max_events: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        let stream_id = request.stream_id;
+        let stream_id_text = stream_id.to_string();
+        let subject_state = self
+            .subject_resolver
+            .resolve_subject_state(self.events_stream(), stream_id)
+            .await
+            .map_err(JetStreamStoreError::ResolveSubject)?;
+        let Some(current_position) = subject_state.current_position else {
+            return Ok(ReadStreamResponse {
+                current_position: None,
+                events: Vec::new(),
+            });
+        };
+        let from_sequence = stream_read_from_to_sequence(request.from);
+        let to_sequence = current_position.as_u64();
+        let events = read_subject_stream_bounded(
+            self.events_stream(),
+            stream_id_text.as_str(),
+            subject_state.subject.as_str(),
+            from_sequence,
+            to_sequence,
+            max_events,
         )
         .await
         .map_err(JetStreamStoreError::ReadStream)?;
