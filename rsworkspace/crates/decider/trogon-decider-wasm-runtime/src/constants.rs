@@ -24,7 +24,7 @@ pub const DEFAULT_MAX_TABLE_ELEMENTS: usize = 8_192;
 /// guest session's store may create.
 ///
 /// Every component this crate loads implements the fixed
-/// `trogon:decider@0.1.0` world, which declares exactly one resource type
+/// `trogon:decider@0.2.0` world, which declares exactly one resource type
 /// (`session`). Inspecting the compiled schedules decider component with
 /// `wasm-tools print` shows that shape always instantiates 3 real core
 /// modules: the guest's own module plus a pair of tiny resource-destructor

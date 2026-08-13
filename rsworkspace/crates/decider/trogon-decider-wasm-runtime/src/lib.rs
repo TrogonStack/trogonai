@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 //! Production host runtime for compiled WASM Trogon decider components.
 //!
-//! This crate loads a compiled `trogon:decider@0.1.0` component, structurally
+//! This crate loads a compiled `trogon:decider@0.2.0` component, structurally
 //! enforces that it declares zero imports, and executes commands against it
 //! end to end: replaying stream history into a fresh guest session, deciding
 //! the command, appending the resulting events, and best-effort snapshotting
