@@ -21,7 +21,7 @@ impl std::fmt::Display for PushListSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.push.list",
+            "{}.v1.agents.{}.push.list",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

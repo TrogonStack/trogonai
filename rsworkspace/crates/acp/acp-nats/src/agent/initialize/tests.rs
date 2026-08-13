@@ -14,7 +14,7 @@ use trogon_nats::AdvancedMockNatsClient;
 async fn initialize_forwards_request_and_returns_response() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = InitializeResponse::new(ProtocolVersion::LATEST);
-    set_json_response(&mock, "acp.agent.initialize", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.initialize", &expected);
 
     let request = InitializeRequest::new(ProtocolVersion::LATEST);
     let result = bridge.initialize(request).await;
@@ -28,7 +28,7 @@ async fn initialize_forwards_request_and_returns_response() {
 async fn initialize_logs_client_name_when_client_info_provided() {
     let (mock, _js, bridge) = mock_bridge();
     let expected = InitializeResponse::new(ProtocolVersion::LATEST);
-    set_json_response(&mock, "acp.agent.initialize", &expected);
+    set_json_response(&mock, "acp.v1.global.agent.initialize", &expected);
 
     let request =
         InitializeRequest::new(ProtocolVersion::LATEST).client_info(Implementation::new("my-client", "1.0.0"));
@@ -51,7 +51,7 @@ async fn initialize_returns_error_when_nats_request_fails() {
 #[tokio::test]
 async fn initialize_returns_error_when_response_is_invalid_json() {
     let (mock, _js, bridge) = mock_bridge();
-    mock.set_response("acp.agent.initialize", "not json".into());
+    mock.set_response("acp.v1.global.agent.initialize", "not json".into());
 
     let request = InitializeRequest::new(ProtocolVersion::LATEST);
     let err = bridge.initialize(request).await.unwrap_err();
@@ -65,7 +65,7 @@ async fn initialize_records_metrics_on_success() {
     let (mock, _js, bridge, exporter, provider) = mock_bridge_with_metrics();
     set_json_response(
         &mock,
-        "acp.agent.initialize",
+        "acp.v1.global.agent.initialize",
         &InitializeResponse::new(ProtocolVersion::LATEST),
     );
 
@@ -108,7 +108,7 @@ async fn handlers_use_custom_prefix() {
         tokio::sync::mpsc::channel(1).0,
     );
     let expected = InitializeResponse::new(ProtocolVersion::LATEST);
-    set_json_response(&mock, "myorg.prod.agent.initialize", &expected);
+    set_json_response(&mock, "myorg.prod.v1.global.agent.initialize", &expected);
 
     let request = InitializeRequest::new(ProtocolVersion::LATEST);
     let result = bridge.initialize(request).await;

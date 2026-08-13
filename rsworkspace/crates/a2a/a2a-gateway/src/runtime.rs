@@ -1,7 +1,7 @@
 //! Runtime entry point.
 //!
 //! `run_with_args` resolves config, connects to NATS, builds the policy
-//! layers, and pumps `{prefix}.gateway.>` ingress envelopes through
+//! layers, and pumps `{prefix}.v1.gateway.>` ingress envelopes through
 //! [`dispatch::dispatch_gateway_ingress`]. Sibling modules carry the
 //! per-tier helpers the orchestrator composes.
 

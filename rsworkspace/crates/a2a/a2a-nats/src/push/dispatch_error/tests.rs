@@ -39,7 +39,7 @@ fn dispatch_error_webhook_url_error_routes_through_from() {
 }
 
 fn subject() -> NatsPushSubject {
-    NatsPushSubject::new("a2a.push.t.caller.task").unwrap()
+    NatsPushSubject::new("a2a.v1.push.t.caller.task").unwrap()
 }
 
 fn url() -> WebhookUrl {
@@ -62,10 +62,10 @@ fn dispatch_error_unexpected_status_display_contains_url_and_code() {
 fn nats_publish_dispatch_error_round_trips_subject_and_source() {
     let inner = std::io::Error::other("nats down");
     let err = NatsPublishDispatchError::new(subject(), inner);
-    assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
+    assert_eq!(err.subject().as_str(), "a2a.v1.push.t.caller.task");
     assert_eq!(
         err.to_string(),
-        "NATS publish to a2a.push.t.caller.task failed: nats down"
+        "NATS publish to a2a.v1.push.t.caller.task failed: nats down"
     );
     assert!(err.source().is_some());
 }
@@ -74,10 +74,10 @@ fn nats_publish_dispatch_error_round_trips_subject_and_source() {
 fn jetstream_publish_dispatch_error_round_trips_subject_and_source() {
     let inner = std::io::Error::other("jetstream down");
     let err = JetStreamPublishDispatchError::new(subject(), inner);
-    assert_eq!(err.subject().as_str(), "a2a.push.t.caller.task");
+    assert_eq!(err.subject().as_str(), "a2a.v1.push.t.caller.task");
     assert_eq!(
         err.to_string(),
-        "JetStream publish to a2a.push.t.caller.task failed: jetstream down"
+        "JetStream publish to a2a.v1.push.t.caller.task failed: jetstream down"
     );
     assert!(err.source().is_some());
 }
@@ -104,7 +104,10 @@ fn dispatch_error_display_and_source_cover_every_variant() {
     assert!(header.source().is_some());
 
     let nats = DispatchError::NatsPublish(NatsPublishDispatchError::new(subject(), std::io::Error::other("oops")));
-    assert_eq!(nats.to_string(), "NATS publish to a2a.push.t.caller.task failed: oops");
+    assert_eq!(
+        nats.to_string(),
+        "NATS publish to a2a.v1.push.t.caller.task failed: oops"
+    );
     assert!(nats.source().is_some());
 
     let js = DispatchError::JetStreamPublish(JetStreamPublishDispatchError::new(
@@ -113,7 +116,7 @@ fn dispatch_error_display_and_source_cover_every_variant() {
     ));
     assert_eq!(
         js.to_string(),
-        "JetStream publish to a2a.push.t.caller.task failed: oops"
+        "JetStream publish to a2a.v1.push.t.caller.task failed: oops"
     );
     assert!(js.source().is_some());
 

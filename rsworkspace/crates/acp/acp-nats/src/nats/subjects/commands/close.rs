@@ -18,7 +18,7 @@ impl std::fmt::Display for CloseSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.close",
+            "{}.v1.session.{}.agent.close",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

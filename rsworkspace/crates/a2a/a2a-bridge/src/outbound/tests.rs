@@ -79,7 +79,7 @@ async fn catalog_registration_writes_expected_subject() -> Result<(), BridgeErro
     publish_https_agent_card_to_catalog(&reg, &prefix, &agent_id, card).await?;
     let g = captured.lock().unwrap();
     let (topic, payload) = g.as_ref().unwrap();
-    assert_eq!(topic.as_str(), "a2a.catalog.register.card-bot");
+    assert_eq!(topic.as_str(), "a2a.v1.catalog.register.card-bot");
     assert_eq!(payload.as_slice(), card.as_slice());
     Ok(())
 }
@@ -140,7 +140,7 @@ async fn publish_https_agent_card_registered_uses_bridge_agent_id() -> Result<()
     publish_https_agent_card_registered(&reg, &prefix, &agent_id, card).await?;
     let g = captured.lock().unwrap();
     let (topic, payload) = g.as_ref().unwrap();
-    assert_eq!(topic.as_str(), "a2a.catalog.register.card-bot");
+    assert_eq!(topic.as_str(), "a2a.v1.catalog.register.card-bot");
     assert_eq!(payload.as_slice(), card.as_slice());
     Ok(())
 }

@@ -74,7 +74,7 @@ async fn enabled_publish_targets_ok_audit_subject() {
     spawn_gateway_audit_publish(true, nats.clone(), prefix(), agent(), ok_envelope());
     wait_for_publish(&nats, 1).await;
     let subjects = nats.published_messages();
-    assert_eq!(subjects, vec!["a2a.audit.ok.message.send".to_owned()]);
+    assert_eq!(subjects, vec!["a2a.v1.audit.ok.message.send".to_owned()]);
 }
 
 #[tokio::test]
@@ -85,7 +85,7 @@ async fn enabled_publish_targets_err_audit_subject() {
     spawn_gateway_audit_publish(true, nats.clone(), prefix(), agent(), err_envelope());
     wait_for_publish(&nats, 1).await;
     let subjects = nats.published_messages();
-    assert_eq!(subjects, vec!["a2a.audit.err.tasks.get".to_owned()]);
+    assert_eq!(subjects, vec!["a2a.v1.audit.err.tasks.get".to_owned()]);
 }
 
 #[tokio::test]

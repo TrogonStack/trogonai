@@ -63,17 +63,15 @@ async fn prompt_via_agent_trait_returns_done() {
     let (resp_consumer, resp_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(resp_consumer);
 
-    let response = PromptResponse::new(StopReason::EndTurn);
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: bytes::Bytes::from(serde_json::to_vec(&response).unwrap()),
-        headers: None,
-        status: None,
-        description: None,
-        length: 0,
+    let result = serde_json::to_value(PromptResponse::new(StopReason::EndTurn)).unwrap();
+    crate::agent::test_support::reply_when_published(&js.publisher, resp_tx, move |request_headers| {
+        let encoded = jsonrpc_nats::encode(&jsonrpc_nats::Message::Success {
+            id: crate::wire::response_id_from_request_headers(&request_headers),
+            result,
+        })
+        .unwrap();
+        (encoded.headers, encoded.body)
     });
-    resp_tx.unbounded_send(Ok(msg)).unwrap();
 
     let result = bridge.prompt(PromptRequest::new("s1", vec![])).await;
     assert!(result.is_ok());

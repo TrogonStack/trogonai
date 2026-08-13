@@ -17,7 +17,7 @@ impl std::fmt::Display for SubscriptionsListenSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.subscriptions.listen",
+            "{}.v1.server.{}.subscriptions.listen",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

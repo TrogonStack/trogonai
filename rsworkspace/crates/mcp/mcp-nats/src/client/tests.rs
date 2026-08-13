@@ -21,5 +21,5 @@ async fn connect_subscribes_to_client_subjects() {
     .await
     .unwrap();
 
-    assert_eq!(nats.subscribed_to(), vec!["mcp.client.desktop.>"]);
+    assert_eq!(nats.subscribed_to(), vec!["mcp.v1.client.desktop.>"]);
 }

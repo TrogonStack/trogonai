@@ -26,7 +26,7 @@ pub async fn handle<N: RequestClient + PublishClient + FlushClient, C: GetElapse
     let result: Result<NewSessionResponse> = jsonrpc_call(
         bridge.nats(),
         &subject,
-        "session.new",
+        "session/new",
         &args,
         bridge.config.operation_timeout,
     )

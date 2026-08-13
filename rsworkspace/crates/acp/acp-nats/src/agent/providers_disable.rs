@@ -21,7 +21,7 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
     let result = jsonrpc_call(
         bridge.nats(),
         &subject,
-        "providers.disable",
+        "providers/disable",
         &args,
         bridge.config.operation_timeout,
     )

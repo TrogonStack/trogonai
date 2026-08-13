@@ -83,7 +83,7 @@ async fn publish_uses_typed_subject_string() {
 
     assert_eq!(
         nats.published_messages(),
-        vec!["mcp.client.desktop.notifications.tools.list_changed"]
+        vec!["mcp.v1.client.desktop.notifications.tools.list_changed"]
     );
 }
 

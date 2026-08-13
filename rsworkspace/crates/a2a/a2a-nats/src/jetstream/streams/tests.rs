@@ -21,7 +21,7 @@ fn events_stream_normalizes_dotted_prefix() {
 #[test]
 fn events_subjects_cover_all_tasks() {
     let config = A2aStream::Events.config(&p("a2a"));
-    assert_eq!(config.subjects, vec!["a2a.tasks.*.events.*"]);
+    assert_eq!(config.subjects, vec!["a2a.v1.tasks.*.events"]);
 }
 
 #[test]
@@ -42,10 +42,13 @@ fn events_stream_uses_discard_old() {
     assert_eq!(config.discard, DiscardPolicy::Old);
 }
 
+/// A subscriber only learns the task id from the bootstrap reply, so it opens its
+/// consumer after the first events are already published. `Interest` would discard
+/// those; `Limits` is what keeps them readable.
 #[test]
-fn events_stream_uses_interest_retention() {
+fn events_stream_uses_limits_retention() {
     let config = A2aStream::Events.config(&p("a2a"));
-    assert_eq!(config.retention, RetentionPolicy::Interest);
+    assert_eq!(config.retention, RetentionPolicy::Limits);
 }
 
 #[test]
@@ -60,7 +63,10 @@ fn all_configs_returns_both_streams() {
 #[test]
 fn push_dlq_subjects_cover_caller_and_task() {
     let config = A2aStream::PushDlq.config(&p("a2a"));
-    assert_eq!(config.subjects, vec!["a2a.push.dlq.*.*", "a2a.push.dlq.mirror.*.*"]);
+    assert_eq!(
+        config.subjects,
+        vec!["a2a.v1.push.dlq.*.*", "a2a.v1.push.dlq.mirror.*.*"]
+    );
 }
 
 #[test]

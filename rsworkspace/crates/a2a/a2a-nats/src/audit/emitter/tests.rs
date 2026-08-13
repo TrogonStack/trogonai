@@ -30,7 +30,7 @@ async fn nats_emitter_publishes_ok_subject() {
     emitter
         .publish(&prefix(), &agent(), make_envelope(AuditOutcome::Ok))
         .await;
-    assert_eq!(nats.published_messages(), vec!["a2a.audit.ok.message.send"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.ok.message.send"]);
 }
 
 #[tokio::test]
@@ -47,7 +47,7 @@ async fn nats_emitter_publishes_err_subject() {
             }),
         )
         .await;
-    assert_eq!(nats.published_messages(), vec!["a2a.audit.err.message.send"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.err.message.send"]);
 }
 
 #[tokio::test]
@@ -76,7 +76,7 @@ async fn nats_emitter_task_lifecycle_publishes_lifecycle_subject() {
         4000,
     );
     emitter.publish_task_lifecycle(&prefix(), &agent(), env).await;
-    assert_eq!(nats.published_messages(), vec!["a2a.audit.lifecycle"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.audit.lifecycle"]);
     let payloads = nats.published_payloads();
     let v: serde_json::Value = serde_json::from_slice(&payloads[0]).unwrap();
     assert_eq!(v["task_id"], "task-xyz");

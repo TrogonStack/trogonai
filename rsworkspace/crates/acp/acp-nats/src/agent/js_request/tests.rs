@@ -41,6 +41,16 @@ fn make_wire_success_msg<Res: serde::Serialize>(req_id: &str, result: &Res) -> a
     make_nats_msg(&encoded.body, Some(encoded.headers))
 }
 
+/// A reply addressed to `req_id` whose body cannot be decoded.
+fn make_bad_payload_msg(req_id: &str) -> async_nats::Message {
+    let addressed = encode(&Message::Success {
+        id: ResponseId::String(req_id.to_string()),
+        result: serde_json::Value::Null,
+    })
+    .unwrap();
+    make_nats_msg(b"not json", Some(addressed.headers))
+}
+
 fn make_wire_error_msg(req_id: &str, error: &agent_client_protocol::Error) -> async_nats::Message {
     let encoded = encode(&Message::Error {
         id: ResponseId::String(req_id.to_string()),
@@ -64,7 +74,7 @@ async fn js_request_success() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -90,7 +100,7 @@ async fn js_request_publish_failure() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -110,7 +120,7 @@ async fn js_request_consumer_creation_failure() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -132,7 +142,7 @@ async fn js_request_messages_failure() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -152,12 +162,12 @@ async fn js_request_bad_response_payload() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let msg = MockJsMessage::new(make_nats_msg(b"not json", None));
+    let msg = MockJsMessage::new(make_bad_payload_msg("req-1"));
     tx.unbounded_send(Ok(msg)).unwrap();
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -179,7 +189,7 @@ async fn js_request_timeout() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -206,7 +216,7 @@ async fn js_request_agent_error_response() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -231,7 +241,7 @@ async fn js_request_stream_closed() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -256,7 +266,7 @@ async fn js_request_consumer_stream_error() {
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
         &js,
-        "acp.session.s1.agent.prompt",
+        "acp.v1.session.s1.agent.prompt",
         "prompt",
         &prompt_request(),
         &test_prefix(),
@@ -268,4 +278,65 @@ async fn js_request_consumer_stream_error() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().message.contains("response consumer"));
+}
+
+/// The response consumer is session-scoped, so it sees replies belonging to the
+/// other requests in flight on the same session.
+#[tokio::test]
+async fn js_request_skips_a_response_addressed_to_another_request() {
+    let js = MockJs::new();
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(consumer);
+
+    let other = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::Cancelled);
+    tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-other", &other))))
+        .unwrap();
+
+    let mine = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
+    tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-1", &mine))))
+        .unwrap();
+
+    let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        &js,
+        "acp.v1.session.s1.agent.prompt",
+        "prompt",
+        &prompt_request(),
+        &test_prefix(),
+        &test_sid("s1"),
+        &ReqId::from_test("req-1"),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert_eq!(
+        result.expect("expected the reply addressed to req-1").stop_reason,
+        agent_client_protocol::schema::v1::StopReason::EndTurn
+    );
+}
+
+/// A reply that carries no `Jsonrpc-Id` cannot be attributed to a request, so it
+/// is skipped rather than mistaken for this one's.
+#[tokio::test]
+async fn js_request_skips_a_response_without_an_id() {
+    let js = MockJs::new();
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(consumer);
+
+    tx.unbounded_send(Ok(MockJsMessage::new(make_nats_msg(b"not json", None))))
+        .unwrap();
+    drop(tx);
+
+    let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        &js,
+        "acp.v1.session.s1.agent.prompt",
+        "prompt",
+        &prompt_request(),
+        &test_prefix(),
+        &test_sid("s1"),
+        &ReqId::from_test("req-1"),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert!(result.unwrap_err().message.contains("response stream closed"));
 }

@@ -16,7 +16,7 @@ fn declarative_context_returns_none_for_unknown_method_dots() {
         &agent("planner"),
         Some("user/alice"),
         "acme",
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     );
     assert!(ctx.is_none());
 }
@@ -31,7 +31,7 @@ fn declarative_context_resolves_slash_caller_slug() {
         &agent("planner"),
         Some("user/alice"),
         "acme",
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     )
     .expect("context for message.send");
     // The caller_subject ends up wrapping `user/alice` (the slug
@@ -51,7 +51,7 @@ fn declarative_context_normalizes_plain_slug() {
         &agent("planner"),
         Some("alice"),
         "acme",
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     )
     .expect("context");
     let subject = ctx.caller_subject.as_ref().expect("subject present");
@@ -67,7 +67,7 @@ fn declarative_context_uses_anonymous_sentinel_when_caller_absent() {
         &agent("planner"),
         None,
         "acme",
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     )
     .expect("context");
     let subject = ctx.caller_subject.as_ref().expect("subject present");
@@ -88,12 +88,12 @@ fn declarative_context_round_trips_method_and_agent() {
         &agent("worker"),
         Some("user/bob"),
         "acme",
-        "a2a.gateway.worker.tasks.get",
+        "a2a.v1.gateway.worker.tasks.get",
     )
     .expect("context");
     assert_eq!(ctx.agent_method, A2aMethod::TasksGet);
     assert_eq!(ctx.agent_id.as_str(), "worker");
-    assert_eq!(ctx.nats_subject, "a2a.gateway.worker.tasks.get");
+    assert_eq!(ctx.nats_subject, "a2a.v1.gateway.worker.tasks.get");
 }
 
 #[test]

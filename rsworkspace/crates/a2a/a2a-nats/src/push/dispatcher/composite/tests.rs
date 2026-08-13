@@ -97,7 +97,7 @@ async fn nats_target_routes_to_nats_leg() {
     composite
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1"),
+            &config("subject:a2a.v1.push.bot.caller.t1"),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             b"{}",
@@ -128,7 +128,7 @@ async fn jetstream_target_routes_to_jetstream_leg() {
     composite
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1"),
+            &config("jetstream:a2a.v1.push.bot.caller.t1"),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             b"{}",
@@ -201,12 +201,12 @@ async fn factory_returns_dyn_dispatcher_routing_by_target() {
     dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1"),
+            &config("subject:a2a.v1.push.bot.caller.t1"),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             b"{}",
         )
         .await
         .unwrap();
-    assert_eq!(nats.published_messages(), vec!["a2a.push.bot.caller.t1"]);
+    assert_eq!(nats.published_messages(), vec!["a2a.v1.push.bot.caller.t1"]);
 }

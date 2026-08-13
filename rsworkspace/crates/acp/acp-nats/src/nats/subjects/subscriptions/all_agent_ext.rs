@@ -12,7 +12,7 @@ impl AllAgentExtSubject {
 
 impl std::fmt::Display for AllAgentExtSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.session.*.agent.ext.>", self.prefix.as_str())
+        write!(f, "{}.v1.session.*.agent.ext.>", self.prefix.as_str())
     }
 }
 

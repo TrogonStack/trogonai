@@ -22,7 +22,7 @@ impl std::fmt::Display for TasksResubscribeSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.tasks.resubscribe",
+            "{}.v1.agents.{}.tasks.resubscribe",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

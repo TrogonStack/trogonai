@@ -62,18 +62,18 @@ fn agent_id_accessor_returns_constructor_value() {
 fn outbound_rpc_subject_returns_agent_subject_for_default_routing() {
     let client = A2aClient::new(prefix(), agent_id(), (), ());
     let subject = client
-        .outbound_rpc_subject("a2a.agents.test-agent.message.send".to_string())
+        .outbound_rpc_subject("a2a.v1.agents.test-agent.message.send".to_string())
         .unwrap();
-    assert_eq!(subject, "a2a.agents.test-agent.message.send");
+    assert_eq!(subject, "a2a.v1.agents.test-agent.message.send");
 }
 
 #[test]
 fn outbound_rpc_subject_swaps_agents_to_gateway_when_jwt_set() {
     let client = A2aClient::new(prefix(), agent_id(), (), ()).routing_via_gateway_ingress(minted_jwt());
     let subject = client
-        .outbound_rpc_subject("a2a.agents.test-agent.message.send".to_string())
+        .outbound_rpc_subject("a2a.v1.agents.test-agent.message.send".to_string())
         .unwrap();
-    assert_eq!(subject, "a2a.gateway.test-agent.message.send");
+    assert_eq!(subject, "a2a.v1.gateway.test-agent.message.send");
 }
 
 #[test]

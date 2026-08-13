@@ -17,7 +17,7 @@ impl std::fmt::Display for ListResourcesSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.resources.list",
+            "{}.v1.server.{}.resources.list",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

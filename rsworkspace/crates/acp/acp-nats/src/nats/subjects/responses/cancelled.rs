@@ -18,7 +18,7 @@ impl std::fmt::Display for CancelledSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.cancelled",
+            "{}.v1.session.{}.agent.cancelled",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

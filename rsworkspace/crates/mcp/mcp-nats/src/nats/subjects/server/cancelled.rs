@@ -17,7 +17,7 @@ impl std::fmt::Display for CancelledSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.cancelled",
+            "{}.v1.client.{}.notifications.cancelled",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

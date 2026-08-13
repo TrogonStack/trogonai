@@ -9,12 +9,12 @@ fn p(s: &str) -> crate::A2aPrefix {
 }
 
 #[test]
-fn events_config_uses_interest_retention_and_discard_old() {
+fn events_config_uses_limits_retention_and_discard_old() {
     let config = A2aStream::events_config(&p("a2a"), EventsStreamMaxAge::DEFAULT);
-    assert_eq!(config.retention, RetentionPolicy::Interest);
+    assert_eq!(config.retention, RetentionPolicy::Limits);
     assert_eq!(config.discard, DiscardPolicy::Old);
     assert_eq!(config.max_age, DEFAULT_STREAM_MAX_AGE);
-    assert_eq!(config.subjects, vec!["a2a.tasks.*.events.*"]);
+    assert_eq!(config.subjects, vec!["a2a.v1.tasks.*.events"]);
 }
 
 #[test]

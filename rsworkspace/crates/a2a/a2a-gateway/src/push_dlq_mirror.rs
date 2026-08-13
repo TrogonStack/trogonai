@@ -1,7 +1,7 @@
 //! Push-DLQ mirror.
 //!
-//! A pull-consumer that observes `{prefix}.push.dlq.>` and republishes each
-//! envelope to `{prefix}.push.dlq.mirror.<caller_id>.<task_id>` so a tenant
+//! A pull-consumer that observes `{prefix}.v1.push.dlq.>` and republishes each
+//! envelope to `{prefix}.v1.push.dlq.mirror.<caller_id>.<task_id>` so a tenant
 //! audit surface can subscribe to its own DLQ without needing access to the
 //! authoritative stream. Loop markers (`X-A2a-Dlq-Mirrored` header and the
 //! `.mirror.` subject infix) plus a `PushDlqDedupGate` keep redelivery from
@@ -97,7 +97,7 @@ pub fn push_dlq_mirror_settings<E: ReadEnv>(env: &E) -> PushDlqMirrorSettings {
 pub fn push_dlq_mirror_pull_config(prefix: &A2aPrefix, durable: &PushDlqMirrorDurable) -> Config {
     Config {
         durable_name: Some(durable.as_str().to_owned()),
-        filter_subject: format!("{}.push.dlq.>", prefix.as_str()),
+        filter_subject: format!("{}.v1.push.dlq.>", prefix.as_str()),
         deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
@@ -117,7 +117,7 @@ pub fn push_dlq_mirror_subject(prefix: &A2aPrefix, source_subject: &str) -> Opti
         return None;
     }
 
-    let head = format!("{}.push.dlq.", prefix.as_str());
+    let head = format!("{}.v1.push.dlq.", prefix.as_str());
     let rest = source_subject.strip_prefix(&head)?;
     let mut segments = rest.split('.');
     let caller_id = segments.next()?;
@@ -126,7 +126,12 @@ pub fn push_dlq_mirror_subject(prefix: &A2aPrefix, source_subject: &str) -> Opti
         return None;
     }
 
-    Some(format!("{}.push.dlq.mirror.{}.{}", prefix.as_str(), caller_id, task_id))
+    Some(format!(
+        "{}.v1.push.dlq.mirror.{}.{}",
+        prefix.as_str(),
+        caller_id,
+        task_id
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

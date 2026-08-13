@@ -18,7 +18,7 @@ impl std::fmt::Display for OneAgentSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.>",
+            "{}.v1.session.{}.agent.>",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

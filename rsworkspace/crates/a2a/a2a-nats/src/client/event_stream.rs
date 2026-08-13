@@ -8,6 +8,8 @@ use futures::{Stream, StreamExt};
 use tokio::task::AbortHandle;
 use trogon_nats::jetstream::{JetStreamConsumer, JsAck, JsMessageRef};
 
+use crate::req_id::ReqId;
+
 use super::error::ClientError;
 
 pub struct TypedEventStream {
@@ -39,7 +41,17 @@ impl Drop for TypedEventStream {
     }
 }
 
-pub fn build_event_stream<C>(consumer: C, last_seq_cell: Arc<Mutex<u64>>) -> TypedEventStream
+/// Pump a task-events consumer into a typed stream.
+///
+/// `demux_req_id` is `Some` for a live subscription, where the consumer's subject
+/// names only the task (ADR#0055) and concurrent subscribers to that task are told
+/// apart by `Trogon-Req-Id`. It is `None` for a resume, whose replayed events carry
+/// the correlation id of the original subscription rather than of this request.
+pub fn build_event_stream<C>(
+    consumer: C,
+    last_seq_cell: Arc<Mutex<u64>>,
+    demux_req_id: Option<ReqId>,
+) -> TypedEventStream
 where
     C: JetStreamConsumer + Send + 'static,
     C::Message: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
@@ -50,7 +62,7 @@ where
     let (tx, receiver) = mpsc::unbounded();
     let last_seq_for_task = last_seq_cell.clone();
 
-    let join = tokio::spawn(pull_loop(consumer, tx, last_seq_for_task));
+    let join = tokio::spawn(pull_loop(consumer, tx, last_seq_for_task, demux_req_id));
 
     TypedEventStream {
         receiver,
@@ -59,10 +71,28 @@ where
     }
 }
 
+/// A stream that is already finished.
+///
+/// `message/stream` may answer with a bare `Message` instead of a `Task`. There is
+/// no task to scope a consumer to and no events will follow, so the caller gets a
+/// stream that ends immediately rather than a consumer on a subject nobody writes.
+pub fn empty_event_stream() -> TypedEventStream {
+    let (tx, receiver) = mpsc::unbounded::<Result<StreamResponse, ClientError>>();
+    drop(tx);
+    let join = tokio::spawn(std::future::ready(()));
+
+    TypedEventStream {
+        receiver,
+        last_seq: Arc::new(Mutex::new(0)),
+        abort: join.abort_handle(),
+    }
+}
+
 async fn pull_loop<C>(
     consumer: C,
     tx: mpsc::UnboundedSender<Result<StreamResponse, ClientError>>,
     last_seq: Arc<Mutex<u64>>,
+    demux_req_id: Option<ReqId>,
 ) where
     C: JetStreamConsumer,
     C::Message: JsMessageRef + JsAck<Error: std::fmt::Display + Send + 'static> + Send + 'static,
@@ -84,6 +114,18 @@ async fn pull_loop<C>(
                 return;
             }
             Ok(js_msg) => {
+                // One task can be streamed by several callers at once, so an event
+                // stamped for someone else's subscription is acked and dropped
+                // rather than handed to this stream's reader.
+                if let Some(ref req_id) = demux_req_id
+                    && !req_id.matches_event_headers(js_msg.message().headers.as_ref())
+                {
+                    if let Err(e) = js_msg.ack().await {
+                        tracing::warn!(error = %e, "JetStream ack failed for an event of another subscription");
+                    }
+                    continue;
+                }
+
                 let stream_seq = stream_sequence_from_reply(js_msg.message().reply.as_deref());
                 let payload = js_msg.message().payload.as_ref();
                 let send_result = match serde_json::from_slice::<StreamResponse>(payload) {

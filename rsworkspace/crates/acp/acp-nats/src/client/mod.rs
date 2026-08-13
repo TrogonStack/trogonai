@@ -1,7 +1,6 @@
 pub(crate) mod elicitation_complete;
 pub(crate) mod elicitation_create;
 pub(crate) mod ext;
-pub(crate) mod ext_session_prompt_response;
 pub(crate) mod fs_read_text_file;
 pub(crate) mod fs_write_text_file;
 pub(crate) mod request_permission;
@@ -232,16 +231,6 @@ async fn dispatch_client_method<
         }
         ClientMethod::ElicitationComplete => {
             elicitation_complete::handle(headers, &payload, ctx.client, reply.is_some(), &ctx.bridge.metrics).await;
-        }
-        ClientMethod::ExtSessionPromptResponse => {
-            ext_session_prompt_response::handle(
-                parsed.session_id.as_str(),
-                headers,
-                &payload,
-                reply.as_deref(),
-                ctx.bridge,
-            )
-            .await;
         }
         ClientMethod::TerminalCreate => {
             terminal_create::handle(

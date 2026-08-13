@@ -18,7 +18,7 @@ impl std::fmt::Display for DeleteSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.delete",
+            "{}.v1.session.{}.agent.delete",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

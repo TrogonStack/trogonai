@@ -8,7 +8,7 @@ fn peer(s: &str) -> McpPeerId {
 #[test]
 fn parses_server_request_subject() {
     assert_eq!(
-        parse_server_subject("mcp.server.filesystem.tools.list").unwrap(),
+        parse_server_subject("mcp.v1.server.filesystem.tools.list").unwrap(),
         ParsedServerSubject::Request {
             server_id: peer("filesystem"),
             method: ServerRequestMethod::ListTools,
@@ -19,14 +19,14 @@ fn parses_server_request_subject() {
 #[test]
 fn parses_server_subject_when_peer_id_matches_role_name() {
     assert_eq!(
-        parse_server_subject("mcp.server.server.tools.list").unwrap(),
+        parse_server_subject("mcp.v1.server.server.tools.list").unwrap(),
         ParsedServerSubject::Request {
             server_id: peer("server"),
             method: ServerRequestMethod::ListTools,
         }
     );
     assert_eq!(
-        parse_server_subject("mcp.server.server.notifications.initialized").unwrap(),
+        parse_server_subject("mcp.v1.server.server.notifications.initialized").unwrap(),
         ParsedServerSubject::Notification {
             server_id: peer("server"),
             method: ClientNotificationMethod::Initialized,
@@ -37,7 +37,7 @@ fn parses_server_subject_when_peer_id_matches_role_name() {
 #[test]
 fn parses_server_subject_when_prefix_contains_role_name() {
     assert_eq!(
-        parse_server_subject("mcp.server.namespace.server.server.tools.list").unwrap(),
+        parse_server_subject("mcp.v1.server.namespace.server.server.tools.list").unwrap(),
         ParsedServerSubject::Request {
             server_id: peer("server"),
             method: ServerRequestMethod::ListTools,
@@ -48,7 +48,7 @@ fn parses_server_subject_when_prefix_contains_role_name() {
 #[test]
 fn parses_server_notification_subject() {
     assert_eq!(
-        parse_server_subject("mcp.server.filesystem.notifications.initialized").unwrap(),
+        parse_server_subject("mcp.v1.server.filesystem.notifications.initialized").unwrap(),
         ParsedServerSubject::Notification {
             server_id: peer("filesystem"),
             method: ClientNotificationMethod::Initialized,
@@ -59,7 +59,7 @@ fn parses_server_notification_subject() {
 #[test]
 fn parses_client_request_subject() {
     assert_eq!(
-        parse_client_subject("mcp.client.desktop.sampling.create_message").unwrap(),
+        parse_client_subject("mcp.v1.client.desktop.sampling.create_message").unwrap(),
         ParsedClientSubject::Request {
             client_id: peer("desktop"),
             method: ClientRequestMethod::CreateMessage,
@@ -70,14 +70,14 @@ fn parses_client_request_subject() {
 #[test]
 fn parses_client_subject_when_peer_id_matches_role_name() {
     assert_eq!(
-        parse_client_subject("mcp.client.client.roots.list").unwrap(),
+        parse_client_subject("mcp.v1.client.client.roots.list").unwrap(),
         ParsedClientSubject::Request {
             client_id: peer("client"),
             method: ClientRequestMethod::ListRoots,
         }
     );
     assert_eq!(
-        parse_client_subject("mcp.client.client.notifications.tools.list_changed").unwrap(),
+        parse_client_subject("mcp.v1.client.client.notifications.tools.list_changed").unwrap(),
         ParsedClientSubject::Notification {
             client_id: peer("client"),
             method: ServerNotificationMethod::ToolListChanged,
@@ -88,7 +88,7 @@ fn parses_client_subject_when_peer_id_matches_role_name() {
 #[test]
 fn parses_client_subject_when_prefix_contains_role_name() {
     assert_eq!(
-        parse_client_subject("mcp.client.namespace.client.client.roots.list").unwrap(),
+        parse_client_subject("mcp.v1.client.namespace.client.client.roots.list").unwrap(),
         ParsedClientSubject::Request {
             client_id: peer("client"),
             method: ClientRequestMethod::ListRoots,
@@ -99,7 +99,7 @@ fn parses_client_subject_when_prefix_contains_role_name() {
 #[test]
 fn parses_client_notification_subject() {
     assert_eq!(
-        parse_client_subject("mcp.client.desktop.notifications.resources.updated").unwrap(),
+        parse_client_subject("mcp.v1.client.desktop.notifications.resources.updated").unwrap(),
         ParsedClientSubject::Notification {
             client_id: peer("desktop"),
             method: ServerNotificationMethod::ResourceUpdated,
@@ -116,7 +116,7 @@ fn suffix_tables_stay_in_sync_with_transport_method_table() {
         .chain(ServerNotificationMethod::SUFFIXES)
         .copied()
         .collect();
-    let transport_suffixes: HashSet<&str> = crate::transport::METHOD_TABLE
+    let transport_suffixes: HashSet<&str> = crate::nats::subjects::METHOD_TABLE
         .iter()
         .map(|(_, suffix)| *suffix)
         .collect();
@@ -126,25 +126,25 @@ fn suffix_tables_stay_in_sync_with_transport_method_table() {
 
     assert!(
         only_in_transport.is_empty() && only_in_parsing.is_empty(),
-        "parsing.rs and transport.rs suffix tables drifted apart: \
-         transport.rs routes but parsing.rs cannot parse {only_in_transport:?}; \
-         parsing.rs can parse but transport.rs never routes {only_in_parsing:?}"
+        "parsing.rs and subjects/methods.rs suffix tables drifted apart: \
+         methods.rs routes but parsing.rs cannot parse {only_in_transport:?}; \
+         parsing.rs can parse but methods.rs never routes {only_in_parsing:?}"
     );
 }
 
 #[test]
 fn rejects_unknown_or_invalid_subjects() {
-    assert!(parse_server_subject("mcp.server.filesystem").is_none());
+    assert!(parse_server_subject("mcp.v1.server.filesystem").is_none());
     assert_eq!(
-        parse_server_subject("mcp.server..server.filesystem.tools.list").unwrap(),
+        parse_server_subject("mcp.v1.server..server.filesystem.tools.list").unwrap(),
         ParsedServerSubject::Request {
             server_id: peer("filesystem"),
             method: ServerRequestMethod::ListTools,
         }
     );
-    assert!(parse_server_subject("mcp.server.filesystem.request").is_none());
-    assert!(parse_server_subject("mcp.server.filesystem.notifications.resources.updated").is_none());
-    assert!(parse_server_subject("mcp.server.file.system.tools.list").is_none());
-    assert!(parse_client_subject("mcp.client.desktop.tools.list").is_none());
-    assert!(parse_client_subject("mcp.client.desktop.notifications.initialized").is_none());
+    assert!(parse_server_subject("mcp.v1.server.filesystem.request").is_none());
+    assert!(parse_server_subject("mcp.v1.server.filesystem.notifications.resources.updated").is_none());
+    assert!(parse_server_subject("mcp.v1.server.file.system.tools.list").is_none());
+    assert!(parse_client_subject("mcp.v1.client.desktop.tools.list").is_none());
+    assert!(parse_client_subject("mcp.v1.client.desktop.notifications.initialized").is_none());
 }

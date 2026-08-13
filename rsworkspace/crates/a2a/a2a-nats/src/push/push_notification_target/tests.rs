@@ -15,16 +15,16 @@ fn parses_http_webhook() {
 
 #[test]
 fn parses_nats_subject_scheme() {
-    let target = PushNotificationTarget::parse("subject:a2a.push.acme.caller-42.task-9").unwrap();
+    let target = PushNotificationTarget::parse("subject:a2a.v1.push.acme.caller-42.task-9").unwrap();
     assert!(matches!(
         &target,
-        PushNotificationTarget::Nats(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
+        PushNotificationTarget::Nats(subject) if subject.as_str() == "a2a.v1.push.acme.caller-42.task-9"
     ));
 }
 
 #[test]
 fn rejects_bare_subject_without_prefix() {
-    assert!(PushNotificationTarget::parse("a2a.push.acme.caller.task").is_err());
+    assert!(PushNotificationTarget::parse("a2a.v1.push.acme.caller.task").is_err());
 }
 
 #[test]
@@ -34,10 +34,10 @@ fn rejects_nats_uri_scheme() {
 
 #[test]
 fn parses_jetstream_subject_scheme() {
-    let target = PushNotificationTarget::parse("jetstream:a2a.push.acme.caller-42.task-9").unwrap();
+    let target = PushNotificationTarget::parse("jetstream:a2a.v1.push.acme.caller-42.task-9").unwrap();
     assert!(matches!(
         &target,
-        PushNotificationTarget::JetStream(subject) if subject.as_str() == "a2a.push.acme.caller-42.task-9"
+        PushNotificationTarget::JetStream(subject) if subject.as_str() == "a2a.v1.push.acme.caller-42.task-9"
     ));
 }
 
@@ -51,14 +51,14 @@ fn rejects_other_schemes() {
 
 #[test]
 fn display_roundtrips_nats_target() {
-    let target = PushNotificationTarget::parse("subject:a2a.push.t.caller.task").unwrap();
-    assert_eq!(target.to_string(), "subject:a2a.push.t.caller.task");
+    let target = PushNotificationTarget::parse("subject:a2a.v1.push.t.caller.task").unwrap();
+    assert_eq!(target.to_string(), "subject:a2a.v1.push.t.caller.task");
 }
 
 #[test]
 fn display_roundtrips_jetstream_target() {
-    let target = PushNotificationTarget::parse("jetstream:a2a.push.t.caller.task").unwrap();
-    assert_eq!(target.to_string(), "jetstream:a2a.push.t.caller.task");
+    let target = PushNotificationTarget::parse("jetstream:a2a.v1.push.t.caller.task").unwrap();
+    assert_eq!(target.to_string(), "jetstream:a2a.v1.push.t.caller.task");
 }
 
 #[test]

@@ -18,7 +18,7 @@ impl std::fmt::Display for ResumeSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.resume",
+            "{}.v1.session.{}.agent.resume",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

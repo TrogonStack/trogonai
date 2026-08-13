@@ -8,31 +8,18 @@ fn sid(s: &str) -> AcpSessionId {
     AcpSessionId::new(s).expect("test session id")
 }
 
-fn rid(s: &str) -> ReqId {
-    ReqId::from_test(s)
-}
-
 #[test]
 fn prompt_notifications_consumer_filter() {
-    let config = prompt_notifications_consumer(&p("acp"), &sid("sess-1"), &rid("req-abc"));
-    assert_eq!(config.filter_subject, "acp.session.sess-1.agent.update.req-abc");
+    let config = prompt_notifications_consumer(&p("acp"), &sid("sess-1"));
+    assert_eq!(config.filter_subject, "acp.v1.session.sess-1.agent.update");
 }
 
 #[test]
-fn prompt_notifications_consumer_delivers_all() {
-    let config = prompt_notifications_consumer(&p("acp"), &sid("s1"), &rid("r1"));
-    assert_eq!(config.deliver_policy, DeliverPolicy::All);
+fn prompt_notifications_consumer_delivers_new() {
+    let config = prompt_notifications_consumer(&p("acp"), &sid("s1"));
+    assert_eq!(config.deliver_policy, DeliverPolicy::New);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
     assert_eq!(config.replay_policy, ReplayPolicy::Instant);
-}
-
-#[test]
-fn prompt_response_consumer_filter() {
-    let config = prompt_response_consumer(&p("acp"), &sid("sess-1"), &rid("req-abc"));
-    assert_eq!(
-        config.filter_subject,
-        "acp.session.sess-1.agent.prompt.response.req-abc"
-    );
 }
 
 #[test]
@@ -50,26 +37,37 @@ fn commands_observer_no_filter() {
 
 #[test]
 fn response_consumer_filter() {
-    let config = response_consumer(&p("acp"), &sid("sess-1"), &rid("req-abc"));
-    assert_eq!(config.filter_subject, "acp.session.sess-1.agent.response.req-abc");
+    let config = response_consumer(&p("acp"), &sid("sess-1"));
+    assert_eq!(config.filter_subject, "acp.v1.session.sess-1.agent.response");
 }
 
 #[test]
-fn response_consumer_delivers_all() {
-    let config = response_consumer(&p("acp"), &sid("s1"), &rid("r1"));
-    assert_eq!(config.deliver_policy, DeliverPolicy::All);
+fn response_consumer_delivers_new() {
+    let config = response_consumer(&p("acp"), &sid("s1"));
+    assert_eq!(config.deliver_policy, DeliverPolicy::New);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
     assert_eq!(config.replay_policy, ReplayPolicy::Instant);
 }
 
 #[test]
 fn response_consumer_custom_prefix() {
-    let config = response_consumer(&p("myapp"), &sid("s1"), &rid("r1"));
-    assert_eq!(config.filter_subject, "myapp.session.s1.agent.response.r1");
+    let config = response_consumer(&p("myapp"), &sid("s1"));
+    assert_eq!(config.filter_subject, "myapp.v1.session.s1.agent.response");
 }
 
 #[test]
-fn custom_prefix_in_consumers() {
-    let config = prompt_response_consumer(&p("myapp"), &sid("s1"), &rid("r1"));
-    assert_eq!(config.filter_subject, "myapp.session.s1.agent.prompt.response.r1");
+fn consumer_filters_carry_no_request_id() {
+    let p = p("acp");
+    let s = sid("sess-1");
+    for filter in [
+        response_consumer(&p, &s).filter_subject,
+        prompt_notifications_consumer(&p, &s).filter_subject,
+    ] {
+        assert!(
+            !filter
+                .split('.')
+                .any(trogon_nats::subject_conformance::looks_like_request_id),
+            "{filter}"
+        );
+    }
 }

@@ -1,6 +1,6 @@
 //! NATS-safe extension method name value object.
 //!
-//! Method names are embedded in subjects: `{prefix}.agent.ext.{method}`.
+//! Method names are embedded in subjects: `{prefix}.v1.global.agent.ext.{method}`.
 //! Validation follows [NATS subject naming](https://docs.nats.io/nats-concepts/subjects#characters-allowed-and-recommended-for-subject-names):
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `vendor.operation`) but rejects
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.

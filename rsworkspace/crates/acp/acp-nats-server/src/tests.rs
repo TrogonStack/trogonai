@@ -18,6 +18,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
 use trogon_nats::AdvancedMockNatsClient;
 
+/// Wrap an agent result in the canonical JSON-RPC envelope the NATS leg now
+/// carries (ADR#0056). The mock replies to every id with the same body, and the
+/// ACP client ignores the response id, so a fixed id is enough here.
+fn canonical_result(result: &str) -> bytes::Bytes {
+    format!(r#"{{"jsonrpc":"2.0","id":1,"result":{result}}}"#).into()
+}
+
 #[derive(Clone)]
 struct MockJs {
     publisher: trogon_nats::jetstream::MockJetStreamPublisher,
@@ -194,7 +201,7 @@ async fn test_websocket_connection_lifecycle() {
 
     // Setup mock response for NATS
     let nats_response = r#"{"agentCapabilities": {"loadSession": false, "mcpCapabilities": {"http": false, "sse": false}, "promptCapabilities": {"audio": false, "embeddedContext": false, "image": false}, "sessionCapabilities": {}}, "authMethods": [], "protocolVersion": 0}"#;
-    nats_mock.set_response("acp.agent.initialize", nats_response.into());
+    nats_mock.set_response("acp.v1.global.agent.initialize", canonical_result(nats_response));
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
 
@@ -267,10 +274,8 @@ async fn streamable_http_initialize_returns_connection_id_and_json_response() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let response = app
@@ -315,11 +320,12 @@ async fn streamable_http_session_new_returns_accepted_and_get_stream_event() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
-    nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+    nats_mock.set_response(
+        "acp.v1.global.agent.session.new",
+        canonical_result(r#"{"sessionId":"test-session-1"}"#),
+    );
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
@@ -383,11 +389,9 @@ async fn streamable_http_session_load_uses_request_session_id_header() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
-    nats_mock.set_response("acp.session.test-session-1.agent.load", "{}".into());
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+    nats_mock.set_response("acp.v1.session.test-session-1.agent.load", canonical_result("{}"));
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
@@ -455,10 +459,8 @@ async fn streamable_http_session_load_falls_back_to_the_params_session_id() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -512,10 +514,8 @@ async fn streamable_http_session_load_returns_accepted_before_backend_completes(
     let control = nats_mock.clone();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -703,10 +703,8 @@ async fn streamable_http_delete_terminates_initialized_connection() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -750,10 +748,8 @@ async fn streamable_http_forwards_an_unknown_session_scoped_notification() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -806,10 +802,8 @@ async fn streamable_http_forwards_an_unknown_session_scoped_post() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -863,10 +857,8 @@ async fn streamable_http_rejects_mismatched_protocol_version_after_initialize() 
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_test_app(nats_mock);
     let initialize = app
@@ -916,11 +908,12 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
     let nats_mock = AdvancedMockNatsClient::new();
     let notification_tx = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
-    nats_mock.set_response("acp.agent.session.new", r#"{"sessionId":"test-session-1"}"#.into());
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
+    nats_mock.set_response(
+        "acp.v1.global.agent.session.new",
+        canonical_result(r#"{"sessionId":"test-session-1"}"#),
+    );
 
     let (addr, shutdown_tx, server_task) = start_test_server(nats_mock).await;
     let client = reqwest::Client::builder().build().unwrap();
@@ -1000,10 +993,15 @@ async fn streamable_http_get_broadcasts_connection_stream_updates_to_all_active_
         session_id.clone(),
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("fanout"))),
     );
-    let payload = serde_json::to_vec(&notification).unwrap();
+    let payload = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": serde_json::to_value(&notification).unwrap(),
+    }))
+    .unwrap();
     notification_tx
         .unbounded_send(async_nats::Message {
-            subject: format!("acp.session.{}.client.session.update", session_id).into(),
+            subject: format!("acp.v1.session.{}.client.session.update", session_id).into(),
             reply: None,
             payload: payload.clone().into(),
             headers: None,
@@ -1057,10 +1055,8 @@ async fn upstream_http_transport_round_trips_initialize_through_the_bridge() {
     let nats_mock = AdvancedMockNatsClient::new();
     let _injector = nats_mock.inject_messages();
     nats_mock.set_response(
-            "acp.agent.initialize",
-            r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#
-                .into(),
-        );
+            "acp.v1.global.agent.initialize",
+            canonical_result(r#"{"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":false,"image":false},"sessionCapabilities":{}},"authMethods":[],"protocolVersion":0}"#));
 
     let (app, shutdown_tx) = build_upstream_app(nats_mock);
 

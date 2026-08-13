@@ -18,7 +18,7 @@ impl std::fmt::Display for TerminalWaitForExitSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.terminal.wait_for_exit",
+            "{}.v1.session.{}.client.terminal.wait_for_exit",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

@@ -59,9 +59,9 @@ impl IssuedPermissions {
     #[allow(clippy::expect_used)]
     pub fn default_for_caller(caller_id: &CallerId) -> Self {
         let inbox = format!("_INBOX.{}.>", caller_id.as_str());
-        let push = format!("a2a.push.{}.>", caller_id.as_str());
+        let push = format!("a2a.v1.push.{}.>", caller_id.as_str());
         Self {
-            publish_allow: vec![SubjectPattern::new("a2a.gateway.>").expect("static literal")],
+            publish_allow: vec![SubjectPattern::new("a2a.v1.gateway.>").expect("static literal")],
             subscribe_allow: vec![
                 SubjectPattern::new(inbox).expect("derived from validated caller_id"),
                 SubjectPattern::new(push).expect("derived from validated caller_id"),

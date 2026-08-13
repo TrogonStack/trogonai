@@ -7,6 +7,21 @@ date: 2026-07-09
 
 # ADR#0022: Canonical ACP Method Vocabulary in the NATS Layer (Rejected)
 
+> **Premise invalidated; partially reversed by
+> [ADR#0056](./0056-canonical-jsonrpc-bodies-over-nats.md) (draft).**
+> This ADR's first rejection premise — that the content-mode codec never
+> serializes the method, so there is nothing on the NATS wire to make
+> self-describing — no longer holds. [ADR#0056](0056-canonical-jsonrpc-bodies-over-nats.md) puts the complete JSON-RPC
+> envelope, `method` included, in the body. Upon its acceptance the **body** must
+> carry the spec method (`session/prompt`); the **subject token** vocabulary
+> defended here is retained, reclassified as a projection of the method rather
+> than a substitute for it
+> ([ADR#0055](./0055-nats-subject-design-jsonrpc-bindings.md), Method-to-terminal
+> mapping). [ADR#0056](0056-canonical-jsonrpc-bodies-over-nats.md) argues the byte-level and operational case this ADR's
+> Consequences section demanded of any reversal. Status stays `rejected`: the
+> 2026-07 proposal was rejected on the evidence then available, and this document
+> remains the record of that.
+
 ## Context
 
 A change was proposed (and briefly implemented) to rename the [NATS](../glossary/nats) layer's

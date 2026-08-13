@@ -18,7 +18,7 @@ impl std::fmt::Display for PromptSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.prompt",
+            "{}.v1.session.{}.agent.prompt",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

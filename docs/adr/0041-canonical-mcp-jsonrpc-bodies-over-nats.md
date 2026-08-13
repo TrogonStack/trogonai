@@ -7,6 +7,12 @@ date: 2026-07-29
 
 # ADR#0041: Canonical MCP JSON-RPC Bodies over NATS
 
+> **Absorption pending.** [ADR#0056](./0056-canonical-jsonrpc-bodies-over-nats.md)
+> (draft) generalizes this ADR's canonical-body decision from MCP-only to MCP,
+> ACP, and A2A, and carries forward this ADR's MCP allowlist and `_meta` rules.
+> Upon acceptance of [ADR#0056](0056-canonical-jsonrpc-bodies-over-nats.md), this ADR's status becomes `superseded`. Until
+> then, this document remains the draft MCP-scoped proposal.
+
 ## Context
 
 [ADR#0011](./0011-jsonrpc-over-nats-binding.md) defines a binary content-mode
@@ -115,6 +121,7 @@ the two wire modes explicitly so selecting one is deliberate.
 
 - [ADR#0011: JSON-RPC over NATS Binding](./0011-jsonrpc-over-nats-binding.md)
 - [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
+- [ADR#0056: Canonical JSON-RPC Bodies over NATS](./0056-canonical-jsonrpc-bodies-over-nats.md)
 - [MCP draft transport model](https://modelcontextprotocol.io/specification/draft/basic/transports)
 - [SEP-2243: HTTP Header Standardization](https://modelcontextprotocol.io/seps/2243-http-standardization)
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)

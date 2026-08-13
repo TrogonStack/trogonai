@@ -21,7 +21,7 @@ impl std::fmt::Display for TasksCancelSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.agents.{}.tasks.cancel",
+            "{}.v1.agents.{}.tasks.cancel",
             self.prefix.as_str(),
             self.agent_id.as_str()
         )

@@ -48,17 +48,26 @@ pub enum StreamingSpawnIntent {
     Spawn(StreamingIngressKind),
 }
 
+/// `events_last_seq` is the events stream head read before the forward, and is
+/// only consulted for `message.stream`: that consumer filters every task, so
+/// without a start anchor it would replay the whole retained history. `None`
+/// means the head could not be read, and a pump with no safe start position is
+/// not worth spawning.
 #[must_use]
 pub fn classify_streaming_spawn(
     method_dots: &str,
     headers: &async_nats::HeaderMap,
     payload: &[u8],
+    events_last_seq: Option<u64>,
 ) -> StreamingSpawnIntent {
     let Some(req_id) = req_id_from_headers_or_payload(headers, payload) else {
         return StreamingSpawnIntent::NotStreaming;
     };
     match method_dots {
-        MESSAGE_STREAM_METHOD_DOTS => StreamingSpawnIntent::Spawn(StreamingIngressKind::MessageStream { req_id }),
+        MESSAGE_STREAM_METHOD_DOTS => match events_last_seq {
+            Some(last_seq) => StreamingSpawnIntent::Spawn(StreamingIngressKind::MessageStream { req_id, last_seq }),
+            None => StreamingSpawnIntent::NotStreaming,
+        },
         TASKS_RESUBSCRIBE_METHOD_DOTS => {
             let params = json_rpc_params(payload);
             let Some(task_id) = task_id_from_resubscribe_params(&params) else {
@@ -127,8 +136,10 @@ pub fn maybe_spawn_streaming_ingress_pump(
     payload: &[u8],
     reply: async_nats::Subject,
     caller_key: CallerKey,
+    events_last_seq: Option<u64>,
 ) -> MaybeStreamingSpawn {
-    let StreamingSpawnIntent::Spawn(kind) = classify_streaming_spawn(method_dots, headers, payload) else {
+    let StreamingSpawnIntent::Spawn(kind) = classify_streaming_spawn(method_dots, headers, payload, events_last_seq)
+    else {
         return MaybeStreamingSpawn::NotStreaming;
     };
     let spawn = StreamingIngressSpawn {

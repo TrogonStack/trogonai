@@ -44,7 +44,7 @@ fn rule_id(s: &str) -> Tier1DeclarativeRuleId {
 }
 
 fn ingress_subject(agent: &str, method_dots: &str) -> String {
-    format!("a2a.gateway.{agent}.{method_dots}")
+    format!("a2a.v1.gateway.{agent}.{method_dots}")
 }
 
 #[test]
@@ -92,11 +92,6 @@ fn per_method_allowlist_denies_other_methods() {
 
 #[test]
 fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
-    // The declarative deny path encodes the -32803 JSON-RPC error
-    // code in the `Jsonrpc-Error-Code` header (jsonrpc-nats wire
-    // contract on main splits the code from the body), so the
-    // assertion below checks the header value via
-    // `ingress_error_response_wire` rather than the body shape.
     let gate = RealTier1DeclarativeGate::new(load_reference_bundle("per-method-allowlist.tier1.toml"));
     let payload = br#"{"jsonrpc":"2.0","id":"1","method":"tasks/cancel","params":{}}"#;
     let headers = async_nats::HeaderMap::new();
@@ -115,7 +110,13 @@ fn per_method_allowlist_deny_emits_policy_denied_response_shape() {
     )
     .expect("deny response");
     let denied_json: serde_json::Value = serde_json::from_slice(&denied_body).expect("deny json");
-    assert_eq!(denied_json["message"], "tier-1 declarative policy rejected envelope");
+    assert_eq!(denied_json["jsonrpc"], "2.0");
+    assert_eq!(denied_json["id"], "1");
+    assert_eq!(denied_json["error"]["code"], -32_803);
+    assert_eq!(
+        denied_json["error"]["message"],
+        "tier-1 declarative policy rejected envelope"
+    );
 
     let wire = ingress_error_response_wire(
         &headers,

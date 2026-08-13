@@ -18,7 +18,7 @@ impl std::fmt::Display for FsWriteTextFileSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.fs.write_text_file",
+            "{}.v1.session.{}.client.fs.write_text_file",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

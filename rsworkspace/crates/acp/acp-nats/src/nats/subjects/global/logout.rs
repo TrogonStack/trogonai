@@ -12,7 +12,7 @@ impl LogoutSubject {
 
 impl std::fmt::Display for LogoutSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.logout", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.logout", self.prefix.as_str())
     }
 }
 

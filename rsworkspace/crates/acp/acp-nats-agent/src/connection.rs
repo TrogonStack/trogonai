@@ -2,8 +2,10 @@ use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
-use acp_nats::wire::{encode_agent_error, encode_success, response_id_from_request_headers};
-use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, PromptResponseSubject, ReqId, ResponseSubject};
+use acp_nats::wire::{
+    encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
+};
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, CancelNotification, CloseSessionRequest, DeleteSessionRequest, DisableProviderRequest,
     ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest, ListProvidersRequest, ListSessionsRequest,
@@ -247,51 +249,69 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
 ) -> Result<(), DispatchError> {
     match method {
         GlobalAgentMethod::Initialize => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: InitializeRequest| {
-                agent.initialize(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: InitializeRequest| agent.initialize(req),
+            )
             .await
         }
         GlobalAgentMethod::Authenticate => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: AuthenticateRequest| {
-                agent.authenticate(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: AuthenticateRequest| agent.authenticate(req),
+            )
             .await
         }
         GlobalAgentMethod::Logout => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: LogoutRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: LogoutRequest| {
                 agent.logout(req)
             })
             .await
         }
         GlobalAgentMethod::SessionNew => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: NewSessionRequest| {
-                agent.new_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: NewSessionRequest| agent.new_session(req),
+            )
             .await
         }
         GlobalAgentMethod::SessionList => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ListSessionsRequest| {
-                agent.list_sessions(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: ListSessionsRequest| agent.list_sessions(req),
+            )
             .await
         }
         GlobalAgentMethod::ProvidersList => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ListProvidersRequest| {
-                agent.list_providers(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: ListProvidersRequest| agent.list_providers(req),
+            )
             .await
         }
         GlobalAgentMethod::ProvidersSet => {
-            handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: SetProviderRequest| {
-                agent.set_provider(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: SetProviderRequest| agent.set_provider(req),
+            )
             .await
         }
         GlobalAgentMethod::ProvidersDisable => {
             handle_jsonrpc_request(
                 msg,
-                method.wire_method().as_str(),
+                method.protocol_method().as_str(),
                 nats,
                 |req: DisableProviderRequest| agent.disable_provider(req),
             )
@@ -299,7 +319,7 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
         }
         GlobalAgentMethod::Ext(_) => {
             if msg.reply.is_some() {
-                handle_jsonrpc_request(msg, method.wire_method().as_str(), nats, |req: ExtRequest| {
+                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: ExtRequest| {
                     agent.ext_method(req)
                 })
                 .await
@@ -318,49 +338,58 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
 ) -> Result<(), DispatchError> {
     match method {
         SessionAgentMethod::Load => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: LoadSessionRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
                 agent.load_session(req)
             })
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: PromptRequest| agent.prompt(req)).await
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: PromptRequest| {
+                agent.prompt(req)
+            })
+            .await
         }
         SessionAgentMethod::Cancel => {
-            handle_wire_notification(msg, method.wire_method(), |req: CancelNotification| agent.cancel(req)).await
+            handle_wire_notification(msg, method.protocol_method(), |req: CancelNotification| {
+                agent.cancel(req)
+            })
+            .await
         }
         SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionModeRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
                 agent.set_session_mode(req)
             })
             .await
         }
         SessionAgentMethod::SetConfigOption => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: SetSessionConfigOptionRequest| {
-                agent.set_session_config_option(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+            )
             .await
         }
         SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: ForkSessionRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
                 agent.fork_session(req)
             })
             .await
         }
         SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: ResumeSessionRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
                 agent.resume_session(req)
             })
             .await
         }
         SessionAgentMethod::Close => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: CloseSessionRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
                 agent.close_session(req)
             })
             .await
         }
         SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(msg, method.wire_method(), nats, |req: DeleteSessionRequest| {
+            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
                 agent.delete_session(req)
             })
             .await
@@ -603,21 +632,13 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
         }
     };
 
-    let req_id = js_msg
-        .message()
-        .headers
-        .as_ref()
-        .and_then(|h| h.get(trogon_nats::REQ_ID_HEADER))
-        .map(|v| ReqId::from_header(v.as_str()));
+    let req_id = js_msg.message().headers.as_ref().and_then(req_id_from_request_headers);
 
     let reply_subject: Option<String> = match (&req_id, &method) {
-        (Some(rid), SessionAgentMethod::Prompt) => {
-            Some(PromptResponseSubject::new(prefix, &session_id, rid).to_string())
-        }
         (_, SessionAgentMethod::Cancel) => None,
-        (Some(rid), _) => Some(ResponseSubject::new(prefix, &session_id, rid).to_string()),
+        (Some(_), _) => Some(ResponseSubject::new(prefix, &session_id).to_string()),
         (None, _) => {
-            warn!(subject, "JetStream message missing X-Req-Id header");
+            warn!(subject, "JetStream message missing Jsonrpc-Id header");
             None
         }
     };
@@ -636,22 +657,29 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
 
     let result = match method {
         SessionAgentMethod::Load => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: LoadSessionRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
                 agent.load_session(req)
             })
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request_with_keepalive(&msg, method.wire_method(), nats, &js_msg, |req: PromptRequest| {
-                agent.prompt(req)
-            })
+            handle_jsonrpc_request_with_keepalive(
+                &msg,
+                method.protocol_method(),
+                nats,
+                &js_msg,
+                |req: PromptRequest| agent.prompt(req),
+            )
             .await
         }
         SessionAgentMethod::Cancel => {
-            handle_wire_notification(&msg, method.wire_method(), |req: CancelNotification| agent.cancel(req)).await
+            handle_wire_notification(&msg, method.protocol_method(), |req: CancelNotification| {
+                agent.cancel(req)
+            })
+            .await
         }
         SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: SetSessionModeRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
                 agent.set_session_mode(req)
             })
             .await
@@ -659,32 +687,32 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
         SessionAgentMethod::SetConfigOption => {
             handle_jsonrpc_request(
                 &msg,
-                method.wire_method(),
+                method.protocol_method(),
                 nats,
                 |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
             )
             .await
         }
         SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: ForkSessionRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
                 agent.fork_session(req)
             })
             .await
         }
         SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: ResumeSessionRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
                 agent.resume_session(req)
             })
             .await
         }
         SessionAgentMethod::Close => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: CloseSessionRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
                 agent.close_session(req)
             })
             .await
         }
         SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(&msg, method.wire_method(), nats, |req: DeleteSessionRequest| {
+            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
                 agent.delete_session(req)
             })
             .await

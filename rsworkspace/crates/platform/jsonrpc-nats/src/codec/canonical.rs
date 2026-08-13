@@ -5,17 +5,17 @@ use serde_json::Value;
 use crate::constants::{HEADER_ERROR_CODE, HEADER_ID};
 use crate::direction::Direction;
 use crate::error::CodecError;
-use crate::id::{ResponseId, decode_response_id_literal};
+use crate::id::{ResponseId, decode_response_id_literal, encode_id_literal, encode_response_id_literal};
 use crate::message::Message;
 
 use super::{Encoded, from_json_value, to_json_value};
 
 /// Encode a complete canonical JSON-RPC 2.0 object in the NATS body.
 ///
-/// Unlike the legacy ADR#0011 content-mode codec, this encoding does not emit
-/// authoritative `Jsonrpc-*` headers. Routing projections are derived by the
-/// protocol adapter from the same message and validated during decoding.
-pub fn encode_canonical(message: &Message) -> Result<Encoded, CodecError> {
+/// The body is authoritative. `Jsonrpc-Id` and `Jsonrpc-Error-Code` are emitted
+/// as non-authoritative projections of the body for cheap routing and metrics
+/// (ADR#0056). Decoders reject a present header that disagrees with the body.
+pub fn encode(message: &Message) -> Result<Encoded, CodecError> {
     let mut value = to_json_value(message);
     // `Message` cannot distinguish an absent `params` from an explicit null, so
     // `to_json_value` renders an omitted `params` as `"params": null`. Canonical
@@ -26,52 +26,80 @@ pub fn encode_canonical(message: &Message) -> Result<Encoded, CodecError> {
     {
         object.remove("params");
     }
-    encode_canonical_value(&value)
+    let body = serde_json::to_vec(&value).map_err(CodecError::Serialize)?;
+    Ok(Encoded {
+        headers: derived_projection_headers(message),
+        body: Bytes::from(body),
+    })
 }
 
 /// Encode a complete canonical JSON-RPC 2.0 value without normalizing its shape.
 ///
 /// The value is parsed for protocol validation, but the original value is the
 /// one serialized. This preserves absent optional members and extensions.
-pub fn encode_canonical_value(value: &Value) -> Result<Encoded, CodecError> {
-    parse_canonical_value(value)?;
+/// Derived `Jsonrpc-*` headers are projected from the parsed message.
+pub fn encode_value(value: &Value) -> Result<Encoded, CodecError> {
+    let message = parse_canonical_value(value)?;
     let body = serde_json::to_vec(value).map_err(CodecError::Serialize)?;
     Ok(Encoded {
-        headers: HeaderMap::new(),
+        headers: derived_projection_headers(&message),
         body: Bytes::from(body),
     })
+}
+
+/// Non-authoritative projections of the body for routing and metrics.
+fn derived_projection_headers(message: &Message) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    match message {
+        Message::Request { id, .. } => {
+            headers.insert(HEADER_ID, encode_id_literal(id));
+        }
+        Message::Notification { .. } => {}
+        Message::Success { id, .. } => {
+            if let Some(literal) = encode_response_id_literal(id) {
+                headers.insert(HEADER_ID, literal);
+            }
+        }
+        Message::Error { id, code, .. } => {
+            if let Some(literal) = encode_response_id_literal(id) {
+                headers.insert(HEADER_ID, literal);
+            }
+            headers.insert(HEADER_ERROR_CODE, code.to_string());
+        }
+    }
+    headers
 }
 
 /// Decode a canonical JSON-RPC 2.0 body and validate its NATS projections.
 ///
 /// `projected_method` is required for request-direction messages because the
-/// NATS subject mirrors the JSON-RPC method for routing. Legacy `Jsonrpc-Id`
+/// NATS subject mirrors the JSON-RPC method for routing. Derived `Jsonrpc-Id`
 /// and `Jsonrpc-Error-Code` headers are optional, but when present they must
 /// agree with the canonical body.
-pub fn decode_canonical(
+pub fn decode(
     direction: Direction,
     projected_method: Option<&str>,
     headers: &HeaderMap,
     body: &[u8],
 ) -> Result<Message, CodecError> {
-    let (_, message) = decode_canonical_parts(direction, projected_method, headers, body)?;
+    let (_, message) = decode_parts(direction, projected_method, headers, body)?;
     Ok(message)
 }
 
 /// Decode and validate a canonical JSON-RPC 2.0 body without normalizing it.
 ///
 /// The returned value has exactly the member shape carried in the body.
-pub fn decode_canonical_value(
+pub fn decode_value(
     direction: Direction,
     projected_method: Option<&str>,
     headers: &HeaderMap,
     body: &[u8],
 ) -> Result<Value, CodecError> {
-    let (value, _) = decode_canonical_parts(direction, projected_method, headers, body)?;
+    let (value, _) = decode_parts(direction, projected_method, headers, body)?;
     Ok(value)
 }
 
-fn decode_canonical_parts(
+fn decode_parts(
     direction: Direction,
     projected_method: Option<&str>,
     headers: &HeaderMap,

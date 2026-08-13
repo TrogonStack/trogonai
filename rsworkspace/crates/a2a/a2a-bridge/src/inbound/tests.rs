@@ -17,6 +17,40 @@ use crate::identity::BridgeUserJwt;
 
 use super::*;
 
+/// Bootstrap replies are built from the SDK response type rather than hand-written
+/// JSON: `SendMessageResponse` nests the payload under a variant key, and a fixture
+/// that spells the shape by hand can drift from the wire without failing.
+fn bootstrap_reply(response: a2a::types::SendMessageResponse) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": "corr-1",
+        "result": serde_json::to_value(response).unwrap(),
+    }))
+    .unwrap()
+}
+
+fn bootstrap_task(task_id: &str) -> Vec<u8> {
+    bootstrap_reply(a2a::types::SendMessageResponse::Task(a2a::types::Task {
+        id: task_id.to_string(),
+        context_id: String::new(),
+        status: a2a::types::TaskStatus {
+            state: a2a::types::TaskState::Working,
+            message: None,
+            timestamp: None,
+        },
+        artifacts: None,
+        history: None,
+        metadata: None,
+    }))
+}
+
+fn bootstrap_bare_message() -> Vec<u8> {
+    bootstrap_reply(a2a::types::SendMessageResponse::Message(a2a::types::Message::new(
+        a2a::types::Role::Agent,
+        vec![a2a::types::Part::text("done")],
+    )))
+}
+
 #[test]
 fn default_a2a_prefix_constructs() {
     assert_eq!(default_a2a_prefix().as_str(), "a2a");
@@ -33,15 +67,7 @@ fn build_gateway_subject_formats_expected_subject() {
     let prefix = default_a2a_prefix();
     assert_eq!(
         build_gateway_subject(&prefix, "planner", "message/send"),
-        "a2a.gateway.planner.message.send"
-    );
-}
-
-#[test]
-fn task_events_wild_subject_includes_prefix_and_task_id() {
-    assert_eq!(
-        task_events_wild_subject(&default_a2a_prefix(), "task-1"),
-        "a2a.task.task-1.events.>"
+        "a2a.v1.gateway.planner.message.send"
     );
 }
 
@@ -86,19 +112,79 @@ fn gateway_reply_is_jsonrpc_error_detects_error_envelope() {
 
 #[test]
 fn sse_plan_builds_message_stream_and_resubscribe_plans() {
-    let req_id = ReqId::from_header("corr-1");
     let stream_body = json!({"method": "message/stream", "params": {}});
-    assert!(matches!(
-        sse_plan("message/stream", &stream_body, req_id.clone()).unwrap(),
-        SseConsumePlan::MessageStreamBootstrap { .. }
-    ));
+    let bootstrap = bootstrap_task("task-7");
+    let plan = sse_plan("message/stream", &stream_body, &bootstrap, &ReqId::from_header("req-9"))
+        .unwrap()
+        .expect("a task means a consumer");
+    match plan {
+        SseConsumePlan::MessageStreamBootstrap { task_id, req_id } => {
+            assert_eq!(task_id.as_str(), "task-7");
+            assert_eq!(req_id.as_str(), "req-9");
+        }
+        other => panic!("expected a bootstrap plan, got {other:?}"),
+    }
 
     let resub_body = json!({
         "method": "tasks/resubscribe",
         "params": { "taskId": "task-1", "lastSequence": 3 }
     });
-    let plan = sse_plan("tasks/resubscribe", &resub_body, req_id).unwrap();
-    assert!(matches!(plan, SseConsumePlan::TasksResubscribe { last_seq: 3, .. }));
+    let plan = sse_plan("tasks/resubscribe", &resub_body, b"", &ReqId::from_header("req-9")).unwrap();
+    assert!(matches!(
+        plan,
+        Some(SseConsumePlan::TasksResubscribe { last_seq: 3, .. })
+    ));
+}
+
+#[test]
+fn plan_consumer_demuxes_a_live_subscription_but_not_a_resume() {
+    let prefix = default_a2a_prefix();
+    let task_id = A2aTaskId::new("task-7").unwrap();
+
+    let (_cfg, demux) = SseConsumePlan::MessageStreamBootstrap {
+        task_id: task_id.clone(),
+        req_id: ReqId::from_header("req-9"),
+    }
+    .consumer(&prefix);
+    assert_eq!(demux.map(|r| r.as_str().to_owned()), Some("req-9".to_owned()));
+
+    let (_cfg, demux) = SseConsumePlan::TasksResubscribe { task_id, last_seq: 4 }.consumer(&prefix);
+    assert!(demux.is_none(), "a resume replays events of the original request");
+}
+
+#[test]
+fn event_forwards_only_when_it_carries_the_subscriptions_req_id() {
+    let req_id = ReqId::from_header("req-9");
+    let mut mine = async_nats::HeaderMap::new();
+    mine.insert(REQ_ID_HEADER, "req-9");
+    let mut theirs = async_nats::HeaderMap::new();
+    theirs.insert(REQ_ID_HEADER, "req-other");
+
+    assert!(event_forwards_to_caller(Some(&req_id), Some(&mine)));
+    assert!(!event_forwards_to_caller(Some(&req_id), Some(&theirs)));
+    assert!(!event_forwards_to_caller(Some(&req_id), None));
+    assert!(event_forwards_to_caller(None, Some(&theirs)));
+}
+
+#[test]
+fn sse_plan_returns_no_consumer_when_the_reply_carries_no_task() {
+    // `message/stream` may answer with a bare `Message`; no task means no
+    // events, so opening a consumer would just leak one.
+    let body = json!({"method": "message/stream", "params": {}});
+    let bootstrap = bootstrap_bare_message();
+    assert!(
+        sse_plan("message/stream", &body, &bootstrap, &ReqId::from_header("req-9"))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn sse_plan_rejects_a_task_id_that_is_not_a_nats_token() {
+    let body = json!({"method": "message/stream", "params": {}});
+    let bootstrap = bootstrap_task("task.*");
+    let err = sse_plan("message/stream", &body, &bootstrap, &ReqId::from_header("req-9")).unwrap_err();
+    assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 
 #[test]
@@ -208,7 +294,7 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         publisher.peek_subject().as_deref(),
-        Some("a2a.gateway.planner.tasks.get")
+        Some("a2a.v1.gateway.planner.tasks.get")
     );
 }
 
@@ -244,7 +330,7 @@ fn resub_task_and_seq_defaults_last_seq_to_zero() {
 
 #[test]
 fn sse_plan_rejects_unsupported_streaming_method() {
-    let err = sse_plan("tasks/subscribe", &json!({}), ReqId::from_header("corr")).unwrap_err();
+    let err = sse_plan("tasks/subscribe", &json!({}), b"", &ReqId::from_header("req-9")).unwrap_err();
     assert!(matches!(err, BridgeError::StreamingParams(_)));
 }
 

@@ -1,7 +1,10 @@
 use crate::a2a_prefix::A2aPrefix;
 
-/// `{prefix}.tasks.*.events.*` — global JetStream filter subject covering every task's
-/// events. Used by the JetStream `EVENTS` stream config and aggregation consumers.
+/// `{prefix}.v1.tasks.*.events`: filter subject covering every task's events.
+///
+/// The source of the `EVENTS` stream, and the filter for consumers that cannot narrow
+/// to one task: the gateway durable, which serves every caller, and the gateway's
+/// `message/stream` pump, which never sees the bootstrap reply that names the task.
 #[derive(Debug)]
 pub struct TaskAllEventsSubject {
     prefix: A2aPrefix,
@@ -15,7 +18,7 @@ impl TaskAllEventsSubject {
 
 impl std::fmt::Display for TaskAllEventsSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.tasks.*.events.*", self.prefix.as_str())
+        write!(f, "{}.v1.tasks.*.events", self.prefix.as_str())
     }
 }
 

@@ -33,17 +33,25 @@ impl A2aStream {
     pub fn subject_patterns(&self, prefix: &A2aPrefix) -> Vec<String> {
         let p = prefix.as_str();
         match self {
-            Self::Events => vec![format!("{p}.tasks.*.events.*")],
-            Self::PushDlq => vec![format!("{p}.push.dlq.*.*"), format!("{p}.push.dlq.mirror.*.*")],
+            Self::Events => vec![super::subscriptions::TaskAllEventsSubject::new(prefix).to_string()],
+            Self::PushDlq => vec![format!("{p}.v1.push.dlq.*.*"), format!("{p}.v1.push.dlq.mirror.*.*")],
         }
     }
 
+    /// `Limits`, not `Interest`.
+    ///
+    /// A subscriber only learns the `task_id` from the `message/stream` bootstrap
+    /// reply, so it cannot open its consumer until after the agent has started
+    /// publishing events. Under `Interest` an event published while no consumer
+    /// yet matches it is discarded immediately, which would lose the head of every
+    /// stream. `Limits` plus `max_age` retains it, which is also what makes
+    /// `tasks/resubscribe` able to resume after every earlier consumer has gone.
     pub fn events_config(prefix: &A2aPrefix, max_age: EventsStreamMaxAge) -> Config {
         Config {
             name: Self::Events.stream_name(prefix),
             subjects: Self::Events.subject_patterns(prefix),
             storage: StorageType::File,
-            retention: RetentionPolicy::Interest,
+            retention: RetentionPolicy::Limits,
             max_age: max_age.as_duration(),
             discard: DiscardPolicy::Old,
             ..Default::default()

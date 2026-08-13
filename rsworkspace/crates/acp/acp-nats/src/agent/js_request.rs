@@ -4,8 +4,7 @@ use futures::StreamExt;
 use jsonrpc_nats::RequestId;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use tokio::time::timeout;
-use trogon_nats::REQ_ID_HEADER;
+use tokio::time::timeout_at;
 use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
@@ -15,7 +14,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::req_id::ReqId;
-use crate::wire::{WireError, decode_response, encode_request};
+use crate::wire::{WireError, decode_response, encode_request, req_id_from_request_headers};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn js_request<J, Req, Res>(
@@ -35,7 +34,7 @@ where
     Res: DeserializeOwned,
 {
     let responses_stream = streams::responses_stream_name(prefix);
-    let resp_config = consumers::response_consumer(prefix, session_id, req_id);
+    let resp_config = consumers::response_consumer(prefix, session_id);
     let stream = js
         .get_stream(&responses_stream)
         .await
@@ -55,7 +54,6 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
 
     let mut headers = encoded.headers;
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     js.publish_with_headers(subject.to_string(), headers, encoded.body)
@@ -64,44 +62,60 @@ where
         .await
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
 
-    match timeout(operation_timeout, resp_messages.next()).await {
-        Ok(Some(Ok(js_msg))) => {
-            let message = js_msg.message();
-            let response_headers = message.headers.clone().unwrap_or_default();
-            match decode_response::<Res>(&response_headers, message.payload.as_ref()) {
-                Ok(Ok(response)) => {
+    let deadline = tokio::time::Instant::now() + operation_timeout;
+
+    loop {
+        match timeout_at(deadline, resp_messages.next()).await {
+            Ok(Some(Ok(js_msg))) => {
+                let message = js_msg.message();
+                let response_headers = message.headers.clone().unwrap_or_default();
+
+                if req_id_from_request_headers(&response_headers).as_ref() != Some(req_id) {
                     let _ = js_msg.ack().await;
-                    Ok(response)
+                    continue;
                 }
-                Ok(Err(agent_err)) => {
-                    let _ = js_msg.ack().await;
-                    Err(agent_err)
-                }
-                Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
-                    let _ = js_msg.ack_with(AckKind::Term).await;
-                    Err(Error::new(ErrorCode::InternalError.into(), "bad response payload"))
-                }
-                Err(e) => {
-                    let _ = js_msg.ack_with(AckKind::Term).await;
-                    Err(Error::new(
-                        ErrorCode::InternalError.into(),
-                        format!("decode response: {e}"),
-                    ))
-                }
+
+                return match decode_response::<Res>(&response_headers, message.payload.as_ref()) {
+                    Ok(Ok(response)) => {
+                        let _ = js_msg.ack().await;
+                        Ok(response)
+                    }
+                    Ok(Err(agent_err)) => {
+                        let _ = js_msg.ack().await;
+                        Err(agent_err)
+                    }
+                    Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
+                        let _ = js_msg.ack_with(AckKind::Term).await;
+                        Err(Error::new(ErrorCode::InternalError.into(), "bad response payload"))
+                    }
+                    Err(e) => {
+                        let _ = js_msg.ack_with(AckKind::Term).await;
+                        Err(Error::new(
+                            ErrorCode::InternalError.into(),
+                            format!("decode response: {e}"),
+                        ))
+                    }
+                };
+            }
+            Ok(Some(Err(e))) => {
+                return Err(Error::new(
+                    ErrorCode::InternalError.into(),
+                    format!("response consumer: {e}"),
+                ));
+            }
+            Ok(None) => {
+                return Err(Error::new(
+                    ErrorCode::InternalError.into(),
+                    "response stream closed unexpectedly",
+                ));
+            }
+            Err(_elapsed) => {
+                return Err(Error::new(
+                    ErrorCode::InternalError.into(),
+                    "request timed out waiting for runner",
+                ));
             }
         }
-        Ok(Some(Err(e))) => Err(Error::new(
-            ErrorCode::InternalError.into(),
-            format!("response consumer: {e}"),
-        )),
-        Ok(None) => Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "response stream closed unexpectedly",
-        )),
-        Err(_elapsed) => Err(Error::new(
-            ErrorCode::InternalError.into(),
-            "request timed out waiting for runner",
-        )),
     }
 }
 

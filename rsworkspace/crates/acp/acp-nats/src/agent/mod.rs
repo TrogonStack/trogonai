@@ -24,7 +24,6 @@ mod set_session_mode;
 pub(crate) mod test_support;
 
 pub use bridge::Bridge;
-pub use prompt::REQ_ID_HEADER;
 
 #[cfg(test)]
 mod tests;

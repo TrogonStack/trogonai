@@ -14,17 +14,17 @@ use crate::push::push_idempotency_key::PushIdempotencyKey;
 use crate::push::status_transition_id::StatusTransitionId;
 use crate::task_id::A2aTaskId;
 
-/// `{prefix}.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.push.dlq.*.*`.
+/// `{prefix}.v1.push.dlq.{caller_id}.{task_id}` — trailing tokens match the `A2A_PUSH_DLQ` stream filter `{prefix}.v1.push.dlq.*.*`.
 pub fn push_dlq_publish_subject(prefix: &A2aPrefix, caller_id: &CallerId, task_id: &A2aTaskId) -> String {
     format!(
-        "{}.push.dlq.{}.{}",
+        "{}.v1.push.dlq.{}.{}",
         prefix.as_str(),
         sanitize_subject_token(caller_id.as_str()),
         task_id.as_str()
     )
 }
 
-/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.push.dlq/v1`**).
+/// JSON envelope for terminal push delivery failures (`schema`: **`a2a.v1.push.dlq/v1`**).
 ///
 /// `idempotency_key` is deterministic: `{task_id}:{status_transition_id}:{target_url}`.
 #[derive(Serialize)]

@@ -18,7 +18,7 @@ impl std::fmt::Display for TerminalReleaseSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.client.terminal.release",
+            "{}.v1.session.{}.client.terminal.release",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

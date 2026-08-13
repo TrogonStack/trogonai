@@ -3,7 +3,7 @@ use a2a::types::{
     CancelTaskRequest, DeleteTaskPushNotificationConfigRequest, GetTaskPushNotificationConfigRequest, GetTaskRequest,
     ListTaskPushNotificationConfigsRequest, ListTasksRequest, SendMessageRequest, TaskPushNotificationConfig,
 };
-use a2a_nats::client::{A2aClient, ClientError};
+use a2a_nats::client::{A2aClient, ClientError, ValidatedRpc};
 use a2a_nats::task_id::A2aTaskId;
 use futures::StreamExt;
 use serde_json::Value;
@@ -12,7 +12,7 @@ use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::constants::{INVALID_PARAMS, METHOD_NOT_FOUND};
-use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, OutboundResponse, RpcId};
+use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, RpcId};
 
 fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
     let (code, message) = match &err {
@@ -44,6 +44,13 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Box<
             e.to_string(),
         )))
     })
+}
+
+fn forward_validated<T>(id: &RpcId, validated: ValidatedRpc<T>) -> OutboundFrame {
+    match validated.body_with_client_id(&id.to_json_value()) {
+        Ok(body) => OutboundFrame::RawBody(body),
+        Err(e) => OutboundFrame::Error(OutboundError::new(id.clone(), -32603, e.to_string())),
+    }
 }
 
 /// `method` is the JSON-RPC method this notification is associated with —
@@ -80,11 +87,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.message_send(&req).await {
-                Ok(resp) => {
-                    let result = serde_json::to_value(&resp).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.message_send_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -97,11 +101,10 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.message_stream(&req).await {
+            match client.message_stream_validated(&req).await {
                 Err(e) => client_err_to_frame(id, e),
                 Ok((bootstrap, mut stream)) => {
-                    let result = serde_json::to_value(&bootstrap).unwrap_or(Value::Null);
-                    let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
+                    let bootstrap_frame = forward_validated(&id, bootstrap);
                     // If the bootstrap response can't reach stdout there is no
                     // point pumping the JetStream loop — the caller never saw
                     // the opening `result` and would interpret subsequent
@@ -138,11 +141,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.tasks_get(&req).await {
-                Ok(task) => {
-                    let result = serde_json::to_value(&task).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.tasks_get_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -155,11 +155,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.tasks_list(&req).await {
-                Ok(resp) => {
-                    let result = serde_json::to_value(&resp).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.tasks_list_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -172,11 +169,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.tasks_cancel(&req).await {
-                Ok(task) => {
-                    let result = serde_json::to_value(&task).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.tasks_cancel_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -212,11 +206,10 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.tasks_resubscribe(&task_id, p.last_seq).await {
+            match client.tasks_resubscribe_validated(&task_id, p.last_seq).await {
                 Err(e) => client_err_to_frame(id, e),
                 Ok((snapshot, mut stream)) => {
-                    let result = serde_json::to_value(&snapshot).unwrap_or(Value::Null);
-                    let bootstrap_frame = OutboundFrame::Response(OutboundResponse::new(id.clone(), result));
+                    let bootstrap_frame = forward_validated(&id, snapshot);
                     // Same rationale as message/stream — without the snapshot
                     // landing on stdout, the caller has no anchor to attach
                     // the resubscribe notifications to.
@@ -251,11 +244,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.push_set(&req).await {
-                Ok(cfg) => {
-                    let result = serde_json::to_value(&cfg).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.push_set_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -268,11 +258,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.push_get(&req).await {
-                Ok(cfg) => {
-                    let result = serde_json::to_value(&cfg).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.push_get_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -285,11 +272,8 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.push_list(&req).await {
-                Ok(resp) => {
-                    let result = serde_json::to_value(&resp).unwrap_or(Value::Null);
-                    OutboundFrame::Response(OutboundResponse::new(id, result))
-                }
+            match client.push_list_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
@@ -302,17 +286,14 @@ pub async fn dispatch_request<N, J>(
                     return;
                 }
             };
-            match client.push_delete(&req).await {
-                Ok(()) => OutboundFrame::Response(OutboundResponse::new(id, Value::Null)),
+            match client.push_delete_validated(&req).await {
+                Ok(validated) => forward_validated(&id, validated),
                 Err(e) => client_err_to_frame(id, e),
             }
         }
 
-        "agent/getAuthenticatedExtendedCard" => match client.agent_card().await {
-            Ok(card) => {
-                let result = serde_json::to_value(&card).unwrap_or(Value::Null);
-                OutboundFrame::Response(OutboundResponse::new(id, result))
-            }
+        "agent/getAuthenticatedExtendedCard" => match client.agent_card_validated().await {
+            Ok(validated) => forward_validated(&id, validated),
             Err(e) => client_err_to_frame(id, e),
         },
 
@@ -328,9 +309,9 @@ pub async fn dispatch_request<N, J>(
 
 fn make_with_id(frame: OutboundFrame, id: &RpcId) -> OutboundFrame {
     match frame {
-        OutboundFrame::Error(mut e) => {
-            e.id = id.clone();
-            OutboundFrame::Error(e)
+        OutboundFrame::Error(mut err) => {
+            err.id = id.clone();
+            OutboundFrame::Error(err)
         }
         other => other,
     }

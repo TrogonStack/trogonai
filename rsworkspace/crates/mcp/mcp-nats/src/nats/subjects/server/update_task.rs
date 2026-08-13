@@ -17,7 +17,7 @@ impl std::fmt::Display for UpdateTaskSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.server.{}.tasks.update",
+            "{}.v1.server.{}.tasks.update",
             self.prefix.as_str(),
             self.server_id.as_str()
         )

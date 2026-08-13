@@ -29,11 +29,13 @@ pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(7200);
 pub const DEFAULT_MAX_CONCURRENT_CLIENT_TASKS: usize = 256;
 
 /// NATS message header carrying the [`crate::ReqId`] across the request/reply boundary.
-pub const REQ_ID_HEADER: &str = "X-Req-Id";
+///
+/// Defined once in `trogon-nats` (ADR#0013 / RFC 6648 `Trogon-` prefix).
+pub use trogon_nats::REQ_ID_HEADER;
 
 /// Optional correlate external caller identity on gateway ingress (`a2a-gateway` records it on spans /
 /// audits). **`a2a-bridge`** should copy HTTP header [`GATEWAY_CALLER_ID_HTTP`] into this NATS header when
-/// publishing to `{prefix}.gateway.>`.
+/// publishing to `{prefix}.v1.gateway.>`.
 ///
 /// Stable wire token (case-insensitive matching on ingress); prefer `GatewayCallerId` casing in observability prose.
 pub const GATEWAY_CALLER_ID_HEADER: &str = "X-A2a-Caller-Id";
@@ -52,7 +54,7 @@ pub const GATEWAY_PRINCIPAL_HEADER: &str = "X-A2a-Spicedb-Principal";
 /// [`crate::push::JetStreamPublishPushDispatcher`].
 pub const HTTP_PUSH_WEBHOOK_MAX_ATTEMPTS: u32 = 3;
 
-/// Default `{caller_id}` segment for `{prefix}.push.dlq.{caller_id}.{task_id}` when the agent
+/// Default `{caller_id}` segment for `{prefix}.v1.push.dlq.{caller_id}.{task_id}` when the agent
 /// bridge has no authenticated external caller identity (until gateway/auth-callout propagates one).
 pub const DEFAULT_PUSH_DLQ_CALLER_SEGMENT: &str = "_";
 
@@ -148,7 +150,7 @@ pub const AGENT_UNAVAILABLE: i32 = -32050;
 
 // -- gateway_ingress --
 
-/// Recognized dotted method suffix tokens after `{prefix}.agents.{agent_id}.` /
+/// Recognized dotted method suffix tokens after `{prefix}.v1.agents.{agent_id}.` /
 /// ingress remainder (same spelling as [`crate::server::dispatch::A2aMethod`] mapping).
 ///
 /// Listed longest-first to ensure deterministic matching.
@@ -177,7 +179,7 @@ pub(crate) const MAX_RETRY_DELAY: Duration = Duration::from_secs(3);
 
 // -- push::dlq --
 
-pub const PUSH_DLQ_SCHEMA_V1: &str = "a2a.push.dlq/v1";
+pub const PUSH_DLQ_SCHEMA_V1: &str = "a2a.v1.push.dlq/v1";
 
 // -- push::push_idempotency_key --
 

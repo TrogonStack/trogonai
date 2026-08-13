@@ -119,40 +119,83 @@ pub fn set_wire_agent_error(mock: &AdvancedMockNatsClient, subject: &str, code: 
     mock.set_response_wire(subject, encoded.headers, encoded.body);
 }
 
+/// Queues a reply addressed to the request but carrying an undecodable body.
 pub fn set_js_raw_response(js: &MockJs, payload: &[u8]) {
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: bytes::Bytes::from(payload.to_vec()),
-        headers: None,
-        status: None,
-        description: None,
-        length: 0,
+    let payload = bytes::Bytes::from(payload.to_vec());
+    reply_to_published_request(js, move |request_headers| {
+        let mut headers = async_nats::HeaderMap::new();
+        if let Some(literal) = request_headers.get(jsonrpc_nats::HEADER_ID) {
+            headers.insert(jsonrpc_nats::HEADER_ID, literal.as_str());
+        }
+        (headers, payload)
     });
-    let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    tx.unbounded_send(Ok(msg)).unwrap();
-    js.consumer_factory.add_consumer(consumer);
 }
 
+/// Queues a success response that echoes the request's `Jsonrpc-Id`, the way a
+/// runner does.
+///
+/// The bridge mints the id internally, so the reply cannot be built until the
+/// request has been published: response subjects are session-scoped and the
+/// bridge demuxes on the header, so a reply carrying a different id is skipped.
 pub fn set_js_response<T: serde::Serialize>(js: &MockJs, resp: &T) {
     let result = serde_json::to_value(resp).unwrap();
-    let encoded = jsonrpc_nats::encode(&Message::Success {
-        id: ResponseId::Number(1),
-        result,
-    })
-    .unwrap();
-    let msg = trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
-        subject: "test".into(),
-        reply: None,
-        payload: encoded.body,
-        headers: Some(encoded.headers),
-        status: None,
-        description: None,
-        length: 0,
+    reply_to_published_request(js, move |request_headers| {
+        let encoded = jsonrpc_nats::encode(&Message::Success {
+            id: crate::wire::response_id_from_request_headers(&request_headers),
+            result,
+        })
+        .unwrap();
+        (encoded.headers, encoded.body)
     });
+}
+
+fn reply_to_published_request<F>(js: &MockJs, build: F)
+where
+    F: FnOnce(async_nats::HeaderMap) -> (async_nats::HeaderMap, bytes::Bytes) + Send + 'static,
+{
     let (consumer, tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
-    tx.unbounded_send(Ok(msg)).unwrap();
     js.consumer_factory.add_consumer(consumer);
+    reply_when_published(&js.publisher, tx, build);
+}
+
+/// Sends a reply on `tx` once a request carrying a `Jsonrpc-Id` has been
+/// published, giving the builder that request's headers.
+///
+/// For tests that need to wire up their consumers themselves.
+pub fn reply_when_published<F>(
+    publisher: &trogon_nats::jetstream::MockJetStreamPublisher,
+    tx: futures::channel::mpsc::UnboundedSender<
+        Result<trogon_nats::jetstream::MockJsMessage, trogon_nats::mocks::MockError>,
+    >,
+    build: F,
+) where
+    F: FnOnce(async_nats::HeaderMap) -> (async_nats::HeaderMap, bytes::Bytes) + Send + 'static,
+{
+    let publisher = publisher.clone();
+    tokio::spawn(async move {
+        // Yield before looking: this task is spawned before the caller
+        // publishes, so the request is not on the publisher yet.
+        let mut request = None;
+        while request.is_none() {
+            tokio::task::yield_now().await;
+            request = publisher
+                .published_messages()
+                .into_iter()
+                .find(|m| m.headers.get(jsonrpc_nats::HEADER_ID).is_some());
+        }
+        let request_headers = request.map(|m| m.headers).unwrap_or_default();
+
+        let (headers, payload) = build(request_headers);
+        let _ = tx.unbounded_send(Ok(trogon_nats::jetstream::MockJsMessage::new(async_nats::Message {
+            subject: "test".into(),
+            reply: None,
+            payload,
+            headers: Some(headers),
+            status: None,
+            description: None,
+            length: 0,
+        })));
+    });
 }
 
 pub fn has_request_metric(

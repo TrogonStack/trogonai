@@ -7,6 +7,12 @@ date: 2026-06-23
 
 # ADR#0011: JSON-RPC over NATS Binding
 
+> **Supersession pending.** [ADR#0056](./0056-canonical-jsonrpc-bodies-over-nats.md)
+> (draft) replaces this ADR's content-mode codec with canonical full-envelope
+> bodies for MCP, ACP, and A2A. Upon acceptance of [ADR#0056](0056-canonical-jsonrpc-bodies-over-nats.md), this ADR's status
+> becomes `superseded`. Until then, this document remains the accepted record of
+> the content-mode decision that adapters are migrating away from.
+
 ## Context
 
 Several first-party [protocols](../glossary/protocol) are JSON-RPC 2.0 protocols carried over the [NATS](../glossary/nats)
@@ -282,4 +288,5 @@ These are now resolved by the `jsonrpc-nats` transport seam:
 - [ADR#0003: AI Protocol Transport Taxonomy](./0003-ai-protocol-transport-taxonomy.md)
 - [ADR#0004: Protocol and Transport Layering](./0004-protocol-and-transport-layering.md)
 - [ADR#0009: Protocol Buffers Wire Contracts](./0009-protocol-buffers-wire-contracts.md)
+- [ADR#0056: Canonical JSON-RPC Bodies over NATS](./0056-canonical-jsonrpc-bodies-over-nats.md)
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)

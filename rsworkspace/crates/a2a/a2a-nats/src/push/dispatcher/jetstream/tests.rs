@@ -99,7 +99,7 @@ async fn dispatch_publishes_to_resolved_jetstream_subject() {
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{"ok":true}"#,
@@ -107,7 +107,7 @@ async fn dispatch_publishes_to_resolved_jetstream_subject() {
         .await
         .unwrap();
     let captured = js.captured.lock().unwrap();
-    assert_eq!(captured[0].0, "a2a.push.bot.caller.t1");
+    assert_eq!(captured[0].0, "a2a.v1.push.bot.caller.t1");
 }
 
 #[tokio::test]
@@ -117,7 +117,7 @@ async fn dispatch_stamps_nats_msg_id_under_exactly_once_semantics() {
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -140,7 +140,7 @@ async fn dispatch_succeeds_when_jetstream_reports_duplicate_ack() {
     dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -158,7 +158,7 @@ async fn dispatch_rejects_non_jetstream_target() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,
@@ -175,7 +175,7 @@ async fn dispatch_returns_prep_error_when_exactly_once_lacks_config_id() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", None),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", None),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -194,7 +194,7 @@ async fn dispatch_surfaces_publish_error_after_budget_exhaustion() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,
@@ -211,7 +211,7 @@ async fn dispatch_surfaces_ack_failure_after_budget_exhaustion() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("jetstream:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("jetstream:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,

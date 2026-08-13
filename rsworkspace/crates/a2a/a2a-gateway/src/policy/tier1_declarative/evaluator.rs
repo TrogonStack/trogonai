@@ -140,8 +140,8 @@ fn match_hits(ctx: &Tier1DeclarativeContext, item: &Tier1DeclarativeMatch, clock
             .is_some_and(|subject| pattern_matches(&item.pattern, subject.as_str())),
         // NATS subjects are dot-tokenized; `*` matches exactly one token
         // and `>` matches the trailing tail. Without the NATS-aware
-        // matcher, a rule like `a2a.gateway.*.message.send` would also
-        // allow `a2a.gateway.tenant.x.message.send` because the generic
+        // matcher, a rule like `a2a.v1.gateway.*.message.send` would also
+        // allow `a2a.v1.gateway.tenant.x.message.send` because the generic
         // `glob_match` lets `*` span dots.
         Tier1ResourceKind::NatsSubjectPattern => nats_subject_matches(&item.pattern, &ctx.nats_subject),
         kind => {

@@ -47,11 +47,11 @@ fn wire_error_response(code: i32, message: &str) -> (async_nats::HeaderMap, Byte
 async fn success_response_deserializes_result() {
     let mock = AdvancedMockNatsClient::new();
     let (headers, body) = wire_success_response("hello");
-    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+    mock.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -67,11 +67,11 @@ async fn success_response_deserializes_result() {
 async fn task_not_found_error_code_maps_to_typed_error() {
     let mock = AdvancedMockNatsClient::new();
     let (headers, body) = wire_error_response(-32001, "Task not found");
-    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+    mock.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -87,11 +87,11 @@ async fn task_not_found_error_code_maps_to_typed_error() {
 async fn agent_unavailable_code_maps_to_typed_error() {
     let mock = AdvancedMockNatsClient::new();
     let (headers, body) = wire_error_response(-32050, "no responders");
-    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+    mock.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -110,7 +110,7 @@ async fn transport_failure_returns_transport_error() {
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -129,7 +129,7 @@ async fn hang_returns_timeout_error() {
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -145,14 +145,14 @@ async fn hang_returns_timeout_error() {
 async fn malformed_response_returns_deserialize_error() {
     let mock = AdvancedMockNatsClient::new();
     mock.set_response_wire(
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         async_nats::HeaderMap::new(),
         Bytes::from_static(b"not json at all"),
     );
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -168,11 +168,11 @@ async fn malformed_response_returns_deserialize_error() {
 async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
     let mock = AdvancedMockNatsClient::new();
     let (headers, body) = wire_error_response(-32099, "custom");
-    mock.set_response_wire("a2a.agents.bot.tasks.get", headers, body);
+    mock.set_response_wire("a2a.v1.agents.bot.tasks.get", headers, body);
 
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.agents.bot.tasks.get",
+        "a2a.v1.agents.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -188,12 +188,12 @@ async fn unknown_error_code_maps_to_generic_jsonrpc_error() {
 async fn gateway_jwt_attaches_caller_jwt_header() {
     let mock = AdvancedMockNatsClient::new();
     let (headers, body) = wire_success_response("ok");
-    mock.set_response_wire("a2a.gateway.bot.tasks.get", headers, body);
+    mock.set_response_wire("a2a.v1.gateway.bot.tasks.get", headers, body);
 
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.gateway.bot.tasks.get",
+        "a2a.v1.gateway.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),
@@ -211,7 +211,7 @@ async fn gateway_expired_jwt_returns_expired_error() {
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjF9.signature").unwrap();
     let result: Result<Response, _> = send_unary(
         &mock,
-        "a2a.gateway.bot.tasks.get",
+        "a2a.v1.gateway.bot.tasks.get",
         "tasks/get",
         &Params { x: 1 },
         &req_id(),

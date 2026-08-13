@@ -18,7 +18,7 @@ impl std::fmt::Display for ExtReadySubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.ext.ready",
+            "{}.v1.session.{}.agent.ext.ready",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

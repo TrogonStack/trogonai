@@ -10,7 +10,7 @@ use trogon_nats::{NatsError, RequestClient, build_request_headers};
 use crate::nats::markers::Requestable;
 use crate::wire::WireError;
 
-/// JSON-RPC content-mode request/reply over core NATS.
+/// JSON-RPC canonical request/reply over core NATS (ADR#0056).
 pub async fn jsonrpc_request_with_timeout<N, Req, Res>(
     client: &N,
     subject: &impl Requestable,
@@ -25,7 +25,7 @@ where
     N::RequestError: 'static,
 {
     let subject = subject.to_string();
-    let request_id = RequestId::String(uuid::Uuid::new_v4().to_string());
+    let request_id = RequestId::String(uuid::Uuid::now_v7().to_string());
     match shared_jsonrpc_request_with_timeout(
         client,
         &subject,

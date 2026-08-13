@@ -273,7 +273,7 @@ async fn three_party_ps_asserted_access_over_nats() {
         "signer's own jkt must match the jkt embedded in the minted agent token"
     );
 
-    let subject = "a2a.gateway.bot.message.send";
+    let subject = "a2a.v1.gateway.bot.message.send";
     let reply = "_INBOX.capstone.1";
     let payload = br#"{"hello":"world"}"#.to_vec();
     let pop_headers = unauthenticated_signer
@@ -496,7 +496,7 @@ async fn three_party_ps_asserted_access_over_nats() {
     // ScopeNotCovered rather than a fresh PoP challenge -- the agent already
     // has a valid session, it just needs a broader grant.
     // ------------------------------------------------------------------
-    let uncovered_subject = "a2a.gateway.bot.tasks.get";
+    let uncovered_subject = "a2a.v1.gateway.bot.tasks.get";
     let uncovered_headers = authorized_signer
         .sign_nats_request_now(uncovered_subject, Some(reply), &payload)
         .into_pairs();

@@ -18,9 +18,9 @@ use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
-use crate::wire::{WireError, decode_notification_params, decode_response, encode_request};
-
-pub use trogon_nats::REQ_ID_HEADER;
+use crate::wire::{
+    WireError, decode_notification_params, decode_response, encode_request, req_id_from_request_headers,
+};
 
 #[instrument(
     name = ACP_SESSION_PROMPT,
@@ -71,10 +71,11 @@ where
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
     // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
-    // JetStream consumers with DeliverAll replay from stream start, so they'll see the
-    // response even if the runner responds before we start consuming.
+    // Both consumers are session-scoped and deliver only new messages, so creating
+    // them first is what guarantees the response is seen even if the runner answers
+    // before we start consuming.
     let notifications_stream = streams::notifications_stream_name(prefix);
-    let notif_config = consumers::prompt_notifications_consumer(prefix, session_id, req_id);
+    let notif_config = consumers::prompt_notifications_consumer(prefix, session_id);
     let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
         Error::new(
             ErrorCode::InternalError.into(),
@@ -93,7 +94,7 @@ where
         .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("notification messages: {e}")))?;
 
     let responses_stream = streams::responses_stream_name(prefix);
-    let resp_config = consumers::prompt_response_consumer(prefix, session_id, req_id);
+    let resp_config = consumers::response_consumer(prefix, session_id);
     let resp_stream = js
         .get_stream(&responses_stream)
         .await
@@ -118,14 +119,13 @@ where
 
     // Now publish — consumers are ready, no race condition.
     let encoded = encode_request(
-        SessionAgentMethod::Prompt.wire_method(),
+        SessionAgentMethod::Prompt.protocol_method(),
         RequestId::String(req_id.as_str().to_string()),
         args,
     )
     .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
 
     let mut headers = encoded.headers;
-    headers.insert(REQ_ID_HEADER, req_id.as_str());
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     let prompt_subject = commands::PromptSubject::new(prefix, session_id);
@@ -182,6 +182,14 @@ where
                     Ok(Some(Ok(js_msg))) => {
                         let message = js_msg.message();
                         let response_headers = message.headers.clone().unwrap_or_default();
+
+                        // The consumer is session-scoped, so it also sees the replies of
+                        // other requests in flight on this session.
+                        if req_id_from_request_headers(&response_headers).as_ref() != Some(req_id) {
+                            let _ = js_msg.ack().await;
+                            continue;
+                        }
+
                         match decode_response::<PromptResponse>(&response_headers, message.payload.as_ref()) {
                             Ok(Ok(response)) => {
                                 let _ = js_msg.ack().await;

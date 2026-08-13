@@ -82,7 +82,7 @@ fn last_seq_returns_none_when_absent_or_non_integer() {
 #[test]
 fn classify_returns_not_streaming_for_unrelated_method() {
     let headers = headers_with_req_id("r-1");
-    let intent = classify_streaming_spawn("message.send", &headers, b"");
+    let intent = classify_streaming_spawn("message.send", &headers, b"", Some(0));
     assert!(matches!(intent, StreamingSpawnIntent::NotStreaming));
 }
 
@@ -93,17 +93,42 @@ fn classify_returns_not_streaming_when_req_id_missing() {
     // unary error path rather than spawning a pump that nobody can
     // join.
     let headers = HeaderMap::new();
-    let intent = classify_streaming_spawn("message.stream", &headers, payload_without_id());
+    let intent = classify_streaming_spawn("message.stream", &headers, payload_without_id(), Some(0));
     assert!(matches!(intent, StreamingSpawnIntent::NotStreaming));
 }
 
 #[test]
 fn classify_spawns_message_stream_kind() {
     let headers = headers_with_req_id("r-2");
-    let intent = classify_streaming_spawn("message.stream", &headers, b"");
+    let intent = classify_streaming_spawn("message.stream", &headers, b"", Some(41));
     match intent {
-        StreamingSpawnIntent::Spawn(StreamingIngressKind::MessageStream { .. }) => {}
+        StreamingSpawnIntent::Spawn(StreamingIngressKind::MessageStream { last_seq, .. }) => {
+            assert_eq!(last_seq, 41);
+        }
         other => panic!("expected MessageStream kind, got {other:?}"),
+    }
+}
+
+#[test]
+fn classify_returns_not_streaming_when_the_events_stream_head_is_unknown() {
+    // Without a head to anchor on, the all-tasks consumer would have to replay the
+    // whole retained history, so no pump is better than that one.
+    let headers = headers_with_req_id("r-2");
+    let intent = classify_streaming_spawn("message.stream", &headers, b"", None);
+    assert!(matches!(intent, StreamingSpawnIntent::NotStreaming));
+}
+
+#[test]
+fn classify_spawns_tasks_resubscribe_without_an_events_stream_head() {
+    // Resubscribe carries its own cursor in the params, so it never needs the head.
+    let headers = headers_with_req_id("r-6");
+    let payload = br#"{"jsonrpc":"2.0","id":"r-6","method":"tasks/resubscribe","params":{"id":"t-1","last_seq":5}}"#;
+    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload, None);
+    match intent {
+        StreamingSpawnIntent::Spawn(StreamingIngressKind::TasksResubscribe { last_seq, .. }) => {
+            assert_eq!(last_seq, 5);
+        }
+        other => panic!("expected TasksResubscribe kind, got {other:?}"),
     }
 }
 
@@ -111,7 +136,7 @@ fn classify_spawns_message_stream_kind() {
 fn classify_spawns_tasks_resubscribe_kind_with_resume_cursor() {
     let headers = headers_with_req_id("r-3");
     let payload = br#"{"jsonrpc":"2.0","id":"r-3","method":"tasks/resubscribe","params":{"id":"t-1","last_seq":5}}"#;
-    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload);
+    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload, Some(0));
     match intent {
         StreamingSpawnIntent::Spawn(StreamingIngressKind::TasksResubscribe { task_id, last_seq, .. }) => {
             assert_eq!(task_id.as_str(), "t-1");
@@ -128,7 +153,7 @@ fn classify_tasks_resubscribe_without_task_id_falls_through() {
     // -32600/invalid_request to the caller.
     let headers = headers_with_req_id("r-4");
     let payload = br#"{"jsonrpc":"2.0","id":"r-4","method":"tasks/resubscribe","params":{}}"#;
-    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload);
+    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload, Some(0));
     assert!(matches!(intent, StreamingSpawnIntent::NotStreaming));
 }
 
@@ -136,7 +161,7 @@ fn classify_tasks_resubscribe_without_task_id_falls_through() {
 fn classify_tasks_resubscribe_defaults_last_seq_to_zero_when_absent() {
     let headers = headers_with_req_id("r-5");
     let payload = br#"{"jsonrpc":"2.0","id":"r-5","method":"tasks/resubscribe","params":{"id":"t-1"}}"#;
-    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload);
+    let intent = classify_streaming_spawn("tasks.resubscribe", &headers, payload, Some(0));
     match intent {
         StreamingSpawnIntent::Spawn(StreamingIngressKind::TasksResubscribe { last_seq, .. }) => {
             assert_eq!(last_seq, 0);

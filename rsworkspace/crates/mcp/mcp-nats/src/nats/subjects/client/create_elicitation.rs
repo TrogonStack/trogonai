@@ -17,7 +17,7 @@ impl std::fmt::Display for CreateElicitationSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.elicitation.create",
+            "{}.v1.client.{}.elicitation.create",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

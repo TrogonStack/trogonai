@@ -18,7 +18,7 @@ impl std::fmt::Display for LoadSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.session.{}.agent.load",
+            "{}.v1.session.{}.agent.load",
             self.prefix.as_str(),
             self.session_id.as_str()
         )

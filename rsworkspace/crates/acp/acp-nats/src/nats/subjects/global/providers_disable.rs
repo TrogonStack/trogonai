@@ -12,7 +12,7 @@ impl ProvidersDisableSubject {
 
 impl std::fmt::Display for ProvidersDisableSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.providers.disable", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.providers.disable", self.prefix.as_str())
     }
 }
 

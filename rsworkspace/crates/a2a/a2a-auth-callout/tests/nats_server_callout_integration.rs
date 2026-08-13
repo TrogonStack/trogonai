@@ -414,7 +414,7 @@ fn assert_tenant_acl(claims: &UserJwtClaims) {
     assert_eq!(claims.aud.as_str(), TENANT_ACCOUNT);
     assert!(!claims.caller_id.as_str().is_empty());
     assert_eq!(claims.nats_permissions.publish_allow.len(), 1);
-    assert_eq!(claims.nats_permissions.publish_allow[0].as_str(), "a2a.gateway.>");
+    assert_eq!(claims.nats_permissions.publish_allow[0].as_str(), "a2a.v1.gateway.>");
     let subs: Vec<&str> = claims
         .nats_permissions
         .subscribe_allow
@@ -423,7 +423,7 @@ fn assert_tenant_acl(claims: &UserJwtClaims) {
         .collect();
     assert_eq!(subs.len(), 2);
     let inbox = format!("_INBOX.{}.>", claims.caller_id.as_str());
-    let push = format!("a2a.push.{}.>", claims.caller_id.as_str());
+    let push = format!("a2a.v1.push.{}.>", claims.caller_id.as_str());
     assert!(subs.contains(&inbox.as_str()));
     assert!(subs.contains(&push.as_str()));
 }

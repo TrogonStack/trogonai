@@ -21,5 +21,5 @@ async fn connect_subscribes_to_server_subjects() {
     .await
     .unwrap();
 
-    assert_eq!(nats.subscribed_to(), vec!["mcp.server.filesystem.>"]);
+    assert_eq!(nats.subscribed_to(), vec!["mcp.v1.server.filesystem.>"]);
 }

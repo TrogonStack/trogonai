@@ -48,14 +48,14 @@ fn encode_request_produces_valid_three_segment_jwt() {
     .unwrap();
     assert!(encoded.headers.get(jsonrpc_nats::HEADER_ID).is_some());
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["x"], 1);
+    assert_eq!(body["params"]["x"], 1);
 }
 
 #[test]
 fn encode_success_produces_valid_response() {
     let encoded = encode_success(ResponseId::Number(1), &serde_json::json!({"ok": true})).unwrap();
     let body: serde_json::Value = serde_json::from_slice(&encoded.body).unwrap();
-    assert_eq!(body["ok"], true);
+    assert_eq!(body["result"]["ok"], true);
 }
 
 #[test]

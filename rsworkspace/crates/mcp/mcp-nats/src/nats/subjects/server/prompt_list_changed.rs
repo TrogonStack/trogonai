@@ -17,7 +17,7 @@ impl std::fmt::Display for PromptListChangedSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.client.{}.notifications.prompts.list_changed",
+            "{}.v1.client.{}.notifications.prompts.list_changed",
             self.prefix.as_str(),
             self.client_id.as_str()
         )

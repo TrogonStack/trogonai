@@ -34,6 +34,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
 
 [dev-dependencies]
+a2a = { workspace = true }
 futures-util = { workspace = true }
 nkeys = { workspace = true }
 serde_json = { workspace = true }

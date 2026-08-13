@@ -50,7 +50,7 @@ async fn dispatch_publishes_to_resolved_subject() {
     dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{"ok":true}"#,
@@ -59,7 +59,7 @@ async fn dispatch_publishes_to_resolved_subject() {
         .unwrap();
 
     let published = nats.published_messages();
-    assert_eq!(published, vec!["a2a.push.bot.caller.t1"]);
+    assert_eq!(published, vec!["a2a.v1.push.bot.caller.t1"]);
 }
 
 #[tokio::test]
@@ -70,7 +70,7 @@ async fn dispatch_stamps_nats_msg_id_under_exactly_once_semantics() {
     dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -94,7 +94,7 @@ async fn dispatch_omits_nats_msg_id_under_at_least_once_semantics() {
     dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{"ok":true}"#,
@@ -131,7 +131,7 @@ async fn dispatch_returns_prep_error_when_exactly_once_lacks_config_id() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", None),
+            &config("subject:a2a.v1.push.bot.caller.t1", None),
             DeliverySemantics::ExactlyOnce {
                 idempotency_key_header: None,
             },
@@ -151,7 +151,7 @@ async fn dispatch_retries_then_succeeds_under_at_least_once() {
     dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{"ok":true}"#,
@@ -171,7 +171,7 @@ async fn dispatch_surfaces_publish_error_after_budget_exhaustion() {
     let err = dispatcher
         .dispatch(
             &task(),
-            &config("subject:a2a.push.bot.caller.t1", Some("cfg-1")),
+            &config("subject:a2a.v1.push.bot.caller.t1", Some("cfg-1")),
             DeliverySemantics::AtLeastOnce,
             TerminalPushTaskState::Completed,
             br#"{}"#,

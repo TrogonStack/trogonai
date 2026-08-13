@@ -30,3 +30,10 @@ fn prefix_error_display_covers_validation_failures() {
         "mcp_prefix is too long: 129 bytes (max 128)"
     );
 }
+
+#[test]
+fn prefix_displays_as_its_dotted_token() {
+    let prefix = McpPrefix::new("mcp.tenant").unwrap();
+
+    assert_eq!(prefix.to_string(), "mcp.tenant");
+}

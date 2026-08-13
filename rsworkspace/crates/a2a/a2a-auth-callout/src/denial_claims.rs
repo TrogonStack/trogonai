@@ -115,6 +115,7 @@ impl DenialClaims {
         let iat_secs = secs_since_unix(issued_at)?;
         let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
         let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
+        // JWT `jti` is a security uniqueness token; keep v4 (not correlation v7).
         let jti = Uuid::new_v4().to_string();
 
         #[derive(Serialize)]

@@ -35,8 +35,8 @@ fn env_var_names_are_namespaced() {
 }
 
 #[test]
-fn headers_use_x_prefix() {
-    assert!(REQ_ID_HEADER.starts_with("X-"));
+fn correlation_header_uses_trogon_prefix() {
+    assert_eq!(REQ_ID_HEADER, "Trogon-Req-Id");
     assert!(GATEWAY_CALLER_ID_HEADER.starts_with("X-"));
     assert!(GATEWAY_PRINCIPAL_HEADER.starts_with("X-"));
     assert!(

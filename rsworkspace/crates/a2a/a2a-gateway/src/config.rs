@@ -83,7 +83,7 @@ pub struct Args {
     #[arg(long, env = "A2A_PREFIX", default_value = "a2a")]
     pub prefix: String,
 
-    /// Optional NATS queue group for `{prefix}.gateway.>` subscribers.
+    /// Optional NATS queue group for `{prefix}.v1.gateway.>` subscribers.
     #[arg(long, env = "A2A_GATEWAY_QUEUE_GROUP")]
     pub queue_group: Option<String>,
 }
@@ -100,10 +100,10 @@ pub struct Config {
 }
 
 impl Config {
-    /// Subject the gateway subscribes to. Always `{prefix}.gateway.>` so a
+    /// Subject the gateway subscribes to. Always `{prefix}.v1.gateway.>` so a
     /// single subscriber serves every agent / method behind the gateway.
     pub fn gateway_subscribe_subject(&self) -> String {
-        format!("{}.gateway.>", self.a2a_prefix)
+        format!("{}.v1.gateway.>", self.a2a_prefix)
     }
 }
 

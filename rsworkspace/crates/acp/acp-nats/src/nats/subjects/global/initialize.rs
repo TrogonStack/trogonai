@@ -12,7 +12,7 @@ impl InitializeSubject {
 
 impl std::fmt::Display for InitializeSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.agent.initialize", self.prefix.as_str())
+        write!(f, "{}.v1.global.agent.initialize", self.prefix.as_str())
     }
 }
 

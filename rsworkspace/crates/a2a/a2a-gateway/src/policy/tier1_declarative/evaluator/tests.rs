@@ -52,7 +52,7 @@ fn matching_rule_returns_effect() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(
         decision,
@@ -83,7 +83,7 @@ fn partial_match_tries_next_rule() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(
         decision,
@@ -114,7 +114,7 @@ fn priority_order_is_respected() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(decision, Tier1DeclarativeDecision::Deny { rule: rid("deny-high") });
 }
@@ -125,12 +125,12 @@ fn exact_and_glob_patterns_work() {
     assert!(!pattern_matches("message/send", "message/stream"));
     assert!(pattern_matches("user/*", "user/alice"));
     assert!(pattern_matches(
-        "a2a.gateway.*.message.send",
-        "a2a.gateway.planner.message.send"
+        "a2a.v1.gateway.*.message.send",
+        "a2a.v1.gateway.planner.message.send"
     ));
     assert!(!pattern_matches(
-        "a2a.gateway.*.message.send",
-        "a2a.gateway.planner.message.stream"
+        "a2a.v1.gateway.*.message.send",
+        "a2a.v1.gateway.planner.message.stream"
     ));
 }
 
@@ -147,7 +147,7 @@ fn negate_inverts_match() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/bob"),
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(
         denied,
@@ -160,7 +160,7 @@ fn negate_inverts_match() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
 }
@@ -182,7 +182,7 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         A2aMethod::MessageSend,
         "planner",
         None,
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(unauthenticated, Tier1DeclarativeDecision::Allow { rule: None });
 
@@ -190,7 +190,7 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         A2aMethod::MessageSend,
         "planner",
         Some("user/alice"),
-        "a2a.gateway.planner.message.send",
+        "a2a.v1.gateway.planner.message.send",
     ));
     assert_eq!(
         authenticated,
@@ -209,7 +209,7 @@ fn noop_gate_defaults_allow() {
             A2aMethod::MessageSend,
             "planner",
             None,
-            "a2a.gateway.planner.message.send",
+            "a2a.v1.gateway.planner.message.send",
         )),
         Tier1DeclarativeDecision::Allow { rule: None }
     );
@@ -336,24 +336,24 @@ fn fixed_clock_returns_configured_instant() {
 #[test]
 fn nats_star_matches_exactly_one_token() {
     // NATS semantics: `*` matches one dot-separated token only. Without
-    // this, a generic glob would let `a2a.gateway.*.message.send` also
-    // match `a2a.gateway.tenant.x.message.send` and skew decisions.
+    // this, a generic glob would let `a2a.v1.gateway.*.message.send` also
+    // match `a2a.v1.gateway.tenant.x.message.send` and skew decisions.
     assert!(nats_subject_matches(
-        "a2a.gateway.*.message.send",
-        "a2a.gateway.planner.message.send"
+        "a2a.v1.gateway.*.message.send",
+        "a2a.v1.gateway.planner.message.send"
     ));
     assert!(!nats_subject_matches(
-        "a2a.gateway.*.message.send",
-        "a2a.gateway.tenant.planner.message.send"
+        "a2a.v1.gateway.*.message.send",
+        "a2a.v1.gateway.tenant.planner.message.send"
     ));
-    assert!(!nats_subject_matches("a2a.gateway.*", "a2a.gateway"));
+    assert!(!nats_subject_matches("a2a.v1.gateway.*", "a2a.v1.gateway"));
 }
 
 #[test]
 fn nats_greater_than_matches_one_or_more_trailing_tokens() {
-    assert!(nats_subject_matches("a2a.gateway.>", "a2a.gateway.x.y"));
-    assert!(nats_subject_matches("a2a.gateway.>", "a2a.gateway.x"));
-    assert!(!nats_subject_matches("a2a.gateway.>", "a2a.gateway"));
+    assert!(nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway.x.y"));
+    assert!(nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway.x"));
+    assert!(!nats_subject_matches("a2a.v1.gateway.>", "a2a.v1.gateway"));
 }
 
 #[test]
@@ -361,7 +361,7 @@ fn nats_pattern_mid_subject_greater_than_is_literal() {
     // `>` is only valid as the final token; a mid-pattern `>` should be
     // treated as a literal so it doesn't accidentally match real
     // subjects (no real subject token equals literal `>`).
-    assert!(!nats_subject_matches("a2a.>.send", "a2a.gateway.send"));
+    assert!(!nats_subject_matches("a2a.>.send", "a2a.v1.gateway.send"));
 }
 
 #[test]

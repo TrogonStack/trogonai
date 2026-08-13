@@ -15,7 +15,7 @@ impl PingSubject {
 
 impl std::fmt::Display for PingSubject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.server.{}.ping", self.prefix.as_str(), self.server_id.as_str())
+        write!(f, "{}.v1.server.{}.ping", self.prefix.as_str(), self.server_id.as_str())
     }
 }
 

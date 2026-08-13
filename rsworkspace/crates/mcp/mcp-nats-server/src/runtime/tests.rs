@@ -134,7 +134,7 @@ async fn streamable_http_service_routes_initialize_to_nats_server() {
     let nats = trogon_nats::AdvancedMockNatsClient::new();
     let _inbound = nats.inject_messages();
     let encoded = wire::encode_tx::<RoleServer>(&initialize_response()).unwrap();
-    nats.set_response_wire("mcp.server.default.initialize", encoded.headers, encoded.body);
+    nats.set_response_wire("mcp.v1.server.default.initialize", encoded.headers, encoded.body);
     let service = streamable_http_service(
         nats.clone(),
         mcp_config(),
@@ -162,7 +162,7 @@ async fn streamable_http_service_routes_initialize_to_nats_server() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().contains_key("mcp-session-id"));
     assert_eq!(nats.subscribed_to().len(), 1);
-    assert!(nats.subscribed_to()[0].starts_with("mcp.client.http-"));
+    assert!(nats.subscribed_to()[0].starts_with("mcp.v1.client.http-"));
     assert!(nats.subscribed_to()[0].ends_with(".>"));
     let response_body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(response_body.to_vec()).unwrap();
@@ -174,13 +174,13 @@ async fn streamable_http_preserves_request_meta_and_allowlisted_headers_on_nats(
     let nats = CapturingNatsClient::new();
     let _inbound = nats.inner.inject_messages();
     let initialize = wire::encode_tx::<RoleServer>(&initialize_response()).unwrap();
-    nats.set_response_wire("mcp.server.default.initialize", initialize.headers, initialize.body);
+    nats.set_response_wire("mcp.v1.server.default.initialize", initialize.headers, initialize.body);
     let tool_error = ServerJsonRpcMessage::error(
         ErrorData::internal_error("expected test response", None),
         Some(NumberOrString::Number(2)),
     );
     let tool_error = wire::encode_tx::<RoleServer>(&tool_error).unwrap();
-    nats.set_response_wire("mcp.server.default.tools.call", tool_error.headers, tool_error.body);
+    nats.set_response_wire("mcp.v1.server.default.tools.call", tool_error.headers, tool_error.body);
     let service = streamable_http_service(
         nats.clone(),
         mcp_config(),
@@ -308,7 +308,7 @@ async fn streamable_http_preserves_request_meta_and_allowlisted_headers_on_nats(
         String::from_utf8_lossy(&response_body)
     );
     let captured = &captured[0];
-    assert_eq!(captured.subject, "mcp.server.default.tools.call");
+    assert_eq!(captured.subject, "mcp.v1.server.default.tools.call");
     assert_eq!(
         captured.headers.get("MCP-Protocol-Version").map(|value| value.as_str()),
         Some("2026-07-28")
@@ -350,7 +350,7 @@ async fn request_fails_when_nats_response_id_never_matches() {
         NumberOrString::Number(99),
     );
     let encoded = wire::encode_tx::<RoleServer>(&mismatched).unwrap();
-    nats.set_response_wire("mcp.server.default.initialize", encoded.headers, encoded.body);
+    nats.set_response_wire("mcp.v1.server.default.initialize", encoded.headers, encoded.body);
     let service = streamable_http_service(
         nats.clone(),
         mcp_config().with_operation_timeout(std::time::Duration::from_secs(1)),
