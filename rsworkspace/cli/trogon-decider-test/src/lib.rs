@@ -10,4 +10,4 @@
 pub mod codec;
 mod suite;
 
-pub use suite::{ErrorExpectation, Scenario, Step, Suite, Then};
+pub use suite::{BudgetOverrides, ErrorExpectation, Scenario, Step, Suite, Then};

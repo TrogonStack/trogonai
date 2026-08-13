@@ -7,9 +7,10 @@ use std::process;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use trogon_decider_sim::{SimHost, SimInstance};
+use trogon_decider_sim::{ExpectedOutcome, ScenarioIr, SimHost};
+use trogon_decider_test::codec;
 use trogon_decider_test::codec::{any_type_url, normalize_type_url};
-use trogon_decider_test::{Scenario, Suite, Then};
+use trogon_decider_test::{Suite, Then};
 
 #[derive(Parser)]
 #[command(
@@ -34,7 +35,7 @@ struct Args {
     suite: PathBuf,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 enum OutputFormat {
     #[default]
     Human,
@@ -42,31 +43,38 @@ enum OutputFormat {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run(Args::parse()) {
         eprintln!("error: {error:#}");
         process::exit(1);
     }
 }
 
-fn run() -> Result<()> {
-    let args = Args::parse();
+fn run(args: Args) -> Result<()> {
     let output_format = parse_output_format(&args.format)?;
     let wasm_bytes = fs::read(&args.wasm).with_context(|| format!("read {}", args.wasm.display()))?;
     let suite =
         Suite::from_yaml(&fs::read_to_string(&args.suite).with_context(|| format!("read {}", args.suite.display()))?)?;
 
     let host = SimHost::load(&wasm_bytes)?;
-    let declared_commands = host
-        .instantiate(())?
-        .descriptor()?
+    let descriptor = host.instantiate(())?.descriptor()?;
+    if descriptor.name != suite.suite {
+        bail!(
+            "suite '{}' does not match the component's declared module '{}'",
+            suite.suite,
+            descriptor.name
+        );
+    }
+    let module_name = descriptor.name;
+    let registry = codec::type_registry(&module_name)?;
+    let declared_commands = descriptor
         .commands
         .into_iter()
         .map(|spec| spec.command_type)
         .collect::<BTreeSet<_>>();
-    let declared_events = suite
-        .events
+    let declared_events = codec::declared_events(&module_name)?
         .iter()
-        .map(|type_url| normalize_type_url(type_url))
+        .copied()
+        .map(normalize_type_url)
         .collect::<BTreeSet<_>>();
 
     let mut exercised_commands = BTreeSet::new();
@@ -74,7 +82,6 @@ fn run() -> Result<()> {
     let mut failures = 0usize;
 
     for scenario in &suite.scenarios {
-        let mut instance = host.instantiate(())?;
         let steps = scenario.steps()?;
 
         for value in &scenario.given {
@@ -89,7 +96,10 @@ fn run() -> Result<()> {
             }
         }
 
-        match run_scenario(&mut instance, scenario) {
+        let outcome = scenario
+            .to_ir(registry)
+            .and_then(|ir| run_scenario(&host, &wasm_bytes, &ir));
+        match outcome {
             Ok(()) => {
                 if matches!(output_format, OutputFormat::Tap) {
                     println!("ok {} - {}", suite.suite, scenario.name);
@@ -139,9 +149,32 @@ fn report_coverage_gaps(
     gaps.len()
 }
 
-fn run_scenario(instance: &mut SimInstance<()>, scenario: &Scenario) -> Result<()> {
-    let ir = scenario.to_ir()?;
-    ir.to_sim_scenario().run(instance).map_err(anyhow::Error::new)
+/// Runs one converted scenario. A scenario with a `budget` override loads a scenario-scoped
+/// [`SimHost`] under that fault-injection budget instead of `host`'s default production budget,
+/// since a starved fuel or epoch budget can trap as early as component instantiation, before the
+/// scenario's own steps get a chance to run. A single-step scenario whose sole expectation is a
+/// trap counts an instantiate-time trap as the scenario passing, mirroring how `SimScenario::run`
+/// already treats a trap during `decide` as satisfying `.then_trap()`.
+fn run_scenario(host: &SimHost, wasm_bytes: &[u8], ir: &ScenarioIr) -> Result<()> {
+    let Some(budget) = ir.budget else {
+        let mut instance = host.instantiate(())?;
+        return ir.to_sim_scenario().run(&mut instance).map_err(anyhow::Error::new);
+    };
+
+    let config = budget.apply(host.config());
+    let scenario_host = SimHost::load_with_config(wasm_bytes, config)?;
+    match scenario_host.instantiate(()) {
+        Ok(mut instance) => ir.to_sim_scenario().run(&mut instance).map_err(anyhow::Error::new),
+        Err(error) if expects_trap(ir) && error.is_trap() => Ok(()),
+        Err(error) => Err(anyhow::Error::new(error)),
+    }
+}
+
+/// Returns whether `ir` is a single step whose sole expectation is a trap, the only shape under
+/// which an instantiate-time trap (rather than a `decide`-time one) can stand in for the
+/// scenario's expectation.
+fn expects_trap(ir: &ScenarioIr) -> bool {
+    matches!(ir.steps.as_slice(), [step] if matches!(step.expect, ExpectedOutcome::Trap))
 }
 
 fn parse_output_format(raw: &str) -> Result<OutputFormat> {

@@ -238,3 +238,12 @@ scenarios:
           events:
             - '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.ScheduleResumed
               schedule_id: "0198be07a38479e1a376f250f9181be9"
+
+  - name: a starved fuel budget traps before any command can be decided
+    budget:
+      fuel_per_call: 1
+    when:
+      '@type': type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule
+      schedule_id: "0198be07a38479e1a376f250f9181be9"
+    then:
+      trap: true

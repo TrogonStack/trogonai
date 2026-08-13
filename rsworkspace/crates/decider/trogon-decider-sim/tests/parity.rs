@@ -128,10 +128,21 @@ fn schedules_yaml_scenarios_have_native_wasm_parity() {
         "expected at least one rejection scenario to still be declared"
     );
 
+    // Fault-injection scenarios declare a budget override that starves the wasm engine on
+    // purpose, expecting a Wasmtime-level trap. Native execution has no such mechanism, and this
+    // loop's single `host` always runs under the component's default budget, so those scenarios
+    // are excluded here and instead run their own trap assertion through the CLI/YAML path.
+    let (parity_scenarios, fault_injection_scenarios): (Vec<_>, Vec<_>) =
+        scenarios.iter().partition(|scenario| scenario.budget.is_none());
+    assert!(
+        !fault_injection_scenarios.is_empty(),
+        "expected at least one fault-injection scenario with a budget override to still be declared"
+    );
+
     let wasm = SimFixture::schedules().bytes().to_vec();
     let host = SimHost::load(&wasm).expect("load schedules wasm component");
 
-    for scenario in &scenarios {
+    for scenario in parity_scenarios {
         let mut instance = host.instantiate(()).expect("instantiate schedules component");
         assert_parity::<SchedulesBundle, _>(scenario, &mut instance)
             .unwrap_or_else(|error| panic!("scenario '{}' diverged: {error}", scenario.name));

@@ -150,6 +150,28 @@ pub enum ScenarioError {
         /// The payload `.then_events(...)` expected at this index.
         want_payload: Vec<u8>,
     },
+    /// `.then_trap()` expected the guest call to trap but the command was accepted instead.
+    #[error("expected a trap, got {count} event(s)")]
+    TrapGotEvents {
+        /// The number of events the command was accepted with instead.
+        count: usize,
+    },
+    /// `.then_trap()` expected the guest call to trap but the command was rejected instead.
+    #[error("expected a trap, got rejection: {code}: {message}")]
+    TrapGotRejection {
+        /// The rejection's actual code.
+        code: String,
+        /// The rejection's actual message.
+        message: String,
+    },
+    /// `.then_trap()` expected the guest call to trap but the command faulted instead.
+    #[error("expected a trap, got fault: {code}: {message}")]
+    TrapGotFault {
+        /// The fault's actual code.
+        code: String,
+        /// The fault's actual message.
+        message: String,
+    },
     /// A step in a multi-step scenario failed. `index` is the zero-based
     /// position of the failing step in the scenario's ordered step sequence.
     ///
@@ -173,6 +195,7 @@ enum Expectation {
     Rejected,
     Accepted,
     Error(String),
+    Trap,
 }
 
 /// One `when`/`then` pair in a scenario's ordered step sequence.
@@ -328,6 +351,20 @@ impl SimScenario {
         self
     }
 
+    /// Expect the guest call to trap (a Wasmtime-level fault such as fuel exhaustion, an expired
+    /// epoch deadline, or a memory ceiling), the way a runaway or resource-starved decider would
+    /// fail in production. A step whose trap is confirmed leaves the session resource in an
+    /// unrecoverable state, so `.run(...)` abandons the session without tearing it down further.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no `.when(...)` call opened the current step, or if a `.then_*(...)` call already
+    /// set an expectation for it.
+    pub fn then_trap(mut self) -> Self {
+        self.current.set_expectation(Expectation::Trap);
+        self
+    }
+
     /// Runs the scenario's ordered steps against `instance`'s guest session, asserting each
     /// step's expectation in turn and folding its accepted events into the session before the
     /// next step.
@@ -375,8 +412,17 @@ impl SimScenario {
                 forwarded.clear();
             }
 
-            let outcome = session
-                .decide(&step.when)
+            let decide_result = session.decide(&step.when);
+            if matches!(step.expectation, Expectation::Trap) && decide_result.is_err() {
+                // The guest call trapped as expected. The component-model resource-borrow
+                // tracker leaves the session unrecoverable after a mid-call trap, so this
+                // mirrors production's `drop_session_discarding_trap`: abandon the session
+                // instead of running its `Drop` teardown against a trapped store.
+                std::mem::forget(session);
+                return Ok(());
+            }
+
+            let outcome = decide_result
                 .map_err(|source| wrap_step(index, wrap_per_step, ScenarioError::DecideCall { source }))?;
             forwarded =
                 check_outcome(outcome, step.expectation).map_err(|error| wrap_step(index, wrap_per_step, error))?;
@@ -481,6 +527,17 @@ fn check_outcome(
             }
             Ok(actual)
         }
+        Expectation::Trap => match outcome {
+            Ok(events) => Err(ScenarioError::TrapGotEvents { count: events.len() }),
+            Err(host::DecideError::Rejected(err)) => Err(ScenarioError::TrapGotRejection {
+                code: err.code,
+                message: err.message,
+            }),
+            Err(host::DecideError::Faulted(err)) => Err(ScenarioError::TrapGotFault {
+                code: err.code,
+                message: err.message,
+            }),
+        },
     }
 }
 

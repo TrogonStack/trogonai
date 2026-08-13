@@ -22,8 +22,8 @@ pub use fixture::SimFixture;
 pub use host::{SimError, SimHost, SimInstance};
 pub use import_check::{ImportCheckError, assert_zero_imports};
 pub use ir::{
-    DomainErrorOutcome, ExpectedOutcome, ScenarioIr, ScenarioRun, ScenarioStep, StepOutcome, StreamIdOutcome,
-    WireEnvelope,
+    BudgetOverrides, DomainErrorOutcome, ExpectedOutcome, ScenarioIr, ScenarioRun, ScenarioStep, StepOutcome,
+    StreamIdOutcome, WireEnvelope,
 };
 #[cfg(feature = "test-support")]
 pub use native::{
@@ -34,4 +34,4 @@ pub use native::{
 pub use parity::{ParityError, assert_parity};
 pub use scenario::{ScenarioError, SimScenario};
 pub use session::SimSession;
-pub use trogon_decider_wasm_runtime::{WasmEngineConfig, WasmEngineError};
+pub use trogon_decider_wasm_runtime::{ModuleName, ModuleNameError, WasmEngineConfig, WasmEngineError};

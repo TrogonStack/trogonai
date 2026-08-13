@@ -23,6 +23,14 @@ fn schedules_wasm() -> Vec<u8> {
 }
 
 fn create_command(id: &str) -> CommandEnvelope {
+    create_command_with_data(id, br#"{"kind":"heartbeat"}"#.to_vec())
+}
+
+fn oversized_create_command(id: &str) -> CommandEnvelope {
+    create_command_with_data(id, vec![0u8; 1_000_000])
+}
+
+fn create_command_with_data(id: &str, data: Vec<u8>) -> CommandEnvelope {
     CommandEnvelope {
         type_: CREATE_SCHEDULE_TYPE_URL.to_string(),
         payload: v1::CreateSchedule {
@@ -55,7 +63,7 @@ fn create_command(id: &str) -> CommandEnvelope {
             message: MessageField::some(v1::Message {
                 content: MessageField::some(content_v1alpha1::Content {
                     content_type: "application/json".to_string(),
-                    data: br#"{"kind":"heartbeat"}"#.to_vec(),
+                    data,
                 }),
                 headers: Vec::new(),
             }),
@@ -240,6 +248,42 @@ fn a_runaway_decider_traps_on_fuel_exhaustion_like_production_would() {
         matches!(trap.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::OutOfFuel)),
         "expected an OutOfFuel trap, got {trap}"
     );
+}
+
+#[test]
+fn a_runaway_decider_traps_on_an_expired_epoch_deadline_like_production_would() {
+    let config = WasmEngineConfig::default().with_epoch_ticks_per_call(0);
+    let host = SimHost::load_with_config(&schedules_wasm(), config).unwrap();
+
+    // A zero-tick deadline is already expired before the first guest call arms it, so either
+    // instantiation or the first guest export call must trap with `Interrupt`, not run unbounded.
+    let trap = match host.instantiate(()) {
+        Err(SimError::Instantiate { source }) => source,
+        Err(other) => panic!("expected SimError::Instantiate on epoch expiry, got {other}"),
+        Ok(mut instance) => match instance.descriptor() {
+            Err(source) => source,
+            Ok(descriptor) => panic!("expected an epoch-expiry trap, but the guest call succeeded: {descriptor:?}"),
+        },
+    };
+    assert!(
+        matches!(trap.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::Interrupt)),
+        "expected an Interrupt trap, got {trap}"
+    );
+}
+
+#[test]
+fn a_runaway_decider_traps_on_a_memory_ceiling_like_production_would() {
+    let config = WasmEngineConfig::default().with_max_memory_bytes(2 * 1024 * 1024);
+    let host = SimHost::load_with_config(&schedules_wasm(), config).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    // A payload this large forces the guest to grow its linear memory past the starved ceiling
+    // mid-`decide`, matching how production would trap a session that outgrows its budget.
+    SimScenario::new()
+        .when(oversized_create_command(BACKUP_SCHEDULE_ID))
+        .then_trap()
+        .run(&mut instance)
+        .unwrap();
 }
 
 #[test]
@@ -476,6 +520,19 @@ fn then_events_reports_rejection() {
         .run(&mut instance)
         .unwrap_err();
     assert!(matches!(&error, ScenarioError::EventsGotRejection { .. }), "{error}");
+}
+
+#[test]
+fn then_trap_reports_events_mismatch_when_no_trap_occurs() {
+    let host = SimHost::load(&schedules_wasm()).unwrap();
+    let mut instance = host.instantiate(()).unwrap();
+
+    let error = SimScenario::new()
+        .when(create_command(BACKUP_SCHEDULE_ID))
+        .then_trap()
+        .run(&mut instance)
+        .unwrap_err();
+    assert!(matches!(&error, ScenarioError::TrapGotEvents { count: 1 }), "{error}");
 }
 
 #[test]

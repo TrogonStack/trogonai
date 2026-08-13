@@ -39,6 +39,18 @@ pub enum SimError {
     },
 }
 
+impl SimError {
+    /// Returns whether this error is a Wasmtime-level trap, the way a starved fuel or epoch
+    /// budget surfaces when it strikes during component instantiation rather than during a
+    /// guest export call.
+    pub fn is_trap(&self) -> bool {
+        match self {
+            Self::Instantiate { source } => source.downcast_ref::<wasmtime::Trap>().is_some(),
+            Self::Import(_) | Self::Engine(_) | Self::Compile { .. } | Self::Arm { .. } => false,
+        }
+    }
+}
+
 /// Loaded decider component ready to instantiate in-memory test sessions.
 ///
 /// Every guest call runs against the same resource budget

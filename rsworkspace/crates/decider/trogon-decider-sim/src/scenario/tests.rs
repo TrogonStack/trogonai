@@ -50,6 +50,13 @@ fn then_before_any_when_panics() {
 }
 
 #[test]
+fn then_trap_completes_a_step() {
+    let scenario = SimScenario::new().when(command("a")).then_trap().when(command("b"));
+    assert_eq!(scenario.steps.len(), 1);
+    assert!(matches!(scenario.steps[0].expectation, Expectation::Trap));
+}
+
+#[test]
 fn when_then_when_then_flushes_the_first_step_and_buffers_the_second() {
     let scenario = SimScenario::new()
         .when(command("a"))
