@@ -310,7 +310,13 @@ shares the one physical `SESSION_EVENTS` stream (facet 1): without them, two
 different sessions -- or two different commands -- reusing one idempotency key
 would collide to one id and the second append would be silently swallowed as a
 duplicate. With them, key uniqueness only has to hold per session and command
-type, which the caller can actually guarantee. A redelivered command therefore
+type, which the caller can actually guarantee. Whatever supplies that command
+type has to be an explicitly declared, stable identifier, the same kind of name
+a WASM module descriptor already declares and `CommandType` already validates.
+A compiler-derived Rust type name is specifically excluded: `std::any::type_name`
+carries no stability guarantee across compiler versions, so deriving ids from it
+would let a toolchain upgrade silently change every id and defeat the dedup this
+formula exists to provide. A redelivered command therefore
 reproduces byte-identical event ids on retry, while distinct events within one
 multi-event batch (a `[SessionStarted, SessionForked]` fork, say) stay distinct
 -- no batch aliasing, and no cross-session aliasing. This is what makes
@@ -389,7 +395,11 @@ platform, not by this ADR):
   the command idempotency key, and the batch index -- none of which that
   hook can see. Where derivation actually runs (an extended shared-runtime
   surface, or a Session-owned append boundary that computes ids before
-  handing events over) is an open design with no current answer.
+  handing events over) is an open design with no current answer. Whichever
+  surface wins has to take the command type as a declared value rather than
+  reach for one, for the stability reason given above; on the native path no
+  such declaration exists today, so supplying it is part of this obligation
+  and not a detail of the chosen surface.
 - **Duplicate-publish-ack treated as success rather than an append error.**
   A behavior flip to `trogon-decider-nats`'s append acknowledgment path.
   Global-versus-opt-in is undecided (see above); a global flip changes every
