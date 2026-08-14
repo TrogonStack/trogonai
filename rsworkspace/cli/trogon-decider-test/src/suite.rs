@@ -89,6 +89,14 @@ pub struct BudgetOverrides {
     pub max_memory_bytes: Option<usize>,
 }
 
+impl BudgetOverrides {
+    /// Whether this block replaces at least one production budget. An empty `budget: {}` parses
+    /// but leaves every resource at its production value, so it starves nothing.
+    fn starves_a_resource(&self) -> bool {
+        self.fuel_per_call.is_some() || self.epoch_ticks_per_call.is_some() || self.max_memory_bytes.is_some()
+    }
+}
+
 impl From<&BudgetOverrides> for trogon_decider_sim::BudgetOverrides {
     fn from(value: &BudgetOverrides) -> Self {
         Self {
@@ -152,10 +160,11 @@ impl Scenario {
                 Then::Rejected { rejected: false } => ExpectedOutcome::Accepted,
                 Then::Error { error } => ExpectedOutcome::Error(error.expected()?),
                 Then::Trap { trap: true } => {
-                    if self.budget.is_none() {
+                    if !self.budget.as_ref().is_some_and(BudgetOverrides::starves_a_resource) {
                         bail!(
                             "scenario '{}': `then.trap: true` requires a scenario-level `budget` override that \
-                             starves the resource under test; under the default production budget the guest \
+                             sets at least one of `fuel_per_call`, `epoch_ticks_per_call`, or `max_memory_bytes` \
+                             to starve the resource under test; under the default production budget the guest \
                              will not trap and the step reports a plain expectation mismatch instead",
                             self.name
                         );
@@ -200,8 +209,8 @@ pub enum Then {
     Trap {
         /// Whether the guest call must trap. Must be `true`; `false` is rejected in
         /// [`Scenario::to_ir`] since it is not a meaningful expectation on its own.
-        /// [`Scenario::to_ir`] also rejects `true` without the paired `budget`, since
-        /// nothing starves the guest under the default production budget.
+        /// [`Scenario::to_ir`] also rejects `true` unless the paired `budget` sets at least one
+        /// resource, since nothing starves the guest under the default production budget.
         trap: bool,
     },
 }
