@@ -121,10 +121,13 @@ pub fn build_nats_transport_app_state(
     let agent = A2aAgentId::new(agent_id).expect("fixture agent id");
     let harness = Arc::new(HarnessGatewayUnary::new(nats, prefix.clone(), agent));
     let publisher = GatewayInboundPublisher::new(harness.clone());
+    // The scripted event carries a transport id the caller never sent, which is
+    // what the hops behind the bridge correlate on. The SSE edge is expected to
+    // restamp it with the caller's own id.
     let jetstream: Arc<dyn TaskJetStreamPort> = Arc::new(ScriptedTaskJetstream::single_ok(
         json!({
             "jsonrpc": "2.0",
-            "id": "corr-1",
+            "id": "transport-9",
             "result": { "statusUpdate": { "taskId": "task-sse-1" } }
         })
         .to_string(),

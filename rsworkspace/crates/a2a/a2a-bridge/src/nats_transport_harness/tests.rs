@@ -141,8 +141,12 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     assert_eq!(frames.len(), 2, "bootstrap plus one task event, got: {wire}");
     assert_eq!(frames[0]["result"]["taskId"], "task-sse-1");
     assert_eq!(frames[1]["jsonrpc"], "2.0");
-    assert_eq!(frames[1]["id"], "corr-1");
     assert_eq!(frames[1]["result"]["statusUpdate"]["taskId"], "task-sse-1");
+    // The bootstrap arrived with a null id and the task event with the transport
+    // id `transport-9`; the caller correlates on neither.
+    for frame in &frames {
+        assert_eq!(frame["id"], "corr-1", "every SSE frame echoes the caller id: {wire}");
+    }
 
     let audit_subject = nats
         .published_messages()

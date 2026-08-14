@@ -20,7 +20,9 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream, Stream};
 use serde_json::{Value, json};
+use tracing::warn;
 
+use a2a_nats::client::rewrite_response_id;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
 use a2a_nats::jetstream::consumers::{PullConfig, resubscribe_consumer, stream_events_consumer};
 use a2a_nats::jetstream::streams::events_stream_name;
@@ -479,8 +481,21 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
 /// that repeats the caller's request id. Naming the events instead would put the
 /// bootstrap and the task chunks on distinct SSE event types, which a spec client
 /// never subscribes to, and the bodies already say which is which.
-fn sse_data_line(body: &[u8]) -> Event {
-    Event::default().data(String::from_utf8_lossy(body))
+///
+/// The id is restamped rather than forwarded, because the hops behind this edge
+/// correlate on their own transport id (`Trogon-Req-Id`, or a minted one when the
+/// caller sent no id at all). Only the caller's own id is meaningful to the
+/// caller. A body that is not a JSON object goes out untouched: there is no
+/// envelope to stamp, and swallowing it would lose the only diagnostic the caller
+/// would get.
+fn sse_data_line(body: &[u8], caller_id: &Value) -> Event {
+    match rewrite_response_id(body, caller_id) {
+        Ok(stamped) => Event::default().data(String::from_utf8_lossy(stamped.as_ref())),
+        Err(e) => {
+            warn!(error = %e, "SSE frame is not a JSON-RPC envelope; forwarding without a caller id");
+            Event::default().data(String::from_utf8_lossy(body))
+        }
+    }
 }
 
 fn sse_error_line(caller_id: &Value, err: &BridgeError) -> Event {
@@ -497,11 +512,11 @@ fn sse_from_bootstrap_and_payloads(
     tail: Pin<Box<dyn Stream<Item = Result<Bytes, BridgeError>> + Send>>,
     caller_id: Value,
 ) -> BoxStream<'static, Result<Event, Infallible>> {
-    let head_event = sse_data_line(&bootstrap_owned);
+    let head_event = sse_data_line(&bootstrap_owned, &caller_id);
     let head = futures_util::stream::once(futures_util::future::ready(Ok::<Event, Infallible>(head_event)));
     let tail_mapped = tail.map(move |item| {
         Ok::<Event, Infallible>(match item {
-            Ok(chunk) => sse_data_line(chunk.as_ref()),
+            Ok(chunk) => sse_data_line(chunk.as_ref(), &caller_id),
             Err(ref err) => sse_error_line(&caller_id, err),
         })
     });

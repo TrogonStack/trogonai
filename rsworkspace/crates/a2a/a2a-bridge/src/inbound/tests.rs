@@ -373,3 +373,45 @@ async fn handle_jsonrpc_invalid_agent_header_errors() {
     let err = handle_jsonrpc(headers, Bytes::new(), &state).await.unwrap_err();
     assert!(matches!(err, BridgeError::InvalidAgent(_)));
 }
+
+/// Reads an SSE stream the way a caller does: every frame is an unnamed
+/// `data:` line, so the JSON bodies are what the assertions look at.
+async fn sse_frames(stream: BoxStream<'static, Result<Event, Infallible>>) -> Vec<String> {
+    use axum::response::IntoResponse;
+    let response = Sse::new(stream).into_response();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:").map(|d| d.trim().to_owned()))
+        .collect()
+}
+
+#[tokio::test]
+async fn sse_frames_carry_the_caller_id_and_survive_a_body_that_is_not_an_envelope() {
+    let bootstrap = serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap();
+    let tail = stream::iter(vec![
+        Ok(Bytes::from_static(b"not-an-envelope")),
+        Err(BridgeError::JetStreamConsume("consumer gone".into())),
+    ]);
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        bootstrap,
+        Box::pin(tail),
+        json!("corr-1"),
+    ))
+    .await;
+
+    assert_eq!(frames.len(), 3);
+    let bootstrap: serde_json::Value = serde_json::from_str(&frames[0]).unwrap();
+    assert_eq!(bootstrap["id"], "corr-1");
+    assert_eq!(bootstrap["result"]["taskId"], "t-1");
+
+    assert_eq!(frames[1], "not-an-envelope");
+
+    let failure: serde_json::Value = serde_json::from_str(&frames[2]).unwrap();
+    assert_eq!(failure["id"], "corr-1");
+    assert_eq!(failure["error"]["code"], INTERNAL_ERROR);
+    assert!(
+        failure["error"]["message"].as_str().unwrap().contains("consumer gone"),
+        "the caller keeps the only diagnostic the stream produced: {failure}"
+    );
+}
