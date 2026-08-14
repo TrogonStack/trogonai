@@ -38,3 +38,12 @@ fn parse_inbound_rejects_missing_or_wrong_jsonrpc_version() {
     let err = parse_inbound(r#"{"jsonrpc":2.0,"id":3}"#).unwrap_err();
     assert_eq!(err.error_code().unwrap(), -32600);
 }
+
+#[test]
+fn parse_inbound_rejects_a_notification() {
+    // A notification carries no id, so the stdio bridge has nothing to
+    // correlate a reply with; it answers requests only.
+    let err = parse_inbound(r#"{"jsonrpc":"2.0","method":"tasks/get","params":{}}"#).unwrap_err();
+    assert_eq!(err.error_code().unwrap(), -32600);
+    assert_eq!(serde_json::to_value(*err).unwrap()["id"], Value::Null);
+}

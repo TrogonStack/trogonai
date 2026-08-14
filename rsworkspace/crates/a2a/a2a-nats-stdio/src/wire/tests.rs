@@ -50,3 +50,13 @@ fn with_error_id_stamps_errors_and_leaves_other_frames_alone() {
     let untouched = OutboundFrame::RawBody(raw).with_error_id(ResponseId::Number(9));
     assert_eq!(serde_json::to_value(&untouched).unwrap()["id"], "keep");
 }
+
+#[test]
+fn error_code_is_none_for_frames_that_are_not_errors() {
+    assert!(
+        OutboundFrame::success(ResponseId::Number(1), json!({}))
+            .error_code()
+            .is_none()
+    );
+    assert!(OutboundFrame::RawBody(Bytes::from_static(b"{}")).error_code().is_none());
+}

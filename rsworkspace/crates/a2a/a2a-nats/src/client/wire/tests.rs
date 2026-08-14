@@ -66,6 +66,19 @@ fn roundtrip_reconstructs_canonical_json_at_edge() {
 }
 
 #[test]
+fn map_wire_error_keeps_the_deserialize_source_and_flattens_the_rest() {
+    let source = serde_json::from_str::<DummyResult>("{}").unwrap_err();
+    let mapped = map_wire_error(WireError::Deserialize(source));
+    assert!(matches!(mapped, ClientError::Deserialize(_)));
+
+    let mapped = map_wire_error(WireError::UnexpectedMessage);
+    let ClientError::Deserialize(e) = mapped else {
+        panic!("every wire error reaches the caller as a deserialize failure");
+    };
+    assert!(e.to_string().contains("unexpected JSON-RPC message variant"));
+}
+
+#[test]
 fn merge_headers_overlays_jsonrpc_fields() {
     let mut base = HeaderMap::new();
     base.insert("Trogon-Req-Id", "transport");

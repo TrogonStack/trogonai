@@ -200,6 +200,14 @@ fn req_id_from_payload_when_header_absent() {
 }
 
 #[test]
+fn req_id_from_a_numeric_payload_id_uses_its_decimal_text() {
+    let headers = async_nats::HeaderMap::new();
+    let payload = br#"{"jsonrpc":"2.0","id":7,"method":"x"}"#;
+    let req_id = req_id_from_headers_or_payload(&headers, payload).expect("payload extract");
+    assert_eq!(req_id.as_str(), "7");
+}
+
+#[test]
 fn req_id_is_none_for_a_null_json_rpc_id() {
     // A `"null"` string would collapse every null-id envelope onto one
     // correlation key, so the pump is not spawned at all.
