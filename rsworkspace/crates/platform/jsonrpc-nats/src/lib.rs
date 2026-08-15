@@ -18,7 +18,10 @@ pub mod message;
 pub mod transport;
 
 pub use codec::{Encoded, decode, decode_value, encode, encode_value, from_json_value, to_json_value};
-pub use constants::{HEADER_ERROR_CODE, HEADER_ID, JSONRPC_VERSION};
+pub use constants::{
+    HEADER_ERROR_CODE, HEADER_ID, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, JSONRPC_VERSION, METHOD_NOT_FOUND,
+    PARSE_ERROR,
+};
 pub use direction::Direction;
 pub use error::CodecError;
 pub use id::{

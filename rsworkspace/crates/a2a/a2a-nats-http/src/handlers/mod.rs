@@ -13,26 +13,18 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use futures::{Stream, StreamExt};
+use jsonrpc_nats::{INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, ResponseId};
 use serde::Deserialize;
 use serde_json::Value;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
-use crate::constants::JSONRPC_VERSION;
 use crate::sse::{client_error_to_jsonrpc_code, typed_event_stream_to_sse};
-use crate::wire::{OutboundError, RestError};
-
-#[derive(Debug, Deserialize)]
-pub struct JsonRpcEnvelope {
-    pub jsonrpc: Option<String>,
-    pub id: Option<Value>,
-    pub method: String,
-    pub params: Option<Value>,
-}
+use crate::wire::{self, InboundRequest, RestError};
 
 pub async fn handle_jsonrpc<N, J>(
     State(client): State<Arc<A2aClient<N, J>>>,
-    Json(envelope): Json<JsonRpcEnvelope>,
+    Json(mut envelope): Json<InboundRequest>,
 ) -> Response
 where
     N: RequestClient + Clone + Send + Sync + 'static,
@@ -44,14 +36,18 @@ where
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::MessagesError: std::fmt::Display + Send + 'static,
     <<<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer as trogon_nats::jetstream::JetStreamConsumer>::StreamError: std::fmt::Display + Send + 'static,
 {
-    let id = envelope.id.clone().unwrap_or(Value::Null);
-    let params = envelope.params.unwrap_or(Value::Null);
+    let id = envelope.response_id();
+    let params = envelope.params();
 
     // JSON-RPC 2.0 requires the version field to be exactly "2.0". Reject
     // anything else with `-32600 Invalid Request` before dispatching, so the
     // bridge doesn't silently front another protocol's calls.
-    if envelope.jsonrpc.as_deref() != Some(JSONRPC_VERSION) {
-        let body = OutboundError::new(id, -32600, "invalid request: missing or unsupported jsonrpc version");
+    if !envelope.has_supported_version() {
+        let body = wire::error(
+            &id,
+            INVALID_REQUEST,
+            "invalid request: missing or unsupported jsonrpc version",
+        );
         return (StatusCode::OK, Json(body)).into_response();
     }
 
@@ -212,7 +208,7 @@ where
             Err(e) => jsonrpc_error_response(&id, &e),
         },
         method => {
-            let body = OutboundError::new(id, -32601, format!("method not found: {method}"));
+            let body = wire::error(&id, METHOD_NOT_FOUND, format!("method not found: {method}"));
             (StatusCode::OK, Json(body)).into_response()
         }
     }
@@ -243,7 +239,7 @@ where
     }
 }
 
-fn jsonrpc_forward<T>(id: &Value, validated: ValidatedRpc<T>) -> Response {
+fn jsonrpc_forward<T>(id: &ResponseId, validated: ValidatedRpc<T>) -> Response {
     match validated.body_with_client_id(id) {
         Ok(body) => match serde_json::from_slice::<Value>(&body) {
             Ok(value) => (StatusCode::OK, Json(value)).into_response(),
@@ -253,14 +249,14 @@ fn jsonrpc_forward<T>(id: &Value, validated: ValidatedRpc<T>) -> Response {
     }
 }
 
-fn jsonrpc_error_response(id: &Value, err: &ClientError) -> Response {
+fn jsonrpc_error_response(id: &ResponseId, err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
-    let body = OutboundError::new(id.clone(), code, message);
+    let body = wire::error(id, code, message);
     (StatusCode::OK, Json(body)).into_response()
 }
 
-fn jsonrpc_parse_error(id: &Value, message: &str) -> Response {
-    let body = OutboundError::new(id.clone(), -32602, format!("invalid params: {message}"));
+fn jsonrpc_parse_error(id: &ResponseId, message: &str) -> Response {
+    let body = wire::error(id, INVALID_PARAMS, format!("invalid params: {message}"));
     (StatusCode::OK, Json(body)).into_response()
 }
 

@@ -418,3 +418,51 @@ fn canonical_decode_rejects_mismatched_derived_projections() {
         })
     ));
 }
+
+#[test]
+fn response_id_from_request_value_keeps_canonical_ids() {
+    assert_eq!(
+        ResponseId::from_request_value(&serde_json::json!("my-string-id")),
+        ResponseId::String("my-string-id".to_string())
+    );
+    assert_eq!(
+        ResponseId::from_request_value(&serde_json::json!(7)),
+        ResponseId::Number(7)
+    );
+    assert_eq!(
+        ResponseId::from_request_value(&serde_json::Value::Null),
+        ResponseId::Null
+    );
+}
+
+#[test]
+fn response_id_from_request_value_nulls_non_canonical_ids() {
+    for value in [
+        serde_json::json!(1.5),
+        serde_json::json!({ "nested": true }),
+        serde_json::json!([1]),
+        serde_json::json!(true),
+    ] {
+        assert_eq!(ResponseId::from_request_value(&value), ResponseId::Null);
+    }
+}
+
+#[test]
+fn responses_built_from_coerced_ids_stay_decodable() {
+    // The property the coercion exists for: whatever a caller sends as `id`, the
+    // envelope an edge answers with still parses as canonical JSON-RPC.
+    for value in [
+        serde_json::json!("abc"),
+        serde_json::json!(1),
+        serde_json::json!(1.5),
+        serde_json::json!({ "nested": true }),
+    ] {
+        let envelope = to_json_value(&Message::Error {
+            id: ResponseId::from_request_value(&value),
+            code: crate::INVALID_REQUEST,
+            message: "invalid request".to_string(),
+            data: None,
+        });
+        assert!(from_json_value(&envelope).is_ok(), "id {value} produced {envelope}");
+    }
+}

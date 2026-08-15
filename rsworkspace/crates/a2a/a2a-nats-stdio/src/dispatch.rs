@@ -43,7 +43,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Box<
 }
 
 fn forward_validated<T>(id: &RequestId, validated: ValidatedRpc<T>) -> OutboundFrame {
-    match validated.body_with_client_id(&id.to_json()) {
+    match validated.body_with_client_id(&ResponseId::from(id.clone())) {
         Ok(body) => OutboundFrame::RawBody(body),
         Err(e) => OutboundFrame::error(ResponseId::from(id.clone()), -32603, e.to_string()),
     }

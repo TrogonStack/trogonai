@@ -18,8 +18,9 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use jsonrpc_nats::ResponseId;
 
-use crate::wire::OutboundError;
+use crate::wire;
 
 pub use crate::constants::{A2A_EXTENSIONS_HEADER, A2A_MEDIA_TYPE, A2A_VERSION_HEADER, DEFAULT_A2A_VERSION};
 
@@ -127,7 +128,7 @@ pub struct NegotiatedSpec {
 }
 
 fn json_rpc_error(code: i32, message: &str) -> Response {
-    let body = OutboundError::new(serde_json::Value::Null, code, message);
+    let body = wire::error(&ResponseId::Null, code, message);
     let mut response = (StatusCode::BAD_REQUEST, axum::Json(body)).into_response();
     response
         .headers_mut()
