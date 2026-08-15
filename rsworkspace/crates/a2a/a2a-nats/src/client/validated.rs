@@ -4,7 +4,7 @@
 //! without hand-assembling `{jsonrpc,id,result|error}`.
 
 use bytes::Bytes;
-use serde_json::Value;
+use jsonrpc_nats::ResponseId;
 
 /// Domain value after typed decode, with the validated NATS body retained.
 #[derive(Debug, Clone)]
@@ -23,16 +23,19 @@ impl<T> ValidatedRpc<T> {
     ///
     /// Transport request ids often differ from the stdio/HTTP client's id; the
     /// envelope otherwise stays unmodified.
-    pub fn body_with_client_id(&self, client_id: &Value) -> Result<Bytes, serde_json::Error> {
+    pub fn body_with_client_id(&self, client_id: &ResponseId) -> Result<Bytes, serde_json::Error> {
         rewrite_response_id(&self.body, client_id)
     }
 }
 
 /// Replace top-level `"id"` in a canonical JSON-RPC response body.
-pub fn rewrite_response_id(body: &[u8], client_id: &Value) -> Result<Bytes, serde_json::Error> {
-    let mut value: Value = serde_json::from_slice(body)?;
+///
+/// Taking a [`ResponseId`] rather than a bare value is what keeps the rewrite
+/// from turning a validated envelope into one no canonical decoder accepts.
+pub fn rewrite_response_id(body: &[u8], client_id: &ResponseId) -> Result<Bytes, serde_json::Error> {
+    let mut value: serde_json::Value = serde_json::from_slice(body)?;
     if let Some(object) = value.as_object_mut() {
-        object.insert("id".to_string(), client_id.clone());
+        object.insert("id".to_string(), client_id.to_json());
     }
     Ok(Bytes::from(serde_json::to_vec(&value)?))
 }

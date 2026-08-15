@@ -38,6 +38,22 @@ impl ResponseId {
             Self::Null => Value::Null,
         }
     }
+
+    /// Response id for an inbound request id of arbitrary shape.
+    ///
+    /// A protocol edge accepts whatever bytes a caller sends, so the `id` it has
+    /// to answer with may be absent, a float, or a whole object. JSON-RPC 2.0
+    /// section 5 requires `null` whenever the request id could not be
+    /// determined, so anything outside `string | number` collapses to
+    /// [`Self::Null`] instead of being echoed back in a response no canonical
+    /// decoder would accept.
+    pub fn from_request_value(value: &Value) -> Self {
+        match value {
+            Value::String(s) => Self::String(s.clone()),
+            Value::Number(n) => n.as_i64().map_or(Self::Null, Self::Number),
+            _ => Self::Null,
+        }
+    }
 }
 
 impl From<RequestId> for ResponseId {
