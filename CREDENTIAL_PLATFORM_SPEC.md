@@ -27,6 +27,41 @@ reads of the relevant modules), not copied from `SECRET_STORE.md` or
 `API_KEY.md`. Those two design documents predate the first implementation
 slice and are the background reading, not the current state.
 
+`API_KEY.md` has since been reconciled against ADR#0046, ADR#0048,
+ADR#0050, ADR#0051, and ADR#0058 through ADR#0061, so it is now the design
+of record for the API key platform rather than a superseded draft. It still
+describes nothing that exists in code.
+
+### Which document owns what
+
+Every fact about this platform lives in exactly one of four places. When
+two of them disagree, the one further up this list wins and the other is
+the bug.
+
+```text
+docs/adr/*.md              WHY. Ratified decisions and their trade-offs.
+                           Historical records: amended by a later ADR,
+                           never edited to match a document below.
+
+API_KEY.md                 WHAT the API key platform is. Data model,
+                           key format, create and verification flows,
+                           permissions, rate limits, rerolling,
+                           idempotency, observability.
+
+SECRET_STORE.md            WHAT the credential vault is.
+
+CREDENTIAL_PLATFORM_SPEC   CONTRACTS and PLAN. Every endpoint, error
+(this file)                code, idempotency namespace, the canonical
+                           signed-request target, UI acceptance, build
+                           order, testing, alerting, done criteria.
+                           Points at the design documents rather than
+                           restating them.
+```
+
+The endpoint table is here and not in `API_KEY.md` because a table split
+across two files is a table that drifts. The data model is there and not
+here for the same reason.
+
 Open questions are called out inline as:
 
 ```text
@@ -219,11 +254,26 @@ API key model
   -> signed keys strongly recommended for all callers (ADR#0050)
   -> bearer keys as the policy-bounded compatibility tier
   -> root/management keyspaces are signed-only
+  -> two keyspaces per project from creation: management, default (ADR#0059)
+  -> permissions are the only authorization vocabulary; no scopes (ADR#0060)
+  -> built-in roles only in the first milestone (ADR#0060)
 
 signed key default
-  -> Coinbase-style JWT request token
+  -> Coinbase-style JWT request token, single-use and fully bound (ADR#0051)
   -> client-generated key pair only; the platform never holds private keys
   -> Ed25519 default, ES256 accepted for compatibility (ADR#0050)
+  -> 1 minute token lifetime, 2 minute ceiling, 30s skew tolerance
+  -> replay store in NATS KV, keyed by (key_id, jti), always fail closed
+
+bearer key default
+  -> tg_<env>_<key_id>_<secret><checksum> (ADR#0058)
+  -> HMAC-SHA-256 verifier under a versioned pepper, constant-time compare
+  -> pepper in OpenBao KV, resolved at boot, never on the request path
+  -> 24h reroll grace; 1h in management keyspaces (ADR#0061)
+
+rate limits
+  -> per-key and per-project only in the first milestone (ADR#0060)
+  -> counters in NATS KV; fail open on product traffic, closed on management
 
 idempotency
   -> scoped by owner/workspace and command namespace
@@ -634,8 +684,53 @@ POST   /v1/projects/{project}/credentials/{credential_id}/revoke
 POST   /v1/projects/{project}/credentials/{credential_id}/archive
 POST   /v1/projects/{project}/credentials/{credential_id}/delete
 
+POST   /v1/projects/{project}/api-keyspaces
+GET    /v1/projects/{project}/api-keyspaces
+GET    /v1/projects/{project}/api-keyspaces/{keyspace}
+PATCH  /v1/projects/{project}/api-keyspaces/{keyspace}
+DELETE /v1/projects/{project}/api-keyspaces/{keyspace}
+
+POST   /v1/projects/{project}/api-keyspaces/{keyspace}/keys
+GET    /v1/projects/{project}/api-keyspaces/{keyspace}/keys
+GET    /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}
+PATCH  /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}
+POST   /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}/reroll
+POST   /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}/revoke
+POST   /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}/public-keys
+POST   /v1/projects/{project}/api-keyspaces/{keyspace}/keys/{key}/public-keys/{public_key}/revoke
+
 GET    /v1/projects/{project}/operations/{operation_id}
 ```
+
+The flat `/v1/api-keys` shape an earlier draft used is superseded by the
+project-anchored form above (ADR#0046 section 3).
+
+The `{project}` segment is an authorization statement, not just addressing.
+Admission derives the expected project from the authenticated caller
+context and rejects a request whose `{project}` does not match it.
+
+There is deliberately no public `POST /v1/api-keys/verify`. Verification is
+an admission-time internal operation, not a customer-callable route. Unkey
+exposes one because verification-as-a-service is their product, and
+Trogonai is verifying its own callers; exposing it would publish an
+unauthenticated oracle for testing candidate keys.
+
+Key create accepts a `kind`, and there is no server-generated private key
+option under either:
+
+```text
+kind: signed
+  -> register a client-generated public key (recommended; the only kind
+     the management keyspace permits)
+
+kind: bearer
+  -> create a verifier-backed raw key shown once
+  -> rejected where keyspace bearer_issuance is disallowed
+```
+
+The `management` and `default` keyspaces are created by project creation
+(ADR#0059 section 3), so `POST .../api-keyspaces` is for additional ones
+and neither of the two built-ins can be deleted while it holds active keys.
 
 Idempotency rule per write command, following the idempotency contract
 above:
@@ -670,6 +765,28 @@ POST .../revoke
 POST .../archive, POST .../delete
   namespace credential.archive / .delete, targeted by credential_id
 
+POST /v1/projects/{project}/api-keyspaces
+  namespace api_keyspace.create, targeted by keyspace_id if the client can
+  pre-assign one, otherwise scoped by project_id + name
+
+PATCH .../api-keyspaces/{keyspace}, DELETE .../api-keyspaces/{keyspace}
+  namespace api_keyspace.update / .delete, targeted by keyspace_id
+
+POST .../api-keyspaces/{keyspace}/keys
+  namespace api_key.create, targeted by key_id if the client can pre-assign
+  one, otherwise scoped by keyspace_id + display_name
+
+POST .../keys/{key}/reroll, POST .../keys/{key}/revoke
+  namespace api_key.reroll / .revoke, targeted by key_id
+
+POST .../keys/{key}/public-keys
+  namespace api_key.add_public_key, targeted by public_key_fingerprint,
+  which makes re-applying the same registration a no-op and is the same
+  idempotency key ADR#0059 section 4 relies on for bootstrap
+
+POST .../keys/{key}/public-keys/{public_key}/revoke
+  namespace api_key.revoke_public_key, targeted by public_key_id
+
 GET endpoints
   read-only, no idempotency key required
 ```
@@ -697,7 +814,7 @@ forbidden
   -> bot token
 ```
 
-Applied per endpoint: every endpoint above is metadata-only except the two
+Applied per endpoint: every endpoint above is metadata-only except the four
 that legitimately hand back new secret material, and even those only
 display it once, per
 [ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md):
@@ -708,9 +825,20 @@ POST /v1/projects/{project}/credentials
      only
 POST .../rotate                -> returns the new secret value once, same
                                   one-time rule
+POST .../api-keyspaces/{keyspace}/keys
+  -> returns the bearer key once, same one-time rule, and only when the
+     keyspace allows bearer issuance. Creating a signed key returns
+     metadata only: the caller already holds the private key and the
+     platform never had one
+POST .../keys/{key}/reroll      -> returns the new bearer key once, same
+                                  one-time rule. Signed keys rotate by
+                                  public-key swap and mint nothing
 POST .../resubmit-secret        -> receives plaintext in the request; the
                                   response should stay metadata-only (there
                                   is nothing new to display back)
+POST .../keys/{key}/public-keys -> receives a public key in the request;
+                                  the response is metadata only, and a
+                                  private key is never accepted here
 every other endpoint            -> never plaintext
 ```
 
@@ -729,7 +857,22 @@ runtime_service_not_allowed
 secret_store_unavailable
 provider_registration_failed
 cleanup_pending
+bearer_issuance_disallowed
+algorithm_not_allowed
+key_limit_reached
+keyspace_in_use
 ```
+
+The last four are API-key management failures that `validation_failed`
+would flatten into an indistinguishable error. Each names a policy the
+caller can act on: bearer issuance is off for this keyspace, the requested
+signing algorithm is outside the keyspace's `allowed_algorithms`, the
+keyspace is at `max_active_keys`, or the keyspace still holds active keys
+and therefore cannot be deleted.
+
+A delegation-ceiling violation is `permission_denied`, not a code of its
+own (ADR#0060 section 5). The caller asked for authority they do not hold,
+which is the same answer as any other authorization failure.
 
 Mapped per endpoint by what can plausibly fail there:
 
@@ -775,6 +918,37 @@ POST .../archive, .../delete          validation_failed, permission_denied,
                                        idempotency_conflict, cleanup_pending
 GET /v1/projects/{project}/operations/{operation_id}
                                        validation_failed, permission_denied
+
+POST /v1/projects/{project}/api-keyspaces
+                                       validation_failed, permission_denied,
+                                       idempotency_conflict
+GET .../api-keyspaces[/{keyspace}]    validation_failed, permission_denied
+PATCH .../api-keyspaces/{keyspace}    validation_failed, permission_denied,
+                                       idempotency_conflict
+DELETE .../api-keyspaces/{keyspace}   validation_failed, permission_denied,
+                                       idempotency_conflict, keyspace_in_use
+POST .../api-keyspaces/{keyspace}/keys
+                                       validation_failed, permission_denied,
+                                       idempotency_conflict,
+                                       bearer_issuance_disallowed,
+                                       algorithm_not_allowed,
+                                       key_limit_reached
+GET .../keys[/{key}]                  validation_failed, permission_denied
+PATCH .../keys/{key}                  validation_failed, permission_denied,
+                                       idempotency_conflict
+POST .../keys/{key}/reroll            validation_failed, permission_denied,
+                                       idempotency_conflict,
+                                       bearer_issuance_disallowed
+POST .../keys/{key}/revoke            validation_failed, permission_denied,
+                                       idempotency_conflict
+POST .../keys/{key}/public-keys       validation_failed, permission_denied,
+                                       idempotency_conflict,
+                                       algorithm_not_allowed,
+                                       key_limit_reached (2 active public
+                                       keys per signed key, ADR#0061)
+POST .../public-keys/{public_key}/revoke
+                                       validation_failed, permission_denied,
+                                       idempotency_conflict
 ```
 
 Two codes in that vocabulary, `host_not_allowed` and
@@ -782,6 +956,34 @@ Two codes in that vocabulary, `host_not_allowed` and
 than management-API failures; they belong to the delivery-policy checks
 described in RUNTIME_PROJECTION (allowed_hosts, allowed_runtime_services),
 not to any of the endpoints above.
+
+Caller-authentication failures are a different surface and use a different,
+deliberately coarse vocabulary. They are returned by admission on whatever
+route the caller was calling, not by a management endpoint:
+
+```text
+unauthenticated   every credential-shaped failure: unknown key id, revoked
+                  or expired key, bad verifier, bad signature, expired or
+                  future-dated token, spent jti, target mismatch, payload
+                  digest mismatch. One code, because distinguishing them
+                  hands an attacker the oracle the absent public verify
+                  endpoint was withheld to avoid.
+nonce_required    carries a fresh server nonce to bind into the retry. Not
+                  a leak: it is a protocol step the client must complete,
+                  and it is returned before any key material is judged.
+rate_limited      carries retry-after.
+```
+
+Target mismatch is the one case that returns a detail alongside the coarse
+code: the verifier's own computed canonical target, per the API-contract
+rules above. Without it every SDK integration debugs blind.
+
+The detail carries an ordering requirement, or it becomes the oracle it is
+carved out of. It is emitted only after the signature has verified against
+a registered, live public key, and never for an unknown, revoked, or
+expired key. A caller who reaches that point holds the private key, so the
+only thing the detail tells them is how the server serialized the request
+they themselves sent. Every other failure returns the bare code.
 
 DECIDED (ADR#0048): a replay of the same idempotency key returns metadata
 only, never plaintext, even for the caller who originally received it on
@@ -811,6 +1013,141 @@ per-provider validation call anywhere in the eleven wired sources today.
 Prioritize adding first-class validation for the providers that already
 have a working write/rotate/revoke path through the internal admin API
 before adding it for anything not yet wired.
+
+### Canonical signed-request target (nothing built)
+
+[ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section 2 places
+this definition here and requires it to land before signed-request
+verification does. A target the client and the server
+serialize differently is a signature failure neither side can debug, so the
+rules below are the whole compatibility surface between every SDK and the
+verifier.
+
+The serialization is a single string, fields joined by one LF (`0x0A`),
+with no trailing LF. None of the fields can contain an LF after the
+normalization rules below, so the framing is unambiguous without length
+prefixes.
+
+```text
+HTTP    "http/1" LF method LF authority LF path LF query
+NATS    "nats/1" LF subject LF operation
+```
+
+The leading transport tag is what keeps a NATS subject from ever colliding
+with an HTTP target that happens to normalize to the same bytes.
+
+HTTP field rules:
+
+```text
+method     uppercase ASCII, verbatim. A request whose method is not already
+           uppercase ASCII is rejected before verification, so there is no
+           case-folding rule for the two sides to disagree about.
+
+authority  host, lowercased; port appended only when it is not the default
+           for the scheme. IDN hosts use their A-label (punycode) form.
+           IPv6 literals are bracketed, lowercase hex, in the RFC 5952
+           compressed form. Scheme is not a field because signed routes
+           accept only https; cleartext is rejected at admission.
+
+path       percent-encoding normalized: percent-escapes of unreserved
+           characters (A-Z a-z 0-9 - . _ ~) are decoded, every remaining
+           escape uses uppercase hex digits, and every other non-unreserved
+           byte is encoded. `/` stays the segment separator. Otherwise the
+           path is taken as sent: no dot-segment removal, no slash
+           collapsing, no trailing-slash normalization, no case folding. A
+           path containing a `.` or `..` segment is rejected rather than
+           resolved. An empty path serializes as `/`.
+
+query      empty when the request has no query string, so the field is
+           present but empty and the LF framing stays fixed. Otherwise each
+           parameter is percent-encoding normalized the same way as the
+           path (with `&` and `=` encoded inside names and values), the
+           encoded parameter strings are sorted by byte order, and they are
+           rejoined with `&`. A parameter sent without `=` keeps its bare
+           name, so `?a` and `?a=` do not collapse into one target.
+```
+
+Query is bound rather than dropped. Without it a token signed for
+`GET /v1/.../credentials?page_size=25` would authorize the same call with
+`page_size=100000`, which is the same substitution the payload digest
+closes for bodies.
+
+Sorting exists because HTTP clients and proxies reorder query parameters
+freely, so an unsorted target would fail for reasons the caller did not
+cause.
+
+NATS field rules:
+
+```text
+subject    the concrete subject the message was published on, verbatim.
+           Subjects are already a restricted alphabet, so no normalization
+           applies. A subject containing `*` or `>` is rejected: a wildcard
+           is not a target. Subject mapping that rewrites subjects is
+           unsupported in front of signed subjects, per ADR#0051 section 6.
+
+operation  the operation name from the payload envelope, verbatim.
+```
+
+The `tgt` claim carries the base64url SHA-256 (unpadded) of the canonical
+target string, not the string itself. Constant width, no JSON escaping of
+the LF framing, and nothing about it is secret: on a target mismatch the
+verifier returns its own computed canonical target in the error detail, so
+an SDK author can diff the two strings directly instead of comparing
+hashes.
+
+Worked examples:
+
+```text
+GET https://api.trogon.ai/v1/projects/p_9f2/credentials
+    ?page_size=25&filter=kind%3Aslack
+
+  http/1
+  GET
+  api.trogon.ai
+  /v1/projects/p_9f2/credentials
+  filter=kind%3Aslack&page_size=25
+
+  tgt = m_hqRMLS9vuHqgfOxfDxNBpE3ybIjZ5monRX9nbloo0
+
+NATS subject credential.command.rotate, operation RotateCredential
+
+  nats/1
+  credential.command.rotate
+  RotateCredential
+
+  tgt = OExB_oJqD9xvhssENaQeU-k1d5zufYFK5xAjN6CPZlc
+```
+
+The payload digest that rides alongside it:
+
+```text
+pdh = base64url(SHA-256(exact request body bytes)), unpadded
+
+bodyless requests use the digest of the empty byte string:
+  47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU
+```
+
+On NATS the digest covers the raw payload bytes with no canonicalization,
+because a NATS payload is a single byte slice.
+
+Two verifier obligations that are not serialization rules but fail the same
+way when they are missed:
+
+- the verifier rejects any authority outside its own configured set of
+  served authorities before it compares targets, so a forged `Host` header
+  cannot decide what a signature is checked against;
+- an intermediary that rewrites paths, query strings, or bodies breaks
+  signatures by design, which is the stated consequence in ADR#0051 rather
+  than a bug to work around.
+
+Test vectors ship as one shared fixture consumed by both the verifier tests
+and the SDK test suites, so a divergence is a failing test rather than a
+support ticket. The set covers, at minimum: mixed-case host, IDN host, IPv6
+literal, default and non-default ports, over-encoded and under-encoded
+paths, a path with reserved characters in a resource id, absent query,
+single-parameter query, out-of-order multi-parameter query, repeated
+parameter names, valueless parameters, empty body, and a NATS subject with
+a multi-token name.
 
 ## Authorization Matrix (AUTHORIZATION_MATRIX)
 
@@ -871,6 +1208,12 @@ break_glass_admin
             can do every operation with no logging beyond ordinary tracing
   gap:      no break-glass concept, no audit trail specific to emergency
             access
+  consumer: ADR#0059 section 6 gives this role its first concrete
+            consumer, the operator CLI that registers an additional root
+            public key when every root private key is lost. That path is
+            unusable in production until an audit device is provisioned,
+            so the audit-device gap is a blocker on it rather than
+            adjacent work
 ```
 
 The internal `/-/credentials` admin API has its own, separate
@@ -1204,6 +1547,28 @@ allowed hosts
 actions: add, rotate, resubmit secret, revoke, archive, delete, view audit
 ```
 
+### API key list columns
+
+```text
+display name
+keyspace
+kind                 bearer | signed
+status               active | rotating | revoked | expired
+public prefix        tg_<env>_<key_id>, bearer only, derived not stored
+fingerprint          sha256:..., signed only
+roles
+direct permissions   distinct badge, never folded into the role display
+expires at
+last used
+actions: create, reroll, revoke, add public key, revoke public key,
+         view audit
+```
+
+`rotating` and the direct-permissions badge are not cosmetic choices:
+ADR#0061 section 3 and ADR#0060 section 3 make them the product surface for
+a half-finished rotation and for an out-of-role grant, both of which are
+otherwise visible only in the data.
+
 ### Acceptance scenarios
 
 Given a user with permission to add credentials to a vault
@@ -1252,6 +1617,29 @@ Given a bearer API key's raw value was shown once and the tab was closed
 When the user returns to the key's detail view
 Then the UI states the key exists but its value cannot be recovered, and
   offers reroll as the only recovery action.
+
+Given a bearer key was rerolled and its grace window has not elapsed
+When the user views the key list
+Then the old key shows as rotating with its expiry rather than as active,
+  so a rotation somebody started and forgot to finish is visible in the
+  product rather than only in the data.
+
+Given a user is creating a signed key
+When the UI walks them through it
+Then it never offers to generate, upload, or accept a private key, and
+  asks only for a public key produced by the CLI, because the platform
+  never holds a private key (ADR#0050 section 2).
+
+Given a keyspace whose policy disallows bearer issuance
+When the user opens the create-key flow for it
+Then bearer is not an offered option, and the flow explains the keyspace
+  policy rather than failing with bearer_issuance_disallowed after submit.
+
+Given a key carries direct permissions beyond its roles
+When the user views the key list or its detail view
+Then those permissions render as a distinct badge and the key is marked as
+  carrying them, so an out-of-role grant is discoverable without reading
+  the key's policy.
 
 Given any credential state
 When the user inspects it through the UI
@@ -1362,75 +1750,111 @@ Acceptance for this area:
 Nothing is implemented. No bearer key, signed key, keyspace, or
 `ApiPrincipal` code exists in the repository. `API_KEY.md` holds the full
 design (data model, key format, create and verification flows, keyspaces,
-identities, permissions, rate limits, rerolling, revocation); this section
-records only the build order and the acceptance bar.
+identities, permissions, rate limits, rerolling, revocation) and is the
+design of record; this section records only the build order and the
+acceptance bar.
 
 Signed mode is the strongly recommended default and the primary build
 target per [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md);
 bearer is the policy-bounded compatibility tier.
 
-### Signed keys
+Every decision this section depends on is ratified:
 
 ```text
-api_key.public_key.add
-api_key.public_key.revoke
-api_key.verify_signed_request
+ADR#0046  project-anchored resource names; environment is an attribute
+ADR#0048  one-time plaintext exposure; no escrow in any form
+ADR#0050  signed-first posture; client-generated keys only; Ed25519/ES256
+ADR#0051  fully bound single-use request tokens; NATS KV replay store
+ADR#0058  key format, HMAC verifier construction, pepper custody
+ADR#0059  keyspace model, keyspace policy, root key bootstrap
+ADR#0060  permissions vocabulary, built-in roles, delegation, rate limits
+ADR#0061  rotation grace, first-release audit set
 ```
 
-- client-generated key pairs only; the platform never holds private keys;
-- Ed25519 default, ES256 accepted (ADR#0050);
-- the database stores the public key and a fingerprint;
-- single-use tokens with full binding per
-  [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md): transport-mapped
-  target (HTTP method/host/path or NATS subject), payload digest, iat/exp
-  within a 2 minute ceiling, jti replay store, server-nonce escalation;
-- verification fails closed when the replay store is unavailable;
-- tokens verify once at admission; durable flows carry provenance onward
-  per [ADR#0039](./docs/adr/0039-self-authenticating-event-provenance.md),
-  and consumers never re-verify expired caller tokens;
-- root and management keyspaces are signed-only and demand server nonces.
+### Commands to implement
 
-### Bearer keys
+The design behind each of these is in `API_KEY.md`; the ADR beside it is
+where the reasoning lives. This list is the build surface, not a second
+copy of the model.
+
+Names are verb + noun per
+[ADR#0014](./docs/adr/0014-command-and-query-naming.md), and they are the
+generated proto message names under `proto/trogonai/platform/`, so the
+build surface and the wire contract cannot drift into two vocabularies.
 
 ```text
-api_key.create
-api_key.reroll
-api_key.revoke
-api_key.verify
+CreateApiKeyspace               ADR#0059  policy boundary and its fields
+UpdateApiKeyspacePolicy                   environment and tier are immutable
+DeleteApiKeyspace                         refused while active keys remain
+
+CreateApiKey                    ADR#0058  format and verifier digest
+RerollApiKey                    ADR#0061  grace window; revoke has none
+RevokeApiKey
+ChangeApiKeyPolicy              ADR#0060  delegation ceiling checked here
+ExpireApiKey                    ADR#0061  lazy, on first denied use
+
+AddApiKeyPublicKey              ADR#0050  client-generated pairs only
+RevokeApiKeyPublicKey           ADR#0061  swap bounded at 2 active
 ```
 
-- the raw key is shown once (ADR#0048);
-- the database stores a verifier digest;
-- the verifier pepper lives outside the API-key table;
-- list and read responses are metadata-only;
-- a lost one-time response requires reroll by default;
-- keyspace policy can disallow bearer issuance entirely (ADR#0050).
+Verification is deliberately not on this list. It appends no event and
+changes no state, so it is not a command: bearer verification is a
+constant-time compare against the peppered digest
+([ADR#0058](./docs/adr/0058-api-key-format-and-verifier-construction.md)),
+and signed-request verification is a signature check plus an atomic
+check-and-record against the replay store
+([ADR#0051](./docs/adr/0051-fully-bound-request-signing.md) section 4).
+Neither produces a domain event, because successful verification is a
+metric rather than an audit fact
+([ADR#0061](./docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+section 6) and a denial is an audit fact rather than a state change.
+`ExpireApiKey` is the single exception, and it is a command precisely
+because it is the one thing a verification can durably record.
 
-### Authorization result
+Two ordering constraints the build has to respect, both of which are
+properties of this plan rather than of the design:
 
-Both modes return an `ApiPrincipal`:
+- the canonical target serialization in API_CONTRACTS lands before
+  signed-request verification does, because the verifier and the SDKs have
+  to agree on bytes before either can be tested against the other;
+- tokens verify once at admission, and durable flows carry provenance
+  onward per
+  [ADR#0039](./docs/adr/0039-self-authenticating-event-provenance.md).
+  Consumers never re-verify an expired caller token, so verification does
+  not belong on any path downstream of admission.
 
-```text
-ApiPrincipal
-  owner_id
-  identity_id
-  key_id
-  keyspace_id
-  scopes
-  roles
-  allowed_vaults
-  allowed_integrations
-  allowed_environments
-```
+Both modes return an `ApiPrincipal`, whose shape is in API_KEY.md as
+amended by [ADR#0060](./docs/adr/0060-api-key-authorization-model-and-rate-limits.md):
+one effective permission set, no `scopes`, resource scope as a
+`ResourceScope` value object ANDed with permissions.
+
+The seven required first-release audit facts are in
+[ADR#0061](./docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+section 5. Two of them, `api_key.denied` and
+`api_key.signed_request_replayed`, are what the two unfirable alerts in
+`devops/openbao/runbooks/alerts.md` are waiting on, so item 6i below closes
+those alerts.
 
 ### Acceptance
 
-- bearer verification is constant-time;
-- signed verification checks signature, expiry, nonce, method, host, and
-  path;
+- bearer verification is constant-time, and the checksum rejects malformed
+  keys before any lookup;
+- signed verification checks signature, expiry, skew, nonce, payload
+  digest, replay record, and the canonical target;
+- a target mismatch returns the verifier's computed canonical target so an
+  SDK author can diff it;
 - API keys never directly return raw provider credentials;
-- root keys cannot delegate more authority than they have;
-- rate limits can attach to keys, identities, owners, or routes.
+- the delegation ceiling is a checked invariant, not a documented rule:
+  create and patch fail with `permission_denied` when the resulting key's
+  effective permissions or resource scope exceed the acting principal's,
+  and root keys are not exempt;
+- rate limits attach to keys and projects in the first milestone;
+  `identity` and `route` stay declared but unenforced, so adding them later
+  is a policy row rather than a schema migration;
+- rate-limit counters use NATS KV compare-and-set, fail open on ordinary
+  keyspaces and closed on management keyspaces, and emit a distinct metric
+  either way so a fail-open window is visible;
+- the replay store, unlike the rate limiter, fails closed in every case.
 
 ## Testing Strategy
 
@@ -1464,12 +1888,26 @@ Not covered, each blocked on the feature it tests:
 
 ```text
 verifier digest construction            (API key platform)
+wire-format checksum rejection          (API key platform)
+pepper rotation dual-version window     (API key platform)
+canonical target vectors, both          (API key platform, and the one
+  transports                             item ADR#0051 requires before
+                                         signed verification ships)
 signed-request verification             (API key platform)
 signed request replay is rejected       (API key platform)
+delegation ceiling is enforced          (API key platform)
+rate limiter fails open on ordinary     (API key platform)
+  keyspaces and closed on management
 create saga with DB intent and outbox   (sagas)
 cleanup worker                          (worker does not exist)
 no plaintext in outbox                  (outbox does not exist)
 ```
+
+The canonical target vectors are the one entry above that is not blocked on
+the feature it tests. The serialization is fully specified in API_CONTRACTS
+and the vectors are a fixture file, so they can be written and shared with
+SDK authors before any verifier exists, which is the order ADR#0051 section
+2 asks for.
 
 Failure injection, none of it written:
 
@@ -1540,7 +1978,8 @@ before OpenBao-to-DB reconciliation is possible at all.
 - a declarative apply (Terraform or equivalent) instead of the manual loop
   in the policies README;
 - provision an audit device, without which break-glass access cannot be
-  audited;
+  audited and the ADR#0059 section 6 root-key recovery path cannot be used
+  in production;
 - run the restore drill specified in
   `devops/openbao/runbooks/backup-and-restore.md`, which needs a cluster.
 
@@ -1556,9 +1995,72 @@ before OpenBao-to-DB reconciliation is possible at all.
 ### 6. API key platform
 
 Per the section above. `ApiKeyState`, `SignedPublicKeyState`, `ApiKeyId`,
-`ApiKeyspaceId`, `ApiKeyKind`, and `IdentityId` all land here; no key
-issuance surface exists today, so there is nothing for them to transition
-or identify yet.
+`ApiKeyspaceId`, `ApiKeyKind`, `ResourceScope`, and `IdentityId` all land
+here; no key issuance surface exists today, so there is nothing for them to
+transition or identify yet.
+
+Every design question is now ratified (ADR#0046, ADR#0048, ADR#0050,
+ADR#0051, ADR#0058 through ADR#0061), so what remains is build order rather
+than open design:
+
+```text
+6a  keyspaces and policy
+    ApiKeyspaceId, the policy value objects, project creation making
+    `management` and `default`. Everything else needs a keyspace to live
+    in, and the policy fields decide what the issuance paths may do.
+
+6b  canonical target serialization and its shared test vectors
+    Required by ADR#0051 section 2 to land before signed verification.
+    Independent of 6a, so it can run in parallel.
+
+6c  signed key issuance
+    AddApiKeyPublicKey / RevokeApiKeyPublicKey, the fingerprint, the
+    2-active-key rotation bound. No secret is minted, so this path needs
+    neither the pepper nor the one-time display and is the shorter of the
+    two tiers.
+
+6d  signed verification
+    The verifier against 6b, plus the NATS KV replay store with atomic
+    conditional create and fail-closed behavior. Not a command: it appends
+    no event, so it lands as a verification path rather than a decider.
+
+6e  self-hosted bootstrap
+    Register the root public key from deployment configuration,
+    idempotent by fingerprint. Needs 6a and 6c; unblocks running a
+    self-hosted deployment with no other auth path.
+
+6f  bearer issuance and verification
+    The wire format, the CRC32C checksum, the pepper resolved at boot
+    through the secrets service, HMAC verification, one-time display, and
+    reroll with its grace window. Deliberately after the signed tier:
+    ADR#0050 makes bearer the compatibility tier, and building it second
+    keeps the management API from having a bearer-authenticated era.
+
+6g  authorization
+    Built-in roles, direct_permissions, ResourceScope, and the delegation
+    ceiling as a checked invariant. Needs a principal from 6d or 6f to
+    check against.
+
+6h  rate limits
+    NATS KV compare-and-set counters, per key and per project, with the
+    fail-open/fail-closed split and its metric.
+
+6i  audit facts
+    The seven required facts. Emitted as each producing path lands rather
+    than as a trailing phase, since two of them are the signal for the
+    alerts in item 8.
+```
+
+The one non-design blocker is item 1: audit facts are specified as distinct
+from domain events, and nothing persists them yet.
+
+Separately, `a2a-auth-callout`'s transitional HMAC-registry `ApiKey`
+(`credentials/api_key.rs`, already marked deprecated, preferred last behind
+OIDC and mTLS in `CredentialSource`) is the one place an API-key-shaped
+concept exists in code today. It is not an ancestor of this platform and
+shares nothing with it beyond the name; retiring it belongs to the A2A
+stack's own migration, not to this build order. Worth stating so nobody
+tries to grow it into the platform.
 
 ### 7. UI
 
@@ -1566,13 +2068,21 @@ Per UI_ACCEPTANCE. Depends on the public API existing first.
 
 ### 8. Alerting
 
-Five of nine alerts are fully specified and firable in
+Six of nine alerts have a signal to fire on in
 `devops/openbao/runbooks/alerts.md`; none are deployed, and wiring them
-into a monitoring backend is separate work. Three still have no signal:
-orphan cleanup backlog (no worker, no backlog gauge), suspicious API-key
-verification failures, and signed-request replay attempts (both blocked on
-the API key platform). The fourth gap, repeated OpenBao write failures, is
-now closed by `gateway.credential.store.write.failures`.
+into a monitoring backend is separate work. The most recent to gain one was
+repeated OpenBao write failures, closed by
+`gateway.credential.store.write.failures`.
+
+Of the remaining three, the two API-key alerts, suspicious verification
+failures and signed-request replay attempts, now have a specified signal
+source: `api_key.denied` and `api_key.signed_request_replayed` in the
+ADR#0061 audit set. They are no longer blocked on a design decision, only
+on item 6i shipping, and item 6i names them as its reason for landing
+incrementally rather than last.
+
+One gap remains with no signal at all: orphan cleanup backlog, which has no
+worker and no backlog gauge.
 
 Also open: ratify the revocation latency target as an alert on
 `gateway.credential.revocation.latency`, which is measured but not
@@ -1589,7 +2099,6 @@ questions in
 - which providers get first-class validation on rotate;
 - the default idempotency TTL;
 - the default pending credential TTL;
-- which API keyspaces ship first;
 - whether idempotency records stay in NATS KV or move to the control-plane
   database (the same question as ADR#0057's Q3).
 
@@ -1597,6 +2106,22 @@ Owner boundary, metadata backend, path convention, cache TTL, revocation
 latency target, signed-key algorithm, the signed-first posture, request
 signing binding, and the production seal are decided in ADR#0046 through
 ADR#0052.
+
+The API key platform has no architectural decisions left. Key format,
+verifier construction, pepper custody, keyspaces and their policy fields,
+root key bootstrap, the permissions vocabulary, built-in roles, delegation
+enforcement, rate-limit subject kinds and counter store, rotation grace,
+and the first-release audit set are decided in ADR#0058 through ADR#0061.
+The three things deferred there (customer-authored roles, identity-level
+and route-level rate limits, and a dedicated counter store) carry stated
+trigger conditions, so they are deferrals rather than undecided design.
+
+What remains open there is scoping, listed in API_KEY.md's own Open
+Questions: which identity kinds ship first and whether identity is required
+on a key, what replaces the internal `/-/credentials` admin API, concrete
+first-milestone pending-operation caps, whether SDKs verify the wire-format
+checksum before sending, and whether policy is patchable in the first
+release or create-time only. None of them blocks starting item 6.
 
 ## Definition Of Done
 
@@ -1610,7 +2135,12 @@ The credential platform is done when:
 - gateway runtime resolution is authorized and cached;
 - cleanup is idempotent and observable;
 - API keys are split between verifier-only bearer keys and signed keys;
-- signed keys do not require Trogonai to store caller private keys;
+- signed keys do not require Trogonai to store caller private keys, on any
+  path including bootstrap and break-glass recovery;
+- no key can be issued with more authority than the principal that issued
+  it, proven by test rather than asserted in documentation;
+- a self-hosted deployment can reach its first authenticated request
+  without a plaintext credential ever crossing the boundary;
 - UI states hide distributed-system details from users;
 - runbooks exist for stuck, leaked, orphaned, and missed-projection
   scenarios;
