@@ -6,7 +6,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
 pub use nats_permission_claims::{NatsPermissionClaims, NatsSubjectPermission};
@@ -147,13 +147,27 @@ impl SpiceDbSubject {
     }
 }
 
+/// The one claim a principal minted here carries; an inbound principal keeps
+/// whatever else its issuer put in the document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct SpiceDbSubjectClaim {
+    spicedb_subject: Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SpiceDbPrincipal(pub Value);
 
 impl SpiceDbPrincipal {
     pub fn new(subject: impl Into<String>) -> Self {
-        Self(json!({ "spicedb_subject": subject.into() }))
+        Self::from_subject_claim(Value::String(subject.into()))
+    }
+
+    /// The claim holds a single [`Value`]; serde_json::to_value cannot fail at
+    /// runtime, and an authorization payload must never panic.
+    fn from_subject_claim(spicedb_subject: Value) -> Self {
+        let claim = SpiceDbSubjectClaim { spicedb_subject };
+        Self(serde_json::to_value(claim).unwrap_or(Value::Null))
     }
 
     pub fn spicedb_subject(&self) -> Option<SpiceDbSubject> {
@@ -429,9 +443,9 @@ pub(crate) fn spicedb_principal_from_oidc_claims(claims: &Value) -> SpiceDbPrinc
     if let Some(p) = claims.get("spicedb_principal") {
         SpiceDbPrincipal(p.clone())
     } else if let Some(sub) = claims.get("sub") {
-        SpiceDbPrincipal(json!({ "spicedb_subject": sub }))
+        SpiceDbPrincipal::from_subject_claim(sub.clone())
     } else {
-        SpiceDbPrincipal(json!({}))
+        SpiceDbPrincipal(Value::Object(serde_json::Map::new()))
     }
 }
 

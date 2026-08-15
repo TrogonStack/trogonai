@@ -19,7 +19,8 @@ use axum::{
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream, Stream};
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 use tracing::warn;
 
 use a2a_nats::RequestId;
@@ -31,7 +32,7 @@ use a2a_nats::{A2aPrefix, A2aTaskId, ReqId};
 use a2a_auth_callout::{CALLER_JWT_HEADER_NAME, CallerJwtHeaderValue, MintedUserJwt};
 
 use crate::auth::AuthCalloutClient;
-use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR};
+use crate::constants::{AGENT_ID_HEADER, INTERNAL_ERROR, JSONRPC_VERSION};
 use crate::error::BridgeError;
 use crate::identity::{BridgeAgentId, BridgeUserJwt, CallerHttpsAuth};
 
@@ -156,13 +157,23 @@ impl InboundGatewayPublish for RecordingInboundPublisher {
     }
 }
 
+/// The canned reply [`RecordingInboundPublisher`] hands back in place of a real
+/// gateway response: a null id, since no request correlated it, and an empty
+/// result.
+#[derive(Serialize)]
+struct StaticJsonOk {
+    jsonrpc: &'static str,
+    id: Option<Value>,
+    result: serde_json::Map<String, Value>,
+}
+
 fn static_json_ok() -> Vec<u8> {
-    serde_json::to_vec(&json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "result": {},
-    }))
-    .unwrap_or_else(|_| b"{}".to_vec())
+    let reply = StaticJsonOk {
+        jsonrpc: JSONRPC_VERSION,
+        id: None,
+        result: serde_json::Map::new(),
+    };
+    serde_json::to_vec(&reply).unwrap_or_else(|_| b"{}".to_vec())
 }
 
 #[async_trait]
@@ -524,13 +535,32 @@ fn sse_error_line(caller_id: &Value, err: &BridgeError) -> Event {
     sse_error_frame(caller_id, err.to_string())
 }
 
+/// The `error` member of a JSON-RPC response.
+#[derive(Serialize)]
+struct SseErrorDetail {
+    code: i32,
+    message: String,
+}
+
+/// JSON-RPC error response carried on an SSE frame, echoing the caller's id so
+/// the failure correlates with the request that opened the stream.
+#[derive(Serialize)]
+struct SseErrorEnvelope<'a> {
+    jsonrpc: &'static str,
+    id: &'a Value,
+    error: SseErrorDetail,
+}
+
 fn sse_error_frame(caller_id: &Value, message: String) -> Event {
-    let envelope = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": caller_id,
-        "error": { "code": INTERNAL_ERROR, "message": message },
-    });
-    Event::default().data(envelope.to_string())
+    let envelope = SseErrorEnvelope {
+        jsonrpc: JSONRPC_VERSION,
+        id: caller_id,
+        error: SseErrorDetail {
+            code: INTERNAL_ERROR,
+            message,
+        },
+    };
+    Event::default().data(serde_json::to_string(&envelope).unwrap_or_default())
 }
 
 fn sse_from_bootstrap_and_payloads(
@@ -736,9 +766,16 @@ async fn a2a_post(State(state): State<AppState>, headers: HeaderMap, body: bytes
     }
 }
 
+/// Failure body for a request that never reached the gateway, so there is no
+/// JSON-RPC envelope to carry the error in.
+#[derive(Serialize)]
+struct BridgeErrorBody {
+    error: String,
+}
+
 fn bridge_error_into_response(e: BridgeError) -> Response {
     let status = StatusCode::BAD_GATEWAY;
-    let payload = serde_json::json!({"error": e.to_string()});
+    let payload = BridgeErrorBody { error: e.to_string() };
     (status, axum::Json(payload)).into_response()
 }
 

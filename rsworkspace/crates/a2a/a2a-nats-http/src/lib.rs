@@ -8,6 +8,7 @@ pub mod rest;
 pub mod router;
 pub mod runtime;
 pub mod sse;
+pub mod wire;
 
 pub use runtime::{RuntimeError, run};
 

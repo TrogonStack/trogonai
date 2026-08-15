@@ -244,8 +244,15 @@ async fn handle_payload_envelope<P: JetStreamPublisher, S: ObjectStorePut>(
     }
 }
 
+/// The acknowledgement Slack expects back on the socket for a delivered
+/// envelope.
+#[derive(serde::Serialize)]
+struct AckFrame {
+    envelope_id: String,
+}
+
 fn ack_frame(envelope_id: String) -> String {
-    serde_json::json!({ "envelope_id": envelope_id }).to_string()
+    serde_json::to_string(&AckFrame { envelope_id }).unwrap_or_default()
 }
 
 #[cfg(test)]

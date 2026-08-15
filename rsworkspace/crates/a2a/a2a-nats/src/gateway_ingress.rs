@@ -8,6 +8,7 @@
 
 use async_nats::header::HeaderMap;
 use jsonrpc_nats::Encoded;
+use serde::Serialize;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
@@ -196,6 +197,12 @@ pub fn ingress_gateway_declarative_denied_response_bytes(
     Ok(ingress_error_wire(request_headers, request_payload_hint, -32_803, message, None)?.body)
 }
 
+/// `data` member of a Tier-3 skill refusal, naming the rule that refused.
+#[derive(Debug, Serialize)]
+struct Tier3RefusalData<'a> {
+    rule: &'a str,
+}
+
 /// Serialize a Tier-3 skill refusal reply (`-32802`) for the correlating inbox.
 pub fn ingress_gateway_tier3_refused_response_bytes(
     request_headers: &HeaderMap,
@@ -208,7 +215,7 @@ pub fn ingress_gateway_tier3_refused_response_bytes(
         request_payload_hint,
         -32_802,
         message,
-        Some(serde_json::json!({ "rule": rule })),
+        serde_json::to_value(Tier3RefusalData { rule }).ok(),
     )?
     .body)
 }

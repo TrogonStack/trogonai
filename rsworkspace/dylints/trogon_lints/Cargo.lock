@@ -1300,6 +1300,8 @@ dependencies = [
  "dylint_linting",
  "dylint_testing",
  "opentelemetry",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

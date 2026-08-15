@@ -178,14 +178,23 @@ fn source_subject(source: &projections_v1::delivery::nats_message::Source) -> Op
         .map(|SourceKind::LatestFromSubject(inner)| inner.subject.clone())
 }
 
-fn headers_to_json(message: &projections_v1::Message) -> serde_json::Value {
-    serde_json::Value::Array(
-        message
-            .headers
-            .iter()
-            .map(|header| serde_json::json!({ "name": header.name, "value": header.value }))
-            .collect(),
-    )
+/// A message header as it sits in the `message_headers` JSONB column.
+#[derive(serde::Serialize)]
+struct HeaderWire<'a> {
+    name: &'a str,
+    value: &'a str,
+}
+
+fn headers_to_json(message: &projections_v1::Message) -> Result<serde_json::Value, SchedulerError> {
+    let headers: Vec<HeaderWire<'_>> = message
+        .headers
+        .iter()
+        .map(|header| HeaderWire {
+            name: &header.name,
+            value: &header.value,
+        })
+        .collect();
+    serde_json::to_value(headers).map_err(|_| malformed("message headers could not be encoded as JSON"))
 }
 
 fn headers_from_json(value: &serde_json::Value) -> Result<Vec<projections_v1::Header>, SchedulerError> {
@@ -405,7 +414,7 @@ impl PostgresSchedulesProjection {
             Some(content) => (Some(content.content_type.clone()), Some(content.data.clone())),
             None => (None, None),
         };
-        let message_headers = headers_to_json(message);
+        let message_headers = headers_to_json(message)?;
 
         sqlx::query(
             "INSERT INTO schedules_projection ( \

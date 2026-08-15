@@ -31,7 +31,7 @@ impl DenialCategory {
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
             AuthCalloutError::Jwt(_) => Self::InternalError,
-            AuthCalloutError::WireFormat(_) => Self::InternalError,
+            AuthCalloutError::WireFormat(_) | AuthCalloutError::BridgeWireFormat { .. } => Self::InternalError,
             AuthCalloutError::Internal(_) => Self::InternalError,
             AuthCalloutError::MissingEnvVar(_)
             | AuthCalloutError::UnknownSigningKeySource(_)
@@ -47,6 +47,7 @@ impl DenialCategory {
             CredentialError::UnknownAccount(_) => Self::UnknownAccount,
             CredentialError::VerifierUnavailable { .. } => Self::VerifierUnavailable,
             CredentialError::InvalidRequest(_) => Self::InvalidRequest,
+            CredentialError::PrincipalSerialization(_) => Self::InternalError,
             // The algorithm and JWK-policy rejections stay behind the same
             // wire category as any other bad credential. The typed variants
             // exist so this side can count them apart, not so a caller can

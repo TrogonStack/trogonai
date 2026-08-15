@@ -226,24 +226,43 @@ fn prompt_text(event: &InboundEvent) -> String {
     format!("[telegram message from {}]\n{}", event.sender.display_name, body)
 }
 
+/// The `chat` entry of `_meta`: where the message arrived, who sent it, and
+/// when.
+#[cfg(not(coverage))]
+#[derive(serde::Serialize)]
+struct ChatMeta<'a> {
+    channel: &'a str,
+    endpoint: String,
+    sender: SenderMeta<'a>,
+    message_ref: &'a str,
+    occurred_at: i64,
+}
+
+#[cfg(not(coverage))]
+#[derive(serde::Serialize)]
+struct SenderMeta<'a> {
+    platform_user_id: &'a str,
+    display_name: &'a str,
+}
+
 /// Structured twin of the context prefix, for agents that opt into reading
 /// `_meta` (see the architecture doc's `_meta` convention).
 #[cfg(not(coverage))]
 fn prompt_meta(event: &InboundEvent) -> agent_client_protocol::schema::v1::Meta {
     let mut meta = serde_json::Map::new();
-    meta.insert(
-        "chat".to_string(),
-        serde_json::json!({
-            "channel": event.endpoint.channel(),
-            "endpoint": event.endpoint.kv_key(),
-            "sender": {
-                "platform_user_id": event.sender.platform_user_id,
-                "display_name": event.sender.display_name,
-            },
-            "message_ref": event.message_ref,
-            "occurred_at": event.occurred_at,
-        }),
-    );
+    let chat = ChatMeta {
+        channel: event.endpoint.channel(),
+        endpoint: event.endpoint.kv_key(),
+        sender: SenderMeta {
+            platform_user_id: event.sender.platform_user_id.as_str(),
+            display_name: &event.sender.display_name,
+        },
+        message_ref: event.message_ref.as_str(),
+        occurred_at: event.occurred_at,
+    };
+    if let Ok(chat) = serde_json::to_value(chat) {
+        meta.insert("chat".to_string(), chat);
+    }
     meta
 }
 

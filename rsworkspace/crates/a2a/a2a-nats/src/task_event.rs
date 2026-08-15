@@ -11,6 +11,8 @@
 //! retention window after the last agent is upgraded.
 
 use a2a::event::StreamResponse;
+use jsonrpc_nats::JSONRPC_VERSION;
+use serde::Serialize;
 use serde_json::Value;
 
 /// Decodes a task event that predates the JSON-RPC envelope, or `None` if the body
@@ -27,11 +29,21 @@ pub fn decode_legacy_event(body: &[u8]) -> Option<StreamResponse> {
 /// hops that forward event bytes without typing them.
 pub fn legacy_event_as_response(body: &[u8], id: &Value) -> Option<Value> {
     let event = decode_legacy_event(body)?;
-    Some(serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": event,
-    }))
+    let envelope = LegacyEventResponse {
+        jsonrpc: JSONRPC_VERSION,
+        id,
+        result: event,
+    };
+    serde_json::to_value(envelope).ok()
+}
+
+/// The envelope a legacy event is lifted into: a JSON-RPC success response
+/// carrying the reader's id, since the event bytes never held one.
+#[derive(Serialize)]
+struct LegacyEventResponse<'a> {
+    jsonrpc: &'static str,
+    id: &'a Value,
+    result: StreamResponse,
 }
 
 #[cfg(test)]

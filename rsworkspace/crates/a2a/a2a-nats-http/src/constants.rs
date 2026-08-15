@@ -4,6 +4,9 @@ pub const A2A_VERSION_HEADER: HeaderName = HeaderName::from_static("a2a-version"
 pub const A2A_EXTENSIONS_HEADER: HeaderName = HeaderName::from_static("a2a-extensions");
 pub const A2A_MEDIA_TYPE: &str = "application/a2a+json";
 
+/// JSON-RPC protocol version every envelope this binding emits carries.
+pub const JSONRPC_VERSION: &str = "2.0";
+
 /// Default A2A protocol version this server speaks when the client omits the header.
 pub const DEFAULT_A2A_VERSION: &str = "0.3.0";
 

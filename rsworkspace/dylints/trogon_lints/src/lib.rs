@@ -15,6 +15,8 @@ mod function_local_use;
 mod inline_module_block;
 mod manual_error_impl;
 mod redundant_module_path;
+mod serde_json_macro;
+mod serde_json_macro_allow_without_reason;
 mod std_env_access;
 mod telemetry_attribute_literal;
 mod telemetry_key_value_literal;
@@ -41,6 +43,8 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
         INLINE_MODULE_BLOCK,
         MANUAL_ERROR_IMPL,
         REDUNDANT_MODULE_PATH,
+        SERDE_JSON_MACRO,
+        SERDE_JSON_MACRO_ALLOW_WITHOUT_REASON,
         STD_ENV_ACCESS,
         TELEMETRY_ATTRIBUTE_LITERAL,
         TELEMETRY_KEY_VALUE_LITERAL,
@@ -51,6 +55,9 @@ pub fn register_lints(sess: &rustc_session::Session, lint_store: &mut LintStore)
     ]);
     lint_store.register_late_pass(|_| Box::<TrogonLints>::default());
     lint_store.register_early_pass(|| Box::new(redundant_module_path::RedundantModulePath));
+    lint_store.register_early_pass(|| {
+        Box::new(serde_json_macro_allow_without_reason::SerdeJsonMacroAllowWithoutReason)
+    });
 }
 
 rustc_session::declare_lint! {
@@ -286,6 +293,100 @@ rustc_session::declare_lint! {
     pub REDUNDANT_MODULE_PATH,
     Deny,
     "drop `#[path]` when `mod foo;` already resolves to the same file",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects a `serde_json::json!` invocation in production code.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// A `json!` literal is an anonymous payload shape. The keys are strings the
+    /// compiler never checks, the value types are whatever the literal happens to
+    /// hold, and the same wire shape gets respelled at every site that builds
+    /// it, so a renamed field is found by whoever reads the failing payload
+    /// rather than by `cargo check`. Modelling the payload as a type with
+    /// `#[derive(Serialize)]` gives the shape a name, a single definition, and a
+    /// schema that the consumer side can deserialize into, and
+    /// `serde_json::to_value` still produces the `Value` the API wanted. Tests
+    /// are exempt: a fixture's whole job is to spell a payload out literally,
+    /// including the malformed ones no type can express. A genuinely dynamic
+    /// shape (pass-through of a foreign document, a protocol whose fields are
+    /// only known at runtime) is a real exception, so the lint is suppressible at
+    /// the site with a stated reason. Generated files (those carrying an
+    /// `@generated` marker near the top) are exempt too, since their contents are
+    /// dictated by codegen.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// let body = serde_json::json!({
+    ///     "error": { "code": code, "message": message },
+    /// });
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// #[derive(serde::Serialize)]
+    /// struct ErrorBody {
+    ///     error: ErrorDetail,
+    /// }
+    ///
+    /// #[derive(serde::Serialize)]
+    /// struct ErrorDetail {
+    ///     code: i32,
+    ///     message: String,
+    /// }
+    ///
+    /// let body = serde_json::to_value(ErrorBody {
+    ///     error: ErrorDetail { code, message },
+    /// })?;
+    /// ```
+    pub SERDE_JSON_MACRO,
+    Deny,
+    "build JSON payloads from a `Serialize` type, not an ad-hoc `serde_json::json!` literal",
+}
+
+rustc_session::declare_lint! {
+    /// ### What it does
+    ///
+    /// Detects an `allow(serde_json_macro)` (or `expect(serde_json_macro)`)
+    /// attribute that carries no `reason = "..."`.
+    ///
+    /// ### Why is this bad?
+    ///
+    /// `serde_json_macro` is suppressible because a genuinely dynamic payload
+    /// is a real exception, not because the rule is optional. Rust accepts a
+    /// bare `allow`, so without this check the escape hatch costs one line and
+    /// records nothing: the next reader cannot tell an argued exception from a
+    /// silenced diagnostic, and cannot tell when the exception stopped being
+    /// true. Requiring the reason keeps the justification next to the code it
+    /// justifies, where review sees it.
+    ///
+    /// ### Example
+    ///
+    /// ```rust,ignore
+    /// #[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro))]
+    /// fn passthrough(document: &RawValue) -> Value { ... }
+    /// ```
+    ///
+    /// Use instead:
+    ///
+    /// ```rust,ignore
+    /// #[cfg_attr(
+    ///     dylint_lib = "trogon_lints",
+    ///     allow(
+    ///         serde_json_macro,
+    ///         reason = "the upstream document is forwarded verbatim and has no fixed schema"
+    ///     )
+    /// )]
+    /// fn passthrough(document: &RawValue) -> Value { ... }
+    /// ```
+    pub SERDE_JSON_MACRO_ALLOW_WITHOUT_REASON,
+    Deny,
+    "state the technical reason when suppressing `serde_json_macro`",
 }
 
 rustc_session::declare_lint! {
@@ -625,6 +726,7 @@ rustc_session::declare_lint! {
 struct TrogonLints {
     error_string_comparison: error_string_comparison::ErrorStringComparison,
     function_local_use: function_local_use::FunctionLocalUse,
+    serde_json_macro: serde_json_macro::SerdeJsonMacro,
     std_env_access: std_env_access::StdEnvAccess,
     telemetry_attribute_literal: telemetry_attribute_literal::TelemetryAttributeLiteral,
     telemetry_key_value_literal: telemetry_key_value_literal::TelemetryKeyValueLiteral,
@@ -640,6 +742,7 @@ impl<'tcx> LateLintPass<'tcx> for TrogonLints {
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
         self.error_string_comparison.check_expr(cx, expr);
+        self.serde_json_macro.check_expr(cx, expr);
         self.std_env_access.check_expr(cx, expr);
         self.telemetry_attribute_literal.check_expr(cx, expr);
         self.telemetry_key_value_literal.check_expr(cx, expr);
@@ -670,6 +773,7 @@ rustc_session::impl_lint_pass!(TrogonLints => [
     FUNCTION_LOCAL_USE,
     INLINE_MODULE_BLOCK,
     MANUAL_ERROR_IMPL,
+    SERDE_JSON_MACRO,
     STD_ENV_ACCESS,
     TELEMETRY_ATTRIBUTE_LITERAL,
     TELEMETRY_KEY_VALUE_LITERAL,
@@ -680,6 +784,11 @@ rustc_session::impl_lint_pass!(TrogonLints => [
 ]);
 
 rustc_session::impl_lint_pass!(redundant_module_path::RedundantModulePath => [REDUNDANT_MODULE_PATH]);
+
+rustc_session::impl_lint_pass!(
+    serde_json_macro_allow_without_reason::SerdeJsonMacroAllowWithoutReason
+        => [SERDE_JSON_MACRO_ALLOW_WITHOUT_REASON]
+);
 
 #[test]
 fn ui() {

@@ -6,9 +6,12 @@
 //! reply serialisation, JSON-RPC error mapping) that the loop is built from.
 
 use bytes::Bytes;
+use jsonrpc_nats::ResponseId;
+use serde_json::Value;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::{A2aAgentId, AgentIdError};
+use crate::wire::{encode_error, encode_success};
 
 use super::store::CatalogStoreError;
 
@@ -70,21 +73,15 @@ pub fn agent_id_from_subject(subject: &str, prefix: &A2aPrefix) -> Result<A2aAge
 }
 
 pub fn success_reply() -> Option<Bytes> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "result": null
-    });
-    serde_json::to_vec(&body).ok().map(Bytes::from)
+    encode_success(ResponseId::Null, &Value::Null)
+        .ok()
+        .map(|encoded| encoded.body)
 }
 
 pub fn error_reply(code: i32, message: &str) -> Option<Bytes> {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "error": { "code": code, "message": message }
-    });
-    serde_json::to_vec(&body).ok().map(Bytes::from)
+    encode_error(ResponseId::Null, code, message, None)
+        .ok()
+        .map(|encoded| encoded.body)
 }
 
 #[derive(Debug, thiserror::Error)]
