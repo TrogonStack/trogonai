@@ -61,9 +61,16 @@ lint crate rather than in per-invocation flags.
   a genuinely dynamic shape (an upstream document passed through verbatim, a
   payload whose keys are decided at runtime) opts out at the site with
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro, reason = "..."))]`,
-  where the `reason` records the technical justification. As a late (HIR) pass
-  it sees `#[cfg(test)] mod tests { ... }` only when the test target is
-  compiled, i.e. when linting with `--all-targets`.
+  where the `reason` records the technical justification and is required by
+  `serde_json_macro_allow_without_reason`. As a late (HIR) pass it sees
+  `#[cfg(test)] mod tests { ... }` only when the test target is compiled, i.e.
+  when linting with `--all-targets`.
+- `serde_json_macro_allow_without_reason` (`deny`): requires an
+  `allow(serde_json_macro)` or `expect(serde_json_macro)` to carry a non-empty
+  `reason = "..."`. Rust accepts a bare `allow`, so without this the escape
+  hatch records nothing and a silenced diagnostic is indistinguishable from an
+  argued exception. Runs as an early (AST) pass, since lint level attributes
+  never reach HIR.
 - `std_env_access` (`deny`): requires reading environment variables through the
   injected `trogon_std::env` abstraction (the `ReadEnv` lookup trait and the
   `EnumerateEnv` enumeration trait, backed by `SystemEnv` in production and
