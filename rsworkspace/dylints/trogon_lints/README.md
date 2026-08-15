@@ -47,6 +47,23 @@ lint crate rather than in per-invocation flags.
   `#[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]` at the
   site. As a late (HIR) pass it sees `#[cfg(test)] mod tests { ... }` only when
   the test target is compiled, i.e. when linting with `--all-targets`.
+- `serde_json_macro` (`deny`): requires JSON payloads to be built from a named
+  type (`#[derive(serde::Serialize)]` plus `serde_json::to_value`) instead of an
+  ad-hoc `serde_json::json!` literal, so every payload the code emits has a
+  name, a schema, and a single definition to change. Fires once per hand-written
+  invocation, however it is spelled (`json!`, `serde_json::json!`, or nested in
+  another macro call). Test and benchmark sources (`tests.rs`, `*_tests.rs`,
+  anything under a Cargo `tests/` or `benches/` directory, `#[cfg(test)]` and
+  `#[test]` code, inline `tests`/`benches` modules and the not-for-prod
+  test-support module family (`test_support`, `mocks`, `fixtures`, `testkit`,
+  `*_harness`)) build fixtures rather than production payloads and are exempt,
+  as are generated files (those carrying an `@generated` marker near the top);
+  a genuinely dynamic shape (an upstream document passed through verbatim, a
+  payload whose keys are decided at runtime) opts out at the site with
+  `#[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro, reason = "..."))]`,
+  where the `reason` records the technical justification. As a late (HIR) pass
+  it sees `#[cfg(test)] mod tests { ... }` only when the test target is
+  compiled, i.e. when linting with `--all-targets`.
 - `std_env_access` (`deny`): requires reading environment variables through the
   injected `trogon_std::env` abstraction (the `ReadEnv` lookup trait and the
   `EnumerateEnv` enumeration trait, backed by `SystemEnv` in production and

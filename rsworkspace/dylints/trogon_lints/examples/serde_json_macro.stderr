@@ -1,0 +1,30 @@
+error: JSON value built with the `serde_json::json!` macro
+  --> $DIR/serde_json_macro.rs:24:5
+   |
+LL |     json!({ "error": { "code": code, "message": "boom" } })
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: define the payload as a type with `#[derive(serde::Serialize)]` and convert it with `serde_json::to_value`, so the shape has a name, a schema, and one definition
+   = note: if the shape is genuinely dynamic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro, reason = "..."))]`
+   = note: `#[deny(serde_json_macro)]` on by default
+
+error: JSON value built with the `serde_json::json!` macro
+  --> $DIR/serde_json_macro.rs:28:5
+   |
+LL |     serde_json::json!({ "ok": true })
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: define the payload as a type with `#[derive(serde::Serialize)]` and convert it with `serde_json::to_value`, so the shape has a name, a schema, and one definition
+   = note: if the shape is genuinely dynamic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro, reason = "..."))]`
+
+error: JSON value built with the `serde_json::json!` macro
+  --> $DIR/serde_json_macro.rs:34:10
+   |
+LL |     vec![json!({ "id": 1 })]
+   |          ^^^^^^^^^^^^^^^^^^
+   |
+   = help: define the payload as a type with `#[derive(serde::Serialize)]` and convert it with `serde_json::to_value`, so the shape has a name, a schema, and one definition
+   = note: if the shape is genuinely dynamic, opt out at the site with `#[cfg_attr(dylint_lib = "trogon_lints", allow(serde_json_macro, reason = "..."))]`
+
+error: aborting due to 3 previous errors
+
