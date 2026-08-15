@@ -1,45 +1,251 @@
-# Credential Platform Spec (Draft)
+# Credential Platform Spec
 
 ## Status
 
-This file is a draft of the six Phase 0 deliverables from PLAN.md
-(CREDENTIAL_LIFECYCLE, API_CONTRACTS, AUTHORIZATION_MATRIX,
-OPENBAO_OPERATIONS, RUNTIME_PROJECTION, UI_ACCEPTANCE). It is a draft for
-ratification, not a decision record. Nothing here should be read as final
-until the DECISION NEEDED blocks below are resolved by the people who own
-this project.
+This is the working specification for the credential vault and API key
+platform: the product model, the boundaries, the contracts, what exists in
+code today, what is still open, and what is left to build. It replaces the
+phased implementation plan the platform was originally scoped from. That
+plan's phase numbering is gone; its remaining work is carried in
+[Remaining Work](#remaining-work) and its open questions in
+[Open Decisions](#open-decisions) below.
+
+The goal is a Vercel-like credential management experience for Trogonai
+while keeping raw credential material out of the normal application
+database.
+
+The specification covers six areas, each a section here:
+CREDENTIAL_LIFECYCLE, API_CONTRACTS, AUTHORIZATION_MATRIX,
+OPENBAO_OPERATIONS, RUNTIME_PROJECTION, UI_ACCEPTANCE. They live in one
+file while the implementation is a single-crate prototype; they should
+become separate files (`CREDENTIAL_LIFECYCLE.md` and peers) before the
+implementation grows past it.
 
 Every claim in this file about what "exists today" was checked directly
-against the trogon-gateway source in this repository (grep and full file
-reads of the relevant modules), not copied from SECRET_STORE.md or
-API_KEY.md, since PLAN.md's own status section notes that the first
-implementation slice already shipped and that those two design documents
-predate it. Anywhere a section depends on one of PLAN.md's Required
-Decisions or Decisions Still Needed, that question is called out inline as:
+against the `trogon-gateway` source in this repository (grep and full file
+reads of the relevant modules), not copied from `SECRET_STORE.md` or
+`API_KEY.md`. Those two design documents predate the first implementation
+slice and are the background reading, not the current state.
+
+Open questions are called out inline as:
 
 ```text
 DECISION NEEDED: <question>
-recommendation: <recommendation, grounded in PLAN.md>
+recommendation: <recommendation>
 ```
 
 No such question has been silently answered by writing this file; each one
-still needs sign-off. PLAN.md itself says these six deliverables "can begin
-as sections in one file, but they should become separate files before
-implementation grows," so this single file is the intended starting point,
-not a final structure.
+still needs sign-off. Blocks marked `DECIDED (ADR#00NN):` were ratified and
+link to the ADR that did it.
 
-ADRs 0042 through 0045 resolved part of the decision list below on
-2026-08-05; those blocks are marked `DECIDED (ADR#00NN):` with a link to
-the ratifying ADR. Every remaining `DECISION NEEDED:` block is still open
-and still needs sign-off.
+This file describes `trogon-gateway` as it exists, and that is deliberately
+not the architecture of record.
+[ADR#0023](./docs/adr/0023-secret-management-and-key-custody-direction.md)
+places a platform secrets service in front of OpenBao and makes it the only
+process holding an OpenBao client, which supersedes the gateway-embedded
+shape described throughout this document. Read the OPENBAO_OPERATIONS and
+RUNTIME_PROJECTION sections in particular as a record of prototype mechanics
+that are scheduled to relocate, not as a description of where this
+responsibility settles.
+[ADR#0057](./docs/adr/0057-credential-platform-extraction-boundary.md)
+carries the move list and the four decisions that block the extraction.
+
+## Direction
+
+Three credential families, three different homes:
+
+```text
+Provider credentials
+  -> raw material Trogonai needs later on the customer's behalf
+  -> OpenBao holds the material
+  -> the application database holds metadata, refs, status, fingerprints,
+     and delivery policy
+
+Trogonai bearer API keys
+  -> authenticate callers to Trogonai
+  -> the raw key is shown once (ADR#0048)
+  -> the application database holds a verifier digest and metadata
+
+Trogonai signed API keys
+  -> high-authority caller authentication
+  -> the caller keeps the private key
+  -> the application database holds public verification material and
+     metadata
+```
+
+The enterprise-ready API key direction splits along the same line:
+
+```text
+Unkey-style control plane
+  -> keyspaces, identities, roles, permissions, rate limits, rerolling,
+     revocation, audit, analytics
+
+Coinbase-style authentication proof
+  -> asymmetric key pair, short-lived signed request token,
+     method/host/path binding, nonce, expiry, optional IP allowlist
+```
+
+OpenBao is the internal credential backend. It is not the public product
+API, and nothing about it reaches a customer-visible contract.
+
+## Non-Goals For The First Version
+
+- Do not build a general-purpose OAuth authorization server first.
+- Do not require FAPI certification first.
+- Do not require mutual TLS for every customer first.
+- Do not store customer caller private keys in OpenBao by default.
+- Do not expose OpenBao paths, mounts, tokens, or policies through the
+  public API.
+- Do not put raw provider secrets in the application database.
+- Do not make every runtime request call OpenBao.
+- Do not make Valkey the source of truth for secrets.
+
+## Product Model
+
+The user-facing model is deliberately small:
+
+```text
+Credential vault
+  -> groups credentials by owner/environment/use
+
+Credential
+  -> metadata and lifecycle around one logical credential
+
+Credential version
+  -> one stored version of credential material
+
+Credential ref
+  -> stable reference used by runtime services
+
+API keyspace
+  -> namespace for Trogonai-issued API keys
+
+API key
+  -> bearer or signed caller authentication credential
+```
+
+The UI never exposes saga, OpenBao, mount, path, or policy language. Users
+see product states only; they are listed under UI_ACCEPTANCE below.
+
+## Architecture Boundaries
+
+### Application Database
+
+The application database stores:
+
+- owners, workspaces, identities, and authorization scope;
+- vault metadata;
+- integration metadata;
+- credential metadata;
+- credential refs;
+- credential lifecycle state;
+- fingerprints;
+- delivery policy;
+- idempotency records;
+- operation records;
+- audit facts;
+- API-key verifier digests;
+- signed-key public verification material.
+
+The application database must not store:
+
+- raw provider API keys;
+- OAuth refresh tokens;
+- webhook signing secrets;
+- bot tokens;
+- raw Trogonai bearer API keys;
+- caller private keys;
+- generated one-time private keys;
+- plaintext secret values inside saga, workflow, outbox, or retry payloads.
+
+### OpenBao
+
+OpenBao stores:
+
+- provider API keys;
+- OAuth refresh tokens;
+- webhook signing secrets;
+- bot tokens;
+- decryptable runtime credentials;
+- verifier peppers when needed;
+- issuer signing keys when needed;
+- certificate authority material when needed.
+
+OpenBao is read:
+
+- on credential creation or rotation;
+- on runtime cache miss;
+- on gateway or session startup and reconnect;
+- during explicit refresh;
+- during cleanup or reconciliation.
+
+OpenBao is not read for every webhook or every ordinary runtime request.
+
+### Gateway And Runtime Services
+
+The gateway receives metadata projections and resolves only active
+`CredentialRef` values when authorized.
+
+Under [ADR#0023](./docs/adr/0023-secret-management-and-key-custody-direction.md)
+that resolution goes through the platform secrets service, not through an
+OpenBao client the gateway holds itself. The gateway is a consumer of refs,
+and after the extraction it has no OpenBao address, token, or policy of its
+own. The current `OpenBaoSecretStore` in `trogon-gateway` is prototype
+scaffolding against that target, tracked in
+[ADR#0057](./docs/adr/0057-credential-platform-extraction-boundary.md).
+
+Runtime services receive typed values:
+
+```text
+GitHubWebhookSecret
+SlackSigningSecret
+DiscordBotToken
+ProviderApiKey
+OAuthRefreshToken
+```
+
+They never receive arbitrary OpenBao paths from callers.
+
+## Implementation Defaults
+
+Unless a later decision overrides them:
+
+```text
+credential backend
+  -> event stream as the metadata source of truth (ADR#0047)
+  -> OpenBao for raw provider credential material
+
+API key model
+  -> signed keys strongly recommended for all callers (ADR#0050)
+  -> bearer keys as the policy-bounded compatibility tier
+  -> root/management keyspaces are signed-only
+
+signed key default
+  -> Coinbase-style JWT request token
+  -> client-generated key pair only; the platform never holds private keys
+  -> Ed25519 default, ES256 accepted for compatibility (ADR#0050)
+
+idempotency
+  -> scoped by owner/workspace and command namespace
+  -> target resource included for targeted operations
+  -> metadata-only replay snapshots
+
+runtime
+  -> projection plus cache
+  -> OpenBao on cache miss or refresh, not on every request
+
+cleanup
+  -> logical cleanup first
+  -> physical cleanup async and idempotent
+```
 
 ## Credential Lifecycle (CREDENTIAL_LIFECYCLE)
 
 There are three separate lifecycle layers in play: the event-sourced decider
 snapshot (implemented), the per-version CredentialStatus used by the
 SecretStore adapters (implemented, and distinct from the decider), and the
-broader CredentialState/IntegrationState/OperationState machines from
-PLAN.md Phase 1 (not built at all). They are easy to conflate because they
+broader CredentialState/IntegrationState/OperationState machines specified
+below (not built at all). They are easy to conflate because they
 share vocabulary (active, revoked, failed); this section keeps them apart on
 purpose.
 
@@ -105,8 +311,8 @@ second `put()` call detects the still-pending write through
 has appended a WriteFailed event, that credential_id has no decider path
 forward at all. By contrast, `rotation_pending --RotationFailed--> active`
 is explicitly a recovery transition; rotation failures are not terminal.
-This gap is exactly what PLAN.md's Phase 1 `resubmission_required` state is
-meant to close, and that state does not exist in code today.
+This gap is exactly what the planned `resubmission_required` state is meant
+to close, and that state does not exist in code today.
 
 `revoked` is also terminal: there is no transition out of it in `evolve()`.
 There is no `destroyed` or `expired` case in the snapshot at all; those
@@ -150,21 +356,22 @@ produced by a revoke call targeting a different, later version. `destroy()`
 only targets the exact version it is given.
 
 DECISION NEEDED: should Pending and Expired remain reserved, unused
-CredentialStatus values, or should Phase 1 wire them up (for example,
+CredentialStatus values, or should the planned lifecycle layer wire them up (for example,
 Expired for a TTL-driven per-version expiry) or remove them so the enum
 only lists what the store layer actually produces?
-recommendation: keep them reserved through Phase 1. PLAN.md's Phase 1
+recommendation: keep them reserved. The planned
 CredentialVersionState additions (resubmission_required,
 revocation_requested, destroy_requested, destroyed, cleanup_failed) already
 plan a richer version-state set that will likely absorb or replace this
 enum; removing the placeholders now and reintroducing similar ones during
-Phase 1 is churn with no benefit in between.
+that work is churn with no benefit in between.
 
-### Layer 3: Phase 1 planned states (not built)
+### Layer 3: planned upper lifecycle states (not built)
 
 None of the following exist as Rust types or proto messages anywhere in the
-repository today; they are PLAN.md Phase 1's plan, quoted here so this file
-is a complete lifecycle picture rather than only the implemented part:
+repository today; they are the planned upper lifecycle layer, written out
+here so this file is a complete lifecycle picture rather than only the
+implemented part:
 
 ```text
 CredentialVersionState (additions to CredentialStatus above)
@@ -201,14 +408,14 @@ OperationState (not built)
 ```
 
 CredentialState, IntegrationState, and OperationState sit above the decider
-and CredentialStatus; they are not replacements for either. PLAN.md's
-Product Model implies CredentialState is closer to what users actually see
+and CredentialStatus; they are not replacements for either. The Product
+Model above implies CredentialState is closer to what users actually see
 (draft, saving, ready, failed, ...; see UI_ACCEPTANCE), while the decider
 snapshot and CredentialStatus stay internal machinery.
 
 DECISION NEEDED: does the decider's write_failed map onto CredentialState
-failed as a recoverable state, or does Phase 1 need the
-resubmission_required transition added to evolve() first?
+failed as a recoverable state, or is the
+resubmission_required transition needed in evolve() first?
 recommendation: add the resubmission_required transition to the decider
 before wiring CredentialState failed to any retry UI. Today, offering a
 "retry" action against a write_failed credential would offer an action the
@@ -297,8 +504,9 @@ on any failure after begin(): abandon(scope) clears the in-progress record
 
 The ledger is a NATS JetStream KV bucket
 (`GATEWAY_CREDENTIAL_MANAGEMENT_IDEMPOTENCY`, history=1, max_age=24h),
-matching PLAN.md's Phase 3 note about "the blanket 24h idempotency bucket
-age."
+so the only expiry today is a blanket 24h bucket age, not a per-operation
+TTL. The record shape it stores (fingerprint, status, response) is a subset
+of the target contract below.
 
 Plaintext: never returned by this API. `CredentialCommandResponse` and
 `CredentialRefResponse` only ever carry id, version, owner_id, source,
@@ -322,8 +530,8 @@ UnexpectedCredentialState(_) -> 500  "credential management request failed"
 InvalidState(_)              -> 500  "credential management request failed"
 ```
 
-These are this API's own ad hoc strings, not PLAN.md's public error-code
-vocabulary (validation_failed, permission_denied, idempotency_conflict,
+These are this API's own ad hoc strings, not the public error-code
+vocabulary defined below (validation_failed, permission_denied, idempotency_conflict,
 pending_operation_exists, credential_not_ready, secret_write_failed,
 needs_secret_resubmission, host_not_allowed, runtime_service_not_allowed,
 secret_store_unavailable, provider_registration_failed, cleanup_pending).
@@ -338,16 +546,71 @@ next_scan_sequence, consecutive_failure_count, first_failure_unix_seconds,
 retry_after_unix_seconds, retry_delayed, stuck_recovery). Read-only,
 metadata-only, no idempotency key required.
 
-DECISION NEEDED: should the internal /-/credentials admin API adopt
-PLAN.md's public error-code vocabulary now, or keep its own strings until
-Phase 4 replaces it?
-recommendation: keep the internal API's own codes. PLAN.md is explicit that
-this is "the internal admin-token-gated per-source API under
-/-/credentials," a bridge, not the public surface; adopting the public
-vocabulary now would imply guarantees (vault_id, operation_id) that this
-API does not have.
+DECISION NEEDED: should the internal /-/credentials admin API adopt the
+public error-code vocabulary now, or keep its own strings until the public
+API replaces it?
+recommendation: keep the internal API's own codes. This is an internal
+admin-token-gated per-source API, a bridge rather than the public surface;
+adopting the public vocabulary now would imply guarantees (vault_id,
+operation_id) that this API does not have.
 
-### Public API, PLAN.md Phase 4 (nothing built)
+### Idempotency contract (target shape, partially built)
+
+The client supplies an opaque key. The server supplies the scope. The KV
+ledger described above implements the fingerprint/status/response core of
+this; the rest is unbuilt.
+
+```text
+IdempotencyRecord
+  owner_id
+  workspace_id       (project id per ADR#0046)
+  command_namespace
+  target_resource_id
+  idempotency_key
+  request_fingerprint
+  operation_id
+  resource_id
+  response_snapshot
+  status
+  created_by_actor_id
+  created_at
+  expires_at
+```
+
+Uniqueness:
+
+```text
+unique(owner_id, command_namespace, idempotency_key)
+```
+
+For targeted operations:
+
+```text
+unique(owner_id, command_namespace, target_resource_id, idempotency_key)
+```
+
+The contract:
+
+```text
+same owner + same namespace + same key + same request fingerprint
+  -> return same operation/resource/status
+
+same owner + same namespace + same key + different request fingerprint
+  -> idempotency conflict
+
+different owner + same key
+  -> unrelated operation
+```
+
+Acceptance:
+
+- retrying create ten times creates one credential intent;
+- retrying rotate ten times creates one pending version;
+- the same idempotency key with a different body returns conflict;
+- two owners can use the same raw idempotency key without collision;
+- response snapshots never contain raw secrets or one-time key material.
+
+### Public API (nothing built)
 
 Every endpoint below is unbuilt. There is no vault, operation, or
 resubmit-secret concept behind any of them today. Paths are parent-scoped
@@ -374,10 +637,8 @@ POST   /v1/projects/{project}/credentials/{credential_id}/delete
 GET    /v1/projects/{project}/operations/{operation_id}
 ```
 
-Idempotency rule per write command, following PLAN.md's Phase 3 contract
-(`unique(owner_id, command_namespace, idempotency_key)`, or
-`unique(owner_id, command_namespace, target_resource_id, idempotency_key)`
-for targeted operations):
+Idempotency rule per write command, following the idempotency contract
+above:
 
 ```text
 POST /v1/projects/{project}/credential-vaults
@@ -413,11 +674,33 @@ GET endpoints
   read-only, no idempotency key required
 ```
 
-Plaintext rule per PLAN.md's Response Rules ("forbidden: raw secret") and
-Definition of Done ("public API responses are metadata-only after one-time
-display"): every endpoint above is metadata-only except the two that
-legitimately hand back new secret material, and even those only display it
-once:
+Responses are metadata-only by default:
+
+```text
+allowed
+  -> ids
+  -> display names
+  -> state
+  -> kind
+  -> source
+  -> fingerprint
+  -> allowed hosts
+  -> allowed runtime services
+  -> last used metadata
+  -> operation id
+
+forbidden
+  -> raw secret
+  -> provider token
+  -> OAuth refresh token
+  -> webhook signing secret
+  -> bot token
+```
+
+Applied per endpoint: every endpoint above is metadata-only except the two
+that legitimately hand back new secret material, and even those only
+display it once, per
+[ADR#0048](./docs/adr/0048-one-time-plaintext-exposure.md):
 
 ```text
 POST /v1/projects/{project}/credentials
@@ -431,8 +714,24 @@ POST .../resubmit-secret        -> receives plaintext in the request; the
 every other endpoint            -> never plaintext
 ```
 
-Error codes, taken verbatim from PLAN.md's Phase 4 list, mapped per
-endpoint by what can plausibly fail there:
+The public error-code vocabulary is:
+
+```text
+validation_failed
+permission_denied
+idempotency_conflict
+pending_operation_exists
+credential_not_ready
+secret_write_failed
+needs_secret_resubmission
+host_not_allowed
+runtime_service_not_allowed
+secret_store_unavailable
+provider_registration_failed
+cleanup_pending
+```
+
+Mapped per endpoint by what can plausibly fail there:
 
 ```text
 POST /v1/projects/{project}/credential-vaults
@@ -478,7 +777,7 @@ GET /v1/projects/{project}/operations/{operation_id}
                                        validation_failed, permission_denied
 ```
 
-Two error codes in PLAN.md's list, `host_not_allowed` and
+Two codes in that vocabulary, `host_not_allowed` and
 `runtime_service_not_allowed`, describe runtime resolution failures rather
 than management-API failures; they belong to the delivery-policy checks
 described in RUNTIME_PROJECTION (allowed_hosts, allowed_runtime_services),
@@ -501,11 +800,10 @@ recommendation: keep the 24 hour figure already implemented in the internal
 API's KV ledger (`CREDENTIAL_MANAGEMENT_IDEMPOTENCY_MAX_AGE = Duration::
 from_secs(24 * 60 * 60)`) as the ratified default, rather than choosing a
 new number for the public API alone; the two surfaces will likely share a
-ledger once Phase 3's persistence work lands.
+ledger once the persistence work lands.
 
-DECISION NEEDED (Decisions Still Needed): which providers get first-class
-validation on rotate (PLAN.md Phase 6 Rotation Saga step "Validate if
-provider supports validation")?
+DECISION NEEDED: which providers get first-class validation on rotate (the
+rotation saga's "validate if the provider supports validation" step)?
 recommendation: none today, and that should be stated plainly rather than
 implied. `SecretVerifier` exists as a value-object wrapper
 (`secret_store/secret_verifier.rs`) but it only wraps a string; there is no
@@ -516,16 +814,25 @@ before adding it for anything not yet wired.
 
 ## Authorization Matrix (AUTHORIZATION_MATRIX)
 
-PLAN.md Phase 5 names five policies: control_plane_write, gateway_read,
-lifecycle_worker_cleanup, audit_read, break_glass_admin. Today there is
-exactly one OpenBao identity in code: a single static bearer token
+The platform defines five roles, derived from the segregated store traits
+so the split survives the extraction in
+[ADR#0057](./docs/adr/0057-credential-platform-extraction-boundary.md):
+`control_plane_write`, `gateway_read`, `lifecycle_worker_cleanup`,
+`audit_read`, `break_glass_admin`. They exist as HCL under
+`devops/openbao/policies/`, one file per role, with a `verify.sh` that
+applies them to a throwaway dev OpenBao and asserts every allow and deny
+outcome against real percent-encoded paths.
+
+What does not exist is any binding between an identity and a policy. In
+code there is exactly one OpenBao identity: a single static bearer token
 (`OPENBAO_TOKEN`), sent unconditionally as `X-Vault-Token` by
 `OpenBaoSecretStore::authorize()` for every operation, regardless of which
 Rust component is calling (the admin API's command handler, the recovery
 worker, the runtime projection resolver). There is no AppRole, no
-Kubernetes auth, no per-service policy anywhere in the code; "no policy
-files exist anywhere in the repo yet (no HCL, no Terraform)" from PLAN.md
-Phase 5 is accurate as read.
+Kubernetes auth, and no declarative apply (no Terraform), only the loop
+documented in that directory's README. Until an auth method binds a service
+to a role, the scoping in each policy file is a design, not a control, and
+the gap table below is the accurate picture.
 
 ```text
 control_plane_write
@@ -638,12 +945,12 @@ created_at         (RFC3339, Utc::now() at write time)
 
 KV v2 custom_metadata is path-level, not per-version, so these five fields
 describe the whole path's current state, not any one historical version.
-Planned fields that do not exist yet, per PLAN.md Phase 5:
+Planned metadata fields that do not exist yet:
 
 ```text
-workspace_id           (needs the Phase 0 owner boundary decision)
+workspace_id            (the project id per ADR#0046)
 integration_id          (needs integration records)
-operation_id            (needs Phase 3 operation records)
+operation_id            (needs operation records)
 credential_version_id   (needs its own convention, since KV v2 metadata has
                         no native per-version attribution)
 ```
@@ -653,9 +960,9 @@ credential_version_id   (needs its own convention, since KV v2 metadata has
 A single static bearer token, sent as `X-Vault-Token` unconditionally for
 every operation (`authorize()` in `openbao_secret_store.rs`), loaded from
 the `OPENBAO_TOKEN` environment variable. No AppRole, Kubernetes auth, or
-certificate auth is configured anywhere in the code. This matches PLAN.md
-Phase 0's own framing: "the prototype uses a static dev token; that is not
-a production answer."
+certificate auth is configured anywhere in the code. A static dev token is
+not a production answer; choosing the first auth method per service is an
+open decision, listed below.
 
 ### Read patterns (implemented)
 
@@ -678,18 +985,18 @@ revoke()   calls the KV v2 soft-delete endpoint for every version from 1
            through the current version, not only the version passed in
 
 destroy()  calls the KV v2 destroy endpoint for exactly the one target
-           version passed in; nothing in the runtime calls destroy() yet
-           (PLAN.md Phase 2: "no runtime path invokes the store-level
-           destroy yet"). Logs the reason via tracing::info! only; there is
+           version passed in, driven by the destroy lifecycle saga
+           (destroy_requested, destroyed, cleanup_failed) and the admin
+           destroy route. Logs the reason via tracing::info! only; there is
            no audit-fact record
 ```
 
-This lines up with PLAN.md's own list of when OpenBao should be read
+This lines up with the Architecture Boundaries list of when OpenBao is read
 (create/rotate, runtime cache miss, startup/reconnect, explicit refresh,
 cleanup/reconciliation): the implemented resolver reads on cache miss, and
 the recovery worker reads metadata() to recover stuck activations. The
-"during cleanup" pattern has no code yet since cleanup itself is unbuilt
-(see RUNTIME_PROJECTION and PLAN.md Phase 6).
+"during cleanup" pattern has no code yet since async cleanup itself is
+unbuilt (see RUNTIME_PROJECTION and Remaining Work).
 
 DECIDED (ADR#0046): `trogonai/{owner_id}/credentials/{credential_id}` and
 its mount are ratified as-is, with owner_id understood as project id.
@@ -700,7 +1007,7 @@ DECISION NEEDED: should revoke() keep soft-deleting every version 1 through
 current, or move to targeting only the version(s) a caller intended to
 revoke?
 recommendation: change revoke() to accept an explicit version (or version
-range) once Phase 1's revocation_requested state exists, instead of
+range) once the revocation_requested state exists, instead of
 implicitly reaching back to version 1. Blanket revocation of all history is
 surprising behavior for an API that reads as "revoke this one ref," and it
 makes reconciliation between OpenBao and the future DB harder to reason
@@ -739,12 +1046,12 @@ cases to `RuntimeIntegrationStatus::Active`, and returns `None` (no
 projection at all) for `Missing`, `PendingWrite`, `WriteFailed`, and
 `Revoked`. `Disabled`, `Archived`, `Deleted`, `Pending`, and `Failed` are
 declared but never constructed outside test helper code; they are
-placeholders for the Phase 1 CredentialState/IntegrationState machinery,
+placeholders for the planned CredentialState/IntegrationState machinery,
 not wired to anything today.
 
-This is worth flagging against PLAN.md's own Phase 7 framing, which says
-"fail-closed behavior on revoked or disabled credentials all exist." The
-revoked half is real: a Revoked event removes the credential from its
+That matters for any claim that fail-closed behavior on revoked or disabled
+credentials exists. The revoked half is real: a Revoked event removes the
+credential from its
 projection entirely (see Invalidation below), so the resolver simply has
 nothing to resolve. The disabled half has no code behind it; there is no
 runtime scenario today that produces a Disabled projection for the
@@ -815,20 +1122,38 @@ same credential always gets the same effective expiry point under a given
 policy; this is stable per-key skew to avoid a thundering herd of
 simultaneous expiries, not run-to-run randomness.
 
-### Planned fields (PLAN.md Phase 7, none of these exist today)
+### Delivery policy (implemented, not yet populated)
+
+`RuntimeIntegrationProjection` carries a `RuntimeDeliveryPolicy` alongside
+key, owner_id, status, version, and the per-kind CredentialRef map:
 
 ```text
-RuntimeCredentialProjection (missing fields)
-  workspace_id
-  allowed_hosts
-  allowed_runtime_services
-  injection_locations
-  cache_policy
+RuntimeDeliveryPolicy
+  allowed_hosts              AllowedHosts { Unrestricted | Only(AllowedHost) }
+  allowed_runtime_services   AllowedRuntimeServices { Unrestricted | Only(RuntimeServiceId) }
+  injection_locations        InjectionLocations (default empty = deny)
+  cache_ttl_override         Option<Duration> (may only shorten)
 ```
 
-`RuntimeIntegrationProjection` only carries key, owner_id, status, version,
-and the per-kind CredentialRef map today; none of the five planned policy
-fields exist on it.
+`workspace_id` is deliberately not a field. ADR#0046 makes
+`CredentialOwnerId` the project id, so the projection's existing `owner_id`
+already carries it; adding a second field would reintroduce the
+workspace/project split that ADR removed.
+
+Enforcement lives on `RuntimeCredentialResolver::resolve_for`, which takes
+a `RuntimeDeliveryRequest` and denies before the secret store is touched,
+so a denied caller cannot warm the cache or distinguish a present
+credential from an absent one. The existing `resolve` delegates with an
+empty request, which the permissive default admits, so the twelve shipped
+source paths are unchanged.
+`RuntimeDeliveryPolicy::effective_cache_ttl` clamps an override to the
+configured TTL, so a policy can only narrow the ADR#0049 staleness bound,
+never widen it.
+
+Nothing populates these fields yet. The management API and the credential
+event stream have to carry them before a policy can be configured in
+production. Until then the default is permissive on hosts and runtime
+services, and the fail-closed behavior is exercised only by tests.
 
 DECIDED (ADR#0049): target p99 revocation-to-invalidation latency at or
 under 5 seconds under normal operation; page when p99 exceeds 10 seconds
@@ -837,7 +1162,7 @@ the working cache default. See docs/adr/0049-revocation-latency-target.md.
 
 DECISION NEEDED: should cache invalidation stay whole-cache-clear on every
 projection merge, or move to per-CredentialRef invalidation now, ahead of
-Phase 6's outbox?
+the outbox exists?
 recommendation: move to per-CredentialRef invalidation now. `apply_state`
 already knows the specific CredentialRef inside the Active/RotationPending
 state it just merged, so invalidating just that entry (the way revoke
@@ -846,14 +1171,14 @@ integrations' cached material on every unrelated rotation.
 
 ## UI Acceptance (UI_ACCEPTANCE)
 
-Nothing described in this section exists in the UI or public API today.
-PLAN.md Phase 9 states plainly that "the console app is a single-route
-scaffold with no data layer, and the credentials proto packages define no
-RPC services a browser client could call." Everything below is acceptance
-criteria for work that has not started, written now so Phase 4/9 build
-against agreed behavior.
+Nothing described in this section exists in the UI or public API today. The
+console app is a single-route scaffold with no data layer, and the
+credentials proto packages define no RPC services a browser client could
+call. Everything below is acceptance criteria for work that has not
+started, written now so the public API and the UI build against agreed
+behavior.
 
-### Product states (PLAN.md Product Model)
+### Product states
 
 ```text
 draft
@@ -866,7 +1191,7 @@ revoked
 cleanup_pending
 ```
 
-### Vault list columns (PLAN.md Credential Vault List)
+### Vault list columns
 
 ```text
 name
@@ -933,7 +1258,7 @@ When the user inspects it through the UI
 Then the user never sees OpenBao paths, mounts, policies, or saga/outbox
   terminology, only the product states listed above.
 
-These map directly onto PLAN.md's own Phase 9 Acceptance Criteria: the user
+Together these are the UI acceptance bar: the user
 never sees OpenBao internals, never sees the raw secret after creation, the
 UI cannot create duplicate pending records through retry, rotation never
 breaks the old active credential before the new one is ready, and every
@@ -952,6 +1277,345 @@ any admin route today, and webhook_token specifically is not even
 reachable through `CredentialKind::parse()`, which has no
 `"webhook_token"` match arm despite the variant existing on the enum. That
 parse gap should be fixed in code regardless of which kinds ship first.
+
+## Lifecycle Sagas And Reconciliation
+
+The gateway performs the immediate write, rotate, revoke, and destroy sagas
+against OpenBao today, with a recovery worker for stuck activations. The
+target sagas below add a database intent and an outbox, neither of which
+exists. Revoke currently deletes from OpenBao synchronously in the same
+request rather than deferring to async cleanup.
+
+### Create saga
+
+```text
+1. Authorize command.
+2. Create scoped idempotency record.
+3. Create DB credential/version intent as pending_secret_write.
+4. Write raw secret to OpenBao.
+5. Mark version active.
+6. Emit outbox event.
+7. Gateway refreshes projection.
+```
+
+### Rotation saga
+
+```text
+1. Keep current active version active.
+2. Create new pending version.
+3. Write new secret to OpenBao.
+4. Validate if the provider supports validation.
+5. Promote new version to active.
+6. Mark old version previous or revoked.
+7. Emit outbox event.
+```
+
+### Cleanup rules
+
+Logical cleanup first:
+
+```text
+DB state prevents runtime use
+  -> revoked / disabled / deleted
+```
+
+Physical cleanup later:
+
+```text
+OpenBao revoke or destroy
+provider revocation when supported
+tombstone retention
+```
+
+Runtime safety never depends on physical cleanup completing immediately.
+
+### Reconciliation jobs
+
+```text
+DB -> Gateway
+  -> implemented, as the checkpointed projection refresh worker
+
+DB -> OpenBao
+  -> not built: expected secret exists and has expected metadata
+
+OpenBao -> DB
+  -> not built: every managed secret has a DB owner or becomes orphan
+     cleanup. Blocked on a list operation; the segregated store traits have
+     no SecretStoreList, so the managed tree cannot be enumerated in code
+     today (see devops/openbao/runbooks/orphan-openbao-secret-cleanup.md
+     for the manual interim procedure)
+
+Provider -> DB
+  -> not built: provider-side revocation or disconnect reflected when
+     possible
+```
+
+Acceptance for this area:
+
+- every midway failure has a test;
+- an OpenBao write success plus a DB activation failure can be reconciled;
+- a DB pending with no OpenBao secret expires to resubmission;
+- cleanup is idempotent.
+
+## API Key Platform
+
+Nothing is implemented. No bearer key, signed key, keyspace, or
+`ApiPrincipal` code exists in the repository. `API_KEY.md` holds the full
+design (data model, key format, create and verification flows, keyspaces,
+identities, permissions, rate limits, rerolling, revocation); this section
+records only the build order and the acceptance bar.
+
+Signed mode is the strongly recommended default and the primary build
+target per [ADR#0050](./docs/adr/0050-signed-first-caller-authentication.md);
+bearer is the policy-bounded compatibility tier.
+
+### Signed keys
+
+```text
+api_key.public_key.add
+api_key.public_key.revoke
+api_key.verify_signed_request
+```
+
+- client-generated key pairs only; the platform never holds private keys;
+- Ed25519 default, ES256 accepted (ADR#0050);
+- the database stores the public key and a fingerprint;
+- single-use tokens with full binding per
+  [ADR#0051](./docs/adr/0051-fully-bound-request-signing.md): transport-mapped
+  target (HTTP method/host/path or NATS subject), payload digest, iat/exp
+  within a 2 minute ceiling, jti replay store, server-nonce escalation;
+- verification fails closed when the replay store is unavailable;
+- tokens verify once at admission; durable flows carry provenance onward
+  per [ADR#0039](./docs/adr/0039-self-authenticating-event-provenance.md),
+  and consumers never re-verify expired caller tokens;
+- root and management keyspaces are signed-only and demand server nonces.
+
+### Bearer keys
+
+```text
+api_key.create
+api_key.reroll
+api_key.revoke
+api_key.verify
+```
+
+- the raw key is shown once (ADR#0048);
+- the database stores a verifier digest;
+- the verifier pepper lives outside the API-key table;
+- list and read responses are metadata-only;
+- a lost one-time response requires reroll by default;
+- keyspace policy can disallow bearer issuance entirely (ADR#0050).
+
+### Authorization result
+
+Both modes return an `ApiPrincipal`:
+
+```text
+ApiPrincipal
+  owner_id
+  identity_id
+  key_id
+  keyspace_id
+  scopes
+  roles
+  allowed_vaults
+  allowed_integrations
+  allowed_environments
+```
+
+### Acceptance
+
+- bearer verification is constant-time;
+- signed verification checks signature, expiry, nonce, method, host, and
+  path;
+- API keys never directly return raw provider credentials;
+- root keys cannot delegate more authority than they have;
+- rate limits can attach to keys, identities, owners, or routes.
+
+## Testing Strategy
+
+The implemented slice carries unit tests for value objects, state
+transitions, and idempotency conflicts, plus integration tests for the
+static, in-memory, and OpenBao adapters, projection refresh, and cache
+invalidation. 909 tests run in `trogon-gateway`.
+
+Covered:
+
+- delivery policy validation (`runtime_delivery_policy.rs`,
+  `injection_location.rs`, `runtime_service_id.rs`, plus resolver-level
+  enforcement tests in `runtime_projection.rs`);
+- allowed-host matching (`allowed_host.rs`, covering wildcard scope, case
+  and trailing-dot normalization, port stripping, and the fail-closed
+  absent-host case);
+- no plaintext in logs, via a capturing tracing subscriber that runs a full
+  resolve/rotate/revoke cycle with a canary plaintext and asserts the canary
+  never reaches the layer, including when the error and the resolved
+  material are logged with `?` and `%`;
+- no plaintext in traces, by the same test: spans and events go through the
+  same `tracing` layer, and the redaction lives in the `Debug` impls of
+  `SecretString` and `SecretVerifier` rather than in a formatter, so it
+  cannot be bypassed by a different exporter;
+- no plaintext in metrics: no metric in the credential path takes a secret
+  as a label or a value, and `SecretString` exposes no `Display`;
+- a denied host cannot be bypassed;
+- an unauthorized service identity cannot resolve credentials.
+
+Not covered, each blocked on the feature it tests:
+
+```text
+verifier digest construction            (API key platform)
+signed-request verification             (API key platform)
+signed request replay is rejected       (API key platform)
+create saga with DB intent and outbox   (sagas)
+cleanup worker                          (worker does not exist)
+no plaintext in outbox                  (outbox does not exist)
+```
+
+Failure injection, none of it written:
+
+```text
+DB intent write fails
+OpenBao write outcome unknown
+DB activation succeeds but outbox publish fails
+cleanup worker fails
+provider revocation fails
+client loses one-time API key response
+```
+
+Load tests, none of them written: gateway cache hit rate, cache miss
+pressure on OpenBao, rotation invalidation latency, revocation latency,
+idempotency ledger contention, OpenBao read/write throughput.
+
+## Remaining Work
+
+Ordered by dependency. Each item's blocker is stated because several look
+like design work and are actually blocked on a consumer that does not
+exist: the crate denies warnings and has no lib target, so a value object
+or enum with no in-crate caller is a hard compile error, not dead weight.
+
+### 1. Persistence and operations
+
+Nothing below exists outside the event stream; the gateway has no database
+dependency and no vault, operation, or audit-fact concept.
+
+- persistence for vaults, credentials, versions, operations, idempotency
+  records, and audit facts;
+- pending-operation caps (the only cap today is the incidental
+  one-pending-write-per-credential rule from the aggregate design);
+- TTL handling for pending operations (today the only expiries are the
+  blanket 24h idempotency bucket age and the recovery worker's stuck
+  window);
+- the full idempotency record shape above (the current KV record carries
+  only fingerprint, status, and response);
+- `CredentialState` and `OperationState` as guarded state machines, and the
+  `OperationId` and `VaultId` value objects, all of which acquire their
+  first caller here;
+- audit facts as a distinct concept from domain events.
+
+### 2. Public management API
+
+Nothing public exists. The only surface today is the internal
+admin-token-gated per-source API under `/-/credentials`.
+
+- the vault-shaped public API specified under API_CONTRACTS;
+- `IntegrationState` as a guarded machine on the integration aggregate.
+  `RuntimeIntegrationStatus` in the runtime projection already carries six
+  of its seven states, missing only `reconnect_required`, but it is not the
+  same type: the projection's status is derived from credential state and
+  overwritten wholesale on each refresh, so it has no transition to guard.
+  Promoting it would put write-side rules on a read model.
+
+### 3. Sagas, cleanup, and reconciliation
+
+Per the section above: DB intent, outbox, resubmission flow, orphan
+cleanup, tombstones, and async revoke. Needs a `SecretStoreList` operation
+before OpenBao-to-DB reconciliation is possible at all.
+
+### 4. OpenBao production hardening
+
+- bind service identities to the five policies. The policy files and their
+  verification script exist; nothing binds an identity to them, so the
+  scoping is a design rather than a control. This is the single largest
+  operational gap.
+- a declarative apply (Terraform or equivalent) instead of the manual loop
+  in the policies README;
+- provision an audit device, without which break-glass access cannot be
+  audited;
+- run the restore drill specified in
+  `devops/openbao/runbooks/backup-and-restore.md`, which needs a cluster.
+
+### 5. Runtime projection
+
+- populate the delivery policy from the management API and the credential
+  event stream; the enforcement path exists and is exercised only by tests
+  until something writes a policy;
+- expose the cache TTL policy through configuration;
+- invalidate on the outbox projection event once the outbox exists;
+- decide fallback behavior for an OpenBao outage per credential kind.
+
+### 6. API key platform
+
+Per the section above. `ApiKeyState`, `SignedPublicKeyState`, `ApiKeyId`,
+`ApiKeyspaceId`, `ApiKeyKind`, and `IdentityId` all land here; no key
+issuance surface exists today, so there is nothing for them to transition
+or identify yet.
+
+### 7. UI
+
+Per UI_ACCEPTANCE. Depends on the public API existing first.
+
+### 8. Alerting
+
+Five of nine alerts are fully specified and firable in
+`devops/openbao/runbooks/alerts.md`; none are deployed, and wiring them
+into a monitoring backend is separate work. Three still have no signal:
+orphan cleanup backlog (no worker, no backlog gauge), suspicious API-key
+verification failures, and signed-request replay attempts (both blocked on
+the API key platform). The fourth gap, repeated OpenBao write failures, is
+now closed by `gateway.credential.store.write.failures`.
+
+Also open: ratify the revocation latency target as an alert on
+`gateway.credential.revocation.latency`, which is measured but not
+alerted on.
+
+## Open Decisions
+
+Beyond the `DECISION NEEDED` blocks inline above and the four extraction
+questions in
+[ADR#0057](./docs/adr/0057-credential-platform-extraction-boundary.md):
+
+- which OpenBao auth method each service should use;
+- which credential kinds ship in the first UI;
+- which providers get first-class validation on rotate;
+- the default idempotency TTL;
+- the default pending credential TTL;
+- which API keyspaces ship first;
+- whether idempotency records stay in NATS KV or move to the control-plane
+  database (the same question as ADR#0057's Q3).
+
+Owner boundary, metadata backend, path convention, cache TTL, revocation
+latency target, signed-key algorithm, the signed-first posture, request
+signing binding, and the production seal are decided in ADR#0046 through
+ADR#0052.
+
+## Definition Of Done
+
+The credential platform is done when:
+
+- raw provider credentials are not in the application database;
+- public API responses are metadata-only after one-time display;
+- idempotent retries cannot create duplicate pending records;
+- OpenBao paths are generated from validated domain values;
+- every midway saga failure has a recovery path;
+- gateway runtime resolution is authorized and cached;
+- cleanup is idempotent and observable;
+- API keys are split between verifier-only bearer keys and signed keys;
+- signed keys do not require Trogonai to store caller private keys;
+- UI states hide distributed-system details from users;
+- runbooks exist for stuck, leaked, orphaned, and missed-projection
+  scenarios;
+- tests prove redaction, authorization, retry, cleanup, rotation, and
+  revocation behavior.
 
 ## Notable code findings not tied to a single section
 
