@@ -120,6 +120,7 @@ async fn replay_attempt(
     filter_subject: Option<&str>,
     from_sequence: u64,
     to_sequence: u64,
+    max_events: Option<u64>,
     stream_id: &mut impl FnMut(&StreamMessage) -> String,
     events: &mut Vec<StreamEvent>,
 ) -> Result<(), StreamStoreError> {
@@ -152,6 +153,10 @@ async fn replay_attempt(
         let id = stream_id(&stream_message);
         events.push(record_stream_message(stream_message, id)?);
 
+        if max_events.is_some_and(|max_events| events.len() as u64 >= max_events) {
+            return Ok(());
+        }
+
         if sequence >= to_sequence {
             return Ok(());
         }
@@ -169,11 +174,17 @@ async fn replay_attempt(
 /// the message stream ending early) recreates the consumer starting from the
 /// sequence right after the last event this call already produced, bounded
 /// by `retry_policy`. Any other failure propagates immediately.
+///
+/// `max_events`, when set, stops the replay once that many events have been
+/// fetched, even if `to_sequence` has not been reached yet. This lets a
+/// caller that only needs to know whether a range holds more than
+/// `max_events` events cap the read instead of paying for the full range.
 pub(super) async fn replay_ordered_range(
     stream: &jetstream::stream::Stream,
     filter_subject: Option<&str>,
     from_sequence: u64,
     to_sequence: u64,
+    max_events: Option<u64>,
     retry_policy: ReplayRetryPolicy,
     mut stream_id: impl FnMut(&StreamMessage) -> String,
 ) -> Result<Vec<StreamEvent>, StreamStoreError> {
@@ -185,7 +196,7 @@ pub(super) async fn replay_ordered_range(
     let start = Instant::now();
 
     let result = async move {
-        if is_empty_replay_range(from_sequence, to_sequence) {
+        if is_empty_replay_range(from_sequence, to_sequence) || max_events == Some(0) {
             return Ok(Vec::new());
         }
 
@@ -199,6 +210,7 @@ pub(super) async fn replay_ordered_range(
                 filter_subject,
                 next_sequence,
                 to_sequence,
+                max_events,
                 &mut stream_id,
                 &mut events,
             )

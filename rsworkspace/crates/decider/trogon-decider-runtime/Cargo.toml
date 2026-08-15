@@ -35,4 +35,17 @@ trogon-std = { version = "0.1.0", path = "../../platform/trogon-std", features =
 uuid = { workspace = true }
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "execute_command_span"
+path = "tests/execute_command_span.rs"
+required-features = ["test-support"]
+
+[[test]]
+name = "replay_events_metric"
+path = "tests/replay_events_metric.rs"
+required-features = ["test-support"]

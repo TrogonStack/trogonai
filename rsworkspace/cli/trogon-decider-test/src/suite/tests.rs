@@ -17,6 +17,10 @@ fn then_error_accepts_plain_string() {
     assert_eq!(error_expectation("error: already-exists\n"), "already-exists");
 }
 
+fn schedules_registry() -> &'static buffa::type_registry::TypeRegistry {
+    codec::type_registry("scheduler.schedules").expect("scheduler.schedules is registered")
+}
+
 fn scenario(when: Option<serde_json::Value>, then: Option<Then>, steps: Option<Vec<Step>>) -> Scenario {
     Scenario {
         name: "scenario under test".to_string(),
@@ -24,6 +28,7 @@ fn scenario(when: Option<serde_json::Value>, then: Option<Then>, steps: Option<V
         when,
         then,
         steps,
+        budget: None,
     }
 }
 
@@ -111,9 +116,10 @@ fn to_ir_converts_given_steps_and_events() {
                 })],
             },
         }]),
+        budget: None,
     };
 
-    let ir = scenario.to_ir().expect("scenario converts to ir");
+    let ir = scenario.to_ir(schedules_registry()).expect("scenario converts to ir");
     assert_eq!(ir.name, "create schedule");
     assert!(ir.given.is_empty());
     assert_eq!(ir.steps.len(), 1);
@@ -134,7 +140,7 @@ fn to_ir_maps_rejected_and_accepted() {
         Some(Then::Rejected { rejected: true }),
         None,
     );
-    let ir = rejected.to_ir().expect("scenario converts to ir");
+    let ir = rejected.to_ir(schedules_registry()).expect("scenario converts to ir");
     assert!(matches!(ir.steps[0].expect, ExpectedOutcome::Rejected));
 
     let accepted = scenario(
@@ -145,6 +151,79 @@ fn to_ir_maps_rejected_and_accepted() {
         Some(Then::Rejected { rejected: false }),
         None,
     );
-    let ir = accepted.to_ir().expect("scenario converts to ir");
+    let ir = accepted.to_ir(schedules_registry()).expect("scenario converts to ir");
     assert!(matches!(ir.steps[0].expect, ExpectedOutcome::Accepted));
+}
+
+#[test]
+fn to_ir_maps_trap_true_and_carries_budget_overrides() {
+    let mut trap_scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(Then::Trap { trap: true }),
+        None,
+    );
+    trap_scenario.budget = Some(BudgetOverrides {
+        fuel_per_call: Some(1),
+        epoch_ticks_per_call: None,
+        max_memory_bytes: None,
+    });
+
+    let ir = trap_scenario
+        .to_ir(schedules_registry())
+        .expect("scenario converts to ir");
+    assert!(matches!(ir.steps[0].expect, ExpectedOutcome::Trap));
+    let budget = ir.budget.expect("budget override carried into ir");
+    assert_eq!(budget.fuel_per_call, Some(1));
+}
+
+#[test]
+fn to_ir_rejects_trap_true_without_a_budget_override() {
+    let scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(Then::Trap { trap: true }),
+        None,
+    );
+    let error = scenario.to_ir(schedules_registry()).unwrap_err().to_string();
+    assert!(
+        error.contains("requires a scenario-level `budget` override"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn to_ir_rejects_trap_true_with_an_empty_budget_block() {
+    let mut scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(Then::Trap { trap: true }),
+        None,
+    );
+    scenario.budget = Some(serde_yaml::from_str("{}").expect("an empty budget block parses"));
+    let error = scenario.to_ir(schedules_registry()).unwrap_err().to_string();
+    assert!(error.contains("sets at least one of"), "unexpected error: {error}");
+}
+
+#[test]
+fn to_ir_rejects_trap_false() {
+    let scenario = scenario(
+        Some(serde_json::json!({
+            "@type": "type.googleapis.com/trogonai.scheduler.schedules.v1.PauseSchedule",
+            "schedule_id": "backup",
+        })),
+        Some(Then::Trap { trap: false }),
+        None,
+    );
+    let error = scenario.to_ir(schedules_registry()).unwrap_err().to_string();
+    assert!(
+        error.contains("not a meaningful expectation"),
+        "unexpected error: {error}"
+    );
 }

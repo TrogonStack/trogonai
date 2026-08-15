@@ -384,6 +384,34 @@ pub(crate) async fn read_subject_stream(
         Some(subject),
         from_sequence,
         to_sequence,
+        None,
+        replay::ReplayRetryPolicy::default(),
+        move |_| stream_id.clone(),
+    )
+    .await
+}
+
+/// Reads at most `max_events` events from a JetStream subject.
+///
+/// Bounds the fetch itself rather than the full `[from_sequence, to_sequence]`
+/// range, so a caller that only needs to know whether the subject holds more
+/// than `max_events` events does not pay for reading the rest of the range.
+#[cfg(any(test, not(coverage)))]
+pub(crate) async fn read_subject_stream_bounded(
+    stream: &jetstream::stream::Stream,
+    stream_id: &str,
+    subject: &str,
+    from_sequence: u64,
+    to_sequence: u64,
+    max_events: u64,
+) -> Result<Vec<StreamEvent>, StreamStoreError> {
+    let stream_id = stream_id.to_string();
+    replay::replay_ordered_range(
+        stream,
+        Some(subject),
+        from_sequence,
+        to_sequence,
+        Some(max_events),
         replay::ReplayRetryPolicy::default(),
         move |_| stream_id.clone(),
     )
@@ -429,6 +457,7 @@ pub async fn read_stream_range(
         None,
         from_sequence,
         to_sequence,
+        None,
         replay::ReplayRetryPolicy::default(),
         |message| message.subject.to_string(),
     )

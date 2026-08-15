@@ -340,6 +340,99 @@ async fn processor_poisons_message_on_handler_error_after_exhausting_redeliverie
 }
 
 #[tokio::test]
+async fn processor_poisons_message_on_handler_panic_after_exhausting_redeliveries() {
+    struct PanickingHandler {
+        calls: Arc<AtomicUsize>,
+        poisoned: Arc<Mutex<Vec<PoisonRecord>>>,
+    }
+
+    impl MessageHandler for PanickingHandler {
+        type Error = TestHandlerError;
+
+        async fn handle(&mut self, _message: &jetstream::Message) -> Result<HandlerVerdict, Self::Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            panic!("scripted handler panic");
+        }
+
+        async fn on_poison(&mut self, reason: PoisonReason<Self::Error>) {
+            let record = match reason {
+                PoisonReason::HandlerError(_) => PoisonRecord::HandlerError,
+                PoisonReason::Verdict => PoisonRecord::Verdict,
+                PoisonReason::RedeliveryExhausted => PoisonRecord::RedeliveryExhausted,
+                PoisonReason::Panic => PoisonRecord::Panic,
+            };
+            self.poisoned.lock().expect("poisoned records lock").push(record);
+        }
+    }
+
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let stream = create_events_stream(&js, "PROCESSOR_PANIC", "processor.panic.>").await;
+    publish(&js, "processor.panic.one", "payload").await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let poisoned = Arc::new(Mutex::new(Vec::new()));
+    let handler = PanickingHandler {
+        calls: calls.clone(),
+        poisoned: poisoned.clone(),
+    };
+    let processor = Processor::new(stream, consumer_config("processor-panic"), handler).with_redelivery_policy(
+        RedeliveryPolicy::new(2, Duration::from_millis(20), Duration::from_millis(50)),
+    );
+    let shutdown = CancellationToken::new();
+    let run_shutdown = shutdown.clone();
+    let run_handle = tokio::spawn(async move { processor.run(run_shutdown).await });
+
+    wait_until(Duration::from_secs(5), || {
+        !poisoned.lock().expect("poisoned records lock").is_empty()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        poisoned.lock().expect("poisoned records lock").clone(),
+        vec![PoisonRecord::Panic]
+    );
+    assert!(
+        calls.load(Ordering::SeqCst) >= 1,
+        "the panicking handler should have been driven at least once"
+    );
+
+    shutdown.cancel();
+    run_handle
+        .await
+        .expect("processor task should not panic")
+        .expect("processor should shut down cleanly");
+}
+
+#[tokio::test]
+async fn processor_reports_consumer_config_mismatch_for_a_diverging_existing_consumer() {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let stream = create_events_stream(&js, "PROCESSOR_CONFIG_MISMATCH", "processor.config_mismatch.>").await;
+
+    let mut config = consumer_config("processor-config-mismatch");
+    stream
+        .create_consumer_strict(config.clone())
+        .await
+        .expect("create the durable consumer with its original configuration");
+
+    config.ack_wait = Duration::from_secs(20);
+    let handler = RecordingHandler::new(vec![HandlerVerdict::Ack]);
+    let processor = Processor::new(stream, config, handler);
+
+    let error = processor
+        .run(CancellationToken::new())
+        .await
+        .expect_err("a diverging existing consumer configuration must be rejected");
+
+    assert!(matches!(
+        error,
+        super::ProcessorError::ConsumerConfigMismatch { durable_name }
+            if durable_name == "processor-config-mismatch"
+    ));
+}
+
+#[tokio::test]
 async fn processor_stops_cleanly_on_shutdown() {
     let server = JetStreamTestServer::start().await;
     let js = server.jetstream().await;

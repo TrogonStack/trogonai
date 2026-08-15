@@ -5,12 +5,33 @@ use trogon_decider_wit::host::CommandEnvelope;
 use trogonai_proto::content::v1alpha1 as content_v1alpha1;
 use trogonai_proto::scheduler::schedules::v1;
 
+#[cfg(not(coverage))]
+use async_nats::jetstream;
+#[cfg(not(coverage))]
+use buffa::MessageName as _;
+#[cfg(not(coverage))]
+use trogon_decider_nats::{
+    JetStreamStore, StreamStoreError, StreamSubject, StreamSubjectResolver, SubjectState, subject_current_position,
+};
+#[cfg(not(coverage))]
+use trogon_decider_runtime::{ReadStreamRequest, StreamRead};
+#[cfg(not(coverage))]
+use trogon_nats::test_support::JetStreamTestServer;
+
 use super::*;
 use crate::test_doubles::{InMemoryEventStore, InMemorySnapshotStore};
 use crate::test_fixture::schedules_bytes;
 use crate::{WasmCommandExecution, WasmDeciderEngine, WasmEngineConfig, WasmSnapshotId};
 
 const SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181be9";
+#[cfg(not(coverage))]
+const HOT_SWAP_SCHEDULE_ID: &str = "0198be07a38479e1a376f250f9181bee";
+#[cfg(not(coverage))]
+const HOT_SWAP_EVENTS_STREAM: &str = "WASM_REGISTRY_HOT_SWAP_EVENTS";
+#[cfg(not(coverage))]
+const HOT_SWAP_EVENTS_SUBJECT: &str = "wasm.registry.hot_swap.events.>";
+#[cfg(not(coverage))]
+const HOT_SWAP_SNAPSHOT_BUCKET: &str = "WASM_REGISTRY_HOT_SWAP_SNAPSHOTS";
 
 fn schedules_module() -> WasmDeciderModule {
     let engine = WasmDeciderEngine::new(WasmEngineConfig::default()).expect("engine builds");
@@ -79,6 +100,54 @@ fn pause_command(id: &str) -> CommandEnvelope {
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test stream position must be non-zero")
+}
+
+#[cfg(not(coverage))]
+#[derive(Clone, Copy)]
+struct TestSubjectResolver;
+
+#[cfg(not(coverage))]
+impl StreamSubjectResolver<str> for TestSubjectResolver {
+    type Error = StreamStoreError;
+
+    async fn resolve_subject_state(
+        &self,
+        events_stream: &jetstream::stream::Stream,
+        stream_id: &str,
+    ) -> Result<SubjectState, Self::Error> {
+        let subject = StreamSubject::new(format!("wasm.registry.hot_swap.events.{stream_id}"))
+            .expect("test stream id produces a valid NATS subject");
+        let current_position = subject_current_position(events_stream, &subject).await?;
+        Ok(SubjectState {
+            subject,
+            current_position,
+        })
+    }
+}
+
+#[cfg(not(coverage))]
+async fn live_hot_swap_store() -> (JetStreamTestServer, JetStreamStore<TestSubjectResolver>) {
+    let server = JetStreamTestServer::start().await;
+    let js = server.jetstream().await;
+    let events_stream = js
+        .create_stream(jetstream::stream::Config {
+            name: HOT_SWAP_EVENTS_STREAM.to_string(),
+            subjects: vec![HOT_SWAP_EVENTS_SUBJECT.to_string()],
+            allow_atomic_publish: true,
+            ..Default::default()
+        })
+        .await
+        .expect("create events stream");
+    let snapshot_bucket = js
+        .create_key_value(jetstream::kv::Config {
+            bucket: HOT_SWAP_SNAPSHOT_BUCKET.to_string(),
+            history: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("create snapshot bucket");
+    let store = JetStreamStore::builder(js, events_stream, snapshot_bucket).with_subject_resolver(TestSubjectResolver);
+    (server, store)
 }
 
 #[test]
@@ -319,4 +388,59 @@ async fn activating_a_new_module_version_starts_cold_and_keeps_the_prior_snapsho
             .position,
         position(2)
     );
+}
+
+#[cfg(not(coverage))]
+#[tokio::test]
+async fn activate_under_live_jetstream_keeps_in_flight_dispatch_pinned_to_its_resolved_module() {
+    let (_server, store) = live_hot_swap_store().await;
+
+    let module_v1 = schedules_module();
+    let module_v2 = module_v1
+        .clone()
+        .with_version(ModuleVersion::new("0.2.0").expect("valid version"));
+
+    let handle = DeciderRegistry::builder()
+        .register(module_v1)
+        .expect("registration succeeds")
+        .build_handle();
+
+    let in_flight_module = handle.route(&create_type()).expect("v1 routes create");
+
+    let activated = handle.activate(module_v2);
+    assert_eq!(activated.len(), 4);
+
+    WasmCommandExecution::new(&in_flight_module, &store, &create_command(HOT_SWAP_SCHEDULE_ID))
+        .execute()
+        .await
+        .expect("dispatch resolved before the swap still completes against its pinned v1 module");
+    assert_eq!(
+        in_flight_module.version().as_str(),
+        "0.1.0",
+        "the module an in-flight dispatch already resolved must not change underneath it"
+    );
+
+    let next_dispatch_module = handle.route(&pause_type()).expect("v2 now routes pause");
+    assert!(
+        !Arc::ptr_eq(&in_flight_module, &next_dispatch_module),
+        "a dispatch resolving after the swap must observe the newly activated module, not the pinned one"
+    );
+    assert_eq!(next_dispatch_module.version().as_str(), "0.2.0");
+
+    let result = WasmCommandExecution::new(&next_dispatch_module, &store, &pause_command(HOT_SWAP_SCHEDULE_ID))
+        .execute()
+        .await
+        .expect("the next dispatch resolves and executes against the swapped-in v2 module");
+    assert_eq!(result.stream_position, position(2));
+
+    let replay = store
+        .read_stream(ReadStreamRequest {
+            stream_id: HOT_SWAP_SCHEDULE_ID,
+            from: ReadFrom::Beginning,
+        })
+        .await
+        .expect("read live event stream");
+    assert_eq!(replay.events.len(), 2);
+    assert_eq!(replay.events[0].event.r#type, v1::ScheduleCreated::FULL_NAME);
+    assert_eq!(replay.events[1].event.r#type, v1::SchedulePaused::FULL_NAME);
 }

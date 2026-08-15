@@ -15,8 +15,8 @@
 use crate::constants::METER_NAME;
 use crate::snapshot::{ReadSnapshotRequest, Snapshot, SnapshotRead, SnapshotType, SnapshotWrite, WriteSnapshotRequest};
 use crate::stream::{
-    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflowError, ReadFrom, ReadStreamRequest, StreamAppend,
-    StreamPosition, StreamRead, StreamWritePrecondition,
+    AppendStreamRequest, AppendStreamResponse, ReadAfterOverflowError, ReadFrom, ReadStreamRequest, ReadStreamResponse,
+    StreamAppend, StreamPosition, StreamRead, StreamWritePrecondition,
 };
 use crate::{
     Decider, Event, EventDecode, EventDecodeOutcome, EventEncode, EventId, EventIdentity, EventType, Events, Headers,
@@ -158,6 +158,32 @@ struct SnapshotTaskTracker {
     idle: tokio::sync::Notify,
 }
 
+/// Reserves one in-flight slot on construction and releases it on drop.
+///
+/// Tying the release to `Drop` rather than to normal completion keeps the
+/// in-flight count accurate when the wrapped task panics: unwinding still
+/// drops this guard, so the counter is decremented and waiters are notified
+/// exactly once regardless of how the task ends.
+#[derive(Debug)]
+struct SnapshotTaskGuard {
+    tasks: Arc<SnapshotTaskTracker>,
+}
+
+impl SnapshotTaskGuard {
+    fn new(tasks: Arc<SnapshotTaskTracker>) -> Self {
+        tasks.in_flight.fetch_add(1, Ordering::SeqCst);
+        Self { tasks }
+    }
+}
+
+impl Drop for SnapshotTaskGuard {
+    fn drop(&mut self) {
+        if self.tasks.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.tasks.idle.notify_waiters();
+        }
+    }
+}
+
 /// Schedules snapshot writes on the ambient Tokio runtime and tracks them so
 /// hosts can await outstanding writes before teardown.
 ///
@@ -188,13 +214,10 @@ impl SnapshotTaskScheduler for DrainableSnapshotTaskScheduler {
             return;
         };
 
-        let tasks = Arc::clone(&self.tasks);
-        tasks.in_flight.fetch_add(1, Ordering::SeqCst);
+        let guard = SnapshotTaskGuard::new(Arc::clone(&self.tasks));
         drop(handle.spawn(async move {
+            let _guard = guard;
             task.await;
-            if tasks.in_flight.fetch_sub(1, Ordering::SeqCst) == 1 {
-                tasks.idle.notify_waiters();
-            }
         }));
     }
 
@@ -451,6 +474,10 @@ pub struct ReplayLimitExceeded {
     /// The replay limit configured for this execution.
     pub limit: ReplayLimit,
     /// The number of stream events the read returned.
+    ///
+    /// The read is bounded to `limit + 1` events once a [`ReplayLimit`] is
+    /// configured, so this is `limit + 1` rather than the stream's true
+    /// length whenever the true length is greater than that.
     pub replayed_event_count: u64,
 }
 
@@ -1008,14 +1035,16 @@ where
             });
         }
 
-        let stream_read = self
-            .event_store
-            .read_stream(ReadStreamRequest {
+        let stream_read = read_stream_for_execution(
+            self.event_store,
+            ReadStreamRequest {
                 stream_id,
                 from: ReadFrom::Beginning,
-            })
-            .await
-            .map_err(CommandError::ReadStream)?;
+            },
+            self.replay_limit,
+        )
+        .await
+        .map_err(CommandError::ReadStream)?;
         let current_position = stream_read.current_position;
         let replayed_event_count = stream_read.events.len() as u64;
         ensure_replay_within_limit(self.replay_limit, replayed_event_count)
@@ -1163,11 +1192,13 @@ where
             Some(position) => ReadFrom::after(position).map_err(CommandError::ReadAfterOverflow)?,
             None => ReadFrom::Beginning,
         };
-        let stream_read = self
-            .event_store
-            .read_stream(ReadStreamRequest { stream_id, from })
-            .await
-            .map_err(CommandError::ReadStream)?;
+        let stream_read = read_stream_for_execution(
+            self.event_store,
+            ReadStreamRequest { stream_id, from },
+            self.replay_limit,
+        )
+        .await
+        .map_err(CommandError::ReadStream)?;
         let mut current_position = stream_read.current_position;
         let mut stream_events = stream_read.events;
 
@@ -1192,14 +1223,16 @@ where
                     state = C::initial_state();
                     snapshot_outcome = attribute::SnapshotOutcome::DiscardedAheadOfStream;
 
-                    let replay = self
-                        .event_store
-                        .read_stream(ReadStreamRequest {
+                    let replay = read_stream_for_execution(
+                        self.event_store,
+                        ReadStreamRequest {
                             stream_id,
                             from: ReadFrom::Beginning,
-                        })
-                        .await
-                        .map_err(CommandError::ReadStream)?;
+                        },
+                        self.replay_limit,
+                    )
+                    .await
+                    .map_err(CommandError::ReadStream)?;
                     current_position = replay.current_position;
                     stream_events = replay.events;
                 }
@@ -1209,15 +1242,8 @@ where
         record_snapshot_read_outcome(&read_snapshot_span, snapshot_outcome);
 
         let replayed_event_count = stream_events.len() as u64;
-        // A discard-and-replay recovery deliberately replays the full stream
-        // and ends by overwriting the discarded snapshot; failing it on a
-        // limit sized for post-snapshot deltas would leave the bad snapshot
-        // in place and wedge every later command in the same
-        // discard-replay-fail loop.
-        if !discarded_bad_snapshot {
-            ensure_replay_within_limit(self.replay_limit, replayed_event_count)
-                .map_err(CommandError::ReplayLimitExceeded)?;
-        }
+        ensure_replay_within_limit(self.replay_limit, replayed_event_count)
+            .map_err(CommandError::ReplayLimitExceeded)?;
         metrics().replay_events.add(replayed_event_count, &[]);
 
         let state = evolve_state_from_stream_events::<C>(state, &stream_events)?;
@@ -1283,6 +1309,33 @@ fn ensure_replay_within_limit(
             replayed_event_count,
         }),
         _ => Ok(()),
+    }
+}
+
+/// Reads a stream for a command execution, bounding the read to one more
+/// than the configured [`ReplayLimit`] when one is set.
+///
+/// Capping the fetched count at `limit + 1` is enough to detect that the
+/// limit was exceeded without reading the rest of the stream: a response
+/// with `limit + 1` events proves the true count is more than the limit,
+/// which is exactly what [`ensure_replay_within_limit`] needs to reject the
+/// command. With no configured limit, this reads the stream unbounded, same
+/// as before.
+async fn read_stream_for_execution<StreamId, E>(
+    event_store: &E,
+    request: ReadStreamRequest<'_, StreamId>,
+    replay_limit: Option<ReplayLimit>,
+) -> Result<ReadStreamResponse, E::Error>
+where
+    StreamId: ?Sized,
+    E: StreamRead<StreamId>,
+{
+    match replay_limit {
+        Some(limit) => {
+            let max_events = limit.as_u64().saturating_add(1);
+            event_store.read_stream_bounded(request, max_events).await
+        }
+        None => event_store.read_stream(request).await,
     }
 }
 

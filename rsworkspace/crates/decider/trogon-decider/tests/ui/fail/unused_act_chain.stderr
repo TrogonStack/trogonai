@@ -1,0 +1,16 @@
+error: unused `trogon_decider::ActChain` that must be used
+  --> tests/ui/fail/unused_act_chain.rs:10:5
+   |
+10 |     Decision::<TestCommand>::act().execute(|_, _| Decision::event(TestEvent::Registered));
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: act chains must be completed with .into() to produce a Decision
+note: the lint level is defined here
+  --> tests/ui/fail/unused_act_chain.rs:1:9
+   |
+ 1 | #![deny(unused_must_use)]
+   |         ^^^^^^^^^^^^^^^
+help: use `let _ = ...` to ignore the resulting value
+   |
+10 |     let _ = Decision::<TestCommand>::act().execute(|_, _| Decision::event(TestEvent::Registered));
+   |     +++++++

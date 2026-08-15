@@ -39,7 +39,14 @@ mechanism to shed load when concurrency spikes.
 Introduce an `AdmissionLimiter`-shaped hook (a bounded-concurrency permit,
 semaphore-shaped) acquired at the top of `CommandExecution::execute` and
 `WasmCommandExecution::execute`, released on completion (RAII permit), before
-any I/O or [wasmtime](../glossary/wasmtime) work begins. It sits at the execution layer, not inside
+any I/O or [wasmtime](../glossary/wasmtime) work begins. Whether an
+unconfigured execution defaults to today's unlimited behavior (an opt-in
+no-op slot, the shape draft
+[ADR#0026](./0026-command-authorization-principal.md) proposes for its
+authorizer) or the limiter is mandatory-on with a default bound is
+deliberately left open (Open Question 2); the two readings differ by
+exactly one unconditional behavior change to every existing caller. It sits
+at the execution layer, not inside
 `DeciderRegistry` or `WasmDeciderEngine`: the registry is deliberately
 stateless and shared read-only, and making every `route()` lookup also
 mutate a shared counter would add contention to what is today a lock-free
@@ -104,28 +111,65 @@ shed or retry, unlike this codebase's existing fail-loudly posture
 ([ADR#0017](./0017-aauth-agent-authentication.md),
 [ADR#0023](./0023-secret-management-and-key-custody-direction.md)).
 
+### Bound concurrency at the consumer or gateway boundary, outside the decider crates
+
+Unresolved; the alternatives above all argue placement *within* the decider
+stack (registry vs. engine vs. execution layer) and never weigh leaving the
+stack alone. Each consumer already owns a dispatch loop (the scheduler's
+worker, the gateway's handler); a semaphore there bounds the same
+concurrency without the shared crates growing a scheduling concern or a new
+error variant, and each consumer sizes its own bound. Its cost: the bound
+is per-consumer rather than per-host (two consumers in one process do not
+share a budget), and nothing in the shared crates can assert an execution
+was ever admitted. Since admission control is operational mechanism rather
+than domain logic, the decider crates' domain-level admission bar cuts
+against the in-crate placement unless this alternative is explicitly
+rebutted (Open Question 1).
+
 ## Non-Goals
 
 - Specifying the limiter's exact algorithm (token bucket, semaphore, leaky
   bucket). Only that one exists at a defined layer with a defined error
   contract.
 - Per-[tenant](../glossary/tenant) fairness or quality-of-service scheduling. A global or
-  per-command-type bound is in scope; weighting by tenant is a follow-on
-  decision that would compose with
+  per-command-type bound is in scope; weighting by tenant is fully open --
   [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s tenant value
-  object, but that composition is left open here.
+  object is itself an unaccepted draft, so there is no settled primitive to
+  compose with, and no follow-on composition is implied here.
 - Bounding NATS-level publish/consume throughput. Only host-side execution
   concurrency for command dispatch is in scope.
 - Changing wasmtime fuel or memory defaults themselves. The admission
   limiter is additive to those existing knobs, not a replacement for them.
 
+## Open Questions
+
+This ADR is a draft: the Decision sections above are proposals, and
+`AdmissionLimiter`/`Overloaded` do not exist. No other document may treat
+them as existing or scheduled surface until acceptance.
+
+1. **Placement.** Admission control is operational mechanism, not domain
+   logic. Whether it belongs inside the shared execution layer at all, or
+   at each consumer's dispatch boundary (the alternative above), must be
+   answered against the decider crates' business-agnostic, domain-level
+   admission bar before acceptance.
+2. **Default behavior.** Opt-in no-op slot versus mandatory-on with a
+   default bound. The first leaves every existing caller's runtime behavior
+   unchanged; the second actually protects hosts whose operators never tuned
+   the knob. The choice does not move source compatibility either way: adding
+   `Overloaded` to the shared error enums is immediately source-breaking for
+   exhaustive matches under both readings. What the choice decides is only
+   whether the runtime path that can produce the variant is live on every
+   execution or only where a caller opted in.
+
 ## Consequences
 
-- Every command execution path gains a new failure mode (rejected for lack
-  of admission), a breaking addition to `CommandError`/`WasmCommandError`
-  that existing callers must handle, the same category of change as the
-  authorization variant in
-  [ADR#0026](./0026-command-authorization-principal.md).
+- Command execution paths gain a new failure mode (rejected for lack of
+  admission) -- on every path if the limiter is mandatory-on, only on
+  opted-in paths otherwise (Open Question 2) -- and a breaking addition to
+  `CommandError`/`WasmCommandError` that existing callers must handle, the
+  same category of change draft
+  [ADR#0026](./0026-command-authorization-principal.md) proposes for its
+  authorization variant.
 - Legitimate bursts are slowed or explicitly rejected rather than silently
   degrading the whole host, but only if callers actually implement retry or
   backoff against the new error; without that, callers just see more

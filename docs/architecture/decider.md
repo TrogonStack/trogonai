@@ -46,6 +46,23 @@ pub enum WritePrecondition {
 }
 ```
 
+The storage layer's `StreamWritePrecondition`
+(`crates/decider/trogon-decider-runtime/src/stream/append_stream.rs`) adds a fourth variant
+the domain-level enum above cannot express: `At(StreamPosition)`, an OCC guard over an
+observed stream position rather than a revision count, enforced server-side via the
+expected-last-subject-sequence guard and tracked as `at` in the `write_precondition`
+telemetry attribute. `WRITE_PRECONDITION` is a compile-time `const`, so a decider can never
+supply the position `At` needs; only `CommandExecution`, which has already read the stream,
+can. The effective guard resolves in three steps: `C::WRITE_PRECONDITION` wins if the decider
+declares one; otherwise the value passed to `.with_write_precondition(...)` applies if the
+caller set one; only when neither is present does `CommandExecution` fall back to
+`At(current_position)` if the stream already has events or `NoStream` if it does not. That
+last step is why real optimistic concurrency ships by default without any decider or caller
+opting in, and it never overrides an explicit builder value.
+[ADR#0035](../adr/0035-session-store-decider-aggregate.md) rejects adding a trait-level
+`At(N)` variant to `WritePrecondition` for exactly this reason: it could only let a decider
+weaken the default guard, never strengthen it.
+
 ### `Decision::Events` vs `Decision::Act`
 
 `decide` returns a `Decision<C>` (`crates/decider/trogon-decider/src/decision.rs`):
@@ -84,8 +101,15 @@ reimplements the stepping logic.
 
 `trogon-decider-runtime`'s `CommandExecution<'a, E, C, S, G>`
 (`crates/decider/trogon-decider-runtime/src/execution.rs`) is the runtime boundary that applies one
-command to one stream: read, replay, decide, append. Build one with `CommandExecution::new`
-and configure it with builder methods before calling `execute`:
+command to one stream: read, replay, decide, append. There is no authorization phase in that
+sequence, and no builder input represents who is submitting the command: whoever can construct
+a `CommandExecution` can apply any command the decider accepts. Callers that need caller
+identity enforced must do it before this boundary.
+[ADR#0026](../adr/0026-command-authorization-principal.md) proposes an authorization phase and
+a principal input, but it is a draft and none of it ships today.
+
+Build one with `CommandExecution::new` and configure it with builder methods before calling
+`execute`:
 
 ```rust
 CommandExecution::new(&event_store, &command)
@@ -119,14 +143,25 @@ called):
   when the configured `SnapshotPolicy::decide_snapshot` returns `SnapshotDecision::Take`.
 
 `with_replay_limit` (`ReplayLimit`, a non-zero event count) bounds how much history one
-command execution may replay: if a stream read returns more events than the limit, the
-command fails with `CommandError::ReplayLimitExceeded` before any folding happens, so a
-decider that forgets or misconfigures snapshotting fails loudly instead of silently growing
-per-command latency with the stream. The check runs after the read returns, so it does not
-bound the read itself; a streaming bound on `StreamRead` is possible future work. A
-discard-and-replay snapshot recovery is exempt from the limit: its full replay is a
-deliberate one-off that ends by overwriting the discarded snapshot, and failing it would
-leave the bad snapshot in place to wedge every later command. The default is unlimited.
+command execution may replay. Once a limit is configured, the read itself is capped to one
+more than the limit through `StreamRead::read_stream_bounded` (a default method that falls
+back to the unbounded `read_stream` for implementations that have not opted into a real
+bound; `trogon-decider-nats` has). If the capped read comes back with more events than the
+limit, the command fails with `CommandError::ReplayLimitExceeded` before any folding happens,
+so a decider that forgets or misconfigures snapshotting fails loudly instead of silently
+growing per-command latency with the stream. A discard-and-replay snapshot recovery is
+bounded by the same limit: its full replay from the beginning is otherwise a deliberate
+one-off that ends by overwriting the discarded snapshot, but a stream that has grown far
+beyond the configured limit still fails loudly instead of replaying without bound.
+
+What the limit bounds depends on the store. The loud failure and the skipped fold hold for
+every `StreamRead` implementation. The I/O and memory bound holds only for implementations
+that override `read_stream_bounded` with a real capped fetch: a store still on the default
+fallback reads the whole stream first and only then discovers it exceeded the limit, so
+`ReplayLimitExceeded` protects folding time but not wire traffic or peak memory there.
+Nothing forces the override when a limit is configured, so "a stream far past the limit is
+never read in full" is a property of the store, not of `ReplayLimit`. The default is
+unlimited.
 
 `CommandError<DecideError, EvolveError, ReadSnapshotError, ReadStreamError, AppendStreamError,
 EventTypeError, PayloadEncodeError, DecodeError>` normalizes failures by phase
@@ -214,7 +249,10 @@ target logical stream's own messages in order rather than scanning every physica
 The consumer is self-healing for most disconnects; residual failure kinds are retried by
 recreating the consumer from the last successfully processed sequence, bounded by
 `ReplayRetryPolicy`: 5 attempts, 100ms base delay, 5s max delay, exponential backoff between
-attempts.
+attempts. `replay_ordered_range` also takes an optional `max_events`, which stops the replay
+once that many events have been fetched even if the target sequence has not been reached yet;
+`JetStreamStore::read_stream_bounded` uses it to give `CommandExecution`'s `ReplayLimit` a
+real bound on the wire, not just on the folded result.
 
 ### KV-backed snapshots
 
@@ -427,8 +465,9 @@ Four layers, from unit-level to conformance-level:
 
 - **`TestCase`** (`trogon-decider/src/testing.rs`) is a given/when/then typestate builder for
   unit-testing a native `Decider` directly: seed a `History<C::Event>`, issue a command,
-  assert the resulting `Decision` via a `Then`-style expectation (event equality, a
-  rejection, or a specific error code), and optionally assert the post-decision state.
+  assert the resulting `Decision` via a `Then`-style expectation (exact event equality via
+  `.then(...)`, or the exact expected `DecideError` value via `.then_error(...)`), and
+  optionally assert the post-decision state.
 - **`trogon-decider-sim`** is the native-vs-wasm parity harness. `SimHost`/`SimInstance`
   (`host.rs`) load a compiled component and run every guest call against the same resource
   budget `WasmDeciderEngine` applies in production, so a decider that would trap in

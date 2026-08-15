@@ -70,14 +70,24 @@ language.
 Add a `CommandAuthorizer<C: Decider>` trait with one method that takes the
 principal and the command and returns either `Ok(())` or a typed denial.
 `CommandExecution`/`WasmCommandExecution` gain an optional builder slot for
-an authorizer, defaulting to an `AllowAll` no-op so existing callers keep
-compiling and behaving exactly as they do today -- the same opt-in shape
-`WithoutSnapshots` already uses for the snapshot builder slot. When an
+an authorizer, defaulting to an `AllowAll` no-op -- the same opt-in shape
+`WithoutSnapshots` already uses for the snapshot builder slot. `AllowAll`
+preserves runtime behavior only: existing call sites keep building and
+behaving exactly as they do today, but the `Unauthorized` variant Decision 5
+adds to the shared error enums is source-breaking for any exhaustive match on
+them, including in consumers that never configure an authorizer. When an
 authorizer is configured, `execute()` calls it after the command's stream id
 and the loaded state are available (an authorizer may need to know the
 target stream) but strictly before `evaluate_decision`/`decide` runs, so a
-denied command never reaches domain logic and never spends replay or, on the
-WASM path, guest [fuel](../glossary/fuel) on work that will be rejected.
+denied command never reaches domain logic and never appends.
+
+What a denial avoids is path-specific, and the two guarantees are not
+interchangeable. On the native path the state an authorizer sees is the
+replayed state, so a denial still pays the stream read and the fold; only
+`decide` and the append are skipped. Decision 3's WASM placement is the one
+that runs before any replay, so a WASM denial additionally avoids guest
+session creation and the guest [fuel](../glossary/fuel) that replay and
+`decide` would spend.
 
 ### 3. Both native and WASM dispatch paths
 
@@ -139,6 +149,77 @@ domain payload (business intent) with cross-cutting authorization context,
 forces every decider author to remember to carry and validate it, and cannot
 be composed, tested, or swapped independently of the domain type.
 
+### Authorize in an application-owned wrapper, outside the decider crates
+
+Unresolved; this is the open acceptance question (see Open Questions). The
+decider crate family is reusable and business-agnostic, and its admission
+bar is that a concern is domain-level and makes sense for every consumer
+with no business context; authorization is application-level policy. Under
+that boundary the natural shape is a wrapper the application composes around
+`CommandExecution` (authorize, then execute): no hook in the shared crates,
+no new builder slot, no new variant on the shared error enums. Its cost is
+the property Decisions 1-3 buy by moving the hook inside: the runtime itself
+can no longer state that a given execution was ever checked, and every
+non-gateway caller must remember to go through the wrapper. Choosing between
+these two placements has not been done; the in-crate Decision above is one
+side of the choice, not a settled answer.
+
+An illustrative sketch of the wrapper shape, in application code only.
+Every name here is placeholder, and whether the pieces live per-app or in a
+shared app-side crate is open; the sketch exists to make the placement
+discussion concrete, not to decide it:
+
+```rust
+// Application-owned. The decider crates never see these types.
+pub struct Principal { /* kind, id, claims: whatever the app decides */ }
+pub struct Denied { pub reason: String }
+
+pub trait Authorize<C> {
+    fn authorize(&self, principal: &Principal, command: &C) -> Result<(), Denied>;
+}
+
+pub enum AppError<E> {
+    Denied(Denied),
+    Execution(E),
+}
+
+// The application's one entry point for executing a command: authorize,
+// assemble every required boundary input (audit headers among them), then
+// run the untouched CommandExecution.
+pub struct CommandBoundary<E, A> {
+    event_store: E,
+    authorizer: A,
+}
+
+impl<E, A> CommandBoundary<E, A> {
+    pub async fn execute_command<C>(
+        &self,
+        principal: &Principal,
+        command: &C,
+    ) -> Result<ExecutionOutcome, AppError<ExecutionError>>
+    where
+        C: Decider, // plus the store bounds CommandExecution already requires
+        A: Authorize<C>,
+    {
+        self.authorizer.authorize(principal, command).map_err(AppError::Denied)?;
+        let headers = required_headers(principal, command)?;
+        CommandExecution::new(&self.event_store, command)
+            .with_headers(headers)
+            .execute()
+            .await
+            .map_err(AppError::Execution)
+    }
+}
+```
+
+Two properties of the sketch worth naming for the discussion. The
+`required_headers` function is deliberately general: it assembles every
+input the application requires at the boundary (audit identity among them),
+not an audit-only helper. And if the application keeps its raw event-store
+handle private to the module defining this entry point, the discipline cost
+above shrinks from team convention to module visibility: the only ergonomic
+path to an append goes through the gate.
+
 ## Non-Goals
 
 - Defining a policy language (SpiceDB, CEL, Rego, or otherwise). This ADR
@@ -151,13 +232,43 @@ be composed, tested, or swapped independently of the domain type.
 - Specifying how an application composes multiple authorizers (allow-list,
   policy callout, or otherwise). One trait, one hook per execution.
 
+## Open Questions
+
+This ADR is a draft: the Decision sections above are proposals, and the
+following must be resolved before it can be accepted. None of the types it
+names (`CommandPrincipal`, `CommandAuthorizer`, `Unauthorized`) exist, and
+no other document may treat them as existing or scheduled surface until
+then; any reference to them must be hedged as a proposal.
+
+1. **Placement.** Does an authorization hook belong inside
+   `trogon_decider_runtime`/`trogon_decider_wasm_runtime` at all? The
+   decider crates are business-agnostic and domain-level; authorization is
+   application-level policy, and the wrapper alternative above keeps it out
+   of the shared crates entirely. The Decision assumes in-crate placement
+   without rebutting that boundary; the rebuttal, or the move outward, is
+   owed before acceptance.
+2. **Error surface.** The `Unauthorized` variant on the shared
+   `CommandError`/`WasmCommandError` enums breaks every consumer's
+   exhaustive match, including consumers that never configure an authorizer.
+   Whether the denial belongs on the shared enums or on a wrapper's own
+   error type follows directly from the placement question.
+3. **Upstream protocol churn.** Decision 4 maps identities out of AAuth's
+   optional-string `principal` claim, a shape accepted
+   [ADR#0017](./0017-aauth-agent-authentication.md) pins to a moving IETF
+   Internet-Draft, not a stable RFC. If that specification churns and
+   [ADR#0017](./0017-aauth-agent-authentication.md) re-pins, Decision 4's
+   mapping rules may need revisiting;
+   acceptance here should state how tightly the mapping is coupled to the
+   pinned revision.
+
 ## Consequences
 
 - `CommandExecution` and `WasmCommandExecution` gain a new builder slot and,
   once populated, a new phase in the execution pipeline; the default no-op
-  authorizer keeps every existing call site compiling and behaving unchanged.
+  authorizer keeps every existing call site behaving unchanged at runtime.
 - `CommandError`/`WasmCommandError` gain an `Unauthorized` variant, additive
-  but breaking for exhaustive matches on those enums, consistent with how
+  but immediately source-breaking for exhaustive matches on those enums
+  whether or not a caller ever configures an authorizer, consistent with how
   every other execution phase already gets its own variant.
 - Enforcement is opt-in per call site. This ADR does not retroactively close
   the "anyone can submit any command" gap the audit identified; it closes it

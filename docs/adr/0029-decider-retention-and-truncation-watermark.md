@@ -124,7 +124,30 @@ origin positions diverge by design.
   `FrequencySnapshot`). Retention consumes whatever cadence a decider already
   chose.
 - Per-[tenant](../glossary/tenant) retention policy differences. Composes with, but does not
-  depend on, [ADR#0027](./0027-decider-multi-tenancy-primitive.md).
+  depend on, [ADR#0027](./0027-decider-multi-tenancy-primitive.md). One
+  caveat that draft proposal creates: its `TenantBinding::Dedicated` would
+  mean per-tenant streams and buckets, and therefore per-tenant watermark
+  computation -- so this ADR's API shape may need to change if that lands,
+  a dependency previously acknowledged only in
+  [ADR#0027](./0027-decider-multi-tenancy-primitive.md)'s own Consequences.
+
+## Open Questions
+
+This ADR is a draft; the watermark API does not exist, and no other
+document may treat it as existing or scheduled surface until acceptance.
+
+1. **Placement.** The Decision argues mechanism (what the watermark reads,
+   and that only an operator or job invokes the purge) but never altitude:
+   whether a read-only operational query belongs inside
+   `trogon-decider-nats` or in a separate maintenance/tooling layer has not
+   been weighed against the decider crates' business-agnostic, domain-level
+   admission bar. Deciding that placement is an acceptance item.
+2. **Relationship to [ADR#0035](./0035-session-store-decider-aggregate.md).**
+   That draft declares session streams keep-forever and claims to supersede
+   this ADR's purge for session streams, keeping only the read-only
+   watermark as a diagnostic. Both documents are drafts; the supersession
+   is provisional until both are accepted, and whichever is accepted first
+   constrains the other.
 
 ## Consequences
 
@@ -151,4 +174,5 @@ origin positions diverge by design.
 - [ADR#0013: Origin Stream Sequence Header](./0013-origin-stream-sequence-header.md)
 - [ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service](./0023-secret-management-and-key-custody-direction.md)
 - [ADR#0027: Tenant Value Object for Decider Stream and Snapshot Resolution](./0027-decider-multi-tenancy-primitive.md)
+- [ADR#0035: Session Store as a Decider Aggregate on NATS JetStream](./0035-session-store-decider-aggregate.md)
 - [NATS JetStream Source and Mirror Streams](https://docs.nats.io/nats-concepts/jetstream/source_and_mirror)

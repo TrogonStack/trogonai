@@ -296,8 +296,13 @@ here.
 **Identity and dedup contract.** Commands are processed at-least-once -- a NATS
 processor redelivers a command after a crash before its ack -- so every command
 carries a caller-supplied idempotency key, stable across redelivery, and no
-domain payload gains a separate identity field of its own. The runtime derives
-each appended event's envelope `Event.id` deterministically: UUIDv5 over
+domain payload gains a separate identity field of its own. Where that key
+structurally lives -- a field on the command struct, or an execution-layer
+input beside it -- is an open design question this ADR does not settle
+(draft [ADR#0026](./0026-command-authorization-principal.md) rejected the
+analogous command-struct placement for its principal, which cuts against a
+struct field here too). Each appended event's envelope `Event.id` is derived
+deterministically: UUIDv5 over
 `(resolved stream subject, command type, command idempotency key, index of the
 event within the decision's batch)`. The subject and command type are in the
 derivation because `Nats-Msg-Id` dedup is stream-wide and every session subject
@@ -305,7 +310,13 @@ shares the one physical `SESSION_EVENTS` stream (facet 1): without them, two
 different sessions -- or two different commands -- reusing one idempotency key
 would collide to one id and the second append would be silently swallowed as a
 duplicate. With them, key uniqueness only has to hold per session and command
-type, which the caller can actually guarantee. A redelivered command therefore
+type, which the caller can actually guarantee. Whatever supplies that command
+type has to be an explicitly declared, stable identifier, the same kind of name
+a WASM module descriptor already declares and `CommandType` already validates.
+A compiler-derived Rust type name is specifically excluded: `std::any::type_name`
+carries no stability guarantee across compiler versions, so deriving ids from it
+would let a toolchain upgrade silently change every id and defeat the dedup this
+formula exists to provide. A redelivered command therefore
 reproduces byte-identical event ids on retry, while distinct events within one
 multi-event batch (a `[SessionStarted, SessionForked]` fork, say) stay distinct
 -- no batch aliasing, and no cross-session aliasing. This is what makes
@@ -320,7 +331,24 @@ re-replays, sees the key already folded, and no-ops.
 
 Publish dedup closes the write side: the append sets the NATS header
 `Nats-Msg-Id` to the event id, and a duplicate acknowledgement inside the
-JetStream dedup window is idempotent success, not an append error. Fold dedup
+JetStream dedup window must read as idempotent success for session appends --
+but only where the duplicate really is the same command. The formula above
+deliberately excludes command content, so a caller that reuses one key for a
+*different* payload under the same session and command type derives the same
+event id, and a bare duplicate ack would report success while the second
+command's content is silently dropped. Key reuse with different content is a
+contract violation, not a duplicate, and must surface as a typed key-reuse
+conflict: the append boundary carries a canonical digest of the command the key
+was first used for, and reads a duplicate ack as idempotent success only when
+the incoming command's digest matches it. Folding the digest into the UUIDv5
+inputs instead was considered and rejected -- it gives the two commands
+distinct ids, so both append under one key on the `Any` path, trading a
+detectable conflict for a silent one. Today `trogon-decider-nats` maps a
+duplicate ack to a typed append error, so
+this is a required behavior change to shared code, and whether it lands as a
+global semantic flip for every consumer or as an opt-in per-store mode is
+undecided (see the substrate obligations below); the difference is every
+other consumer's append semantics, not a session-store detail. Fold dedup
 closes the read side: `evolve` (native and WASM) must receive the envelope event
 id, and the fold and every projection collapse events with an already-seen id,
 with snapshots persisting that seen-key state across a restore. The seen-key
@@ -353,14 +381,50 @@ incorrectly asserted that readers already dedup by an event identity that native
 and WASM replay do not currently expose to `evolve`. The corrected claim: this
 store cannot go live until the substrate obligations below are met.
 
-**Substrate obligations (prerequisites to implementation).** The following are
-tracked in the backlog as prerequisites, not covered by this ADR's wire contract
-alone:
+**Substrate obligations (prerequisites to implementation).** These split into
+two categories that must not be flattened into one checklist, because they
+carry very different costs. The decider crates are reusable,
+business-agnostic, and domain-level; anything this consumer ADR asks of them
+is a request, not a decision, and each item in the first category needs its
+own review against that bar -- independent of this ADR's acceptance --
+because a session-store need is not, by itself, a reason to change shared
+code every other business consumes.
 
-- Evolve-visible event identity in both native and WASM replay paths.
-- A deterministic id-derivation hook (the `EventIdentity::event_id` override
-  point already exists in the runtime and is where this plugs in).
-- Duplicate-publish-ack treated as success rather than an append error.
+Open shared-crate changes (each an unmade decision owned by the decider
+platform, not by this ADR):
+
+- **Evolve-visible event identity in both native and WASM replay paths.**
+  This is a change to the core `Decider` trait's fold surface -- the
+  near-frozen center of the whole crate family -- forcing every decider in
+  every business to see event identity in its fold. Fold-side dedup is
+  arguably transport-level, not domain-level; whether this crosses the core
+  trait at all, or the session store dedups in its own boundary instead, is
+  undesigned.
+- **A deterministic id-derivation hook.** An earlier draft claimed the
+  runtime's existing `EventIdentity::event_id` override point "is where this
+  plugs in." That claim is wrong: the hook sees only the event, while the
+  UUIDv5 formula above needs the resolved stream subject, the command type,
+  the command idempotency key, and the batch index -- none of which that
+  hook can see. Where derivation actually runs (an extended shared-runtime
+  surface, or a Session-owned append boundary that computes ids before
+  handing events over) is an open design with no current answer. Whichever
+  surface wins has to take the command type as a declared value rather than
+  reach for one, for the stability reason given above; on the native path no
+  such declaration exists today, so supplying it is part of this obligation
+  and not a detail of the chosen surface.
+- **Duplicate-publish-ack treated as success rather than an append error.**
+  A behavior flip to `trogon-decider-nats`'s append acknowledgment path.
+  Global-versus-opt-in is undecided (see above); a global flip changes every
+  consumer's observable append semantics and cannot ride in on a session
+  prerequisite list. The flip is not unconditional: reading a duplicate ack as
+  success requires the canonical command digest above to be recoverable at the
+  ack, so where that digest is carried and compared is part of this obligation.
+  Without it the append path cannot tell an idempotent retry from key reuse
+  with different content, and the typed key-reuse conflict has nothing to fire
+  on.
+
+Low-risk additions that stand on their own regardless of the above:
+
 - A decode-failure metric (facet 3).
 - Command-receipt tests for crash-before-ack, concurrent redelivery, and
   multi-event batches.
@@ -412,7 +476,11 @@ Every event carries a small envelope alongside its typed payload: an `Event.id`
 deterministically derived from the command's idempotency key and its batch index
 (facet 2) -- not itself the idempotency key, which lives on the command, not the
 event -- an append timestamp (transport metadata; see the event-time policy
-below), the acting principal ([ADR#0026](./0026-command-authorization-principal.md)),
+below), the acting principal (draft
+[ADR#0026](./0026-command-authorization-principal.md)'s proposed
+`CommandPrincipal`, once that ADR is accepted and lands -- a named
+placeholder until then, per this document's own Context rule that draft
+types are proposed, not shipped),
 and the correlation and causation headers (facet 2). Dedup, audit, and
 authorization are answerable from the envelope; occurrence time, when it
 matters, is answerable from the payload instead.
@@ -978,6 +1046,9 @@ for session streams.** Session streams never issue the
 `MinimumRequiredSequence` [retention watermark](../glossary/retention-watermark)
 stays a read-only diagnostic for this store, and this ADR states that
 supersession explicitly rather than leaving the two decisions in tension.
+Both documents are drafts, so the supersession is provisional until both are
+accepted; [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)
+carries the reciprocal note.
 
 Storage is otherwise managed without ever removing a fact:
 
@@ -1200,6 +1271,29 @@ hot path without inheriting its weak lifecycle guarantees.
   projections, aggregate snapshots, harness recovery checkpoint
   admission, and the substrate obligations facet 2 lists as prerequisites.
 
+## Open Questions
+
+This ADR is a consumer's design. It can be accepted for the session store's
+own domain while every request it makes of the shared decider crates stays
+open, because those crates are business-agnostic and domain-level and their
+changes are decided by their own review, never by a consumer's prerequisite
+list.
+
+1. **The three open shared-crate changes** (facet 2): evolve-visible event
+   identity (a core `Decider` trait change), the id-derivation hook (the
+   earlier draft's claimed plug-in point was wrong; the real design does
+   not exist), and duplicate-ack-as-success (global flip vs. opt-in
+   undecided). Each needs its own decision against the shared crates'
+   universality and altitude bar; alternatives that keep the machinery
+   inside a Session-owned boundary have not been ruled out.
+2. **Where the command idempotency key structurally lives** (facet 2):
+   command-struct field vs. execution-layer input, unresolved, with draft
+   [ADR#0026](./0026-command-authorization-principal.md)'s rejection of the
+   analogous struct placement as prior art against a struct field.
+3. **Five upstream drafts** (0026, 0027, 0028, 0029, 0031): every named
+   type from them is proposed, not shipped; any of them changing before
+   acceptance reopens the facet built on it, per the Context rule.
+
 ## Consequences
 
 - A Session gains rewind and audit for free from event-sourcing, plus real
@@ -1243,9 +1337,11 @@ hot path without inheriting its weak lifecycle guarantees.
 - Gets harder: adding an event type now carries a proto plus a typed-decode plus
   a projection-fold obligation, and every command must carry an idempotency key
   its event ids are deterministically derived from (facet 2), which cannot
-  happen until the substrate obligations facet 2 lists (evolve-visible
-  identity, WASM parity, duplicate-ack success) are actually implemented --
-  this store does not go live on wire contract alone.
+  happen until the open shared-crate changes facet 2 lists (evolve-visible
+  identity, id derivation, duplicate-ack semantics) are decided by the
+  decider platform's own review and then implemented -- this store does not
+  go live on wire contract alone, and this ADR's acceptance does not decide
+  those changes.
 - Cascade is eventually consistent: a child spawned concurrently with a parent's
   terminal marker may run a reconciler cycle or two before it is cancelled, and a
   deep collaboration chain cascades in O(depth) reconciler round-trips; callers
@@ -1267,7 +1363,8 @@ hot path without inheriting its weak lifecycle guarantees.
   is honestly a visibility tombstone, `RedactionApplied` and `ArtifactErased`
   give the store a read-time masking and artifact-destruction story, and
   [ADR#0029](./0029-decider-retention-and-truncation-watermark.md)'s purge is
-  explicitly superseded for session streams (facet 7). Erasure-grade deletion
+  superseded for session streams (facet 7), provisionally until both ADRs
+  are accepted. Erasure-grade deletion
   (crypto-shredding) is still a named gap, deferred to a follow-up ADR, not
   silently unresolved.
 - This decision depends on five still-draft ADRs (0026, 0027, 0028, 0029,

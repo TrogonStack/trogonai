@@ -2,6 +2,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use futures::executor::block_on;
@@ -172,6 +173,7 @@ struct FakeRuntime {
     fail_append: bool,
     loaded_stream_ids: Arc<Mutex<Vec<String>>>,
     reads_from: Arc<Mutex<Vec<ReadFrom>>>,
+    bounded_reads: Arc<Mutex<Vec<u64>>>,
     stream_write_preconditions: Arc<Mutex<Vec<StreamWritePrecondition>>>,
     appended_events: Arc<Mutex<Vec<Event>>>,
     written_snapshots: Arc<Mutex<Vec<Snapshot<TestState>>>>,
@@ -190,6 +192,7 @@ impl Default for FakeRuntime {
             fail_append: false,
             loaded_stream_ids: Arc::new(Mutex::new(Vec::new())),
             reads_from: Arc::new(Mutex::new(Vec::new())),
+            bounded_reads: Arc::new(Mutex::new(Vec::new())),
             stream_write_preconditions: Arc::new(Mutex::new(Vec::new())),
             appended_events: Arc::new(Mutex::new(Vec::new())),
             written_snapshots: Arc::new(Mutex::new(Vec::new())),
@@ -435,6 +438,17 @@ impl StreamRead<str> for FakeRuntime {
                 .collect(),
         })
     }
+
+    async fn read_stream_bounded(
+        &self,
+        request: ReadStreamRequest<'_, str>,
+        max_events: u64,
+    ) -> Result<ReadStreamResponse, Self::Error> {
+        self.bounded_reads.lock().unwrap().push(max_events);
+        let mut response = self.read_stream(request).await?;
+        response.events.truncate(max_events as usize);
+        Ok(response)
+    }
 }
 
 impl StreamAppend<str> for FakeRuntime {
@@ -625,6 +639,32 @@ async fn drainable_snapshot_task_scheduler_shares_tracking_across_clones() {
     });
 
     scheduler.drain().await;
+
+    assert!(executed.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn drainable_snapshot_task_scheduler_drain_resolves_after_panicking_task() {
+    let scheduler = DrainableSnapshotTaskScheduler::new();
+
+    scheduler.schedule(async {
+        panic!("snapshot write task panicked");
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), scheduler.drain())
+        .await
+        .expect("drain must resolve after a scheduled task panics instead of completing normally");
+
+    let executed = Arc::new(AtomicBool::new(false));
+    let task_executed = Arc::clone(&executed);
+    scheduler.schedule(async move {
+        tokio::task::yield_now().await;
+        task_executed.store(true, Ordering::SeqCst);
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), scheduler.drain())
+        .await
+        .expect("drain must resolve for a later schedule/drain cycle after an earlier task panicked");
 
     assert!(executed.load(Ordering::SeqCst));
 }
@@ -1046,7 +1086,7 @@ fn discard_and_replay_recovers_from_snapshot_ahead_of_stream() {
 }
 
 #[test]
-fn discard_and_replay_recovery_is_exempt_from_the_replay_limit() {
+fn discard_and_replay_recovery_rejects_when_the_full_replay_exceeds_the_limit() {
     let runtime = FakeRuntime {
         snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
         current_position: Some(position(2)),
@@ -1071,6 +1111,45 @@ fn discard_and_replay_recovery_is_exempt_from_the_replay_limit() {
     let command = TestCommand::new("alpha", TestAction::Remove);
     let limit = ReplayLimit::try_new(1).unwrap();
 
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .with_snapshot(test_snapshots(&runtime, NoSnapshot))
+            .with_snapshot_failure_policy(DiscardAndReplaySnapshotFailure)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+            limit: error_limit,
+            replayed_event_count: 2,
+        }) if error_limit == limit
+    ));
+    assert!(
+        runtime.written_snapshots.lock().unwrap().is_empty(),
+        "a rejected recovery must not overwrite the discarded snapshot"
+    );
+}
+
+#[test]
+fn discard_and_replay_recovery_succeeds_when_the_full_replay_is_within_the_limit() {
+    let runtime = FakeRuntime {
+        snapshot: Some(Snapshot::new(position(3), TestState::Present { enabled: true })),
+        current_position: Some(position(1)),
+        stream_events: vec![stream_event(
+            1,
+            TestEvent::Registered {
+                id: "alpha".to_string(),
+            },
+        )],
+        stream_position: position(2),
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Disable);
+    let limit = ReplayLimit::try_new(1).unwrap();
+
     let result = block_on(
         CommandExecution::new(&runtime, &command)
             .with_replay_limit(limit)
@@ -1080,10 +1159,10 @@ fn discard_and_replay_recovery_is_exempt_from_the_replay_limit() {
     )
     .unwrap();
 
-    assert_eq!(result.state, TestState::Missing);
+    assert_eq!(result.state, TestState::Present { enabled: false });
     assert_eq!(
         runtime.written_snapshots.lock().unwrap().as_slice(),
-        &[Snapshot::new(position(3), TestState::Missing)],
+        &[Snapshot::new(position(2), TestState::Present { enabled: false })],
         "the recovery snapshot write must land so the bad snapshot cannot wedge later commands"
     );
 }
@@ -1994,6 +2073,72 @@ fn replay_limit_exceeded_fails_before_folding_with_snapshot() {
     ));
     assert!(runtime.stream_write_preconditions.lock().unwrap().is_empty());
     assert!(runtime.appended_events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn replay_limit_exceeded_reads_at_most_limit_plus_one_events() {
+    let runtime = FakeRuntime {
+        current_position: Some(position(5)),
+        stream_events: vec![
+            stream_event(
+                1,
+                TestEvent::Registered {
+                    id: "alpha".to_string(),
+                },
+            ),
+            stream_event(
+                2,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ),
+            stream_event(
+                3,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            ),
+            stream_event(
+                4,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: false,
+                },
+            ),
+            stream_event(
+                5,
+                TestEvent::StateChanged {
+                    id: "alpha".to_string(),
+                    enabled: true,
+                },
+            ),
+        ],
+        ..Default::default()
+    };
+    let command = TestCommand::new("alpha", TestAction::Register);
+    let limit = ReplayLimit::try_new(2).unwrap();
+
+    let error = block_on(
+        CommandExecution::new(&runtime, &command)
+            .with_replay_limit(limit)
+            .execute(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+            limit: error_limit,
+            replayed_event_count: 3,
+        }) if error_limit == limit
+    ));
+    assert_eq!(
+        runtime.bounded_reads.lock().unwrap().as_slice(),
+        &[3],
+        "the read must be capped at limit + 1 events instead of fetching the whole five-event stream"
+    );
 }
 
 #[test]

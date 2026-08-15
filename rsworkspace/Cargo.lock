@@ -6894,6 +6894,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-act-chain-decider"
+version = "0.1.0"
+dependencies = [
+ "buffa",
+ "thiserror 2.0.19",
+ "trogon-decider",
+ "trogon-decider-guest-sdk",
+ "wit-bindgen 0.60.0",
+]
+
+[[package]]
 name = "trogon-channel"
 version = "0.1.0"
 dependencies = [
@@ -6976,11 +6987,14 @@ dependencies = [
  "chrono",
  "futures",
  "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "trogon-decider",
  "trogon-semconv",
  "trogon-std",

@@ -7,6 +7,7 @@
 //! rather than a second hand-written parser.
 
 use anyhow::{Context, Result, bail};
+use buffa::type_registry::TypeRegistry;
 use serde::Deserialize;
 use trogon_decider_sim::{ExpectedOutcome, ScenarioIr, ScenarioStep};
 
@@ -16,13 +17,15 @@ use crate::codec;
 /// author declares the decider under test can produce.
 #[derive(Debug, Deserialize)]
 pub struct Suite {
-    /// The suite's human-readable name.
+    /// The suite's human-readable name. Doubles as the decider's registered module identity: the
+    /// same name its compiled component reports from `descriptor()`, used to resolve which type
+    /// registry and which declared event set this suite's scenarios decode against.
     pub suite: String,
-    /// Type URLs (bare or `type.googleapis.com/`-prefixed) of every event the decider under
-    /// test can produce, asserted by the suite author. Compared against every event actually
-    /// referenced across all scenarios' `given` and `then.events` entries for the strict
-    /// coverage check, since neither the WIT descriptor nor the proto type registry can
-    /// distinguish "events this decider emits" from unrelated message and helper types.
+    /// Type URLs (bare or `type.googleapis.com/`-prefixed) of every event the decider under test
+    /// can produce, as asserted by the suite author. Informational only: the strict coverage
+    /// check now grounds its declared event set in the decider's own registration (see
+    /// [`crate::codec::declared_events`]) instead of trusting this field, since a self-declared
+    /// list can drift from what the component actually emits without anything catching it.
     #[serde(default)]
     pub events: Vec<String>,
     /// The suite's scenarios, run independently against a fresh component instance.
@@ -35,9 +38,11 @@ impl Suite {
         serde_yaml::from_str(yaml).context("parse suite YAML")
     }
 
-    /// Converts every scenario in this suite into [`ScenarioIr`], in declared order.
+    /// Converts every scenario in this suite into [`ScenarioIr`], in declared order, decoding
+    /// wire payloads against the type registry registered for this suite's `suite` module name.
     pub fn to_ir(&self) -> Result<Vec<ScenarioIr>> {
-        self.scenarios.iter().map(Scenario::to_ir).collect()
+        let registry = codec::type_registry(&self.suite)?;
+        self.scenarios.iter().map(|scenario| scenario.to_ir(registry)).collect()
     }
 }
 
@@ -60,6 +65,46 @@ pub struct Scenario {
     /// single `when`/`then` shape.
     #[serde(default)]
     pub steps: Option<Vec<Step>>,
+    /// Fault-injection overrides this scenario runs the wasm component under, used together with
+    /// `then.trap: true` to exercise a resource trap (fuel exhaustion, an expired epoch deadline,
+    /// or a memory ceiling) end to end instead of the component's default production budget.
+    #[serde(default)]
+    pub budget: Option<BudgetOverrides>,
+}
+
+/// YAML-authored overrides to the wasm engine's fuel/epoch/memory budget for one scenario.
+///
+/// A `None` field leaves the component's default production budget for that resource untouched,
+/// so a scenario only needs to name the budget it means to starve.
+#[derive(Debug, Deserialize)]
+pub struct BudgetOverrides {
+    /// Overrides the fuel budget applied before each guest export call.
+    #[serde(default)]
+    pub fuel_per_call: Option<u64>,
+    /// Overrides the epoch ticks allowed for a single guest export call before it is interrupted.
+    #[serde(default)]
+    pub epoch_ticks_per_call: Option<u64>,
+    /// Overrides the memory ceiling applied to each guest store, in bytes.
+    #[serde(default)]
+    pub max_memory_bytes: Option<usize>,
+}
+
+impl BudgetOverrides {
+    /// Whether this block replaces at least one production budget. An empty `budget: {}` parses
+    /// but leaves every resource at its production value, so it starves nothing.
+    fn starves_a_resource(&self) -> bool {
+        self.fuel_per_call.is_some() || self.epoch_ticks_per_call.is_some() || self.max_memory_bytes.is_some()
+    }
+}
+
+impl From<&BudgetOverrides> for trogon_decider_sim::BudgetOverrides {
+    fn from(value: &BudgetOverrides) -> Self {
+        Self {
+            fuel_per_call: value.fuel_per_call,
+            epoch_ticks_per_call: value.epoch_ticks_per_call,
+            max_memory_bytes: value.max_memory_bytes,
+        }
+    }
 }
 
 /// One `when`/`then` pair in a scenario's `steps` list.
@@ -94,25 +139,43 @@ impl Scenario {
     }
 
     /// Converts this scenario into decider-agnostic [`ScenarioIr`], decoding every `given`,
-    /// `when`, and `then.events` value into wire form via [`crate::codec`].
-    pub fn to_ir(&self) -> Result<ScenarioIr> {
+    /// `when`, and `then.events` value into wire form against `registry`.
+    pub fn to_ir(&self, registry: &TypeRegistry) -> Result<ScenarioIr> {
         let mut ir = ScenarioIr::new(self.name.clone());
+        ir.budget = self.budget.as_ref().map(trogon_decider_sim::BudgetOverrides::from);
         for value in &self.given {
-            ir.given.push(codec::json_any_to_envelope(value)?);
+            ir.given.push(codec::json_any_to_envelope(registry, value)?);
         }
         for (when, then) in self.steps()? {
-            let when = codec::json_any_to_command(when)?;
+            let when = codec::json_any_to_command(registry, when)?;
             let expect = match then {
                 Then::Events { events } => {
                     let events = events
                         .iter()
-                        .map(codec::json_any_to_envelope)
+                        .map(|value| codec::json_any_to_envelope(registry, value))
                         .collect::<Result<Vec<_>>>()?;
                     ExpectedOutcome::Events(events)
                 }
                 Then::Rejected { rejected: true } => ExpectedOutcome::Rejected,
                 Then::Rejected { rejected: false } => ExpectedOutcome::Accepted,
                 Then::Error { error } => ExpectedOutcome::Error(error.expected()?),
+                Then::Trap { trap: true } => {
+                    if !self.budget.as_ref().is_some_and(BudgetOverrides::starves_a_resource) {
+                        bail!(
+                            "scenario '{}': `then.trap: true` requires a scenario-level `budget` override that \
+                             sets at least one of `fuel_per_call`, `epoch_ticks_per_call`, or `max_memory_bytes` \
+                             to starve the resource under test; under the default production budget the guest \
+                             will not trap and the step reports a plain expectation mismatch instead",
+                            self.name
+                        );
+                    }
+                    ExpectedOutcome::Trap
+                }
+                Then::Trap { trap: false } => bail!(
+                    "scenario '{}': `then.trap: false` is not a meaningful expectation; use \
+                     `then.rejected`, `then.events`, or `then.error` instead",
+                    self.name
+                ),
             };
             ir.steps.push(ScenarioStep { when, expect });
         }
@@ -139,6 +202,16 @@ pub enum Then {
     Rejected {
         /// Whether the command must be rejected.
         rejected: bool,
+    },
+    /// The guest call must trap: a Wasmtime-level fault such as fuel exhaustion, an expired
+    /// epoch deadline, or a memory ceiling, rather than a decider-level outcome. Always paired
+    /// with a scenario-level `budget` override that starves the resource under test.
+    Trap {
+        /// Whether the guest call must trap. Must be `true`; `false` is rejected in
+        /// [`Scenario::to_ir`] since it is not a meaningful expectation on its own.
+        /// [`Scenario::to_ir`] also rejects `true` unless the paired `budget` sets at least one
+        /// resource, since nothing starves the guest under the default production budget.
+        trap: bool,
     },
 }
 

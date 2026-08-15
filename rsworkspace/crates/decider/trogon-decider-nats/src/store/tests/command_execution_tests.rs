@@ -7,7 +7,8 @@ use async_nats::jetstream::{self, kv};
 use serde::{Deserialize, Serialize};
 use trogon_decider_runtime::{
     CommandError, CommandExecution, Decider, Decision, EventData, EventDecode, EventDecodeOutcome, EventEncode,
-    EventIdentity, EventType, ReadFrom, ReadStreamRequest, StreamRead, StreamWritePrecondition,
+    EventIdentity, EventType, ReadFrom, ReadStreamRequest, ReplayLimit, ReplayLimitExceeded, StreamRead,
+    StreamWritePrecondition,
 };
 use trogon_nats::test_support::JetStreamTestServer;
 
@@ -114,6 +115,87 @@ impl Decider for CreateCommand {
             })),
             CreateState::Created => Err(AlreadyExistsError),
         }
+    }
+}
+
+const APPENDED_EVENT_TYPE: &str = "test.command-execution.appended.v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct AppendedEvent {
+    stream_id: String,
+}
+
+impl EventIdentity for AppendedEvent {}
+
+impl EventType for AppendedEvent {
+    type Error = Infallible;
+
+    fn event_type(&self) -> Result<&'static str, Self::Error> {
+        Ok(APPENDED_EVENT_TYPE)
+    }
+}
+
+impl EventEncode for AppendedEvent {
+    type Error = serde_json::Error;
+
+    fn encode(&self) -> Result<Vec<u8>, Self::Error> {
+        serde_json::to_vec(self)
+    }
+}
+
+impl EventDecode for AppendedEvent {
+    type Error = serde_json::Error;
+
+    fn decode(event: EventData<'_>) -> Result<EventDecodeOutcome<Self>, Self::Error> {
+        if event.event_type != APPENDED_EVENT_TYPE {
+            return Ok(EventDecodeOutcome::Skipped);
+        }
+
+        serde_json::from_slice(event.payload).map(EventDecodeOutcome::Decoded)
+    }
+}
+
+/// A command that unconditionally appends one event, regardless of the
+/// stream's current state. Unlike [`CreateCommand`], repeated calls against
+/// the same stream never fail at the decide step, which is what lets these
+/// tests drive a stream through several appends to exercise
+/// [`StreamWritePrecondition::StreamExists`] and [`StreamWritePrecondition::At`].
+#[derive(Debug, Clone)]
+struct AppendCommand {
+    stream_id: String,
+}
+
+impl AppendCommand {
+    fn new(stream_id: &str) -> Self {
+        Self {
+            stream_id: stream_id.to_string(),
+        }
+    }
+}
+
+impl Decider for AppendCommand {
+    type StreamId = str;
+    type State = u32;
+    type Event = AppendedEvent;
+    type DecideError = Infallible;
+    type EvolveError = Infallible;
+
+    fn stream_id(&self) -> &Self::StreamId {
+        &self.stream_id
+    }
+
+    fn initial_state() -> Self::State {
+        0
+    }
+
+    fn evolve(state: Self::State, _event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
+        Ok(state + 1)
+    }
+
+    fn decide(_state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
+        Ok(Decision::event(AppendedEvent {
+            stream_id: command.stream_id.clone(),
+        }))
     }
 }
 
@@ -281,4 +363,145 @@ async fn concurrent_builder_no_stream_creates_have_one_winner_and_one_append_con
 
     assert_eq!(replay.current_position, Some(success.stream_position));
     assert_eq!(replay.events.len(), 1);
+}
+
+#[tokio::test]
+async fn builder_stream_exists_rejects_a_missing_stream() {
+    let harness = Harness::start().await;
+    let command = AppendCommand::new("stream-exists-missing");
+
+    let error = CommandExecution::new(&harness.store, &command)
+        .with_write_precondition(StreamWritePrecondition::StreamExists)
+        .execute()
+        .await
+        .expect_err("StreamExists should reject a stream with no prior events");
+
+    assert!(
+        matches!(
+            &error,
+            CommandError::Append(JetStreamStoreError::OptimisticConcurrencyConflict(
+                OptimisticConcurrencyConflictError::NoPosition {
+                    stream_id,
+                    expected: StreamWritePrecondition::StreamExists,
+                }
+            )) if stream_id == "stream-exists-missing"
+        ),
+        "expected a StreamExists OCC conflict, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn builder_stream_exists_accepts_an_already_created_stream() {
+    let harness = Harness::start().await;
+    let stream_id = "stream-exists-present";
+    let first = AppendCommand::new(stream_id);
+    CommandExecution::new(&harness.store, &first)
+        .with_write_precondition(StreamWritePrecondition::NoStream)
+        .execute()
+        .await
+        .expect("first append should succeed");
+
+    let second = AppendCommand::new(stream_id);
+    let result = CommandExecution::new(&harness.store, &second)
+        .with_write_precondition(StreamWritePrecondition::StreamExists)
+        .execute()
+        .await
+        .expect("StreamExists should accept a stream with a prior event");
+
+    assert_eq!(result.state, 2);
+}
+
+#[tokio::test]
+async fn builder_at_precondition_accepts_the_expected_position() {
+    let harness = Harness::start().await;
+    let stream_id = "at-precondition-expected";
+    let first = AppendCommand::new(stream_id);
+    let first_result = CommandExecution::new(&harness.store, &first)
+        .with_write_precondition(StreamWritePrecondition::NoStream)
+        .execute()
+        .await
+        .expect("first append should succeed");
+
+    let second = AppendCommand::new(stream_id);
+    let result = CommandExecution::new(&harness.store, &second)
+        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .execute()
+        .await
+        .expect("At precondition matching the current position should succeed");
+
+    assert_eq!(result.state, 2);
+}
+
+#[tokio::test]
+async fn builder_at_precondition_rejects_a_stale_position() {
+    let harness = Harness::start().await;
+    let stream_id = "at-precondition-stale";
+    let first = AppendCommand::new(stream_id);
+    let first_result = CommandExecution::new(&harness.store, &first)
+        .with_write_precondition(StreamWritePrecondition::NoStream)
+        .execute()
+        .await
+        .expect("first append should succeed");
+
+    let second = AppendCommand::new(stream_id);
+    CommandExecution::new(&harness.store, &second)
+        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .execute()
+        .await
+        .expect("second append should succeed");
+
+    let third = AppendCommand::new(stream_id);
+    let error = CommandExecution::new(&harness.store, &third)
+        .with_write_precondition(StreamWritePrecondition::At(first_result.stream_position))
+        .execute()
+        .await
+        .expect_err("At precondition against a stale position should conflict");
+
+    assert!(
+        matches!(
+            &error,
+            CommandError::Append(JetStreamStoreError::OptimisticConcurrencyConflict(
+                OptimisticConcurrencyConflictError::WithPosition {
+                    stream_id,
+                    expected: StreamWritePrecondition::At(position),
+                    ..
+                }
+            )) if stream_id == "at-precondition-stale" && *position == first_result.stream_position
+        ),
+        "expected an At OCC conflict, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn append_with_replay_limit_caps_the_replay_read_below_the_stream_length() {
+    let harness = Harness::start().await;
+    let stream_id = "replay-limit-bounded";
+
+    for _ in 0..5 {
+        CommandExecution::new(&harness.store, &AppendCommand::new(stream_id))
+            .with_write_precondition(StreamWritePrecondition::Any)
+            .execute()
+            .await
+            .expect("seed append should succeed");
+    }
+
+    let limit = ReplayLimit::try_new(2).expect("non-zero replay limit");
+    let command = AppendCommand::new(stream_id);
+    let error = CommandExecution::new(&harness.store, &command)
+        .with_write_precondition(StreamWritePrecondition::Any)
+        .with_replay_limit(limit)
+        .execute()
+        .await
+        .expect_err("a five-event stream should exceed a replay limit of two");
+
+    assert!(
+        matches!(
+            &error,
+            CommandError::ReplayLimitExceeded(ReplayLimitExceeded {
+                limit: error_limit,
+                replayed_event_count: 3,
+            }) if *error_limit == limit
+        ),
+        "expected the read to stop at limit + 1 events instead of the full five-event stream, got {error:?}"
+    );
 }
