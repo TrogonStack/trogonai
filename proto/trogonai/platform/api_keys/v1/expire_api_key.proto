@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// ExpireApiKey records that an expired key was used.
+//
+// Expiry is a property of the record, so a key is already unusable the moment
+// its expires_at passes, with or without this command. What this adds is the
+// fact, emitted lazily on the first denied use rather than by a sweeper
+// (ADR#0061 section 7). A sweeper would emit facts about keys nobody was using,
+// which is noise proportional to the number of keys ever issued instead of to
+// the number anybody still points at.
+//
+// Issued by the admission path, which makes it the one command a verification
+// can produce. It runs at most once per key: the state machine refuses a second
+// one, so a hot loop against an expired key writes a single event and then
+// denies from state.
+message ExpireApiKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

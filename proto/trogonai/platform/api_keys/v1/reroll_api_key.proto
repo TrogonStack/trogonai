@@ -1,0 +1,31 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/duration.proto";
+
+// RerollApiKey is planned rotation. Revocation is the compromise path and has
+// no window at all (ADR#0061 section 1).
+//
+// Keeping the two apart is what makes a non-zero default grace defensible.
+// Nobody has to choose between a rotation that will not break their fleet and
+// a containment action that takes effect now, so neither gets misused as the
+// other.
+//
+// Reroll mints a successor key with its own id, inheriting identity, roles,
+// permissions, resource scopes, and limits. Two streams are touched: this one
+// records ApiKeyRerolled naming the successor, and the successor's own stream
+// opens with ApiKeyCreated naming this key as its predecessor. The successor
+// must be created first, so a crash between the two leaves an orphaned new key
+// rather than a predecessor pointing at a key that does not exist.
+//
+// Bearer-only. Signed keys rotate by public-key swap (ADR#0061 section 4), and
+// routing a signed key here is a decide-time error rather than a second
+// rotation mechanism nobody maintains.
+message RerollApiKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string successor_api_key_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Absent means the keyspace default. Zero is legal and means the old key
+  // stops verifying the moment the new one is issued.
+  google.protobuf.Duration grace = 3;
+}

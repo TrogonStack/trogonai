@@ -1,0 +1,67 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.admission.v1;
+
+// DenialReason is the internal reason a request was refused.
+//
+// It is never returned to the caller. A denied caller learns that it was
+// denied, and nothing that distinguishes an unknown key from a revoked one,
+// because that distinction is an oracle for probing which keys exist. The
+// reason goes to the audit fact and, in low-cardinality form, to the metric.
+//
+// The split this enum exists to preserve is REPLAYED against everything else.
+// A spent jti is an attack; a malformed signature is usually a client bug; and
+// collapsing them produces an alert nobody can act on. REPLAY_STORE_UNAVAILABLE
+// is separated for the same reason in the other direction: the verifier fails
+// closed, so a store outage produces a burst of denials that must not read as a
+// burst of attacks.
+enum DenialReason {
+  DENIAL_REASON_UNSPECIFIED = 0;
+
+  // Rejected before any lookup: bad shape, or the CRC32C checksum in the key
+  // format did not match (ADR#0058 section 1).
+  DENIAL_REASON_MALFORMED_CREDENTIAL = 1;
+  DENIAL_REASON_UNKNOWN_KEY = 2;
+  DENIAL_REASON_KEY_REVOKED = 3;
+  DENIAL_REASON_KEY_EXPIRED = 4;
+  // The key is mid-reroll and its grace window has closed.
+  DENIAL_REASON_GRACE_WINDOW_ELAPSED = 5;
+  // The {project} in the request path did not match the project derived from
+  // the authenticated caller. The path segment is an authorization statement,
+  // not addressing.
+  DENIAL_REASON_PROJECT_MISMATCH = 6;
+
+  // A bearer key was presented to a keyspace that disallows bearer issuance.
+  DENIAL_REASON_BEARER_NOT_PERMITTED = 7;
+  DENIAL_REASON_VERIFIER_MISMATCH = 8;
+
+  DENIAL_REASON_ALGORITHM_NOT_PERMITTED = 9;
+  DENIAL_REASON_UNKNOWN_PUBLIC_KEY = 10;
+  DENIAL_REASON_SIGNATURE_INVALID = 11;
+  DENIAL_REASON_TOKEN_EXPIRED = 12;
+  // The requested validity window exceeded the protocol ceiling or the
+  // keyspace's tighter one.
+  DENIAL_REASON_TOKEN_LIFETIME_EXCEEDED = 13;
+  DENIAL_REASON_CLOCK_SKEW_EXCEEDED = 14;
+
+  // The jti was already spent. This is the attack signal, and the only reason
+  // that produces the replay audit fact.
+  DENIAL_REASON_REPLAYED = 15;
+  // Fail-closed on an unavailable replay store. Not an attack. Alerting on
+  // replay attempts must exclude this, or an outage reads as a quiet period on
+  // the security signal.
+  DENIAL_REASON_REPLAY_STORE_UNAVAILABLE = 16;
+
+  DENIAL_REASON_SERVER_NONCE_REQUIRED = 17;
+  DENIAL_REASON_SERVER_NONCE_INVALID = 18;
+
+  // Authenticated, but the effective permission set does not cover the
+  // operation.
+  DENIAL_REASON_PERMISSION_DENIED = 19;
+  // Authenticated and permitted, but the resource is outside the key's scope.
+  DENIAL_REASON_RESOURCE_SCOPE_DENIED = 20;
+  // Would have exceeded the delegation ceiling (ADR#0060 section 5).
+  DENIAL_REASON_DELEGATION_CEILING_EXCEEDED = 21;
+
+  DENIAL_REASON_RATE_LIMITED = 22;
+}

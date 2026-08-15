@@ -1,0 +1,121 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.audit.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
+import "trogonai/platform/api_keys/audit/v1/audit_actor.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+
+// AuditResult is whether the recorded attempt succeeded.
+//
+// Carried on every fact, including the ones that can only be one value. A
+// reader filtering for denials should not have to know which fact types can
+// denote a failure in order to write the filter correctly.
+enum AuditResult {
+  AUDIT_RESULT_UNSPECIFIED = 0;
+  AUDIT_RESULT_ALLOWED = 1;
+  AUDIT_RESULT_DENIED = 2;
+}
+
+// ApiKeyAuditFact is one entry in the audit trail.
+//
+// Audit facts are a distinct concept from domain events (ADR#0061 section 8).
+// The aggregate's events describe how the key changed; these describe what
+// somebody did and whether it worked, including the attempts that changed
+// nothing. api_key.denied and api_key.signed_request_replayed exist only here,
+// because a rejected request is not a state transition.
+//
+// Successful verification is absent. It is a metric counted by keyspace and
+// result (ADR#0061 section 6): as an audit fact its volume would equal the
+// platform's authenticated request rate, making audit retention a request-path
+// cost. Attribution survives through event provenance (ADR#0039).
+//
+// Nothing here carries the presented key, the request token, the verifier
+// digest, or the pepper. That is enforced structurally rather than by review:
+// no field of any body below has a type that could hold one, and the secret
+// material types are wrapped so their Debug implementations redact regardless
+// of which exporter serializes them.
+message ApiKeyAuditFact {
+  // The envelope every fact carries.
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  AuditActor actor = 4 [features.field_presence = LEGACY_REQUIRED];
+  AuditResult result = 5;
+  google.protobuf.Timestamp occurred_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Caller address. Recorded on the fact and never as a metric label: it is
+  // attacker-controlled, so labelling a counter with it hands an attacker a
+  // cardinality bomb. The alert fires on a rate and the responder pivots here
+  // for the identifier.
+  string source_address = 7;
+
+  oneof fact {
+    ApiKeyCreated created = 8;
+    ApiKeyRerolled rerolled = 9;
+    ApiKeyRevoked revoked = 10;
+    ApiKeyDenied denied = 11;
+    ApiKeyPublicKeyAdded public_key_added = 12;
+    ApiKeyPublicKeyRevoked public_key_revoked = 13;
+    ApiKeySignedRequestReplayed signed_request_replayed = 14;
+    ApiKeyPolicyChanged policy_changed = 15;
+    ApiKeyExpired expired = 16;
+  }
+}
+
+message ApiKeyCreated {
+  string display_name = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The public display form tg_{env}_{key_id}, which is derived rather than
+  // separately minted (ADR#0058 section 1). Safe to record: it is the half of
+  // the key format that carries no secret.
+  string public_prefix = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ApiKeyAuthorization authorization = 3 [features.field_presence = LEGACY_REQUIRED];
+  string rerolled_from_api_key_id = 4;
+}
+
+message ApiKeyRerolled {
+  string successor_api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp grace_expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ApiKeyRevoked {
+  string reason = 1;
+}
+
+// The denial fact. Carries the key id, which the metric deliberately does not:
+// the metric answers whether the failure rate is abnormal, and this answers
+// which key. A responder pivots from the first to the second, so the alert
+// never has to fire on an identifier to stay actionable.
+message ApiKeyDenied {
+  trogonai.platform.api_keys.admission.v1.DenialReason reason = 1;
+}
+
+message ApiKeyPublicKeyAdded {
+  string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ApiKeyPublicKeyRevoked {
+  string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A distinct fact from ApiKeyDenied, not a denial reason folded into it
+// (ADR#0061 section 5). A spent jti is an attack signal and everything else is
+// usually a client bug; the replay alert reads this type and nothing else, so
+// it cannot be diluted by malformed-signature noise.
+message ApiKeySignedRequestReplayed {
+  // The jti that was already spent. Client-generated and single-use, so it
+  // identifies the replayed request without revealing anything reusable.
+  string jti = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp originally_observed_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Both sides of the change, so a reader can answer what changed without
+// replaying the aggregate.
+message ApiKeyPolicyChanged {
+  trogonai.platform.api_keys.v1.ApiKeyAuthorization previous_authorization = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ApiKeyAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ApiKeyExpired {
+  google.protobuf.Timestamp expires_at = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+// DeleteApiKeyspace retires a keyspace.
+//
+// A keyspace holding active keys must not be deleted (ADR#0059 section 3).
+// That invariant spans two aggregates, so it is not decidable from this
+// aggregate's own state and is deliberately not modelled as a field here: the
+// count would be a copy that drifts. The command handler reads the key
+// projection before deciding, and the projection is the authority.
+//
+// The two keyspaces created with the project cannot be deleted at all, which
+// this aggregate does decide on its own, from the tier recorded at creation.
+message DeleteApiKeyspace {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,59 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.projections.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/role.proto";
+
+// ApiKeyListStatus is what the console shows for a key.
+//
+// ROTATING is a first-class status rather than a decoration on ACTIVE
+// (ADR#0061 section 3). A rotation somebody started and forgot to finish is
+// then a visible product state instead of a second live key that looks normal
+// in the list, which is the failure this status exists to prevent.
+enum ApiKeyListStatus {
+  API_KEY_LIST_STATUS_UNSPECIFIED = 0;
+  API_KEY_LIST_STATUS_ACTIVE = 1;
+  API_KEY_LIST_STATUS_ROTATING = 2;
+  API_KEY_LIST_STATUS_REVOKED = 3;
+  API_KEY_LIST_STATUS_EXPIRED = 4;
+}
+
+// ApiKeySummary is the read model's own storage shape for the key list.
+//
+// It mirrors the aggregate today but is defined here so the read model can
+// evolve independently of the event and state schemas, matching how the
+// scheduler's projections own their shapes.
+//
+// last_used_at is deliberately absent. It is the field every key list
+// eventually grows, and it would put a write on the authenticated request path
+// for exactly the reason ADR#0061 section 6 keeps api_key.verified out of the
+// audit trail. If it is wanted later it should be derived from the verification
+// metric at a coarse granularity, not written per request.
+message ApiKeySummary {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The tg_{env}_{key_id} display form. Derived, carries no secret, and is the
+  // only part of a bearer key that survives creation.
+  string public_prefix = 5 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyListStatus status = 6;
+  repeated trogonai.platform.api_keys.v1.Role roles = 7;
+  // Rendered as a distinct badge, never folded into the role display
+  // (ADR#0060 section 3). A boolean rather than the permission list because the
+  // list view's job is to make a key worth a second look identifiable at a
+  // glance; the detail view carries the permissions themselves.
+  bool has_direct_permissions = 8;
+  // Present only while rotating. This is the expiry the list has to show for a
+  // rotating key to be actionable rather than merely flagged.
+  google.protobuf.Timestamp grace_expires_at = 9;
+  google.protobuf.Timestamp created_at = 10 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 11;
+  // Set on a reroll successor, so the console can present a rotation as one
+  // relationship rather than two unrelated rows.
+  string rerolled_from_api_key_id = 12;
+  // Number of active public keys on a signed key: 1 normally, 2 mid-swap. Zero
+  // for a bearer key.
+  uint32 active_public_key_count = 13;
+}

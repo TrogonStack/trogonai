@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ApiKeyPublicKeyRevoked closes a rotation window.
+//
+// Signatures made with the retired key stop verifying at the next request.
+// There is no grace here and none is wanted: the caller controls when to move
+// traffic by choosing when to send this, so a window the platform imposed on
+// top would only widen the period during which a key the operator believes is
+// retired still works.
+message ApiKeyPublicKeyRevoked {
+  string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp revoked_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}

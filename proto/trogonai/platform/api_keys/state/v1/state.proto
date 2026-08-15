@@ -1,0 +1,96 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.state.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/bearer_verifier.proto";
+import "trogonai/platform/api_keys/v1/public_key.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
+
+// ApiKeyStateSnapshot is the API key decider's State.
+//
+// Rotating is a distinct state rather than a flag on Active because the two
+// answer a verification differently: Active verifies until expiry, Rotating
+// verifies until its grace deadline and then stops. Folding them together would
+// put a nullable deadline on every key and make "is this still valid" a
+// question about which fields happen to be set.
+message ApiKeyStateSnapshot {
+  oneof state {
+    MissingApiKeyState missing = 1;
+    ActiveApiKeyState active = 2;
+    RotatingApiKeyState rotating = 3;
+    RevokedApiKeyState revoked = 4;
+    ExpiredApiKeyState expired = 5;
+  }
+}
+
+message MissingApiKeyState {}
+
+// Identity that never changes for the life of the key. Held once here rather
+// than repeated in every state, so a state transition cannot accidentally
+// rewrite which project a key belongs to.
+message ApiKeyIdentity {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp created_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  string rerolled_from_api_key_id = 6;
+}
+
+// The verification material. A key is one tier or the other for its whole life:
+// there is no command that converts a bearer key into a signed one, because
+// that would silently change what a caller has to hold to act as this identity.
+message ApiKeyCredential {
+  oneof kind {
+    trogonai.platform.api_keys.v1.BearerVerifier bearer = 1;
+    SignedCredential signed = 2;
+  }
+}
+
+message SignedCredential {
+  // One or two entries. Two is the rotation window; the cap is what keeps it a
+  // window rather than a growing set (ADR#0061 section 4). Never zero on a live
+  // key, which is why revoking the last public key is refused.
+  repeated trogonai.platform.api_keys.v1.PublicKey active_public_keys = 1;
+}
+
+message ActiveApiKeyState {
+  ApiKeyIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyCredential credential = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.ApiKeyAuthorization authorization = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keys.v1.RateLimitPolicy rate_limit = 4;
+  // Absent means the key does not expire.
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// A bearer key inside its reroll grace window.
+//
+// It still verifies, and its successor already does too, which is the point:
+// the window exists so a fleet the platform cannot see has time to pick up the
+// new key. Signed keys never reach this state; they rotate by public-key swap
+// and stay Active throughout.
+message RotatingApiKeyState {
+  ActiveApiKeyState active = 1 [features.field_presence = LEGACY_REQUIRED];
+  string successor_api_key_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp grace_expires_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal. The credential is dropped: a revoked key never verifies again, so
+// retaining the digest or the public keys would keep material alive for a
+// record that can no longer use it.
+message RevokedApiKeyState {
+  ApiKeyIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  string reason = 2;
+  google.protobuf.Timestamp revoked_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal, and reached only once the expiry has actually been observed on a
+// request. A key whose expires_at has passed but which nobody has used is still
+// Active here, and denied on the strength of its expires_at.
+message ExpiredApiKeyState {
+  ApiKeyIdentity identity = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}

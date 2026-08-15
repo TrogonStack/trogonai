@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.state.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_tier.proto";
+import "trogonai/platform/api_keyspaces/v1/environment.proto";
+
+// ApiKeyspaceStateSnapshot is the keyspace decider's State.
+//
+// A oneof rather than a status field with nullable extras, so a state cannot
+// carry data that is meaningless for it. There is no policy on a missing
+// keyspace and no way to represent one.
+message ApiKeyspaceStateSnapshot {
+  oneof state {
+    MissingApiKeyspaceState missing = 1;
+    ActiveApiKeyspaceState active = 2;
+    DeletedApiKeyspaceState deleted = 3;
+  }
+}
+
+message MissingApiKeyspaceState {}
+
+message ActiveApiKeyspaceState {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string name = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keyspaces.v1.Environment environment = 4;
+  trogonai.platform.api_keyspaces.v1.ApiKeyspaceTier tier = 5;
+  trogonai.platform.api_keyspaces.v1.ApiKeyspacePolicy policy = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Retained rather than collapsed to Missing: a deleted keyspace must not be
+// recreated at the same id, and only a distinct state can refuse that.
+message DeletedApiKeyspaceState {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}

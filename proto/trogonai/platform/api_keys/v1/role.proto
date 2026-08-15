@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// Role is a platform-defined bundle of permissions. Customers assign roles;
+// they do not author them (ADR#0060 section 2).
+//
+// Customer-defined roles are deferred, not rejected. They need a
+// role-management surface, a delegation story for role authorship itself, and
+// a UI, none of which exist. Keeping the set closed until then means the
+// authorization check has one shape rather than two.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  // Every permission in the project.
+  ROLE_OWNER = 1;
+  // Manage vaults, credentials, integrations, and keys.
+  ROLE_ADMIN = 2;
+  // Rotate and revoke credentials; create runtime sessions.
+  ROLE_OPERATOR = 3;
+  // Metadata reads only.
+  ROLE_READER = 4;
+  // Resolve refs it is authorized for; no management verbs.
+  ROLE_RUNTIME = 5;
+}

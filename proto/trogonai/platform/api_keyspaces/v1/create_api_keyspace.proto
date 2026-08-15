@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_tier.proto";
+import "trogonai/platform/api_keyspaces/v1/environment.proto";
+
+// CreateApiKeyspace opens a project-anchored policy boundary
+// (ADR#0059 section 1).
+//
+// Every project gets a management and a standard keyspace at project creation,
+// neither authored by the user; this command also serves the additional
+// keyspaces a user may create. Automatic creation is what removes the
+// chicken-and-egg on the cloud path: a project always has somewhere to put its
+// first key at the moment it exists.
+message CreateApiKeyspace {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Registry-resolved handle appearing in the resource name
+  // projects/{project}/api-keyspaces/{keyspace}, so it carries bare `name`
+  // per ADR#0040.
+  string name = 3 [features.field_presence = LEGACY_REQUIRED];
+  Environment environment = 4;
+  ApiKeyspaceTier tier = 5;
+  ApiKeyspacePolicy policy = 6 [features.field_presence = LEGACY_REQUIRED];
+}

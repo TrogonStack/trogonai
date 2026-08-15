@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
+
+// PublicKey is a client-generated verification key registered against an API
+// key.
+//
+// The platform never generates the pair and never receives the private half,
+// at any moment, on any path (ADR#0050 section 2). There is no
+// server-generated option and no one-time private key download, so there is no
+// instant at which a private key exists on platform infrastructure to be
+// logged, dumped, or subpoenaed.
+message PublicKey {
+  // SHA-256 over the SPKI DER encoding, base64url, displayed with a "sha256:"
+  // prefix (ADR#0058 section 4). This is the value the self-hosted bootstrap
+  // and the rotation flow match on, which is what makes re-applying the same
+  // deployment configuration a no-op rather than a second registration.
+  string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The key itself, SPKI DER. Authoritative: the JWK rendering (ADR#0038,
+  // RFC 8037) is derived from these bytes for display and for JWKS
+  // publication, never stored alongside them, so the two cannot disagree.
+  bytes spki_der = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keyspaces.v1.SigningAlgorithm algorithm = 3;
+  google.protobuf.Timestamp added_at = 4 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,0 +1,53 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/public_key.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
+
+// CreateApiKey issues a key into a keyspace.
+//
+// The oneof is the load-bearing part. A bearer key carries no client material
+// and a signed key carries no server-generated secret, and neither combination
+// can be expressed: there is no way to ask for a signed key whose private half
+// the platform generates, which is the request ADR#0050 section 2 exists to
+// refuse. A flat message with optional fields would have made that request
+// representable and pushed the refusal into a validation branch somebody could
+// later relax.
+message CreateApiKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Denormalized from the keyspace. Safe because a keyspace never moves between
+  // projects, and required because every audit fact carries a project id
+  // (ADR#0061 section 8) and audit must not depend on a second lookup that can
+  // fail.
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Keys are not registry handles, so they carry id and display_name rather
+  // than a bare name (ADR#0040, ADR#0059 section 1).
+  string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
+
+  oneof credential {
+    BearerKeyRequest bearer = 5;
+    SignedKeyRequest signed = 6;
+  }
+
+  ApiKeyAuthorization authorization = 7 [features.field_presence = LEGACY_REQUIRED];
+  RateLimitPolicy rate_limit = 8;
+  // Absent means the keyspace default applies. A keyspace with no default
+  // yields a key that does not expire.
+  google.protobuf.Timestamp expires_at = 9;
+
+  // The platform generates the secret, records only its peppered digest, and
+  // returns the plaintext exactly once. Empty because the caller supplies
+  // nothing: a caller-chosen secret would be a caller-chosen entropy source.
+  //
+  // Rejected where the keyspace sets bearer_issuance to disallowed.
+  message BearerKeyRequest {}
+
+  // The caller generated the pair and sends only the public half.
+  message SignedKeyRequest {
+    PublicKey initial_public_key = 1 [features.field_presence = LEGACY_REQUIRED];
+  }
+}

@@ -1,0 +1,32 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// ResourceScope narrows where a permission applies. It never grants
+// (ADR#0060 section 4).
+//
+// A request must pass both the permission check and every applicable scope
+// check. Scope is ANDed with permissions, so widening a scope can never add an
+// ability the permission set does not already carry.
+//
+// The oneof exists to close the empty-list ambiguity. A bare repeated field
+// would leave the system deciding at runtime whether an empty list means
+// "everything" or "nothing", which is a security question settled by accident
+// in whichever call site is read first. Here All is explicit, and Only with an
+// empty set is rejected at creation rather than interpreted.
+message ResourceScope {
+  oneof kind {
+    All all = 1;
+    Only only = 2;
+  }
+
+  // Project-wide, still subject to permissions.
+  message All {}
+
+  // Exactly these ids. The set must be non-empty; proto cannot express that,
+  // so it is a decide-time validation error and the Rust value object refuses
+  // to construct one.
+  message Only {
+    repeated string ids = 1;
+  }
+}

@@ -1,0 +1,30 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// BearerVerifier is everything the platform retains about a bearer key
+// (ADR#0058 section 2).
+//
+//   digest = HMAC-SHA-256(
+//     pepper[verifier_key_version],
+//     "tgapikey/v1" || 0x00 || key_id || 0x00 || secret
+//   )
+//
+// The presented secret is not here, is not recoverable from here, and appears
+// in no event, state snapshot, projection, idempotency record, log, metric, or
+// trace. It exists once, in the create response, and never again
+// (ADR#0048).
+//
+// The pepper is likewise absent. It lives in OpenBao KV, is resolved once at
+// process start, and is held only in memory (ADR#0058 section 3). A database
+// dump therefore yields no offline verification oracle, which is the whole
+// reason the digest is keyed rather than a plain SHA-256.
+message BearerVerifier {
+  // 32 bytes of HMAC-SHA-256 output. Compared in constant time.
+  bytes digest = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Which pepper version produced the digest. Verification uses the version on
+  // the record rather than the current one, so rotating the pepper opens a
+  // dual-version window instead of forcing a fleet-wide reroll of every key
+  // whose digest the platform cannot re-derive.
+  uint32 verifier_key_version = 2;
+}

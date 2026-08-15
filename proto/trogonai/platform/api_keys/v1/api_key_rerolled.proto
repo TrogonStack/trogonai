@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ApiKeyRerolled puts this key into its grace window.
+//
+// The key stays verifiable until grace_expires_at, then stops. It is not
+// revoked: a rotation somebody started and forgot to finish shows in the
+// product as `rotating` with an expiry rather than as `active`, so the second
+// live key is visible where operators look instead of only in the data
+// (ADR#0061 section 3).
+message ApiKeyRerolled {
+  string successor_api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Absolute rather than a duration, so the deadline does not shift if the
+  // event is replayed or the snapshot is rebuilt later.
+  google.protobuf.Timestamp grace_expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp rerolled_at = 3 [features.field_presence = LEGACY_REQUIRED];
+}

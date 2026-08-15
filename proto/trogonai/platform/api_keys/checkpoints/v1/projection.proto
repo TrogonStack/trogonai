@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.checkpoints.v1;
+
+// ApiKeyProjectionCheckpoint tracks how far the key list projection has
+// consumed the aggregate streams.
+//
+// The distance between this and the stream head is the projection's staleness,
+// and staleness here has a security consequence the credential projection's
+// does not: a lagging projection shows a revoked key as still active to whoever
+// is reading the console to confirm the revocation took. Verification does not
+// read this projection, so the revocation itself is not delayed, but an
+// operator's confirmation of it is.
+message ApiKeyProjectionCheckpoint {
+  uint64 last_scanned_sequence = 1;
+}
