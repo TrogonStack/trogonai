@@ -10,7 +10,8 @@ use async_nats::jetstream::{self, context, kv};
 use buffa::Message as _;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use opentelemetry::metrics::Histogram;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::{Counter, Histogram};
 use tokio::sync::Mutex;
 use tracing::{error, info};
 use trogon_decider_runtime::{
@@ -28,7 +29,10 @@ use trogonai_proto::gateway::credentials::{
     CredentialEventCase, CredentialEventPayloadError, CredentialStateSnapshotCase, state_v1, v1,
 };
 
-use crate::credential::commands::domain::{CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, SourceKind};
+use crate::credential::commands::domain::{
+    CredentialId, CredentialKind, CredentialOwnerId, CredentialRef, RuntimeDeliveryDenied, RuntimeDeliveryPolicy,
+    RuntimeDeliveryRequest, SourceKind,
+};
 use crate::credential::processor::event_stream::{CredentialEventStreamReadError, read_credential_event_stream};
 use crate::credential::proto::{
     CredentialProtoDecodeError, active_credential_ref, decode_credential_metadata, decode_destroy_failed,
@@ -48,6 +52,10 @@ const RUNTIME_PROJECTION_METER_NAME: &str = "trogon-gateway";
 #[derive(Debug)]
 struct RuntimeProjectionMetrics {
     revocation_latency: Histogram<f64>,
+    cache_hits: Counter<u64>,
+    cache_misses: Counter<u64>,
+    delivery_denials: Counter<u64>,
+    resolve_failures: Counter<u64>,
 }
 
 impl RuntimeProjectionMetrics {
@@ -61,12 +69,61 @@ impl RuntimeProjectionMetrics {
                 )
                 .with_unit("s")
                 .build(),
+            cache_hits: meter
+                .u64_counter("gateway.credential.cache.hits")
+                .with_description("Credential resolutions served from the runtime cache.")
+                .build(),
+            cache_misses: meter
+                .u64_counter("gateway.credential.cache.misses")
+                .with_description("Credential resolutions that had to read the secret store.")
+                .build(),
+            delivery_denials: meter
+                .u64_counter("gateway.credential.delivery.denied")
+                .with_description("Credential resolutions refused by the credential's runtime delivery policy.")
+                .build(),
+            resolve_failures: meter
+                .u64_counter("gateway.credential.resolve.failures")
+                .with_description("Credential resolutions that failed to read material from the secret store.")
+                .build(),
         }
     }
 
     fn record_revocation_latency(&self, revoked_recorded_at: DateTime<Utc>) {
         self.revocation_latency
             .record(revocation_latency_seconds(revoked_recorded_at, Utc::now()), &[]);
+    }
+
+    fn record_cache_hit(&self, key: &RuntimeIntegrationKey) {
+        self.cache_hits.add(1, &resolution_attributes(key));
+    }
+
+    fn record_cache_miss(&self, key: &RuntimeIntegrationKey) {
+        self.cache_misses.add(1, &resolution_attributes(key));
+    }
+
+    /// The denial reason is a label so a spike can be attributed without
+    /// reading logs. The rejected host is not: it is attacker-controlled, and
+    /// an unbounded label set is a cardinality bomb.
+    fn record_delivery_denial(&self, key: &RuntimeIntegrationKey, denied: &RuntimeDeliveryDenied) {
+        let mut attributes = resolution_attributes(key);
+        attributes.push(KeyValue::new("reason", denial_reason(denied)));
+        self.delivery_denials.add(1, &attributes);
+    }
+
+    fn record_resolve_failure(&self, key: &RuntimeIntegrationKey) {
+        self.resolve_failures.add(1, &resolution_attributes(key));
+    }
+}
+
+fn resolution_attributes(key: &RuntimeIntegrationKey) -> Vec<KeyValue> {
+    vec![KeyValue::new("source", key.source().as_str().to_string())]
+}
+
+fn denial_reason(denied: &RuntimeDeliveryDenied) -> &'static str {
+    match denied {
+        RuntimeDeliveryDenied::RuntimeService { .. } => "runtime_service",
+        RuntimeDeliveryDenied::Host { .. } => "host",
+        RuntimeDeliveryDenied::InjectionLocation { .. } => "injection_location",
     }
 }
 
@@ -159,6 +216,9 @@ impl RuntimeIntegrationKey {
     }
 }
 
+/// `owner_id` is the project id: ADR#0046 collapses workspace-shaped fields
+/// into the project, so the delivery policy's `workspace_id` is this field rather
+/// than a second one beside it.
 #[derive(Clone, Debug)]
 pub struct RuntimeIntegrationProjection {
     key: RuntimeIntegrationKey,
@@ -166,6 +226,7 @@ pub struct RuntimeIntegrationProjection {
     status: RuntimeIntegrationStatus,
     version: u64,
     credentials: BTreeMap<CredentialKind, CredentialRef>,
+    delivery_policy: RuntimeDeliveryPolicy,
 }
 
 impl RuntimeIntegrationProjection {
@@ -182,11 +243,17 @@ impl RuntimeIntegrationProjection {
             status,
             version,
             credentials: BTreeMap::new(),
+            delivery_policy: RuntimeDeliveryPolicy::default(),
         }
     }
 
     pub fn with_credential(mut self, kind: CredentialKind, credential: CredentialRef) -> Self {
         self.credentials.insert(kind, credential);
+        self
+    }
+
+    pub fn with_delivery_policy(mut self, delivery_policy: RuntimeDeliveryPolicy) -> Self {
+        self.delivery_policy = delivery_policy;
         self
     }
 
@@ -217,6 +284,7 @@ impl RuntimeIntegrationProjection {
             status: RuntimeIntegrationStatus::Active,
             version,
             credentials: BTreeMap::from([(credential.kind(), credential)]),
+            delivery_policy: RuntimeDeliveryPolicy::default(),
         })
     }
 
@@ -266,6 +334,10 @@ impl RuntimeIntegrationProjection {
         self.version
     }
 
+    pub fn delivery_policy(&self) -> &RuntimeDeliveryPolicy {
+        &self.delivery_policy
+    }
+
     fn credential(&self, kind: CredentialKind) -> Option<&CredentialRef> {
         self.credentials.get(&kind)
     }
@@ -282,6 +354,7 @@ fn active_runtime_projection(
         status: RuntimeIntegrationStatus::Active,
         version,
         credentials: BTreeMap::from([(credential.kind(), credential)]),
+        delivery_policy: RuntimeDeliveryPolicy::default(),
     }))
 }
 
@@ -1271,30 +1344,48 @@ impl RuntimeCredentialCache {
         }
     }
 
+    pub fn policy(&self) -> RuntimeCredentialCachePolicy {
+        self.policy
+    }
+
     async fn put(&self, credential: CredentialRef, material: SecretMaterial) {
         self.put_at(credential, material, Instant::now()).await;
     }
 
     async fn put_at(&self, credential: CredentialRef, material: SecretMaterial, now: Instant) {
-        let expires_at = now + self.expiry_offset(&credential);
+        self.put_at_with_ttl(credential, material, self.policy.ttl, now).await;
+    }
+
+    /// Inserts under a caller-supplied ttl, used to honour a credential's
+    /// `RuntimeDeliveryPolicy` cache override.
+    ///
+    /// The override can only shorten, so the jitter is clamped to the shortened
+    /// window rather than allowed to saturate it away.
+    async fn put_with_ttl(&self, credential: CredentialRef, material: SecretMaterial, ttl: Duration) {
+        self.put_at_with_ttl(credential, material, ttl, Instant::now()).await;
+    }
+
+    async fn put_at_with_ttl(&self, credential: CredentialRef, material: SecretMaterial, ttl: Duration, now: Instant) {
+        let expires_at = now + self.expiry_offset_within(&credential, ttl);
         self.entries
             .lock()
             .await
             .insert(credential, RuntimeCredentialCacheEntry { material, expires_at });
     }
 
-    fn expiry_offset(&self, credential: &CredentialRef) -> Duration {
-        self.policy.ttl.saturating_sub(self.key_jitter(credential))
+    fn expiry_offset_within(&self, credential: &CredentialRef, ttl: Duration) -> Duration {
+        ttl.saturating_sub(self.key_jitter_within(credential, ttl))
     }
 
-    fn key_jitter(&self, credential: &CredentialRef) -> Duration {
-        if self.policy.jitter.is_zero() {
+    fn key_jitter_within(&self, credential: &CredentialRef, ttl: Duration) -> Duration {
+        let jitter = self.policy.jitter.min(ttl);
+        if jitter.is_zero() {
             return Duration::ZERO;
         }
         let mut hasher = DefaultHasher::new();
         credential.to_string().hash(&mut hasher);
         let hash = u128::from(hasher.finish());
-        let jitter_nanos = self.policy.jitter.as_nanos();
+        let jitter_nanos = jitter.as_nanos();
         let offset_nanos = hash % jitter_nanos;
         Duration::from_nanos(u64::try_from(offset_nanos).unwrap_or(u64::MAX))
     }
@@ -1351,6 +1442,22 @@ where
         key: &RuntimeIntegrationKey,
         kind: CredentialKind,
     ) -> Result<SecretMaterial, RuntimeCredentialError> {
+        self.resolve_for(key, kind, &RuntimeDeliveryRequest::new()).await
+    }
+
+    /// Resolves under an explicit delivery request so the projection's policy
+    /// can be enforced.
+    ///
+    /// `resolve` is this with an empty request, which a default (unrestricted)
+    /// policy permits and a configured policy denies. The deny happens before
+    /// the store is touched, so a denied caller cannot warm the cache or
+    /// observe a difference between a present and an absent credential.
+    pub async fn resolve_for(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+        request: &RuntimeDeliveryRequest<'_>,
+    ) -> Result<SecretMaterial, RuntimeCredentialError> {
         let projection = self
             .projections
             .get(key)
@@ -1364,16 +1471,32 @@ where
             });
         }
 
+        projection.delivery_policy().permits(request).map_err(|denied| {
+            runtime_projection_metrics().record_delivery_denial(key, &denied);
+            RuntimeCredentialError::DeliveryDenied {
+                key: key.clone(),
+                kind,
+                denied,
+            }
+        })?;
+
         let credential = projection
             .credential(kind)
             .ok_or_else(|| RuntimeCredentialError::CredentialMissing { key: key.clone(), kind })?;
 
         if let Some(material) = self.cache.get(credential).await {
+            runtime_projection_metrics().record_cache_hit(key);
             return Ok(material);
         }
 
-        let material = self.store.get(credential).await?;
-        self.cache.put(credential.clone(), material.clone()).await;
+        runtime_projection_metrics().record_cache_miss(key);
+        let material = self.store.get(credential).await.inspect_err(|_| {
+            runtime_projection_metrics().record_resolve_failure(key);
+        })?;
+        let ttl = projection
+            .delivery_policy()
+            .effective_cache_ttl(self.cache.policy().ttl());
+        self.cache.put_with_ttl(credential.clone(), material.clone(), ttl).await;
         Ok(material)
     }
 
@@ -1382,7 +1505,17 @@ where
         key: &RuntimeIntegrationKey,
         kind: CredentialKind,
     ) -> Result<SecretString, RuntimeCredentialError> {
-        match self.resolve(key, kind).await? {
+        self.resolve_plaintext_for(key, kind, &RuntimeDeliveryRequest::new())
+            .await
+    }
+
+    pub async fn resolve_plaintext_for(
+        &self,
+        key: &RuntimeIntegrationKey,
+        kind: CredentialKind,
+        request: &RuntimeDeliveryRequest<'_>,
+    ) -> Result<SecretString, RuntimeCredentialError> {
+        match self.resolve_for(key, kind, request).await? {
             SecretMaterial::Plaintext(value) => Ok(value),
             SecretMaterial::Verifier(_) => Err(RuntimeCredentialError::VerifierOnly { key: key.clone(), kind }),
         }
@@ -1408,6 +1541,13 @@ pub enum RuntimeCredentialError {
         key: RuntimeIntegrationKey,
         kind: CredentialKind,
     },
+    #[error("runtime credential delivery denied: {key} {kind}: {denied}")]
+    DeliveryDenied {
+        key: RuntimeIntegrationKey,
+        kind: CredentialKind,
+        #[source]
+        denied: RuntimeDeliveryDenied,
+    },
     #[error(transparent)]
     SecretStore(#[from] SecretStoreError),
 }
@@ -1415,6 +1555,10 @@ pub enum RuntimeCredentialError {
 impl RuntimeCredentialError {
     pub fn is_secret_store_error(&self) -> bool {
         matches!(self, Self::SecretStore(_))
+    }
+
+    pub fn is_delivery_denied(&self) -> bool {
+        matches!(self, Self::DeliveryDenied { .. })
     }
 }
 
@@ -1431,13 +1575,16 @@ impl std::fmt::Display for RuntimeIntegrationKey {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::credential::commands::domain::{CredentialScope, CredentialVersion};
+    use crate::credential::commands::domain::{
+        AllowedHosts, AllowedRuntimeServices, CredentialScope, CredentialVersion, InjectionLocation,
+        InjectionLocations, RuntimeServiceId,
+    };
     use crate::credential::proto::{
         activated_to_proto, destroy_requested_to_proto, destroyed_to_proto, revoked_to_proto, write_requested_to_proto,
     };
     use crate::secret_store::{
         MockOpenBaoSecretStore, SecretDestroyReason, SecretStoreDestroy, SecretStoreMetadata, SecretStorePut,
-        SecretStoreRevoke, SecretStoreRotate,
+        SecretStoreRevoke, SecretStoreRotate, SecretVerifier,
     };
     use chrono::Utc;
     use trogon_decider_nats::{StreamSubject, append_stream};
@@ -2191,6 +2338,118 @@ mod tests {
             .with_credential(CredentialKind::BotToken, credential)
     }
 
+    /// Collects everything the tracing layer writes so a test can assert what
+    /// never reached it.
+    #[derive(Clone, Default)]
+    struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+    impl CapturedLogs {
+        fn contents(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    impl std::io::Write for CapturedLogs {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLogs {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    const LEAK_CANARY: &str = "canary-plaintext-must-never-be-logged";
+
+    #[tokio::test]
+    async fn resolving_and_rotating_never_writes_plaintext_to_the_tracing_layer() {
+        let logs = CapturedLogs::default();
+        let _guard = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(logs.clone())
+            .set_default();
+
+        let store = MockOpenBaoSecretStore::default();
+        let credential = put_bot_token(&store, LEAK_CANARY).await;
+        let projections = InMemoryRuntimeProjectionRepository::default();
+        projections
+            .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()))
+            .await;
+        let resolver = RuntimeCredentialResolver::new(projections.clone(), store.clone());
+
+        let material = resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap();
+        assert_eq!(material.as_plaintext().unwrap().as_str(), LEAK_CANARY);
+
+        let rotated = store
+            .rotate(&credential, SecretString::new(LEAK_CANARY).unwrap())
+            .await
+            .unwrap();
+        projections
+            .upsert(projection(RuntimeIntegrationStatus::Active, rotated.clone()))
+            .await;
+        resolver.cache().invalidate(&credential).await;
+        resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap();
+
+        store.revoke(&rotated).await.unwrap();
+        resolver.cache().invalidate(&rotated).await;
+        let revoked = resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap_err();
+
+        tracing::error!(error = ?revoked, "captured resolve failure");
+        tracing::error!(error = %revoked, "captured resolve failure");
+        tracing::info!(material = ?material, credential = %rotated, "captured resolved material");
+        tracing::info!(projection = ?projections.get(&key()).await, "captured projection");
+
+        let contents = logs.contents();
+        assert!(contents.contains("captured resolve failure"));
+        assert!(contents.contains("captured resolved material"));
+        assert!(
+            !contents.contains(LEAK_CANARY),
+            "plaintext leaked into logs: {contents}"
+        );
+    }
+
+    #[test]
+    fn every_carrier_of_plaintext_redacts_its_debug_rendering() {
+        let material = SecretMaterial::Plaintext(SecretString::new(LEAK_CANARY).unwrap());
+        let verifier = SecretMaterial::Verifier(SecretVerifier::new(LEAK_CANARY).unwrap());
+
+        assert!(!format!("{material:?}").contains(LEAK_CANARY));
+        assert!(!format!("{verifier:?}").contains(LEAK_CANARY));
+    }
+
+    #[tokio::test]
+    async fn a_delivery_denial_message_carries_no_plaintext() {
+        let (resolver, _) = restricted_resolver(
+            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap()),
+        )
+        .await;
+
+        let denied = resolver
+            .resolve_for(
+                &key(),
+                CredentialKind::BotToken,
+                &RuntimeDeliveryRequest::new().to_host("api.evil.net"),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(denied.to_string().contains("api.evil.net"));
+        assert!(!denied.to_string().contains("Bot token"));
+        assert!(!format!("{denied:?}").contains("Bot token"));
+    }
+
     #[tokio::test]
     async fn resolves_active_projection_from_secret_store() {
         let store = MockOpenBaoSecretStore::default();
@@ -2226,6 +2485,263 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    async fn restricted_resolver(
+        policy: RuntimeDeliveryPolicy,
+    ) -> (RuntimeCredentialResolver<MockOpenBaoSecretStore>, CredentialRef) {
+        let store = MockOpenBaoSecretStore::default();
+        let credential = put_bot_token(&store, "Bot token").await;
+        let projections = InMemoryRuntimeProjectionRepository::default();
+        projections
+            .upsert(projection(RuntimeIntegrationStatus::Active, credential.clone()).with_delivery_policy(policy))
+            .await;
+        (RuntimeCredentialResolver::new(projections, store), credential)
+    }
+
+    #[test]
+    fn a_wildcard_host_covers_one_label_and_not_the_apex() {
+        let hosts = AllowedHosts::only(["*.example.com", "trogonai.dev"]).unwrap();
+
+        assert!(hosts.permits(Some("api.example.com")));
+        assert!(hosts.permits(Some("API.Example.COM.")));
+        assert!(!hosts.permits(Some("example.com")));
+        assert!(!hosts.permits(Some("a.b.example.com")));
+        assert!(hosts.permits(Some("trogonai.dev")));
+        assert!(!hosts.permits(Some("api.trogonai.dev")));
+        assert!(!hosts.permits(None));
+    }
+
+    #[tokio::test]
+    async fn unconfigured_delivery_policy_keeps_shipped_source_paths_resolving() {
+        let (resolver, _) = restricted_resolver(RuntimeDeliveryPolicy::default()).await;
+
+        assert_eq!(
+            resolver
+                .resolve_plaintext(&key(), CredentialKind::BotToken)
+                .await
+                .unwrap()
+                .as_str(),
+            "Bot token"
+        );
+    }
+
+    #[tokio::test]
+    async fn host_restriction_denies_an_unlisted_host_and_permits_a_listed_one() {
+        let (resolver, _) = restricted_resolver(
+            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["*.example.com"]).unwrap()),
+        )
+        .await;
+
+        let denied = resolver
+            .resolve_for(
+                &key(),
+                CredentialKind::BotToken,
+                &RuntimeDeliveryRequest::new().to_host("api.evil.net"),
+            )
+            .await
+            .unwrap_err();
+        assert!(denied.is_delivery_denied());
+
+        assert!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().to_host("api.example.com:443"),
+                )
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn host_restriction_denies_the_unqualified_resolve_path() {
+        let (resolver, _) = restricted_resolver(
+            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap()),
+        )
+        .await;
+
+        assert!(matches!(
+            resolver.resolve(&key(), CredentialKind::BotToken).await,
+            Err(RuntimeCredentialError::DeliveryDenied {
+                denied: RuntimeDeliveryDenied::Host { .. },
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn unauthorized_runtime_service_cannot_resolve() {
+        let (resolver, _) = restricted_resolver(
+            RuntimeDeliveryPolicy::default()
+                .with_allowed_runtime_services(AllowedRuntimeServices::only(["trogon-gateway"]).unwrap()),
+        )
+        .await;
+        let intruder = RuntimeServiceId::new("some-other-worker").unwrap();
+        let allowed = RuntimeServiceId::new("trogon-gateway").unwrap();
+
+        assert!(matches!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().by_runtime_service(&intruder),
+                )
+                .await,
+            Err(RuntimeCredentialError::DeliveryDenied {
+                denied: RuntimeDeliveryDenied::RuntimeService { .. },
+                ..
+            })
+        ));
+        assert!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().by_runtime_service(&allowed),
+                )
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn injection_location_restriction_denies_a_query_parameter_placement() {
+        let header = InjectionLocation::header("authorization").unwrap();
+        let query = InjectionLocation::query_parameter("access_token").unwrap();
+        let (resolver, _) = restricted_resolver(
+            RuntimeDeliveryPolicy::default().with_injection_locations(InjectionLocations::new([header.clone()])),
+        )
+        .await;
+
+        assert!(matches!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().at_injection_location(&query),
+                )
+                .await,
+            Err(RuntimeCredentialError::DeliveryDenied {
+                denied: RuntimeDeliveryDenied::InjectionLocation { .. },
+                ..
+            })
+        ));
+        assert!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().at_injection_location(&header),
+                )
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_denied_request_does_not_warm_the_cache() {
+        let (resolver, credential) = restricted_resolver(
+            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap()),
+        )
+        .await;
+
+        let _ = resolver
+            .resolve_for(
+                &key(),
+                CredentialKind::BotToken,
+                &RuntimeDeliveryRequest::new().to_host("api.evil.net"),
+            )
+            .await;
+
+        assert!(resolver.cache().expires_at(&credential).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_denial_does_not_reveal_whether_the_credential_exists() {
+        let policy =
+            RuntimeDeliveryPolicy::default().with_allowed_hosts(AllowedHosts::only(["api.example.com"]).unwrap());
+        let store = MockOpenBaoSecretStore::default();
+        let projections = InMemoryRuntimeProjectionRepository::default();
+        projections
+            .upsert(
+                RuntimeIntegrationProjection::new(
+                    owner_id(),
+                    SourceKind::Discord,
+                    integration_id(),
+                    RuntimeIntegrationStatus::Active,
+                    1,
+                )
+                .with_delivery_policy(policy),
+            )
+            .await;
+        let resolver = RuntimeCredentialResolver::new(projections, store);
+
+        assert!(matches!(
+            resolver
+                .resolve_for(
+                    &key(),
+                    CredentialKind::BotToken,
+                    &RuntimeDeliveryRequest::new().to_host("api.evil.net"),
+                )
+                .await,
+            Err(RuntimeCredentialError::DeliveryDenied { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn cache_ttl_override_shortens_the_cached_window() {
+        let (default_resolver, default_credential) = restricted_resolver(RuntimeDeliveryPolicy::default()).await;
+        let (short_resolver, short_credential) = restricted_resolver(
+            RuntimeDeliveryPolicy::default()
+                .with_cache_ttl_override(Duration::from_secs(5))
+                .unwrap(),
+        )
+        .await;
+
+        default_resolver
+            .resolve(&key(), CredentialKind::BotToken)
+            .await
+            .unwrap();
+        short_resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap();
+
+        let now = Instant::now();
+        let default_remaining = default_resolver
+            .cache()
+            .expires_at(&default_credential)
+            .await
+            .unwrap()
+            .saturating_duration_since(now);
+        let short_remaining = short_resolver
+            .cache()
+            .expires_at(&short_credential)
+            .await
+            .unwrap()
+            .saturating_duration_since(now);
+
+        assert!(short_remaining <= Duration::from_secs(5));
+        assert!(short_remaining < default_remaining);
+    }
+
+    #[tokio::test]
+    async fn cache_ttl_override_may_not_extend_the_cached_window() {
+        let (resolver, credential) = restricted_resolver(
+            RuntimeDeliveryPolicy::default()
+                .with_cache_ttl_override(Duration::from_secs(86_400))
+                .unwrap(),
+        )
+        .await;
+
+        resolver.resolve(&key(), CredentialKind::BotToken).await.unwrap();
+
+        let remaining = resolver
+            .cache()
+            .expires_at(&credential)
+            .await
+            .unwrap()
+            .saturating_duration_since(Instant::now());
+        assert!(remaining <= RuntimeCredentialCachePolicy::default().ttl());
     }
 
     #[tokio::test]

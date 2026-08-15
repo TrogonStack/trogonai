@@ -2269,7 +2269,7 @@ fn response_for_active(
 
 fn credential_ref_response(credential: &CredentialRef, status: CredentialStatus) -> CredentialRefResponse {
     CredentialRefResponse {
-        id: credential.id().as_str().to_string(),
+        id: credential.public_id().into_string(),
         version: credential.version().get(),
         owner_id: credential.owner_id().as_str().to_string(),
         source: credential.source().as_str().to_string(),
@@ -2639,14 +2639,55 @@ mod tests {
         let body = response_json(response).await;
         assert_eq!(body["state"], "active");
         assert_eq!(body["stream_position"], 2);
-        assert_eq!(
-            body["credential_ref"]["id"],
-            "openbao:tenant-1:github/primary:webhook_secret"
-        );
+        assert_eq!(body["credential_ref"]["id"], "tenant-1:github/primary:webhook_secret");
         assert_eq!(body["credential_ref"]["version"], 1);
         assert!(!body.to_string().contains("super-secret"));
         assert_eq!(resolved_plaintext(&registry, secrets).await.unwrap(), "super-secret");
         assert_eq!(events.decoded_events().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn responses_never_name_the_storage_backend() {
+        let events = ManagementTestStreamStore::default();
+        let secrets = MockOpenBaoSecretStore::default();
+        let registry = RuntimeCredentialRegistry::default();
+        let app = app(events, secrets, registry);
+
+        let put_body = response_json(
+            app.clone()
+                .oneshot(request(
+                    Method::PUT,
+                    "/github/primary/webhook-secret",
+                    r#"{"owner_id":"tenant-1","secret":"super-secret"}"#,
+                    Some("admin-token"),
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let revoke_body = response_json(
+            app.oneshot(request(
+                Method::DELETE,
+                "/github/primary/webhook-secret",
+                r#"{"owner_id":"tenant-1","version":1}"#,
+                Some("admin-token"),
+            ))
+            .await
+            .unwrap(),
+        )
+        .await;
+
+        for body in [&put_body, &revoke_body] {
+            assert!(!body.to_string().contains("openbao"), "leaked storage backend: {body}");
+        }
+        assert_eq!(
+            put_body["credential_ref"]["id"],
+            "tenant-1:github/primary:webhook_secret"
+        );
+        assert_eq!(
+            revoke_body["credential_ref"]["id"],
+            "tenant-1:github/primary:webhook_secret"
+        );
     }
 
     #[tokio::test]
@@ -2670,7 +2711,7 @@ mod tests {
         assert_eq!(put_response.status(), StatusCode::OK);
         let put_body = response_json(put_response).await;
         assert_eq!(put_body["state"], "active");
-        assert_eq!(put_body["credential_ref"]["id"], "openbao:tenant-1:discord:bot_token");
+        assert_eq!(put_body["credential_ref"]["id"], "tenant-1:discord:bot_token");
         assert_eq!(put_body["credential_ref"]["source"], "discord");
         assert_eq!(put_body["credential_ref"]["scope_key"], "discord");
         assert_eq!(put_body["credential_ref"]["kind"], "bot_token");
@@ -2759,7 +2800,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:slack/primary:signing_secret"
+            "tenant-1:slack/primary:signing_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "slack");
         assert_eq!(put_body["credential_ref"]["kind"], "signing_secret");
@@ -2857,7 +2898,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:gitlab/primary:signing_token"
+            "tenant-1:gitlab/primary:signing_token"
         );
         assert_eq!(put_body["credential_ref"]["source"], "gitlab");
         assert_eq!(put_body["credential_ref"]["kind"], "signing_token");
@@ -2963,7 +3004,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:incidentio/primary:signing_secret"
+            "tenant-1:incidentio/primary:signing_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "incidentio");
         assert_eq!(put_body["credential_ref"]["kind"], "signing_secret");
@@ -3061,7 +3102,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:linear/primary:webhook_secret"
+            "tenant-1:linear/primary:webhook_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "linear");
         assert_eq!(put_body["credential_ref"]["kind"], "webhook_secret");
@@ -3159,7 +3200,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:microsoft_graph/primary:client_state"
+            "tenant-1:microsoft_graph/primary:client_state"
         );
         assert_eq!(put_body["credential_ref"]["source"], "microsoft_graph");
         assert_eq!(put_body["credential_ref"]["kind"], "client_state");
@@ -3257,7 +3298,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:sentry/primary:client_secret"
+            "tenant-1:sentry/primary:client_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "sentry");
         assert_eq!(put_body["credential_ref"]["kind"], "client_secret");
@@ -3355,7 +3396,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:notion/primary:verification_token"
+            "tenant-1:notion/primary:verification_token"
         );
         assert_eq!(put_body["credential_ref"]["source"], "notion");
         assert_eq!(put_body["credential_ref"]["kind"], "verification_token");
@@ -3453,7 +3494,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:telegram/primary:webhook_secret"
+            "tenant-1:telegram/primary:webhook_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "telegram");
         assert_eq!(put_body["credential_ref"]["kind"], "webhook_secret");
@@ -3551,7 +3592,7 @@ mod tests {
         assert_eq!(put_body["state"], "active");
         assert_eq!(
             put_body["credential_ref"]["id"],
-            "openbao:tenant-1:twitter/primary:consumer_secret"
+            "tenant-1:twitter/primary:consumer_secret"
         );
         assert_eq!(put_body["credential_ref"]["source"], "twitter");
         assert_eq!(put_body["credential_ref"]["kind"], "consumer_secret");

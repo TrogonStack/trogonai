@@ -1,6 +1,8 @@
 use std::fmt;
 
-use super::{CredentialId, CredentialKind, CredentialOwnerId, CredentialScope, CredentialVersion, SourceKind};
+use super::{
+    CredentialId, CredentialKind, CredentialOwnerId, CredentialScope, CredentialVersion, PublicCredentialId, SourceKind,
+};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CredentialRef {
@@ -46,6 +48,10 @@ impl CredentialRef {
 
     pub fn kind(&self) -> CredentialKind {
         self.kind
+    }
+
+    pub fn public_id(&self) -> PublicCredentialId {
+        PublicCredentialId::new(&self.owner_id, &self.scope_key, self.kind)
     }
 
     pub fn next_version(&self) -> Self {
