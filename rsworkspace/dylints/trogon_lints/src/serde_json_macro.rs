@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::is_in_test;
@@ -70,12 +71,13 @@ impl SerdeJsonMacro {
 /// Whether the invocation sits in test code, where `json!` is a fixture literal
 /// rather than a payload type the production code has to keep in sync. Covers
 /// `#[test]` functions and `#[cfg(test)]` items, the test and benchmark module
-/// families (whose file-backed modules are `tests.rs`, `parse_tests.rs`,
-/// `test_support.rs`, ...), and Cargo `tests/`/`benches/` targets.
+/// families (`test_support`, `mocks`, ... whether inline or file-backed), test
+/// file names (`tests.rs`, `parse_tests.rs`), and Cargo `tests/`/`benches/`
+/// targets.
 fn is_test_context<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>, span: Span) -> bool {
     is_in_test(cx.tcx, expr.hir_id)
         || is_inside_test_module(cx, cx.tcx.hir_enclosing_body_owner(expr.hir_id))
-        || is_in_test_or_bench_dir(cx, span)
+        || is_test_or_bench_source(cx, span)
 }
 
 /// Walk the module ancestors of the enclosing body and exempt the invocation
@@ -112,12 +114,11 @@ fn is_test_module_name(name: &str) -> bool {
         || name.ends_with("_harness")
 }
 
-/// Cargo integration-test and benchmark targets sit directly in the crate's
-/// `tests`/`benches` directory, or one subdirectory deep (`tests/foo/main.rs`
-/// and that target's modules). Only those two positions count, so an unrelated
-/// ancestor that happens to be named `tests` (the checkout path, say) does not
-/// exempt the whole crate.
-fn is_in_test_or_bench_dir(cx: &LateContext<'_>, span: Span) -> bool {
+/// Test module files (`tests.rs`, `*_tests.rs`, the names `test_module_naming`
+/// enforces) and files in a Cargo `tests/` or `benches/` target directory.
+/// Mirrors `constant_outside_constants_module`, so a file is test code for the
+/// same reasons in both lints.
+fn is_test_or_bench_source(cx: &LateContext<'_>, span: Span) -> bool {
     let file = cx.tcx.sess.source_map().lookup_char_pos(span.lo()).file;
     let FileName::Real(real) = &file.name else {
         return false;
@@ -126,6 +127,22 @@ fn is_in_test_or_bench_dir(cx: &LateContext<'_>, span: Span) -> bool {
         return false;
     };
 
+    if matches!(
+        path.file_stem().and_then(|stem| stem.to_str()),
+        Some(stem) if stem == "tests" || stem.ends_with("_tests")
+    ) {
+        return true;
+    }
+
+    is_in_test_or_bench_dir(path)
+}
+
+/// Cargo integration-test and benchmark targets sit directly in the crate's
+/// `tests`/`benches` directory, or one subdirectory deep (`tests/foo/main.rs`
+/// and that target's modules). Only those two positions count, so an unrelated
+/// ancestor that happens to be named `tests` (the checkout path, say) does not
+/// exempt the whole crate.
+fn is_in_test_or_bench_dir(path: &Path) -> bool {
     let mut dir = path.parent();
     for _ in 0..2 {
         let Some(current) = dir else {
