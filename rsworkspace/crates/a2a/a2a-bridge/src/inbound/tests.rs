@@ -437,6 +437,31 @@ async fn every_sse_frame_is_a_json_rpc_response_carrying_the_caller_id() {
 }
 
 #[tokio::test]
+async fn a_json_object_that_answers_nothing_leaves_as_an_error_frame() {
+    // Being a JSON object is not being a response. An empty body or a
+    // request-shaped one carries no result and no error, so stamping the caller's
+    // id onto it would put a `data:` line on the wire that answers nothing.
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![
+            Ok(Bytes::from(serde_json::to_vec(&json!({})).unwrap())),
+            Ok(Bytes::from(
+                serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"message/stream","params":{}})).unwrap(),
+            )),
+        ])),
+        json!("corr-1"),
+    ))
+    .await;
+
+    for frame in &frames[1..] {
+        let value: serde_json::Value = serde_json::from_str(frame).unwrap();
+        assert_eq!(value["id"], "corr-1");
+        assert_eq!(value["error"]["code"], INTERNAL_ERROR, "{value}");
+        assert!(value["result"].is_null(), "{value}");
+    }
+}
+
+#[tokio::test]
 async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
     // The events stream retains by limits and a rolling upgrade runs both agent
     // releases at once, so this edge still meets bare events. Stamping an id onto

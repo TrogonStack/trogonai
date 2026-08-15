@@ -13,10 +13,11 @@ stored messages, and its storage bill. This page is how you retire it.
 ## When to use this
 
 Use this procedure once per ACP deployment, after every process has been
-upgraded to a release whose provisioner no longer lists the stream. Confirm
-that with:
+upgraded to a release whose provisioner no longer lists the stream. Check the
+deployed process versions to establish that, then use this to see whether the
+retired stream is still there:
 
-```
+```shell
 nats stream ls
 ```
 
@@ -42,7 +43,7 @@ deleting the stream underneath them drops those messages.
 
 1. Confirm the stream is idle. Its message count should stop growing:
 
-   ```
+   ```shell
    nats stream info <PREFIX>_NOTIFICATIONS
    ```
 
@@ -54,13 +55,13 @@ deleting the stream underneath them drops those messages.
    but doing it first makes a still-attached reader fail visibly here rather
    than silently later:
 
-   ```
+   ```shell
    nats consumer rm <PREFIX>_NOTIFICATIONS <CONSUMER>
    ```
 
 3. Delete the stream:
 
-   ```
+   ```shell
    nats stream rm <PREFIX>_NOTIFICATIONS
    ```
 

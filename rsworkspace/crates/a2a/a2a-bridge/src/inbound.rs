@@ -19,7 +19,7 @@ use axum::{
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream::{self, BoxStream, Stream};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tracing::warn;
 
 use a2a_nats::RequestId;
@@ -485,9 +485,10 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
 /// The id is restamped rather than forwarded, because the hops behind this edge
 /// correlate on their own transport id (`Trogon-Req-Id`, or a minted one when the
 /// caller sent no id at all). Only the caller's own id is meaningful to the
-/// caller. A payload that is not a JSON object leaves as a correlated error
-/// frame: a client parses every `data:` line as a JSON-RPC response, so raw
-/// bytes there are a parse failure rather than the diagnostic they look like.
+/// caller. A payload that is not a JSON-RPC response leaves as a correlated
+/// error frame: a client parses every `data:` line as a JSON-RPC response, so
+/// anything else there is a parse failure rather than the diagnostic it looks
+/// like.
 ///
 /// An event an older agent published carries no envelope of its own, so it is
 /// given one here instead of being restamped: forwarding it as-is would put a
@@ -497,7 +498,7 @@ fn sse_data_line(body: &[u8], caller_id: &Value) -> Event {
         return Event::default().data(response.to_string());
     }
 
-    let Ok(Value::Object(mut envelope)) = serde_json::from_slice::<Value>(body) else {
+    let Some(mut envelope) = serde_json::from_slice::<Value>(body).ok().and_then(response_envelope) else {
         warn!(
             payload = %String::from_utf8_lossy(body),
             "stream payload is not a JSON-RPC envelope"
@@ -506,6 +507,17 @@ fn sse_data_line(body: &[u8], caller_id: &Value) -> Event {
     };
     envelope.insert("id".to_owned(), caller_id.clone());
     Event::default().data(Value::Object(envelope).to_string())
+}
+
+/// A JSON-RPC response carries exactly one of `result` and `error`. An object
+/// holding neither is a request, an empty body, or something else entirely, and
+/// stamping the caller's id onto it would emit a `data:` line that answers
+/// nothing.
+fn response_envelope(body: Value) -> Option<Map<String, Value>> {
+    let Value::Object(envelope) = body else {
+        return None;
+    };
+    (envelope.contains_key("result") != envelope.contains_key("error")).then_some(envelope)
 }
 
 fn sse_error_line(caller_id: &Value, err: &BridgeError) -> Event {
