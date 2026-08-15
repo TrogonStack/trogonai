@@ -5,6 +5,14 @@ on. Three do not, and are recorded below with what is missing rather than
 written against metrics that do not exist. No alerts are deployed: this file
 defines them, and wiring them into a monitoring backend is separate work.
 
+Two of those three, suspicious API-key verification failures and
+signed-request replay attempts, now have a specified source rather than an
+open question: `api_key.denied` and `api_key.signed_request_replayed` in
+[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+section 5. They remain unfirable because the API key platform is unbuilt,
+which is a different problem from not knowing what to fire on. The third,
+orphan cleanup backlog, still has neither.
+
 Every alert below names the instrument it reads, the condition, the severity,
 and the runbook the responder opens. An alert without a runbook link is an
 alert that wakes someone with nowhere to go.
@@ -196,6 +204,18 @@ against a known key) distinguished from failures spread across many keys
 (enumeration), which requires the counter to carry enough shape to tell those
 apart without carrying the key itself.
 
+**Signal source, now specified:** `api_key.denied`, one of the seven required
+first-release audit facts in
+[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+section 5. It lands with build item 6i in CREDENTIAL_PLATFORM_SPEC.md.
+
+The label restriction and the clustering question resolve across two
+surfaces rather than one. The metric carries keyspace and outcome, never a
+key id, and answers whether the failure rate is abnormal. The audit fact
+carries the key id and answers which key, because that is what an audit
+fact is for. The responder pivots from the first to the second, so the alert
+never has to fire on an identifier to stay actionable.
+
 ### Signed-request replay attempts
 
 **Missing:** signed-request verification entirely. Fully bound request
@@ -210,6 +230,20 @@ signatures labelled by rejection reason. Replay specifically (a nonce or
 timestamp already seen) must be distinguishable from a malformed or
 mismatched signature: the first is an attack, the second is usually a client
 bug, and collapsing them makes the alert unactionable.
+
+**Signal source, now specified:** `api_key.signed_request_replayed`, a
+distinct audit fact from `api_key.denied` in
+[ADR#0061](../../../docs/adr/0061-api-key-rotation-grace-and-audit-set.md)
+section 5, which is exactly the separation this alert asks for: a spent
+`jti` produces the replay fact, every other rejection produces the denial
+fact. It lands with build item 6i, and the replay store it reads from is
+specified in
+[ADR#0051](../../../docs/adr/0051-fully-bound-request-signing.md) section 4.
+
+One caveat for whoever wires this. The verifier fails closed when the replay
+store is unavailable, so a store outage produces denials, not replays. Alert
+on the replay fact for attacks and on replay-store availability separately,
+or an outage reads as a quiet period on the security signal.
 
 ---
 
