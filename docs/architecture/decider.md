@@ -101,8 +101,15 @@ reimplements the stepping logic.
 
 `trogon-decider-runtime`'s `CommandExecution<'a, E, C, S, G>`
 (`crates/decider/trogon-decider-runtime/src/execution.rs`) is the runtime boundary that applies one
-command to one stream: read, replay, decide, append. Build one with `CommandExecution::new`
-and configure it with builder methods before calling `execute`:
+command to one stream: read, replay, decide, append. There is no authorization phase in that
+sequence, and no builder input represents who is submitting the command: whoever can construct
+a `CommandExecution` can apply any command the decider accepts. Callers that need caller
+identity enforced must do it before this boundary.
+[ADR#0026](../adr/0026-command-authorization-principal.md) proposes an authorization phase and
+a principal input, but it is a draft and none of it ships today.
+
+Build one with `CommandExecution::new` and configure it with builder methods before calling
+`execute`:
 
 ```rust
 CommandExecution::new(&event_store, &command)
