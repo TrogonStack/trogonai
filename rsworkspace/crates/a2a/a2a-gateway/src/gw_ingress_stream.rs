@@ -580,8 +580,9 @@ fn parse_last_event_id_as_u64(value: serde_json::Value) -> Option<u64> {
 }
 
 /// Correlation id for a streaming ingress envelope. Falls back to
-/// [`a2a_nats::jsonrpc::correlation_key_from_body`] so a payload-derived id
-/// keeps its JSON type and a `null` or absent id spawns no pump at all.
+/// [`a2a_nats::jsonrpc::correlation_key_from_body`], which yields the same text
+/// the agent stamps its task events with, so the pump's filter can match; a
+/// `null` or absent id spawns no pump at all.
 pub fn req_id_from_headers_or_payload(headers: &async_nats::HeaderMap, payload: &[u8]) -> Option<ReqId> {
     if let Some(value) = headers.get(a2a_nats::constants::REQ_ID_HEADER) {
         return Some(ReqId::from_header(value.as_str()));

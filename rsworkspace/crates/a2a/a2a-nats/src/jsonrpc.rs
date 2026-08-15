@@ -31,15 +31,24 @@ pub fn extract_request_id_from_body(raw: &[u8]) -> Option<ResponseId> {
     }
 }
 
-/// Canonical correlation key for the id in a request body: the id's JSON
-/// literal, the same form the `Jsonrpc-Id` header carries.
+/// Correlation key for the id in a request body, in the one form the rest of
+/// the transport already agrees on: the id's text, unquoted.
 ///
-/// The literal keeps the id's type in the key, so a numeric `7` and a string
-/// `"7"` cannot collapse onto one stream pump or one audit row. A missing id
-/// and a `null` id both yield `None`: neither can correlate anything, and a
-/// synthesized token would alias unrelated envelopes together.
+/// This is deliberately *not* the `Jsonrpc-Id` literal. `Trogon-Req-Id` is what
+/// a stream pump filters on and what an audit row joins against, and the two
+/// places that mint it (the bridge's caller-id derivation and the agent's event
+/// stamp) both write a string id as its bare text. A key that quoted the id
+/// would match neither, so every event would look like another request's and
+/// every audit row would join nothing.
+///
+/// A missing id and a `null` id both yield `None`: neither can correlate
+/// anything, and a synthesized token would alias unrelated envelopes together.
 pub fn correlation_key_from_body(raw: &[u8]) -> Option<String> {
-    jsonrpc_nats::encode_response_id_literal(&extract_request_id_from_body(raw)?)
+    match extract_request_id_from_body(raw)? {
+        ResponseId::Null => None,
+        ResponseId::Number(n) => Some(n.to_string()),
+        ResponseId::String(s) => Some(s),
+    }
 }
 
 #[cfg(test)]

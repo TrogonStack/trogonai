@@ -140,7 +140,8 @@ pub fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
 
 /// Audit-side correlation id derived from the JSON-RPC request id, sharing
 /// [`a2a_nats::jsonrpc::correlation_key_from_body`] with the streaming pump so
-/// an audit row and the stream it describes join on the same key.
+/// an audit row and the stream it describes join on the same key, and so both
+/// agree with the `Trogon-Req-Id` the bridge minted for the same request.
 pub fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
     a2a_nats::jsonrpc::correlation_key_from_body(payload)
 }
