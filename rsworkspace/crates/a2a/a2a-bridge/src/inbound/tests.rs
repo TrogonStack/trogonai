@@ -435,3 +435,34 @@ async fn every_sse_frame_is_a_json_rpc_response_carrying_the_caller_id() {
         "the caller keeps the only diagnostic the stream produced: {failure}"
     );
 }
+
+#[tokio::test]
+async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
+    // The events stream retains by limits and a rolling upgrade runs both agent
+    // releases at once, so this edge still meets bare events. Stamping an id onto
+    // one and forwarding it would emit a `data:` line that is no JSON-RPC response.
+    let legacy = serde_json::to_vec(&a2a::event::StreamResponse::StatusUpdate(
+        a2a::event::TaskStatusUpdateEvent {
+            task_id: "t-1".to_owned(),
+            context_id: "ctx".to_owned(),
+            status: a2a::types::TaskStatus {
+                state: a2a::types::TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        },
+    ))
+    .unwrap();
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![Ok(Bytes::from(legacy))])),
+        json!("corr-1"),
+    ))
+    .await;
+
+    let event: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
+    assert_eq!(event["jsonrpc"], "2.0");
+    assert_eq!(event["id"], "corr-1");
+    assert_eq!(event["result"]["statusUpdate"]["taskId"], "t-1");
+}

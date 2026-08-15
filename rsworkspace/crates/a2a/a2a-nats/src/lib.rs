@@ -22,6 +22,7 @@ pub mod nats;
 pub mod push;
 pub mod req_id;
 pub mod server;
+pub mod task_event;
 pub mod task_id;
 pub mod wire;
 

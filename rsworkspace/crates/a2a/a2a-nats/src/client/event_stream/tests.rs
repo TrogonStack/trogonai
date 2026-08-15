@@ -149,7 +149,10 @@ async fn stream_yields_error_on_bad_payload() {
 }
 
 #[tokio::test]
-async fn stream_yields_error_on_bare_result_payload() {
+async fn stream_still_reads_an_event_an_older_agent_published() {
+    // `A2A_EVENTS` retains by limits and a rolling upgrade runs both agent
+    // releases at once, so a bare `StreamResponse` is a body this reader meets
+    // rather than a malformed one. Refusing it would end the stream mid-task.
     let (consumer, tx) = MockJetStreamConsumer::new();
     let last_seq = Arc::new(Mutex::new(0u64));
     let mut stream = build_event_stream(consumer, last_seq, None);
@@ -159,7 +162,8 @@ async fn stream_yields_error_on_bare_result_payload() {
         .unwrap();
     drop(tx);
 
-    assert!(matches!(stream.next().await, Some(Err(ClientError::Codec(_)))));
+    let event = stream.next().await.expect("a pre-envelope event").unwrap();
+    assert_eq!(event, make_status_event("task-1"));
 }
 
 #[tokio::test]

@@ -154,11 +154,15 @@ async fn pull_loop<C>(
 /// Each task event on the wire is a full JSON-RPC success response repeating the
 /// request id, which is the shape the A2A spec puts on `message/stream` and
 /// `tasks/resubscribe`. The result member is the `StreamResponse` the reader wants.
+///
+/// A body that is not an envelope gets one more chance as a
+/// [`crate::task_event`] an older agent published, because refusing those would
+/// end a stream mid-task on every replay and every rolling upgrade.
 fn decode_event(headers: &async_nats::header::HeaderMap, payload: &[u8]) -> Result<StreamResponse, ClientError> {
     match decode_response::<StreamResponse>(headers, payload) {
         Ok(Ok(event)) => Ok(event),
         Ok(Err((code, message))) => Err(ClientError::from_jsonrpc_code(code, message)),
-        Err(e) => Err(map_wire_error(e)),
+        Err(e) => crate::task_event::decode_legacy_event(payload).ok_or_else(|| map_wire_error(e)),
     }
 }
 

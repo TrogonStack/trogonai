@@ -488,7 +488,15 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
 /// caller. A payload that is not a JSON object leaves as a correlated error
 /// frame: a client parses every `data:` line as a JSON-RPC response, so raw
 /// bytes there are a parse failure rather than the diagnostic they look like.
+///
+/// An event an older agent published carries no envelope of its own, so it is
+/// given one here instead of being restamped: forwarding it as-is would put a
+/// `data:` line on the wire that no spec client can parse as a response.
 fn sse_data_line(body: &[u8], caller_id: &Value) -> Event {
+    if let Some(response) = a2a_nats::task_event::legacy_event_as_response(body, caller_id) {
+        return Event::default().data(response.to_string());
+    }
+
     let Ok(Value::Object(mut envelope)) = serde_json::from_slice::<Value>(body) else {
         warn!(
             payload = %String::from_utf8_lossy(body),
