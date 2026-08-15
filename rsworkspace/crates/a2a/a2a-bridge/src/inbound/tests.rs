@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::stream::{self, Stream};
 use serde_json::json;
@@ -395,7 +396,6 @@ async fn handle_jsonrpc_invalid_agent_header_errors() {
 /// Reads an SSE stream the way a caller does: every frame is an unnamed
 /// `data:` line, so the JSON bodies are what the assertions look at.
 async fn sse_frames(stream: BoxStream<'static, Result<Event, Infallible>>) -> Vec<String> {
-    use axum::response::IntoResponse;
     let response = Sse::new(stream).into_response();
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8_lossy(&bytes)

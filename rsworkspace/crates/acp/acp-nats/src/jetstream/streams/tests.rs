@@ -2,7 +2,7 @@ use async_nats::jetstream::stream::{DiscardPolicy, RetentionPolicy, StorageType}
 
 use crate::acp_prefix::AcpPrefix;
 use crate::constants::DEFAULT_STREAM_MAX_AGE;
-use crate::nats::AcpStream;
+use crate::nats::{AcpStream, retired_stream_names};
 
 use super::*;
 
@@ -221,8 +221,6 @@ fn no_subject_overlaps_between_streams() {
 
 #[test]
 fn retired_stream_names_follow_the_same_naming_as_provisioned_ones() {
-    use crate::nats::retired_stream_names;
-
     assert_eq!(retired_stream_names(&p("acp")), vec!["ACP_NOTIFICATIONS".to_owned()]);
     assert_eq!(
         retired_stream_names(&p("my.multi.part")),
@@ -232,8 +230,6 @@ fn retired_stream_names_follow_the_same_naming_as_provisioned_ones() {
 
 #[test]
 fn no_retired_stream_is_still_provisioned() {
-    use crate::nats::retired_stream_names;
-
     let prefix = p("acp");
     let live: Vec<String> = AcpStream::ALL.iter().map(|s| s.stream_name(&prefix)).collect();
     for retired in retired_stream_names(&prefix) {
