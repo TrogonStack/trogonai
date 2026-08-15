@@ -83,6 +83,26 @@ impl AcpStream {
     }
 }
 
+/// Suffixes this crate used to provision and no longer does.
+///
+/// Dropping a variant from [`AcpStream`] stops the provisioner from creating
+/// the stream, but a deployment that ran an earlier release still has it,
+/// still has its stored messages, and still bills for its storage. Nothing
+/// here deletes anything: a stream delete is unrecoverable, it races an
+/// operator who may still be draining the old stream, and a rollback to the
+/// prior release would silently re-create it empty. Retirement is an operator
+/// step, and this list is what names the streams that step applies to.
+///
+/// See `docs/how-to/retire-acp-notifications-stream.md`.
+const RETIRED_SUFFIXES: [&str; 1] = ["NOTIFICATIONS"];
+
+/// Stream names an upgraded deployment may still be carrying, for the prefix
+/// it was provisioned under.
+pub fn retired_stream_names(prefix: &AcpPrefix) -> Vec<String> {
+    let root = prefix.as_str().to_uppercase().replace('.', "_");
+    RETIRED_SUFFIXES.iter().map(|s| format!("{root}_{s}")).collect()
+}
+
 impl std::fmt::Display for AcpStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.suffix())

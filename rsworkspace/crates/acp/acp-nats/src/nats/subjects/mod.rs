@@ -6,7 +6,7 @@ pub mod responses;
 pub mod stream;
 pub mod subscriptions;
 
-pub use stream::{AcpStream, StreamAssignment};
+pub use stream::{AcpStream, StreamAssignment, retired_stream_names};
 
 #[cfg(test)]
 mod conformance_tests;

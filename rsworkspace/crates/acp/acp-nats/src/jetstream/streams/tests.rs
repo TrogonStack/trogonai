@@ -218,3 +218,28 @@ fn no_subject_overlaps_between_streams() {
         }
     }
 }
+
+#[test]
+fn retired_stream_names_follow_the_same_naming_as_provisioned_ones() {
+    use crate::nats::retired_stream_names;
+
+    assert_eq!(retired_stream_names(&p("acp")), vec!["ACP_NOTIFICATIONS".to_owned()]);
+    assert_eq!(
+        retired_stream_names(&p("my.multi.part")),
+        vec!["MY_MULTI_PART_NOTIFICATIONS".to_owned()]
+    );
+}
+
+#[test]
+fn no_retired_stream_is_still_provisioned() {
+    use crate::nats::retired_stream_names;
+
+    let prefix = p("acp");
+    let live: Vec<String> = AcpStream::ALL.iter().map(|s| s.stream_name(&prefix)).collect();
+    for retired in retired_stream_names(&prefix) {
+        assert!(
+            !live.contains(&retired),
+            "{retired} is listed as retired but the provisioner still creates it"
+        );
+    }
+}
