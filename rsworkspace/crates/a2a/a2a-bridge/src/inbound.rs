@@ -22,7 +22,7 @@ use futures_util::stream::{self, BoxStream, Stream};
 use serde_json::{Value, json};
 use tracing::warn;
 
-use a2a_nats::client::rewrite_response_id;
+use a2a_nats::RequestId;
 use a2a_nats::constants::{GATEWAY_CALLER_ID_HEADER, GATEWAY_CALLER_ID_HTTP, REQ_ID_HEADER};
 use a2a_nats::jetstream::consumers::{PullConfig, resubscribe_consumer, stream_events_consumer};
 use a2a_nats::jetstream::streams::events_stream_name;
@@ -485,24 +485,30 @@ impl TaskJetStreamPort for ScriptedTaskJetstream {
 /// The id is restamped rather than forwarded, because the hops behind this edge
 /// correlate on their own transport id (`Trogon-Req-Id`, or a minted one when the
 /// caller sent no id at all). Only the caller's own id is meaningful to the
-/// caller. A body that is not a JSON object goes out untouched: there is no
-/// envelope to stamp, and swallowing it would lose the only diagnostic the caller
-/// would get.
+/// caller. A payload that is not a JSON object leaves as a correlated error
+/// frame: a client parses every `data:` line as a JSON-RPC response, so raw
+/// bytes there are a parse failure rather than the diagnostic they look like.
 fn sse_data_line(body: &[u8], caller_id: &Value) -> Event {
-    match rewrite_response_id(body, caller_id) {
-        Ok(stamped) => Event::default().data(String::from_utf8_lossy(stamped.as_ref())),
-        Err(e) => {
-            warn!(error = %e, "SSE frame is not a JSON-RPC envelope; forwarding without a caller id");
-            Event::default().data(String::from_utf8_lossy(body))
-        }
-    }
+    let Ok(Value::Object(mut envelope)) = serde_json::from_slice::<Value>(body) else {
+        warn!(
+            payload = %String::from_utf8_lossy(body),
+            "stream payload is not a JSON-RPC envelope"
+        );
+        return sse_error_frame(caller_id, "stream payload is not a JSON-RPC envelope".to_owned());
+    };
+    envelope.insert("id".to_owned(), caller_id.clone());
+    Event::default().data(Value::Object(envelope).to_string())
 }
 
 fn sse_error_line(caller_id: &Value, err: &BridgeError) -> Event {
+    sse_error_frame(caller_id, err.to_string())
+}
+
+fn sse_error_frame(caller_id: &Value, message: String) -> Event {
     let envelope = serde_json::json!({
         "jsonrpc": "2.0",
         "id": caller_id,
-        "error": { "code": INTERNAL_ERROR, "message": err.to_string() },
+        "error": { "code": INTERNAL_ERROR, "message": message },
     });
     Event::default().data(envelope.to_string())
 }
@@ -732,6 +738,13 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
     let req_id = json_rpc_corr_id(&v);
 
     if is_sse_jsonrpc_method(method) {
+        // Every SSE frame repeats this id, so a streaming request that carries
+        // none has no reply the caller can correlate. Rejecting here keeps the
+        // gateway from doing the work of a stream nobody can read.
+        let stream_caller_id = v
+            .get("id")
+            .and_then(|id| serde_json::from_value::<RequestId>(id.clone()).ok())
+            .ok_or(BridgeError::MissingJsonRpcId)?;
         // The unary publish comes BEFORE the JetStream consumer. Task event
         // subjects are scoped to the task (ADR#0055), and the bootstrap reply is
         // where the task id comes from. Nothing is lost in the gap, because
@@ -761,8 +774,7 @@ pub async fn handle_jsonrpc(headers: HeaderMap, body: bytes::Bytes, state: &AppS
             }
             None => Box::pin(futures_util::stream::empty()),
         };
-        let caller_id = v.get("id").cloned().unwrap_or(Value::Null);
-        let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads, caller_id);
+        let merged = sse_from_bootstrap_and_payloads(unary_reply.to_vec(), payloads, stream_caller_id.to_json());
         return Ok(Sse::new(merged).keep_alive(KeepAlive::default()).into_response());
     }
 

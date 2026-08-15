@@ -298,6 +298,24 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
     );
 }
 
+#[tokio::test]
+async fn handle_jsonrpc_rejects_a_streaming_request_without_a_usable_id() {
+    for id in [json!(null), json!({})] {
+        let publisher = Arc::new(RecordingInboundPublisher::new());
+        let state = test_state(publisher.clone());
+        let body =
+            Bytes::from(json!({ "jsonrpc": "2.0", "id": id, "method": "message/stream", "params": {} }).to_string());
+        let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BridgeError::MissingJsonRpcId), "id {id} was accepted");
+        assert!(
+            publisher.peek_subject().is_none(),
+            "the gateway must not open a stream nobody can correlate"
+        );
+    }
+}
+
 #[test]
 fn json_rpc_corr_id_null_and_complex_ids_mint_fresh() {
     for body in [json!({"id": null}), json!({"id": []}), json!({"id": {}})] {
@@ -387,7 +405,7 @@ async fn sse_frames(stream: BoxStream<'static, Result<Event, Infallible>>) -> Ve
 }
 
 #[tokio::test]
-async fn sse_frames_carry_the_caller_id_and_survive_a_body_that_is_not_an_envelope() {
+async fn every_sse_frame_is_a_json_rpc_response_carrying_the_caller_id() {
     let bootstrap = serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap();
     let tail = stream::iter(vec![
         Ok(Bytes::from_static(b"not-an-envelope")),
@@ -405,7 +423,9 @@ async fn sse_frames_carry_the_caller_id_and_survive_a_body_that_is_not_an_envelo
     assert_eq!(bootstrap["id"], "corr-1");
     assert_eq!(bootstrap["result"]["taskId"], "t-1");
 
-    assert_eq!(frames[1], "not-an-envelope");
+    let undecodable: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
+    assert_eq!(undecodable["id"], "corr-1");
+    assert_eq!(undecodable["error"]["code"], INTERNAL_ERROR);
 
     let failure: serde_json::Value = serde_json::from_str(&frames[2]).unwrap();
     assert_eq!(failure["id"], "corr-1");
