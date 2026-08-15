@@ -717,7 +717,14 @@ checks answerable from one decoded event. At minimum it rejects:
   `AssistantMessageCompleted.message.role` is `ASSISTANT`.
 - `FILE_CHANGE_KIND_RENAMED` requires `previous_path`; non-renames must omit
   it.
-- Locally ordered compaction bounds (`covers_from <= covers_through`).
+- Locally ordered compaction bounds (`covers_from <= covers_through`) with
+  `covers_from == 1`, a set `CompactionContextRoot.root`, and a locally valid
+  `CompactionProducer`: non-empty `producing_execution_attempt_id`, supported
+  nonzero `model_role`, and a `session_execution_plan_digest` with a supported
+  algorithm and length. `covered_input_digest` also has a supported algorithm
+  and length. `Compacted.model`, when present, is non-empty. An inherited root
+  requires a non-empty source Session id and a nonzero
+  `context_prefix_boundary`.
 - `matched_stop_sequence` present if and only if `FINISH_REASON_STOP_SEQUENCE`.
 - Positive attempt numbers and the within-event coupling between attempt number
   and presence of `previous_attempt_id`.
@@ -751,11 +758,22 @@ read is what places a given one: where a command reads no state there is nothing
 to reject against, so its relationship can only be a fold rule.
 `decide` owns the relationships whose command declares a state read in the
 command matrix, and checks them before the append: in-session ordinal existence
-and compaction ordering, exact attempt lineage, a checkpoint's producing attempt
-and plan digest and settled `covers_through`, complete restored-checkpoint
-equality with the fold-selected evidence, continued effectiveness of
-`covers_through` after rewind, and equality with the stored Session plan. These
-are rejected if they fail.
+and compaction ordering; the compaction context root's equality with the
+Session's ordinary or fork lineage; selection of the prior usable compaction;
+the v1 plan's non-empty complete-turn tail, turn-boundary, trigger, and budget
+rules; equality between `covered_input_digest` and the plan-versioned digest of
+the exact effective masked covered input; exact attempt lineage; the compaction
+producer's equality with the current Ready, non-ended owning attempt; the
+producer plan digest and model role's selection of one exact ModelSelection.
+The optional `Compacted.model` is provider-reported telemetry, not selection or
+authorization evidence. It also checks a checkpoint's producing attempt and
+plan digest and settled `covers_through`, complete restored-checkpoint equality
+with the fold-selected evidence, continued effectiveness of `covers_through`
+after rewind, and equality with the stored Session plan. These are rejected if
+they fail. Draft [ADR#0026](./0026-command-authorization-principal.md)'s authorizer
+must additionally authenticate the command's acting principal as the owning
+platform harness for that Session and attempt. A model or delegated Agent may
+produce candidate content, but it has no Session append authority.
 `evolve` owns the relationships carried by commuting facts whose state read is
 `none` -- the assistant start/completion id and model joins, and the tool
 lifecycle joins. Those append under `Any` with nothing to check against, so they
@@ -782,14 +800,78 @@ rejected before append, never persisted and reconciled later.
 ### 4. Compaction is a self-sufficient in-stream marker the store only records
 
 Compaction is an upstream agent-loop concern (forced decision #4): the store
-neither triggers nor understands it. The loop decides when the transcript nears
-the context window and how to summarize; the store persists a single `Compacted`
-event carrying the summary content inline plus the covered range
-(`covers_from`, `covers_through`, both a `SessionOrdinal`, facet 2, both
-inclusive): exactly the events the summary replaces in the model-visible view,
-ratifying the prior art's `SummaryCreated` shape. The model-visible view folds
-from the newest `Compacted` summary and every event strictly after
-`covers_through`; the covered events remain on the stream for audit and rewind.
+neither triggers nor understands summary content. The loop decides when the
+transcript nears the context window and how to summarize; the store records the
+result. A Session may contain multiple historical `Compacted` events. At a
+selected head, only the newest usable marker drives the model-visible view.
+
+Usability is determined before marker selection. The context projection first
+applies every `SessionRewound` through the selected head and removes the
+invalidated branch from consideration. It also applies every read-time
+`RedactionApplied` mask and `ArtifactErased` substitution that affects the
+candidate's covered input. Among branch-effective markers, it evaluates markers
+in ordinal order against the view produced by the newest earlier usable marker.
+A marker is usable only when no effective `RedactionApplied` directly targets
+its event id and its `covered_input_digest` equals a fresh recomputation over
+that exact effective masked input under the compaction contract version bound
+by its Session plan. A direct marker redaction or digest mismatch masks the
+summary from every read surface. Any successor that depended on that stale
+summary also fails recomputation unless it was generated from the newly masked
+view.
+
+The view begins with the newest usable marker's inline `summary_content` and
+continues with effective model-visible items after its `covers_through`. If no
+marker is usable, the view begins at the Session's context root. Rewinding past
+a marker therefore reveals the preceding usable marker, or the uncompacted view
+when none remains. A physically newer marker on a dead branch or with a stale
+covered-input digest never wins.
+
+`covers_from` and `covers_through` are this Session's own fold-derived
+`SessionOrdinal` values (facet 2), both inclusive. `covers_from` is always `1`
+and identifies the beginning of the local ordinal coordinate space.
+`covers_through` is the upper boundary through which effective model-visible
+items were incorporated. The numeric interval does not claim that invalidated
+events on a dead branch were summarized. Coverage always means the effective
+model-visible prefix computed at the command's selected head, never the raw
+events whose ordinals happen to fall inside `[1..covers_through]`.
+
+`CompactionContextRoot` makes the logical beginning of that prefix explicit. An
+ordinary Session uses `session_start`. A fork uses `inherited_prefix`, carrying
+the exact `source_session_id` and `context_prefix_boundary` from its immutable
+`SessionForked` fact. The combination of the root and local covered range makes
+one marker self-describing even though a fork's inherited prefix lies outside
+the child's ordinal space.
+
+`covered_input_digest` commits to the exact platform-canonical input covered by
+the marker, including its resolved context root and effective model-visible
+items through `covers_through`, after rewind filtering, redaction masks, and
+artifact erasure. The immutable Session plan names the canonicalization contract
+version and therefore domain-separates field tags, item boundaries, and mask
+representations. The digest is over the input to the compaction process before
+any bounded generation passes, not provider-formatted text and not the summary
+output. The Session command recomputes it before append. The context projection
+recomputes it when privacy state changes, which prevents a summary from
+retaining content that a fresh replay now masks. Digest equality proves input
+identity only; semantic subsumption remains the owning harness's generation
+obligation.
+
+A successor compaction is cumulative. Let the newest usable marker at the
+selected head be the predecessor. The successor's `covers_through` must include
+the predecessor marker's own ordinal, not merely advance past the predecessor's
+earlier cut. Its summary must subsume the predecessor summary plus the newly
+covered effective tail, so the successor remains sufficient when older markers
+are ignored. The successor retains the same context root. A first compaction
+has no predecessor but otherwise follows the same rule. The `At(H)` guard lets
+only one candidate built from head `H` append. When the guard rejects a stale
+candidate because the head changed, the harness must refold the new head,
+revalidate the immutable root, and regenerate the cut, digest, and summary under
+a fresh compaction request key and fresh `summary_id`. Reusing the old key with
+changed command bytes is the typed key-reuse conflict defined in facet 2, not a
+retry. An idempotent retry after an indeterminate append acknowledgement instead
+reuses the original request key, `summary_id`, and byte-identical command to
+recover that command's outcome. The Session command can prove the predecessor
+ordinal and cut from history. Neither the command, the local payload validator,
+nor the store can prove semantic subsumption by interpreting summary language.
 
 The marker is self-sufficient: no out-of-band sidecar is required to replay
 across a compaction boundary. This resolves the corpus's open sub-question in
@@ -798,6 +880,50 @@ fail-closed external `compaction_checkpoints/{id}.json`, keeping one recovery
 story instead of a second artifact that can go missing. It also corrects the
 platform compactor crate, which overwrote the stored message list wholesale -- the
 exact destructive pattern the corpus warns against.
+
+[ADR#0031](./0031-agent-implementation-and-session-plan.md) owns the current v1
+compaction policy. This event contract still permits `covers_through` to equal
+the command's current head, so a later implementation policy can select a
+summary-only model-visible view without a schema change. The marker's
+`CompactionProducer` binds it to a producing execution attempt, the immutable
+Session plan digest, and either the primary or typed auxiliary-compaction model
+role. The plan digest plus role select the exact typed ModelSelection;
+`Compacted.model` is optional provider-reported telemetry and is not itself the
+authority. Local validation proves only that these fields are well formed. The
+Session command requires the producer to be the current Ready,
+non-ended owning attempt, joins the plan and model fields to folded state, and
+requires an authenticated owning-harness principal through
+[ADR#0026](./0026-command-authorization-principal.md)'s authorizer. Only that
+harness may submit the command. Other models and delegated Agents may return
+untrusted candidate work, but they cannot commit Session history.
+
+Because `summary_content` is inline, the future Session command boundary must
+obtain the current NATS server `INFO.max_payload`, subtract the exact encoded
+decider envelope and header bytes plus every non-summary event field, and treat
+the remainder as the hard `summary_content` budget. The resolved policy bounds
+`guidance` and every other variable non-summary field, envelope value, and
+header value. The command returns typed `CompactionPayloadTooLarge` before
+append when the encoded marker does not fit. It may regenerate a smaller
+candidate only when reducing `summary_content` can make the marker legal. An
+oversized non-summary remainder or a marker whose minimum legal summary cannot
+fit is irreducible and follows the failure path without promising a retry.
+
+Aggregate input that cannot fit the plan's bounded generation strategy returns
+`CompactionInputTooLarge`; one indivisible retained turn that cannot fit returns
+`ContextItemTooLarge`. `CompactionInputTooLarge`, `ContextItemTooLarge`, and an
+irreducible or exhausted payload path end the attempt and eventually map to the
+durable resource-exhausted Session outcome defined by
+[ADR#0031](./0031-agent-implementation-and-session-plan.md). This is a normative
+requirement for the Session command implementation, which remains follow-up
+work, not a claim about behavior already shipped by the generic append
+substrate.
+
+The platform holds two unrelated claim-check mechanisms: the domain-level
+`ArtifactRef`, which addresses tool output by `sha256`, and the transport-level
+`ClaimCheckPublisher`. `ClaimCheckPublisher` offloads only payloads routed
+through it; it is not a global transport behavior. The Session command path
+must not route `Compacted` through that publisher, because doing so would turn
+the self-sufficient inline marker into an unchosen sidecar contract.
 
 ### 5. Fork is an atomic, self-contained creation; inheritance is by explicit reference
 
@@ -828,6 +954,40 @@ explicit, named boundary between three categories:
 - **Forbidden**: source terminal state, source rewind/compaction markers as
   aggregate state, source children.
 
+Before the child has a usable compaction, its model-visible view resolves
+the inherited prefix and then appends effective child-local context. A
+usable child `Compacted` with the matching `inherited_prefix` context root
+replaces that inherited prefix and the covered child-local prefix with its
+self-sufficient summary. The projection may then release its resolved inherited
+prefix because the marker, not the source walk, drives the view. This does not
+delete source history or change the immutable fork relationship. If a later
+child rewind invalidates that marker, usability is recomputed before marker
+selection and the inherited source prefix is resolved again. The rewind thus
+restores the uncompacted inherited view without a special compensating event.
+
+The inherited prefix is one indivisible context root in the v1 marker; child
+ordinals cannot leave a verbatim tail inside it. A fork therefore cannot compact
+until it has at least one complete child-local turn that the v1 policy can retain
+after the cut. Before that point the harness waits rather than appending a
+summary-only marker. If the inherited prefix already exceeds the plan's input
+limit and prevents the first child turn, the attempt returns typed
+`CompactionInputTooLarge` and follows
+[ADR#0031](./0031-agent-implementation-and-session-plan.md)'s durable
+resource-exhausted outcome instead of weakening the tail policy.
+
+A source redaction or artifact erasure is a privacy overlay, not a mutation of
+the immutable fork tuple. It can therefore make a child marker's
+`covered_input_digest` stale even when the child head does not move. The context
+projection tracks that source dependency, masks the stale summary, recomputes
+marker usability, and resolves the now-masked source prefix again. A later child
+compaction may become usable by digesting that new masked view. The child's
+`At(H)` guard cannot serialize a concurrent source-stream privacy append, so
+correctness does not pretend it can: if the source changes after the command's
+digest check but before the child append, dependency recomputation makes the new
+marker unusable as soon as that privacy append is observed. A caller requiring
+read-after-redaction waits for the dependent projection watermark; this ADR does
+not claim instantaneous ordering across two Session streams.
+
 Fork from a terminal source is legal and needs nothing special: the fork has
 its own fresh lifecycle regardless of what happened to the source afterward.
 Fork-of-fork chains resolve because the context projection walks prefixes
@@ -843,7 +1003,8 @@ A later rewind of the source does not retroactively alter a fork's context:
 keep-forever log (facet 7), not a live pointer. Rewind cascade (facet 6)
 applies to delegated children, never to forks -- a fork's relationship to its
 source is a one-time copy-by-reference at creation, not an ongoing dependency a
-source mutation could invalidate.
+source rewind could invalidate. Read-time privacy overlays remain the explicit
+exception above because masking must reach every view of the source bytes.
 
 **Replay cost is no longer an aggregate concern.** Because the child fold never
 touches the source stream, the old mandatory sealing snapshot is no longer a
@@ -1017,6 +1178,14 @@ at or before an admitted harness recovery checkpoint's `covers_through` also
 makes that checkpoint ineligible for restoration (facet 3), so sealed harness
 state never resurrects masked content either; restoration falls back to
 authoritative replay, which applies the mask from the first fact.
+The same rule applies to compaction summaries: if a redaction changes the exact
+masked input committed by `covered_input_digest`, the marker and every successor
+that depended on its stale summary become unusable. Readers fall back to the
+newest digest-valid marker or the masked uncompacted view. For a fork this
+dependency crosses streams, so source-redaction projection work also invalidates
+dependent child-context caches. A `RedactionApplied` that directly targets the
+`Compacted` event makes that marker unusable even when its covered-input digest
+still matches, because the redaction addresses the summary output itself.
 
 **`ArtifactErased` separates artifact-byte lifecycle from event-log retention.**
 New event `ArtifactErased{session_id, artifact_id, reason}` (`At`-guarded)
@@ -1026,7 +1195,9 @@ bytes themselves are gone. Erasing an artifact recorded at or before an
 admitted harness recovery checkpoint's `covers_through` also makes that
 checkpoint ineligible for restoration (facet 3): sealed state may retain
 fetched artifact content the log no longer serves, so restoration falls back
-to authoritative replay.
+to authoritative replay. An erasure that changes a compaction marker's covered
+input likewise makes its digest stale and masks its summary, preventing an
+inline paraphrase from bypassing the artifact lifecycle.
 
 **Ingress rules keep secrets out in the first place.** Credential-bearing URLs,
 signed URLs, and other secrets are prohibited in durable fields;
@@ -1077,12 +1248,15 @@ needs, checkpointing `last_applied_stream_position` after each event exactly as
 the scheduler does. Queries are `verb + noun` Rust functions over the KV
 projection ([ADR#0014](./0014-command-and-query-naming.md)) -- `get_session`,
 `list_sessions` -- with no query protos, since the projection value is the read
-contract. The model-visible context is compiled deterministically from the event
-log bounded by the latest `Compacted` marker (facet 4), ratifying the prior art's
-context-twin/token-budget compiler as a projection, and, for a fork, recursively
-resolving its source's context prefix the same way (facet 5). Any full-text or
-vector search subsystem is a separate, independently bootstrapped projection off
-the same log, out of scope here.
+contract. The model-visible context is compiled deterministically by applying
+rewind invalidation through the selected head before choosing the newest
+usable `Compacted` marker (facet 4). For a fork with no usable child
+marker, the projection recursively resolves the source context named by its
+inherited root; a usable child marker replaces that dependency until a
+rewind invalidates it (facet 5). This ratifies the prior art's
+context-twin/token-budget compiler as a projection. Any full-text or vector
+search subsystem is a separate, independently bootstrapped projection off the
+same log, out of scope here.
 
 Resume rebuilds a session's state the way the runtime rebuilds any decider
 aggregate: load the newest snapshot for the session, then replay only the tail
@@ -1118,7 +1292,7 @@ decision.
 | `FailSession` | head | `At` | `[SessionFailed]` | not already terminal | `session_id` + terminal-request id |
 | `HideSession` | head | `At` | `[SessionHidden]` | none beyond head match | hide-request id |
 | `RewindSession` | head | `At` | `[SessionRewound]` | `keep_through` within current log | rewind-request id |
-| `CompactSession` | head | `At` | `[Compacted]` | `covers_from <= covers_through`, ordered, in-session | compaction-request id |
+| `CompactSession` | head, effective masked history, privacy dependencies, context root, active attempt, stored plan and compaction policy | `At` | `[Compacted]` | `covers_from == 1`; ordered cut lies between complete turn groups, including the fork root boundary, and leaves the v1 non-empty complete-turn tail; root matches ordinary or fork lineage; `covered_input_digest` matches the plan-versioned covered input; a successor cut includes the prior usable marker ordinal; producer is the current Ready, non-ended owning attempt and its plan digest plus role select the exact model; acting principal is the authorized owning harness; guidance and every non-summary variable value satisfy policy bounds; encoded summary fits the current NATS `INFO.max_payload` minus exact envelope, header, and non-summary event bytes; an oversized non-summary remainder is irreducible | compaction-request id, fresh after stale regeneration |
 | `StartExecutionAttempt` | head, active-attempt state, effective history, checkpoint evidence | `At` | `[ExecutionAttemptStarted]` | one active attempt; monotonic attempt number; restored checkpoint exactly equals first admitted evidence; `covers_through` remains effective, with no later redaction or artifact erasure reaching at or before it; restore and tail replay through the selected head precede Ready | attempt id |
 | `MarkExecutionAttemptReady` | head, attempt state | `At` | `[ExecutionAttemptReady]` | Ready only after Started and, for restore, verified artifact recovery plus effective-tail replay through the start head | attempt id |
 | `EndExecutionAttempt` | head, attempt state | `At` | `[ExecutionAttemptEnded]` | one outcome per attempt | attempt id |
@@ -1198,9 +1372,9 @@ crash-safe realization.
 
 ### Compaction with an out-of-band recovery sidecar
 
-Rejected as the default. A sidecar (Grok Build's model) adds a second artifact
-that can go missing when rewinding past the boundary; the self-sufficient
-in-stream marker of facet 4 keeps a single recovery story on a keep-forever log.
+Rejected. A sidecar (Grok Build's model) adds a second artifact that can go
+missing when rewinding past the boundary; the self-sufficient in-stream marker
+of facet 4 keeps a single recovery story on a keep-forever log.
 
 ### A trait-level `WritePrecondition::At(N)` variant, or an explicit ownership/claim protocol
 

@@ -78,6 +78,9 @@ pub enum SessionEventValidationError {
     #[error("{oneof} must be set")]
     MissingOneof { oneof: &'static str },
 
+    #[error("{field} must be set")]
+    MissingRequiredField { field: &'static str },
+
     #[error("{field} must be {expected}")]
     UnexpectedMessageRole {
         field: &'static str,
@@ -92,6 +95,9 @@ pub enum SessionEventValidationError {
 
     #[error("covers_through.value ({covers_through}) must be >= covers_from.value ({covers_from})")]
     CompactionRangeOutOfOrder { covers_from: u64, covers_through: u64 },
+
+    #[error("covers_from.value ({covers_from}) must be 1; a compaction covers the whole own-stream prefix")]
+    CompactionCoversFromNotOwnStreamStart { covers_from: u64 },
 
     #[error("{field}.value must be >= 1")]
     OrdinalNotPositive { field: &'static str },
@@ -571,11 +577,70 @@ fn validate_compacted(event: &v1alpha1::Compacted) -> Result<(), SessionEventVal
             covers_through: event.covers_through.value,
         });
     }
+    if event.covers_from.value != 1 {
+        return Err(SessionEventValidationError::CompactionCoversFromNotOwnStreamStart {
+            covers_from: event.covers_from.value,
+        });
+    }
     require_known_nonzero(event.trigger, "trigger")?;
+    require_non_empty_when_set(event.model.as_deref(), "model")?;
     if let Some(usage) = event.usage.as_option() {
         validate_token_usage(usage, "usage.cost.currency_code")?;
     }
+    let context_root = event
+        .context_root
+        .as_option()
+        .ok_or(SessionEventValidationError::MissingRequiredField { field: "context_root" })?;
+    validate_compaction_context_root(context_root)?;
+    let producer = event
+        .producer
+        .as_option()
+        .ok_or(SessionEventValidationError::MissingRequiredField { field: "producer" })?;
+    validate_compaction_producer(producer)?;
+    let covered_input_digest =
+        event
+            .covered_input_digest
+            .as_option()
+            .ok_or(SessionEventValidationError::MissingRequiredField {
+                field: "covered_input_digest",
+            })?;
+    require_digest(covered_input_digest, "covered_input_digest")?;
     Ok(())
+}
+
+fn validate_compaction_context_root(
+    context_root: &v1alpha1::CompactionContextRoot,
+) -> Result<(), SessionEventValidationError> {
+    match context_root.root.as_ref() {
+        Some(v1alpha1::compaction_context_root::Root::SessionStart(_)) => Ok(()),
+        Some(v1alpha1::compaction_context_root::Root::InheritedPrefix(inherited_prefix)) => {
+            require_non_empty(
+                &inherited_prefix.source_session_id,
+                "context_root.inherited_prefix.source_session_id",
+            )?;
+            require_positive_ordinal(
+                &inherited_prefix.context_prefix_boundary,
+                "context_root.inherited_prefix.context_prefix_boundary",
+            )
+        }
+        None => Err(SessionEventValidationError::MissingOneof {
+            oneof: "compaction_context_root.root",
+        }),
+    }
+}
+
+fn validate_compaction_producer(producer: &v1alpha1::CompactionProducer) -> Result<(), SessionEventValidationError> {
+    require_non_empty(
+        &producer.producing_execution_attempt_id,
+        "producer.producing_execution_attempt_id",
+    )?;
+    let session_execution_plan_digest = producer.session_execution_plan_digest.as_option().ok_or(
+        SessionEventValidationError::MissingRequiredField {
+            field: "producer.session_execution_plan_digest",
+        },
+    )?;
+    require_digest(session_execution_plan_digest, "producer.session_execution_plan_digest")?;
+    require_known_nonzero(producer.model_role, "producer.model_role")
 }
 
 fn validate_user_message_recorded(event: &v1alpha1::UserMessageRecorded) -> Result<(), SessionEventValidationError> {

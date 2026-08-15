@@ -210,6 +210,9 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
       resolved variable bindings
       resolved tool, delegate, memory, and skill versions
       work contract and input references
+      resolved compaction trigger thresholds, input, summary, guidance,
+        retained-tail, bounded-pass, and non-summary encoding budgets,
+        covered-input contract version, and producer role
       harness contract version
       session-plan contract version
       resolved-model-route contract version
@@ -224,6 +227,18 @@ binding reference, exact provider driver, and protocol required to serve each
 ModelSelection. They cannot substitute another model. Attempt-scoped
 [model-access grants](../glossary/modelaccessgrant), secret values, and short-lived provider credentials never
 enter the plan.
+
+AgentConfiguration pins the exact compaction trigger thresholds, input,
+summary, guidance, and retained-tail budgets, bounded-pass limits,
+covered-input contract version, and producer role. The resolved policy also
+sets encoded-length bounds for every variable non-summary `Compacted` field and
+every decider envelope or header value the append carries. Admission rejects an
+unbounded or unsupported value source and copies the accepted limits into the
+immutable SessionExecutionPlan. The selected AgentImplementationVersion
+declares the policy contract and supported limits. The producer role selects
+either the pinned primary ModelSelection or the exact pinned auxiliary
+ModelSelection under the typed role `compaction`. It cannot name an arbitrary
+model.
 
 The plan's model fields inherit the contested ownership recorded in section 1.
 The shipped AgentConfiguration contract exposes no typed ModelSelection for
@@ -275,8 +290,8 @@ digest-mismatched value rejects Session start with a typed failure. Admission
 never falls back to another implementation release, model, provider account,
 credential, or extension.
 
-Across admission, Ready, recovery, and dependency revalidation, the minimum
-failure categories are:
+Across admission, Ready, recovery, dependency revalidation, and compaction, the
+minimum failure categories are:
 
 - ImplementationKindMismatch;
 - ImplementationArtifactMismatch;
@@ -286,8 +301,11 @@ failure categories are:
 - ExactModelMismatch;
 - HostAttestationMismatch;
 - EffectiveConfigurationMismatch;
-- CheckpointIncompatible; and
-- PinnedDependencyRevoked.
+- CheckpointIncompatible;
+- PinnedDependencyRevoked;
+- ContextItemTooLarge;
+- CompactionInputTooLarge; and
+- CompactionPayloadTooLarge.
 
 These failures never trigger harness or platform fallback. A caller may correct
 the configuration, activate another reviewed AgentRevision, or start a new
@@ -338,6 +356,87 @@ must not be conflated:
 
 The protobuf named `Checkpoint` retains its wire name, but this ADR calls that
 object a harness recovery checkpoint to keep the meanings distinct.
+
+The normative v1 platform harness permits repeated compactions. Each successful
+compaction produces one model-visible view consisting of a bounded inline,
+self-sufficient summary of an older effective Session-history prefix and a
+non-empty, policy-bounded tail containing complete `turn_id` groups. The cut
+lies between complete turn groups and never splits one between the summary and
+the tail. It need not end on a turn event: an intervening control event may name
+the ordinal boundary, and a fork's context-root boundary before its first local
+turn is also a valid cut. Keeping recent turns intact preserves context when the
+summary omits something and avoids separating a tool request from its result.
+The resolved policy requires at least one complete retained turn and the
+Session command revalidates that requirement against folded history. Although
+the event schema permits a cut at the current head for a future summary-only
+policy, the v1 command rejects any cut that leaves no complete retained turn.
+
+When a prior compaction is usable under
+[ADR#0035](./0035-session-store-decider-aggregate.md)'s rewind and privacy
+rules, its summary and retained tail are inputs to the successor, whose summary
+must subsume that usable view and the newly covered prefix. Before generation,
+the owning harness compiles the exact effective covered input after rewind
+selection, redaction masks, artifact erasure, and fork-prefix resolution. The
+covered-input contract version in the immutable plan defines the canonical,
+length-delimited representation. The
+harness computes `covered_input_digest` over those exact canonical bytes, and
+the Session command independently recomputes and compares it before append.
+This proves which masked input the candidate covered, not whether natural
+language captured every meaning. [ADR#0035](./0035-session-store-decider-aggregate.md)
+defines how a later privacy change invalidates a marker whose digest no longer
+matches.
+
+Only the owning platform harness may validate a candidate and command its
+append to the Session. The command principal must authenticate that harness for
+the Session and its current Ready, non-ended ExecutionAttempt. The producer's
+plan digest and model role select either the pinned primary ModelSelection or
+the exact pinned auxiliary ModelSelection under the typed role `compaction`.
+The event's optional model string is provider-reported telemetry only; it may be
+absent and does not select or authorize a model. V1 admits neither an arbitrary
+model nor another Agent's output as an authoritative summary. A delegated Agent
+may provide guidance or work product, but the owning harness treats that result
+only as input and cannot append it directly as the summary. A manual compaction
+with no Ready owning attempt must start and admit a new attempt or fail without
+appending a marker.
+
+The resolved policy must trigger early enough to leave its declared input
+safety margin and must define a deterministic maximum number of bounded
+compaction passes. Intermediate pass state is process-local input to generation,
+not a durable sidecar; only the final self-sufficient marker is authoritative.
+If an aggregate covered prefix cannot be processed within those limits, the
+harness returns `CompactionInputTooLarge`. This includes a fork whose inherited
+prefix already exceeds the compaction input limit before the child has a
+complete local turn: v1 cannot replace that indivisible prefix while also
+retaining a non-empty child-local turn, so it fails rather than silently
+switching policies.
+
+Before model dispatch, the harness represents oversized inline content as
+bounded model-visible text plus an ArtifactRef when the content contract
+supports that representation. If one indivisible turn still cannot fit the
+reserved retained-tail budget, it returns `ContextItemTooLarge`. The Session
+command obtains the current NATS server `INFO.max_payload` and subtracts the
+exact encoded decider envelope and header bytes plus every non-summary event
+field. The remaining bytes are the hard budget for the encoded
+`summary_content` field. Guidance and every other variable non-summary value
+must already satisfy the resolved policy's individual bounds.
+
+The command returns `CompactionPayloadTooLarge` before append when the fully
+encoded append exceeds `INFO.max_payload`, equivalently when the encoded summary
+field exceeds its remaining allowance. If only a reducible summary is too
+large, the harness may retry with a smaller legal summary. If
+the bounded non-summary event, envelope, and header bytes leave no room for the
+minimum legal summary, the failure is irreducible and no retry is promised. It
+never splits a turn, silently drops content, switches to a summary-only view, or
+relaxes the selected policy. These typed outcomes are owned by the harness and
+Session coordinator, not the Session Store payload validator. A recoverable
+payload rejection appends nothing. If the plan's bounded retries cannot produce
+a legal context, the coordinator records `ExecutionAttemptEnded` with
+`ATTEMPT_OUTCOME_FAILED`; when no plan-identical attempt can make progress, the
+liveness path records `SessionFailed` with
+`SESSION_FAILURE_REASON_RESOURCE_EXHAUSTED`. Human-readable detail remains
+diagnostic and never controls behavior. V1 creates no separate compaction
+artifact; [ADR#0035](./0035-session-store-decider-aggregate.md) owns the
+self-sufficient in-stream marker and its fold semantics.
 
 A harness recovery checkpoint is admissible only after capture completes and
 the Session command boundary verifies all the following before
@@ -624,6 +723,7 @@ supporting value objects require their own Buf-validated contract design.
       HarnessContractVersion harness_contract = 12;
       SessionPlanContractVersion plan_contract = 13;
       ModelRouteContractVersion model_route_contract = 14;
+      ResolvedCompactionPolicy compaction_policy = 15;
     }
 
     message StoredSessionExecutionPlan {

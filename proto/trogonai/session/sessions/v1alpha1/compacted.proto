@@ -2,20 +2,32 @@ edition = "2024";
 
 package trogonai.session.sessions.v1alpha1;
 
+import "trogonai/session/sessions/v1alpha1/digest.proto";
 import "trogonai/session/sessions/v1alpha1/session_ordinal.proto";
 import "trogonai/session/sessions/v1alpha1/token_usage.proto";
 
 // Compacted is a self-sufficient in-stream compaction marker the store only
 // records (ADR#0035 facet 4); summary content is inline. covers_from and
 // covers_through are this session's own fold-derived SessionOrdinal positions,
-// both inclusive, delimiting exactly the range of events the summary replaces
-// in the model-visible view, validated as an ordered range
-// (covers_from <= covers_through). The model-visible view folds from the
-// newest Compacted summary plus every event strictly after covers_through;
-// the covered events stay on the stream (keep-forever), so no structured
-// replacement set is needed to rewind past the boundary. It is
-// invariant-bearing, admitting one active compaction, guarded by
-// WRITE_PRECONDITION = At(current_position).
+// both inclusive, delimiting the effective own-stream prefix the summary
+// replaces in the model-visible view, validated as an ordered range
+// (covers_from <= covers_through). Rewind filtering and privacy masks run first.
+// A marker is usable only while it is not directly redacted and its
+// covered_input_digest still matches the exact effective masked covered input.
+// The view folds from the newest usable Compacted summary plus every effective
+// event strictly after covers_through. A successor cut includes the prior usable
+// Compacted marker ordinal so its self-sufficient summary cannot depend on an
+// older marker that the newest-marker fold will omit. Covered events stay on
+// the stream (keep-forever), so invalidation can expose an earlier usable marker
+// without a structured replacement set. Because this fold reads only
+// covers_through from the selected marker, covers_from is validated as 1:
+// every compaction re-covers the effective own-stream prefix and only
+// covers_through advances. context_root identifies the logical beginning that
+// precedes that own-stream prefix, including an immutable source prefix
+// inherited by a fork. A covers_from past the own-stream start would otherwise
+// pass validation and silently drop earlier effective events. It is
+// invariant-bearing, admitting one active compaction at a selected head,
+// guarded by WRITE_PRECONDITION = At(current_position).
 message Compacted {
   string session_id = 1 [features.field_presence = LEGACY_REQUIRED];
   string summary_id = 2 [features.field_presence = LEGACY_REQUIRED];
@@ -31,10 +43,57 @@ message Compacted {
   // compactor did not measure them.
   uint64 tokens_before = 8;
   uint64 tokens_after = 9;
-  // Model that produced the summary and its own token and cost usage; empty or
-  // unset when not attributed.
+  // Optional provider-reported model telemetry for the summary-producing
+  // invocation. It is not authoritative identity; exact selection comes from
+  // the producer plan digest and typed role joined by the Session command.
   string model = 10;
   TokenUsage usage = 11;
+  // Logical root of the context replaced by this summary. Forks repeat their
+  // inherited source tuple here because child ordinals cannot address it.
+  CompactionContextRoot context_root = 12 [features.field_presence = LEGACY_REQUIRED];
+  // Evidence binding the summary to the immutable execution plan and the
+  // platform-owned attempt that produced it. Authorization is established by
+  // the Session command's history and plan joins, not by these fields alone.
+  CompactionProducer producer = 13 [features.field_presence = LEGACY_REQUIRED];
+  // Plan-versioned digest of the exact effective privacy-masked covered input
+  // summarized by this marker.
+  Digest covered_input_digest = 14 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CompactionContextRoot makes the logical beginning of covered context
+// explicit when own-stream ordinal 1 is not the beginning of a fork's view.
+message CompactionContextRoot {
+  oneof root {
+    CompactionSessionStart session_start = 1;
+    CompactionInheritedPrefix inherited_prefix = 2;
+  }
+}
+
+// CompactionSessionStart marks a context rooted at this session's start.
+message CompactionSessionStart {}
+
+// CompactionInheritedPrefix preserves the immutable source prefix identity a
+// fork inherited, since that prefix is outside the child stream's ordinals.
+message CompactionInheritedPrefix {
+  string source_session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SessionOrdinal context_prefix_boundary = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CompactionProducer records attribution evidence for the execution context
+// that produced the summary. The Session command validates this evidence
+// against folded attempt history and the immutable execution plan.
+message CompactionProducer {
+  string producing_execution_attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  Digest session_execution_plan_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  CompactionModelRole model_role = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CompactionModelRole distinguishes the plan-owned primary model from the only
+// auxiliary role permitted to produce a compaction summary.
+enum CompactionModelRole {
+  COMPACTION_MODEL_ROLE_UNSPECIFIED = 0;
+  COMPACTION_MODEL_ROLE_PRIMARY = 1;
+  COMPACTION_MODEL_ROLE_AUXILIARY_COMPACTION = 2;
 }
 
 // CompactionTrigger is why a compaction fired.

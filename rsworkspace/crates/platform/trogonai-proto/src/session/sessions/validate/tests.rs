@@ -13,6 +13,55 @@ fn session_ordinal(value: u64) -> v1alpha1::SessionOrdinal {
     v1alpha1::SessionOrdinal { value }
 }
 
+fn compaction_session_start_root() -> v1alpha1::CompactionContextRoot {
+    v1alpha1::CompactionContextRoot {
+        root: Some(v1alpha1::compaction_context_root::Root::SessionStart(Box::new(
+            v1alpha1::CompactionSessionStart {},
+        ))),
+    }
+}
+
+fn compaction_inherited_prefix_root(
+    source_session_id: &str,
+    context_prefix_boundary: u64,
+) -> v1alpha1::CompactionContextRoot {
+    v1alpha1::CompactionContextRoot {
+        root: Some(v1alpha1::compaction_context_root::Root::InheritedPrefix(Box::new(
+            v1alpha1::CompactionInheritedPrefix {
+                source_session_id: source_session_id.to_string(),
+                context_prefix_boundary: MessageField::some(session_ordinal(context_prefix_boundary)),
+            },
+        ))),
+    }
+}
+
+fn compaction_producer() -> v1alpha1::CompactionProducer {
+    v1alpha1::CompactionProducer {
+        producing_execution_attempt_id: "attempt-1".to_string(),
+        session_execution_plan_digest: MessageField::some(digest()),
+        model_role: buffa::EnumValue::from(v1alpha1::CompactionModelRole::Primary),
+    }
+}
+
+fn compacted() -> v1alpha1::Compacted {
+    v1alpha1::Compacted {
+        session_id: "session-1".to_string(),
+        summary_id: "summary-1".to_string(),
+        summary_content: "summary".to_string(),
+        covers_from: MessageField::some(session_ordinal(1)),
+        covers_through: MessageField::some(session_ordinal(5)),
+        trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
+        guidance: None,
+        tokens_before: None,
+        tokens_after: None,
+        model: Some("model".to_string()),
+        usage: MessageField::none(),
+        context_root: MessageField::some(compaction_session_start_root()),
+        producer: MessageField::some(compaction_producer()),
+        covered_input_digest: MessageField::some(digest()),
+    }
+}
+
 fn workspace_ref() -> v1alpha1::WorkspaceRef {
     v1alpha1::WorkspaceRef {
         workspace_id: "workspace-1".to_string(),
@@ -500,17 +549,8 @@ fn validate_compacted_rejects_empty_summary_content() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::Compacted {
-                session_id: "session-1".to_string(),
-                summary_id: "summary-1".to_string(),
                 summary_content: String::new(),
-                covers_from: MessageField::some(session_ordinal(1)),
-                covers_through: MessageField::some(session_ordinal(5)),
-                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
-                guidance: None,
-                tokens_before: None,
-                tokens_after: None,
-                model: None,
-                usage: MessageField::none(),
+                ..compacted()
             }
             .into(),
         ),
@@ -529,17 +569,9 @@ fn validate_compacted_rejects_range_out_of_order() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::Compacted {
-                session_id: "session-1".to_string(),
-                summary_id: "summary-1".to_string(),
-                summary_content: "summary".to_string(),
                 covers_from: MessageField::some(session_ordinal(5)),
                 covers_through: MessageField::some(session_ordinal(1)),
-                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
-                guidance: None,
-                tokens_before: None,
-                tokens_after: None,
-                model: None,
-                usage: MessageField::none(),
+                ..compacted()
             }
             .into(),
         ),
@@ -555,27 +587,236 @@ fn validate_compacted_rejects_range_out_of_order() {
 }
 
 #[test]
-fn validate_compacted_accepts_in_order_range() {
+fn validate_compacted_rejects_covers_from_past_own_stream_start() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::Compacted {
-                session_id: "session-1".to_string(),
-                summary_id: "summary-1".to_string(),
-                summary_content: "summary".to_string(),
-                covers_from: MessageField::some(session_ordinal(1)),
-                covers_through: MessageField::some(session_ordinal(5)),
-                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
-                guidance: None,
-                tokens_before: None,
-                tokens_after: None,
-                model: None,
-                usage: MessageField::none(),
+                covers_from: MessageField::some(session_ordinal(2)),
+                ..compacted()
             }
             .into(),
         ),
     };
 
+    assert_eq!(
+        validate_session_event(&event),
+        Err(SessionEventValidationError::CompactionCoversFromNotOwnStreamStart { covers_from: 2 })
+    );
+}
+
+#[test]
+fn validate_compacted_accepts_in_order_range() {
+    let event = v1alpha1::SessionEvent {
+        event: Some(compacted().into()),
+    };
+
     assert_eq!(validate_session_event(&event), Ok(()));
+}
+
+#[test]
+fn validate_compacted_rejects_missing_context_root_arm() {
+    let mut event = compacted();
+    event.context_root = MessageField::some(v1alpha1::CompactionContextRoot { root: None });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingOneof {
+            oneof: "compaction_context_root.root"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_missing_context_root() {
+    let mut event = compacted();
+    event.context_root = MessageField::none();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingRequiredField { field: "context_root" })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_empty_inherited_source_session_id() {
+    let mut event = compacted();
+    event.context_root = MessageField::some(compaction_inherited_prefix_root("", 3));
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "context_root.inherited_prefix.source_session_id"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_zero_inherited_context_prefix_boundary() {
+    let mut event = compacted();
+    event.context_root = MessageField::some(compaction_inherited_prefix_root("session-0", 0));
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::OrdinalNotPositive {
+            field: "context_root.inherited_prefix.context_prefix_boundary"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_accepts_inherited_context_and_auxiliary_model() {
+    let mut event = compacted();
+    event.context_root = MessageField::some(compaction_inherited_prefix_root("session-0", 3));
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        model_role: buffa::EnumValue::from(v1alpha1::CompactionModelRole::AuxiliaryCompaction),
+        ..compaction_producer()
+    });
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_compacted_rejects_empty_producing_execution_attempt_id() {
+    let mut event = compacted();
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        producing_execution_attempt_id: String::new(),
+        ..compaction_producer()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier {
+            field: "producer.producing_execution_attempt_id"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_missing_producer() {
+    let mut event = compacted();
+    event.producer = MessageField::none();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingRequiredField { field: "producer" })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_missing_plan_digest() {
+    let mut event = compacted();
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        session_execution_plan_digest: MessageField::none(),
+        ..compaction_producer()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingRequiredField {
+            field: "producer.session_execution_plan_digest"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_invalid_plan_digest() {
+    let mut event = compacted();
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        session_execution_plan_digest: MessageField::some(v1alpha1::Digest {
+            algorithm: "sha256".to_string(),
+            value: vec![0; 31],
+        }),
+        ..compaction_producer()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::Sha256DigestWrongLength {
+            field: "producer.session_execution_plan_digest",
+            actual: 31
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_unspecified_model_role() {
+    let mut event = compacted();
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        model_role: buffa::EnumValue::from(v1alpha1::CompactionModelRole::Unspecified),
+        ..compaction_producer()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "producer.model_role"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_unknown_model_role() {
+    let mut event = compacted();
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        model_role: buffa::EnumValue::from(99),
+        ..compaction_producer()
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::UnspecifiedEnum {
+            field: "producer.model_role"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_accepts_missing_model_attribution() {
+    let mut event = compacted();
+    event.model = None;
+
+    assert_eq!(validate_session_event(&event_of(event)), Ok(()));
+}
+
+#[test]
+fn validate_compacted_rejects_empty_model_attribution() {
+    let mut event = compacted();
+    event.model = Some(String::new());
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::EmptyIdentifier { field: "model" })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_missing_covered_input_digest() {
+    let mut event = compacted();
+    event.covered_input_digest = MessageField::none();
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::MissingRequiredField {
+            field: "covered_input_digest"
+        })
+    );
+}
+
+#[test]
+fn validate_compacted_rejects_invalid_covered_input_digest() {
+    let mut event = compacted();
+    event.covered_input_digest = MessageField::some(v1alpha1::Digest {
+        algorithm: "sha256".to_string(),
+        value: vec![0; 31],
+    });
+
+    assert_eq!(
+        validate_session_event(&event_of(event)),
+        Err(SessionEventValidationError::Sha256DigestWrongLength {
+            field: "covered_input_digest",
+            actual: 31
+        })
+    );
 }
 
 #[test]
@@ -3879,17 +4120,8 @@ fn validate_compacted_accepts_valid_usage_currency_code() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::Compacted {
-                session_id: "session-1".to_string(),
-                summary_id: "summary-1".to_string(),
-                summary_content: "summary".to_string(),
-                covers_from: MessageField::some(session_ordinal(1)),
-                covers_through: MessageField::some(session_ordinal(5)),
-                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
-                guidance: None,
-                tokens_before: None,
-                tokens_after: None,
-                model: None,
                 usage: MessageField::some(token_usage_with_currency("USD")),
+                ..compacted()
             }
             .into(),
         ),
@@ -3903,17 +4135,8 @@ fn validate_compacted_rejects_invalid_usage_currency_code() {
     let event = v1alpha1::SessionEvent {
         event: Some(
             v1alpha1::Compacted {
-                session_id: "session-1".to_string(),
-                summary_id: "summary-1".to_string(),
-                summary_content: "summary".to_string(),
-                covers_from: MessageField::some(session_ordinal(1)),
-                covers_through: MessageField::some(session_ordinal(5)),
-                trigger: buffa::EnumValue::from(v1alpha1::CompactionTrigger::Manual),
-                guidance: None,
-                tokens_before: None,
-                tokens_after: None,
-                model: None,
                 usage: MessageField::some(token_usage_with_currency("usd")),
+                ..compacted()
             }
             .into(),
         ),
