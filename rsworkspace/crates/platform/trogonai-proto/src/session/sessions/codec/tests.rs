@@ -125,6 +125,33 @@ fn session_rewound() -> v1alpha1::SessionRewound {
     }
 }
 
+fn compaction_context_root() -> v1alpha1::CompactionContextRoot {
+    v1alpha1::CompactionContextRoot {
+        root: Some(v1alpha1::compaction_context_root::Root::SessionStart(Box::new(
+            v1alpha1::CompactionSessionStart {},
+        ))),
+    }
+}
+
+fn inherited_compaction_context_root() -> v1alpha1::CompactionContextRoot {
+    v1alpha1::CompactionContextRoot {
+        root: Some(v1alpha1::compaction_context_root::Root::InheritedPrefix(Box::new(
+            v1alpha1::CompactionInheritedPrefix {
+                source_session_id: "session-0".to_string(),
+                context_prefix_boundary: MessageField::some(session_ordinal(3)),
+            },
+        ))),
+    }
+}
+
+fn compaction_producer() -> v1alpha1::CompactionProducer {
+    v1alpha1::CompactionProducer {
+        producing_execution_attempt_id: "attempt-1".to_string(),
+        session_execution_plan_digest: MessageField::some(digest()),
+        model_role: buffa::EnumValue::from(v1alpha1::CompactionModelRole::Primary),
+    }
+}
+
 fn compacted() -> v1alpha1::Compacted {
     v1alpha1::Compacted {
         session_id: "session-1".to_string(),
@@ -138,6 +165,9 @@ fn compacted() -> v1alpha1::Compacted {
         tokens_after: Some(10),
         model: Some("model".to_string()),
         usage: MessageField::none(),
+        context_root: MessageField::some(compaction_context_root()),
+        producer: MessageField::some(compaction_producer()),
+        covered_input_digest: MessageField::some(digest()),
     }
 }
 
@@ -967,6 +997,20 @@ fn assert_round_trips(event: v1alpha1::SessionEvent) {
         .unwrap();
 
     assert_eq!(decoded, event);
+}
+
+#[test]
+fn compacted_round_trips_inherited_context_and_auxiliary_model() {
+    let mut event = compacted();
+    event.context_root = MessageField::some(inherited_compaction_context_root());
+    event.producer = MessageField::some(v1alpha1::CompactionProducer {
+        model_role: buffa::EnumValue::from(v1alpha1::CompactionModelRole::AuxiliaryCompaction),
+        ..compaction_producer()
+    });
+
+    assert_round_trips(v1alpha1::SessionEvent {
+        event: Some(event.into()),
+    });
 }
 
 #[test]

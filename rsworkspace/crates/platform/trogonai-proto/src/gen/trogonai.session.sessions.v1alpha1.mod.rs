@@ -154,6 +154,7 @@ pub mod __buffa {
             include!(
                 "trogonai.session.sessions.v1alpha1.command_termination.__view_oneof.rs"
             );
+            include!("trogonai.session.sessions.v1alpha1.compacted.__view_oneof.rs");
             include!(
                 "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__view_oneof.rs"
             );
@@ -170,6 +171,7 @@ pub mod __buffa {
         include!("trogonai.session.sessions.v1alpha1.tool_call.__oneof.rs");
         include!("trogonai.session.sessions.v1alpha1.message.__oneof.rs");
         include!("trogonai.session.sessions.v1alpha1.command_termination.__oneof.rs");
+        include!("trogonai.session.sessions.v1alpha1.compacted.__oneof.rs");
         include!(
             "trogonai.session.sessions.v1alpha1.operation_outcome_recorded.__oneof.rs"
         );
@@ -204,6 +206,10 @@ pub mod __buffa {
         reg.register_json_any(super::__CHECKPOINT_PRODUCED_JSON_ANY);
         reg.register_json_any(super::__COMMAND_TERMINATION_JSON_ANY);
         reg.register_json_any(super::__COMPACTED_JSON_ANY);
+        reg.register_json_any(super::__COMPACTION_CONTEXT_ROOT_JSON_ANY);
+        reg.register_json_any(super::__COMPACTION_SESSION_START_JSON_ANY);
+        reg.register_json_any(super::__COMPACTION_INHERITED_PREFIX_JSON_ANY);
+        reg.register_json_any(super::__COMPACTION_PRODUCER_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DETACHED_JSON_ANY);
         reg.register_json_any(super::__DELEGATION_DISPATCHED_JSON_ANY);
         reg.register_json_any(super::__DIFF_SUMMARY_JSON_ANY);
@@ -356,6 +362,22 @@ pub use self::__buffa::view::CommandTerminationOwnedView;
 pub use self::__buffa::view::CompactedView;
 #[doc(inline)]
 pub use self::__buffa::view::CompactedOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionContextRootView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionContextRootOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionSessionStartView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionSessionStartOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionInheritedPrefixView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionInheritedPrefixOwnedView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionProducerView;
+#[doc(inline)]
+pub use self::__buffa::view::CompactionProducerOwnedView;
 #[doc(inline)]
 pub use self::__buffa::view::DelegationDetachedView;
 #[doc(inline)]
