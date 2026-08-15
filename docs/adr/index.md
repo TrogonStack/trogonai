@@ -63,3 +63,7 @@ future implementation work.
 - [ADR#0055: NATS Subject Design for JSON-RPC Protocol Bindings (Draft)](./0055-nats-subject-design-jsonrpc-bindings.md)
 - [ADR#0056: Canonical JSON-RPC Bodies over NATS (Draft)](./0056-canonical-jsonrpc-bodies-over-nats.md)
 - [ADR#0057: Credential Platform Extraction Boundary (Proposed)](./0057-credential-platform-extraction-boundary.md)
+- [ADR#0058: API Key Format and Bearer Verifier Construction](./0058-api-key-format-and-verifier-construction.md)
+- [ADR#0059: API Keyspaces and Root Key Bootstrap](./0059-api-keyspaces-and-root-key-bootstrap.md)
+- [ADR#0060: API Key Authorization Model and Rate Limits](./0060-api-key-authorization-model-and-rate-limits.md)
+- [ADR#0061: API Key Rotation Grace and the First-Release Audit Set](./0061-api-key-rotation-grace-and-audit-set.md)
