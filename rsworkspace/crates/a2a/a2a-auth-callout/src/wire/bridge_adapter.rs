@@ -5,6 +5,7 @@ use nats_jwt_rs::authorization::{AuthRequest, ClientInfo, ClientTLS, ConnectOpts
 use nats_jwt_rs::types::GenericFields;
 use nats_jwt_rs::{ClaimType, Claims};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use super::ServerAuthRequestClaims;
 use crate::account_resolver::RequestedAccount;
@@ -24,10 +25,19 @@ struct BridgeClientTls {
 
 impl BridgeClientTls {
     fn into_client_tls(self) -> Result<ClientTLS, AuthCalloutError> {
-        let value =
-            serde_json::to_value(self).map_err(|e| AuthCalloutError::WireFormat(format!("bridge client_tls: {e}")))?;
-        serde_json::from_value(value).map_err(|e| AuthCalloutError::WireFormat(format!("bridge client_tls: {e}")))
+        decode_section("client_tls", encode_section("client_tls", self)?)
     }
+}
+
+/// A section the bridge authors, as the JSON document the wire types are
+/// defined over.
+fn encode_section(section: &'static str, value: impl Serialize) -> Result<serde_json::Value, AuthCalloutError> {
+    serde_json::to_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
+}
+
+/// The same document read back as the wire type, whose fields are private.
+fn decode_section<T: DeserializeOwned>(section: &'static str, value: serde_json::Value) -> Result<T, AuthCalloutError> {
+    serde_json::from_value(value).map_err(|source| AuthCalloutError::BridgeWireFormat { section, source })
 }
 
 impl ServerAuthRequestClaims {
@@ -131,8 +141,7 @@ impl ServerAuthRequestClaims {
         // private (the TLS certificates) off the raw `nats` document, so the
         // synthetic request carries the same projection a server-signed one
         // would.
-        let nats_json = serde_json::to_value(&nats)
-            .map_err(|e| AuthCalloutError::WireFormat(format!("bridge mint claims: {e}")))?;
+        let nats_json = encode_section("nats", &nats)?;
 
         let bridge_issuer = nkeys::KeyPair::new_account();
         let inner: Claims<AuthRequest> = Claims {

@@ -24,22 +24,19 @@ pub(crate) struct SerdeJsonMacro {
 
 impl SerdeJsonMacro {
     pub(crate) fn check_expr<'tcx>(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        // The outermost `serde_json::json!` in the backtrace is the one written
-        // by hand: `json!` expands through `json_internal!`, and a `json!`
-        // nested in another macro call (`vec![json!({})]`) still has to be
-        // reported at its own invocation.
-        let Some(call_site) = macro_backtrace(expr.span)
-            .filter(|call| {
-                call.kind == MacroKind::Bang
-                    && cx.tcx.crate_name(call.def_id.krate).as_str() == "serde_json"
-                    && cx.tcx.item_name(call.def_id).as_str() == "json"
-            })
-            .map(|call| (call.expn, call.span))
-            .last()
-        else {
+        // `macro_backtrace` yields innermost first, and every `json!` frame in it
+        // is hand-written: the expansion goes through `json_internal!`, which
+        // the name check drops. Taking the innermost one reports each site on
+        // its own, including a `json!` nested in another `json!` or in an
+        // unrelated macro call (`vec![json!({})]`).
+        let Some(call) = macro_backtrace(expr.span).find(|call| {
+            call.kind == MacroKind::Bang
+                && cx.tcx.crate_name(call.def_id.krate).as_str() == "serde_json"
+                && cx.tcx.item_name(call.def_id).as_str() == "json"
+        }) else {
             return;
         };
-        let (expn, span) = call_site;
+        let (expn, span) = (call.expn, call.span);
 
         if is_test_context(cx, expr, span) || is_generated(cx, span) {
             return;

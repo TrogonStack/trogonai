@@ -34,6 +34,12 @@ fn nested_in_macro() -> Vec<Value> {
     vec![json!({ "id": 1 })]
 }
 
+// Both the inner and the outer invocation are hand-written, so each is its own
+// site.
+fn nested_in_json() -> Value {
+    json!({ "envelope": json!({ "id": 1 }) })
+}
+
 // The documented opt-out: an `allow` carrying the technical reason.
 #[allow(
     serde_json_macro,
@@ -69,6 +75,7 @@ fn main() {
     let _ = inline_object(1);
     let _ = qualified_invocation();
     let _ = nested_in_macro();
+    let _ = nested_in_json();
     let _ = opted_out("{}");
     let _ = typed_payload(1);
     let _ = test_support::sample();

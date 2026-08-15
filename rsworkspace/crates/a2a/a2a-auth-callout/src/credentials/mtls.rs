@@ -192,10 +192,9 @@ impl X509MtlsVerifier {
             spicedb_subject: sub.as_str(),
             mtls: true,
         };
-        let data =
-            spicedb_bundle_for_opaque(serde_json::to_value(principal).map_err(|e| {
-                CredentialError::InvalidCredentials(format!("mTLS principal serialization failed: {e}"))
-            })?);
+        let data = spicedb_bundle_for_opaque(
+            serde_json::to_value(principal).map_err(CredentialError::PrincipalSerialization)?,
+        );
         let caller_id = derive_caller_id(sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
 
