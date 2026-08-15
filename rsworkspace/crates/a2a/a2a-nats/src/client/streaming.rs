@@ -20,7 +20,7 @@ use super::error::ClientError;
 use super::event_stream::{TypedEventStream, build_event_stream, empty_event_stream};
 use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::validated::ValidatedRpc;
-use super::wire::{decode_client_response, encode_client_request, merge_jsonrpc_headers};
+use super::wire::{decode_client_response, encode_client_request, map_wire_error, merge_jsonrpc_headers};
 
 pub struct StreamingRequest<'a, N, J> {
     pub nats: &'a N,
@@ -77,8 +77,8 @@ where
         op_timeout,
         gateway_caller_jwt,
     } = ctx;
-    let encoded = encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params)
-        .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
+    let encoded =
+        encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params).map_err(map_wire_error)?;
 
     let headers = match gateway_caller_jwt {
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
@@ -98,12 +98,11 @@ where
 
     let response_headers = msg.headers.unwrap_or_default();
     let body = msg.payload.clone();
-    let result = match decode_client_response::<SendMessageResponse>(&response_headers, &body)
-        .map_err(|e| ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?
-    {
-        Ok(result) => result,
-        Err((code, message)) => return Err(ClientError::from_jsonrpc_code(code, message)),
-    };
+    let result =
+        match decode_client_response::<SendMessageResponse>(&response_headers, &body).map_err(map_wire_error)? {
+            Ok(result) => result,
+            Err((code, message)) => return Err(ClientError::from_jsonrpc_code(code, message)),
+        };
 
     // The consumer is opened after the reply, not before it: task event subjects
     // are scoped to the task (ADR#0055), and the bootstrap reply is where the task

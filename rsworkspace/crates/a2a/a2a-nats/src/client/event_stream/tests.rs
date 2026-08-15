@@ -145,7 +145,7 @@ async fn stream_yields_error_on_bad_payload() {
     drop(tx);
 
     let item = stream.next().await;
-    assert!(matches!(item, Some(Err(ClientError::Deserialize(_)))));
+    assert!(matches!(item, Some(Err(ClientError::Codec(_)))));
 }
 
 #[tokio::test]
@@ -159,7 +159,7 @@ async fn stream_yields_error_on_bare_result_payload() {
         .unwrap();
     drop(tx);
 
-    assert!(matches!(stream.next().await, Some(Err(ClientError::Deserialize(_)))));
+    assert!(matches!(stream.next().await, Some(Err(ClientError::Codec(_)))));
 }
 
 #[tokio::test]

@@ -66,16 +66,28 @@ fn roundtrip_reconstructs_canonical_json_at_edge() {
 }
 
 #[test]
-fn map_wire_error_keeps_the_deserialize_source_and_flattens_the_rest() {
+fn map_wire_error_carries_every_variant_across_without_flattening() {
     let source = serde_json::from_str::<DummyResult>("{}").unwrap_err();
-    let mapped = map_wire_error(WireError::Deserialize(source));
-    assert!(matches!(mapped, ClientError::Deserialize(_)));
+    assert!(matches!(
+        map_wire_error(WireError::Deserialize(source)),
+        ClientError::Deserialize(_)
+    ));
 
-    let mapped = map_wire_error(WireError::UnexpectedMessage);
-    let ClientError::Deserialize(e) = mapped else {
-        panic!("every wire error reaches the caller as a deserialize failure");
-    };
-    assert!(e.to_string().contains("unexpected JSON-RPC message variant"));
+    let source = serde_json::from_str::<DummyResult>("{}").unwrap_err();
+    assert!(matches!(
+        map_wire_error(WireError::Serialize(source)),
+        ClientError::Serialize(_)
+    ));
+
+    assert!(matches!(
+        map_wire_error(WireError::Codec(jsonrpc_nats::CodecError::RequestWithoutId)),
+        ClientError::Codec(_)
+    ));
+
+    assert!(matches!(
+        map_wire_error(WireError::UnexpectedMessage),
+        ClientError::UnexpectedMessage
+    ));
 }
 
 #[test]

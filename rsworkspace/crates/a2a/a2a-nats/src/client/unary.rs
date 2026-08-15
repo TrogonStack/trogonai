@@ -50,8 +50,8 @@ where
     Req: Serialize,
     Res: DeserializeOwned,
 {
-    let encoded = encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params)
-        .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
+    let encoded =
+        encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params).map_err(map_wire_error)?;
 
     let headers = match gateway_caller_jwt {
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,

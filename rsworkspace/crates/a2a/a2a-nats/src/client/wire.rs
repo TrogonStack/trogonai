@@ -19,10 +19,17 @@ pub fn decode_client_response<Res: DeserializeOwned>(
     decode_response(headers, body)
 }
 
+/// The single wire-to-client error mapping. Every variant keeps its own
+/// identity: flattening `Codec` and `UnexpectedMessage` into a synthesized
+/// `Deserialize` would report a peer that broke the JSON-RPC framing as a
+/// caller whose result type did not match, and callers cannot tell those apart
+/// from a string.
 pub fn map_wire_error(error: WireError) -> ClientError {
     match error {
+        WireError::Serialize(e) => ClientError::Serialize(e),
         WireError::Deserialize(e) => ClientError::Deserialize(e),
-        other => ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{other}"))),
+        WireError::Codec(e) => ClientError::Codec(e),
+        WireError::UnexpectedMessage => ClientError::UnexpectedMessage,
     }
 }
 
