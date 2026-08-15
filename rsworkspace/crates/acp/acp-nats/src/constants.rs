@@ -30,3 +30,16 @@ pub const CONTENT_TYPE_PLAIN: &str = "text/plain";
 
 pub const SESSION_ID_HEADER: &str = "X-Session-Id";
 pub const CAUSATION_ID_HEADER: &str = "X-Causation-Id";
+
+/// Stream suffixes this crate used to provision and no longer does.
+///
+/// Dropping a variant from `AcpStream` stops the provisioner from creating the
+/// stream, but a deployment that ran an earlier release still has it, still has
+/// its stored messages, and still bills for its storage. Nothing here deletes
+/// anything: a stream delete is unrecoverable, it races an operator who may still
+/// be draining the old stream, and a rollback to the prior release would silently
+/// re-create it empty. Retirement is an operator step, and this list is what names
+/// the streams that step applies to.
+///
+/// See `docs/how-to/retire-acp-notifications-stream.md`.
+pub const RETIRED_STREAM_SUFFIXES: [&str; 1] = ["NOTIFICATIONS"];

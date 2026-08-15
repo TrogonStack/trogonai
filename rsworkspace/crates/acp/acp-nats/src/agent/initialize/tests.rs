@@ -105,7 +105,6 @@ async fn handlers_use_custom_prefix() {
         trogon_std::time::SystemClock,
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("myorg.prod"),
-        tokio::sync::mpsc::channel(1).0,
     );
     let expected = InitializeResponse::new(ProtocolVersion::LATEST);
     set_json_response(&mock, "myorg.prod.v1.global.agent.initialize", &expected);

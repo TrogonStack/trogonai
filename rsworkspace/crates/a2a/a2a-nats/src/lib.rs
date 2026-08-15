@@ -22,6 +22,7 @@ pub mod nats;
 pub mod push;
 pub mod req_id;
 pub mod server;
+pub mod task_event;
 pub mod task_id;
 pub mod wire;
 
@@ -38,7 +39,8 @@ pub use gateway_ingress::{
     ingress_gateway_tier3_refused_response_bytes, ingress_invalid_request_response_bytes,
     resolve_gateway_ingress_subject,
 };
-pub use jsonrpc::{JsonRpcId, extract_request_id};
+pub use jsonrpc::extract_request_id;
+pub use jsonrpc_nats::{RequestId, ResponseId};
 pub use req_id::ReqId;
 pub use server::A2aMethod;
 pub use task_id::{A2aTaskId, TaskIdError};

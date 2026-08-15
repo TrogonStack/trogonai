@@ -148,7 +148,7 @@ async fn io_loop_handles_invalid_request_envelope() {
     let (stdin_reader, mut stdin_writer) = tokio::io::duplex(4096);
     let (mut stdout_reader, stdout_writer) = tokio::io::duplex(4096);
 
-    // Valid JSON but missing the required `method` field on InboundRequest.
+    // Valid JSON but missing the `method` field a JSON-RPC request requires.
     stdin_writer.write_all(b"{\"id\":1}\n").await.unwrap();
     drop(stdin_writer);
 

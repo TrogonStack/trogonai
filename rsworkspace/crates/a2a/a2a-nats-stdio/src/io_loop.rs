@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use a2a_nats::client::A2aClient;
+use jsonrpc_nats::{CodecError, Message, RequestId, ResponseId, from_json_value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
@@ -15,7 +16,7 @@ use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck,
 
 use crate::constants::{CHANNEL_CAP, MAX_INFLIGHT_DISPATCH};
 use crate::dispatch::dispatch_request;
-use crate::wire::{InboundRequest, OutboundError, OutboundFrame, RpcId};
+use crate::wire::OutboundFrame;
 
 /// Returns `Err` when the stdout writer task failed (broken pipe, write/flush
 /// error). Callers should propagate so the process exits non-zero — a stdio
@@ -153,7 +154,7 @@ where
                                         shutdown_requested = true;
                                         break 'outer;
                                     }
-                                    _ = frame_tx.send(OutboundFrame::Error(err)) => {}
+                                    _ = frame_tx.send(*err) => {}
                                 }
                                 continue;
                             }
@@ -277,34 +278,38 @@ fn writer_task_err(res: Result<std::io::Result<()>, tokio::task::JoinError>) -> 
 /// Split JSON-syntax failures (`-32700` Parse error) from envelope-shape
 /// failures (`-32600` Invalid Request). JSON-RPC reserves `-32700` for actual
 /// invalid JSON; structurally invalid requests are a different class.
-fn parse_inbound(raw: &str) -> Result<(RpcId, String, serde_json::Value), OutboundError> {
+fn parse_inbound(raw: &str) -> Result<(RequestId, String, serde_json::Value), Box<OutboundFrame>> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
         warn!(error = %e, "stdin line is not valid JSON");
-        OutboundError::new(RpcId::Null, -32700, format!("parse error: {e}"))
+        Box::new(OutboundFrame::error(
+            ResponseId::Null,
+            -32700,
+            format!("parse error: {e}"),
+        ))
     })?;
     // Salvage the request id from the raw JSON before the envelope check so a
     // malformed-shape `-32600` reply still correlates with the originating
     // call. JSON-RPC requires echoing the id when it can be determined.
     let salvaged_id = value
         .get("id")
-        .and_then(|v| serde_json::from_value::<RpcId>(v.clone()).ok())
-        .unwrap_or(RpcId::Null);
-    // InboundRequest deserializes only `id`/`method`/`params`, so a missing or
-    // wrong `jsonrpc` would otherwise dispatch as a real call. JSON-RPC 2.0
-    // requires the version field exactly equal to "2.0".
-    if !matches!(value.get("jsonrpc"), Some(serde_json::Value::String(v)) if v == "2.0") {
-        warn!("JSON-RPC envelope has missing or wrong version");
-        return Err(OutboundError::new(
-            salvaged_id,
-            -32600,
+        .and_then(|v| serde_json::from_value::<ResponseId>(v.clone()).ok())
+        .unwrap_or(ResponseId::Null);
+    let invalid_request = |message: String| {
+        warn!(message, "JSON-RPC envelope is invalid");
+        Box::new(OutboundFrame::error(salvaged_id.clone(), -32600, message))
+    };
+    match from_json_value(&value) {
+        Ok(Message::Request { id, method, params }) => Ok((id, method, params)),
+        // A notification carries no id, so its reply could never be correlated;
+        // the stdio bridge answers requests only.
+        Ok(_) => Err(invalid_request(
+            "invalid request: expected a JSON-RPC request".to_string(),
+        )),
+        Err(CodecError::UnsupportedVersion { .. }) => Err(invalid_request(
             "invalid request: missing or unsupported jsonrpc version".to_string(),
-        ));
+        )),
+        Err(e) => Err(invalid_request(format!("invalid request: {e}"))),
     }
-    let req: InboundRequest = serde_json::from_value(value).map_err(|e| {
-        warn!(error = %e, "JSON-RPC envelope is invalid");
-        OutboundError::new(salvaged_id, -32600, format!("invalid request: {e}"))
-    })?;
-    Ok((req.id, req.method, req.params))
 }
 
 // Loop-exercising tests are gated to `cfg(not(coverage))` — see the io_loop

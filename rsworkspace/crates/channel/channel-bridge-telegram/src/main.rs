@@ -28,7 +28,7 @@ mod render;
 // coverage build and is exercised by the module tests.
 #[cfg(not(coverage))]
 use {
-    acp_nats::{AgentHandler, ClientHandler},
+    acp_nats::AgentHandler,
     acp_port::{AcpBridge, AcpPort, SessionMethods},
     agent_client_protocol::schema::ProtocolVersion,
     agent_client_protocol::schema::v1::InitializeRequest,
@@ -149,7 +149,6 @@ async fn run(
     config: BridgeConfig,
 ) -> anyhow::Result<()> {
     let meter = trogon_telemetry::meter("channel-bridge-telegram");
-    let (notification_tx, mut notification_rx) = tokio::sync::mpsc::channel(64);
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(
         nats_client.clone(),
@@ -157,7 +156,6 @@ async fn run(
         trogon_std::time::SystemClock,
         &meter,
         config.acp.clone(),
-        notification_tx,
     ));
     let renderer = Arc::new(TelegramRenderClient::new());
 
@@ -166,16 +164,6 @@ async fn run(
         renderer.clone(),
         bridge.clone(),
     ));
-    let renderer_for_rx = renderer.clone();
-    let mut notification_task = tokio::task::spawn_local(async move {
-        while let Some(notification) = notification_rx.recv().await {
-            if let Err(e) = renderer_for_rx.session_notification(notification).await {
-                error!(error = ?e, "Render client rejected a session notification");
-                break;
-            }
-        }
-    });
-
     let initialized = bridge
         .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
         .await
@@ -213,10 +201,6 @@ async fn run(
                 error!(?result, "ACP client task ended; agent responses can no longer be rendered");
                 break;
             }
-            result = &mut notification_task => {
-                error!(?result, "Notification task ended; agent responses can no longer be rendered");
-                break;
-            }
             next = messages.next() => {
                 let Some(next) = next else {
                     warn!("Inbound consumer stream ended");
@@ -237,7 +221,6 @@ async fn run(
     }
 
     client_task.abort();
-    notification_task.abort();
     Ok(())
 }
 

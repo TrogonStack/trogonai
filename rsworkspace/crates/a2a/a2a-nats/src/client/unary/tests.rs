@@ -142,7 +142,7 @@ async fn hang_returns_timeout_error() {
 }
 
 #[tokio::test]
-async fn malformed_response_returns_deserialize_error() {
+async fn malformed_response_returns_a_codec_error() {
     let mock = AdvancedMockNatsClient::new();
     mock.set_response_wire(
         "a2a.v1.agents.bot.tasks.get",
@@ -161,7 +161,7 @@ async fn malformed_response_returns_deserialize_error() {
     )
     .await;
 
-    assert!(matches!(result, Err(ClientError::Deserialize(_))));
+    assert!(matches!(result, Err(ClientError::Codec(_))));
 }
 
 #[tokio::test]

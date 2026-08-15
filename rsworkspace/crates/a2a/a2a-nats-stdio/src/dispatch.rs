@@ -6,15 +6,16 @@ use a2a::types::{
 use a2a_nats::client::{A2aClient, ClientError, ValidatedRpc};
 use a2a_nats::task_id::A2aTaskId;
 use futures::StreamExt;
+use jsonrpc_nats::{RequestId, ResponseId};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::constants::{INVALID_PARAMS, METHOD_NOT_FOUND};
-use crate::wire::{OutboundError, OutboundFrame, OutboundNotification, RpcId};
+use crate::wire::OutboundFrame;
 
-fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
+fn client_err_to_frame(id: RequestId, err: ClientError) -> OutboundFrame {
     let (code, message) = match &err {
         ClientError::TaskNotFound => (a2a_nats::error::TASK_NOT_FOUND, err.to_string()),
         ClientError::TaskNotCancelable => (a2a_nats::error::TASK_NOT_CANCELABLE, err.to_string()),
@@ -33,38 +34,29 @@ fn client_err_to_frame(id: RpcId, err: ClientError) -> OutboundFrame {
         ClientError::JsonRpc { code, message } => (*code, message.clone()),
         _ => (-32603, err.to_string()),
     };
-    OutboundFrame::Error(OutboundError::new(id, code, message))
+    OutboundFrame::error(ResponseId::from(id), code, message)
 }
 
 fn parse_params<T: serde::de::DeserializeOwned>(params: Value) -> Result<T, Box<OutboundFrame>> {
-    serde_json::from_value(params).map_err(|e| {
-        Box::new(OutboundFrame::Error(OutboundError::new(
-            RpcId::Null,
-            INVALID_PARAMS,
-            e.to_string(),
-        )))
-    })
+    serde_json::from_value(params)
+        .map_err(|e| Box::new(OutboundFrame::error(ResponseId::Null, INVALID_PARAMS, e.to_string())))
 }
 
-fn forward_validated<T>(id: &RpcId, validated: ValidatedRpc<T>) -> OutboundFrame {
-    match validated.body_with_client_id(&id.to_json_value()) {
+fn forward_validated<T>(id: &RequestId, validated: ValidatedRpc<T>) -> OutboundFrame {
+    match validated.body_with_client_id(&id.to_json()) {
         Ok(body) => OutboundFrame::RawBody(body),
-        Err(e) => OutboundFrame::Error(OutboundError::new(id.clone(), -32603, e.to_string())),
+        Err(e) => OutboundFrame::error(ResponseId::from(id.clone()), -32603, e.to_string()),
     }
 }
 
-/// `method` is the JSON-RPC method this notification is associated with —
-/// `message/stream` for the streaming send path, `tasks/resubscribe` for the
-/// resubscribe path. Clients route notifications by method, so emitting the
-/// wrong one makes the resubscribe stream invisible to compliant callers.
-fn stream_event_to_frame(id: &RpcId, method: &'static str, event: &StreamResponse) -> OutboundFrame {
-    let params = serde_json::to_value(event).unwrap_or(Value::Null);
-    OutboundFrame::Notification(OutboundNotification::new(id.clone(), method, params))
+fn stream_event_to_frame(id: &RequestId, event: &StreamResponse) -> OutboundFrame {
+    let result = serde_json::to_value(event).unwrap_or(Value::Null);
+    OutboundFrame::success(ResponseId::from(id.clone()), result)
 }
 
 pub async fn dispatch_request<N, J>(
     client: &A2aClient<N, J>,
-    id: RpcId,
+    id: RequestId,
     method: &str,
     params: Value,
     tx: &mpsc::Sender<OutboundFrame>,
@@ -117,7 +109,7 @@ pub async fn dispatch_request<N, J>(
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(event) => {
-                                let frame = stream_event_to_frame(&id, "message/stream", &event);
+                                let frame = stream_event_to_frame(&id, &event);
                                 if tx.send(frame).await.is_err() {
                                     return;
                                 }
@@ -197,11 +189,11 @@ pub async fn dispatch_request<N, J>(
                 Ok(t) => t,
                 Err(e) => {
                     let _ = tx
-                        .send(OutboundFrame::Error(OutboundError::new(
-                            id,
+                        .send(OutboundFrame::error(
+                            ResponseId::from(id),
                             INVALID_PARAMS,
                             e.to_string(),
-                        )))
+                        ))
                         .await;
                     return;
                 }
@@ -220,7 +212,7 @@ pub async fn dispatch_request<N, J>(
                     while let Some(item) = stream.next().await {
                         match item {
                             Ok(event) => {
-                                let frame = stream_event_to_frame(&id, "tasks/resubscribe", &event);
+                                let frame = stream_event_to_frame(&id, &event);
                                 if tx.send(frame).await.is_err() {
                                     return;
                                 }
@@ -297,24 +289,18 @@ pub async fn dispatch_request<N, J>(
             Err(e) => client_err_to_frame(id, e),
         },
 
-        unknown => OutboundFrame::Error(OutboundError::new(
-            id,
+        unknown => OutboundFrame::error(
+            ResponseId::from(id),
             METHOD_NOT_FOUND,
             format!("method not found: {unknown}"),
-        )),
+        ),
     };
 
     let _ = tx.send(frame).await;
 }
 
-fn make_with_id(frame: OutboundFrame, id: &RpcId) -> OutboundFrame {
-    match frame {
-        OutboundFrame::Error(mut err) => {
-            err.id = id.clone();
-            OutboundFrame::Error(err)
-        }
-        other => other,
-    }
+fn make_with_id(frame: OutboundFrame, id: &RequestId) -> OutboundFrame {
+    frame.with_error_id(ResponseId::from(id.clone()))
 }
 
 #[cfg(test)]

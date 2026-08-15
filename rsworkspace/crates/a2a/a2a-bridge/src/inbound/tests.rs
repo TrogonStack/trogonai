@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::stream::{self, Stream};
 use serde_json::json;
@@ -298,6 +299,24 @@ async fn handle_jsonrpc_unary_publish_records_gateway_subject() {
     );
 }
 
+#[tokio::test]
+async fn handle_jsonrpc_rejects_a_streaming_request_without_a_usable_id() {
+    for id in [json!(null), json!({})] {
+        let publisher = Arc::new(RecordingInboundPublisher::new());
+        let state = test_state(publisher.clone());
+        let body =
+            Bytes::from(json!({ "jsonrpc": "2.0", "id": id, "method": "message/stream", "params": {} }).to_string());
+        let err = handle_jsonrpc(caller_headers("planner", None), body, &state)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BridgeError::MissingJsonRpcId), "id {id} was accepted");
+        assert!(
+            publisher.peek_subject().is_none(),
+            "the gateway must not open a stream nobody can correlate"
+        );
+    }
+}
+
 #[test]
 fn json_rpc_corr_id_null_and_complex_ids_mint_fresh() {
     for body in [json!({"id": null}), json!({"id": []}), json!({"id": {}})] {
@@ -372,4 +391,103 @@ async fn handle_jsonrpc_invalid_agent_header_errors() {
     );
     let err = handle_jsonrpc(headers, Bytes::new(), &state).await.unwrap_err();
     assert!(matches!(err, BridgeError::InvalidAgent(_)));
+}
+
+/// Reads an SSE stream the way a caller does: every frame is an unnamed
+/// `data:` line, so the JSON bodies are what the assertions look at.
+async fn sse_frames(stream: BoxStream<'static, Result<Event, Infallible>>) -> Vec<String> {
+    let response = Sse::new(stream).into_response();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:").map(|d| d.trim().to_owned()))
+        .collect()
+}
+
+#[tokio::test]
+async fn every_sse_frame_is_a_json_rpc_response_carrying_the_caller_id() {
+    let bootstrap = serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap();
+    let tail = stream::iter(vec![
+        Ok(Bytes::from_static(b"not-an-envelope")),
+        Err(BridgeError::JetStreamConsume("consumer gone".into())),
+    ]);
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        bootstrap,
+        Box::pin(tail),
+        json!("corr-1"),
+    ))
+    .await;
+
+    assert_eq!(frames.len(), 3);
+    let bootstrap: serde_json::Value = serde_json::from_str(&frames[0]).unwrap();
+    assert_eq!(bootstrap["id"], "corr-1");
+    assert_eq!(bootstrap["result"]["taskId"], "t-1");
+
+    let undecodable: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
+    assert_eq!(undecodable["id"], "corr-1");
+    assert_eq!(undecodable["error"]["code"], INTERNAL_ERROR);
+
+    let failure: serde_json::Value = serde_json::from_str(&frames[2]).unwrap();
+    assert_eq!(failure["id"], "corr-1");
+    assert_eq!(failure["error"]["code"], INTERNAL_ERROR);
+    assert!(
+        failure["error"]["message"].as_str().unwrap().contains("consumer gone"),
+        "the caller keeps the only diagnostic the stream produced: {failure}"
+    );
+}
+
+#[tokio::test]
+async fn a_json_object_that_answers_nothing_leaves_as_an_error_frame() {
+    // Being a JSON object is not being a response. An empty body or a
+    // request-shaped one carries no result and no error, so stamping the caller's
+    // id onto it would put a `data:` line on the wire that answers nothing.
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![
+            Ok(Bytes::from(serde_json::to_vec(&json!({})).unwrap())),
+            Ok(Bytes::from(
+                serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"message/stream","params":{}})).unwrap(),
+            )),
+        ])),
+        json!("corr-1"),
+    ))
+    .await;
+
+    for frame in &frames[1..] {
+        let value: serde_json::Value = serde_json::from_str(frame).unwrap();
+        assert_eq!(value["id"], "corr-1");
+        assert_eq!(value["error"]["code"], INTERNAL_ERROR, "{value}");
+        assert!(value["result"].is_null(), "{value}");
+    }
+}
+
+#[tokio::test]
+async fn an_event_an_older_agent_published_reaches_the_caller_as_a_response() {
+    // The events stream retains by limits and a rolling upgrade runs both agent
+    // releases at once, so this edge still meets bare events. Stamping an id onto
+    // one and forwarding it would emit a `data:` line that is no JSON-RPC response.
+    let legacy = serde_json::to_vec(&a2a::event::StreamResponse::StatusUpdate(
+        a2a::event::TaskStatusUpdateEvent {
+            task_id: "t-1".to_owned(),
+            context_id: "ctx".to_owned(),
+            status: a2a::types::TaskStatus {
+                state: a2a::types::TaskState::Working,
+                message: None,
+                timestamp: None,
+            },
+            metadata: None,
+        },
+    ))
+    .unwrap();
+    let frames = sse_frames(sse_from_bootstrap_and_payloads(
+        serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"transport-9","result":{"taskId":"t-1"}})).unwrap(),
+        Box::pin(stream::iter(vec![Ok(Bytes::from(legacy))])),
+        json!("corr-1"),
+    ))
+    .await;
+
+    let event: serde_json::Value = serde_json::from_str(&frames[1]).unwrap();
+    assert_eq!(event["jsonrpc"], "2.0");
+    assert_eq!(event["id"], "corr-1");
+    assert_eq!(event["result"]["statusUpdate"]["taskId"], "t-1");
 }

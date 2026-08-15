@@ -85,7 +85,7 @@ where
                     let bootstrap_sse = futures::stream::once(async move {
                         Ok::<Event, Infallible>(Event::default().data(String::from_utf8_lossy(&bootstrap_bytes)))
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id, "message/stream");
+                    let sse_stream = typed_event_stream_to_sse(stream, id);
                     sse_response(bootstrap_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),
@@ -163,7 +163,7 @@ where
                     let snapshot_sse = futures::stream::once(async move {
                         Ok::<Event, Infallible>(Event::default().data(String::from_utf8_lossy(&snapshot_bytes)))
                     });
-                    let sse_stream = typed_event_stream_to_sse(stream, id, "tasks/resubscribe");
+                    let sse_stream = typed_event_stream_to_sse(stream, id);
                     sse_response(snapshot_sse.chain(sse_stream))
                 }
                 Err(e) => jsonrpc_error_response(&id, &e),

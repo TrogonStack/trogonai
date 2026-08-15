@@ -194,3 +194,18 @@ fn json_rpc_audit_req_id_returns_request_id_when_present() {
     let payload = br#"{"jsonrpc":"2.0","id":"req-42","method":"tasks/get","params":{}}"#;
     assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("req-42"));
 }
+
+#[test]
+fn json_rpc_audit_req_id_renders_a_numeric_id_as_its_decimal_text() {
+    let payload = br#"{"jsonrpc":"2.0","id":42,"method":"tasks/get","params":{}}"#;
+    assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("42"));
+}
+
+#[test]
+fn json_rpc_audit_req_id_matches_the_req_id_header_the_bridge_would_mint() {
+    // The audit row joins the request through `Trogon-Req-Id`, and the bridge
+    // mints that from a string id as its bare text. Quoting it here would
+    // produce a row that joins nothing.
+    let payload = br#"{"jsonrpc":"2.0","id":"corr-1","method":"tasks/get","params":{}}"#;
+    assert_eq!(json_rpc_audit_req_id(payload).as_deref(), Some("corr-1"));
+}

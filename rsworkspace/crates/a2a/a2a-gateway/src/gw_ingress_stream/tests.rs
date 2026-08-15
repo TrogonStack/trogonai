@@ -200,6 +200,37 @@ fn req_id_from_payload_when_header_absent() {
 }
 
 #[test]
+fn req_id_from_a_numeric_payload_id_uses_its_decimal_text() {
+    let headers = async_nats::HeaderMap::new();
+    let payload = br#"{"jsonrpc":"2.0","id":7,"method":"x"}"#;
+    let req_id = req_id_from_headers_or_payload(&headers, payload).expect("payload extract");
+    assert_eq!(req_id.as_str(), "7");
+}
+
+#[test]
+fn a_payload_derived_req_id_can_still_match_an_event_the_agent_stamped() {
+    // The agent stamps task events with the bare string id, so a pump that
+    // derived its filter from the body has to produce that same text or it
+    // discards every event as belonging to another request.
+    let headers = async_nats::HeaderMap::new();
+    let req_id = req_id_from_headers_or_payload(&headers, br#"{"jsonrpc":"2.0","id":"corr-1","method":"x"}"#)
+        .expect("payload extract");
+
+    let mut event = async_nats::HeaderMap::new();
+    event.insert(a2a_nats::constants::REQ_ID_HEADER, "corr-1");
+    assert!(req_id.matches_event_headers(Some(&event)));
+}
+
+#[test]
+fn req_id_is_none_for_a_null_json_rpc_id() {
+    // A `"null"` string would collapse every null-id envelope onto one
+    // correlation key, so the pump is not spawned at all.
+    let headers = async_nats::HeaderMap::new();
+    let payload = br#"{"jsonrpc":"2.0","id":null,"method":"x"}"#;
+    assert!(req_id_from_headers_or_payload(&headers, payload).is_none());
+}
+
+#[test]
 fn streaming_ingress_kind_resubscribe_requires_task_id_by_type() {
     // Compile-only check: the variant has `task_id` as a non-optional
     // field, so a typo or missing-field bug surfaces at the call site

@@ -34,7 +34,7 @@ now needs:
    message. This is *envelope* reconstruction and is unrelated to
    [ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md), which rejected
    *payload* passthrough (forwarding `params` as an untyped `Value` instead of
-   decoding it). [ADR#0021](0021-typed-decode-over-passthrough-forwarding.md) is unaffected by this ADR; see §7.
+   decoding it). [ADR#0021](0021-typed-decode-over-passthrough-forwarding.md) is unaffected by this ADR; see §8.
 
 [ADR#0041](./0041-canonical-mcp-jsonrpc-bodies-over-nats.md) (draft) already
 moves MCP to canonical full-envelope bodies with non-authoritative header
@@ -148,7 +148,34 @@ This ADR adds only that the `id` is application-level, travels authoritatively i
 the body, and is projected to `Jsonrpc-Id`. `Nats-Msg-Id` stays reserved for
 JetStream deduplication.
 
-### 5. MCP-specific rules carried from [ADR#0041](0041-canonical-mcp-jsonrpc-bodies-over-nats.md)
+### 5. A streaming chunk is a response, not a notification
+
+A2A streams `message/stream` and `tasks/resubscribe` as a sequence of JSON-RPC
+**success responses that repeat the request id**, terminated by the one whose
+result is final. Each chunk on the NATS leg carries that complete object:
+
+```json
+{"jsonrpc": "2.0", "id": "<request id>", "result": { "statusUpdate": { } }}
+```
+
+This is not a stylistic choice. A server push carrying both an `id` and a
+`method` is a *request* under JSON-RPC, and one carrying a `method` without an
+`id` is a notification the caller cannot correlate to the subscription it opened.
+Only the response shape says "this belongs to the call you made" without
+inventing a member the specification does not define.
+
+Because the chunk is complete at the point of publish, every hop after it
+forwards the bytes: the gateway egress pump, the HTTP bridge, the SSE facade,
+and the stdio bridge each emit the body verbatim rather than each inventing an
+envelope. An edge that owns the caller's id (a bridge whose caller minted its own
+`id`) rewrites only that member.
+
+ACP is the opposite case and stays so: its mid-turn `session/update` really is a
+notification (id-less, method-bearing) and the terminal `PromptResponse` is the
+only message answering the request id. The difference is in the upstream
+protocols, not in this binding.
+
+### 6. MCP-specific rules carried from [ADR#0041](0041-canonical-mcp-jsonrpc-bodies-over-nats.md)
 
 These remain in force for MCP and are unchanged by the ACP/A2A migration:
 
@@ -159,14 +186,14 @@ These remain in force for MCP and are unchanged by the ACP/A2A migration:
   `Mcp-Name`, `Mcp-Param-*`. `Mcp-Session-Id` and unrelated HTTP headers are not
   forwarded. Those headers remain derived metadata validated against the body.
 
-### 6. Shared package; legacy content mode removed after migration
+### 7. Shared package; legacy content mode removed after migration
 
 The shared `jsonrpc-nats` package owns encode/decode. After ACP and A2A migrate
 to the canonical APIs, the legacy content-mode `encode`/`decode` are removed (or
 deprecated with a removal milestone). A bridge that hand-builds an envelope
 forwards the body unmodified instead, where that assembly is redundant.
 
-### 7. What this ADR does not change
+### 8. What this ADR does not change
 
 - **Typed payload decode stays.**
   [ADR#0021](./0021-typed-decode-over-passthrough-forwarding.md) (accepted) keeps
@@ -198,6 +225,8 @@ forwards the body unmodified instead, where that assembly is redundant.
   subject terminal that is not the body method's projection under the binding's
   method-to-terminal mapping.
 - `"jsonrpc":"2.0"` travels in the body; it is not duplicated into a header.
+- Every A2A stream chunk deserializes as a JSON-RPC success response bearing the
+  request id, on the NATS leg and on every edge that forwards it.
 - MCP `params._meta` and allowlisted `Mcp-*` / `MCP-Protocol-Version` headers
   survive an HTTP proxy to NATS round trip.
 

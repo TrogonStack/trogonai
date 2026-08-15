@@ -1,17 +1,17 @@
 use std::time::Duration;
 
+use jsonrpc_nats::RequestId;
 use serde::{Serialize, de::DeserializeOwned};
 use trogon_nats::RequestClient;
 
 use a2a_identity_types::MintedUserJwt;
 
-use crate::jsonrpc::JsonRpcId;
 use crate::req_id::ReqId;
 
 use super::error::ClientError;
 use super::gateway_headers::{agent_rpc_headers, gateway_ingress_rpc_headers};
 use super::validated::ValidatedRpc;
-use super::wire::{decode_client_response, encode_client_request, merge_jsonrpc_headers};
+use super::wire::{decode_client_response, encode_client_request, map_wire_error, merge_jsonrpc_headers};
 
 pub async fn send_unary<N, Req, Res>(
     nats: &N,
@@ -50,8 +50,8 @@ where
     Req: Serialize,
     Res: DeserializeOwned,
 {
-    let encoded = encode_client_request(method, JsonRpcId::String(req_id.as_str().to_owned()), params)
-        .map_err(|e| ClientError::Serialize(<serde_json::Error as serde::de::Error>::custom(format!("{e}"))))?;
+    let encoded =
+        encode_client_request(method, RequestId::String(req_id.as_str().to_owned()), params).map_err(map_wire_error)?;
 
     let headers = match gateway_caller_jwt {
         Some(jwt) => gateway_ingress_rpc_headers(req_id, jwt)?,
@@ -74,13 +74,6 @@ where
     match decode_client_response::<Res>(&response_headers, &body).map_err(map_wire_error)? {
         Ok(result) => Ok(ValidatedRpc::new(result, body)),
         Err((code, message)) => Err(ClientError::from_jsonrpc_code(code, message)),
-    }
-}
-
-fn map_wire_error(error: crate::wire::WireError) -> ClientError {
-    match error {
-        crate::wire::WireError::Deserialize(e) => ClientError::Deserialize(e),
-        other => ClientError::Deserialize(<serde_json::Error as serde::de::Error>::custom(format!("{other}"))),
     }
 }
 

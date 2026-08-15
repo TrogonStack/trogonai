@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use jsonrpc_nats::ResponseId;
 use tracing::{instrument, warn};
 use trogon_nats::jetstream::JetStreamPublisher;
 use trogon_semconv::span::A2A_SERVER_MESSAGE_STREAM;
@@ -7,7 +8,6 @@ use crate::a2a_prefix::A2aPrefix;
 use crate::constants::{
     GATEWAY_CALLER_ID_HEADER, GATEWAY_PRINCIPAL_HEADER, MESSAGE_STREAM_METHOD as METHOD, REQ_ID_HEADER,
 };
-use crate::jsonrpc::JsonRpcId;
 use crate::nats::subjects::tasks::TaskEventsSubject;
 use crate::req_id::ReqId;
 use crate::server::handler::{A2aError, A2aExecutor};
@@ -15,6 +15,7 @@ use crate::server::wire::{
     encode_error_reply, encode_success_reply, is_notification, parse_request_params, request_id,
 };
 use crate::task_id::A2aTaskId;
+use crate::wire::merge_jsonrpc_headers;
 
 /// Handles `message/stream`.
 ///
@@ -95,21 +96,28 @@ pub async fn handle<H, N, J>(
     let events_subject = TaskEventsSubject::new(prefix, &task_id).to_string();
     let event_headers = event_headers(headers, &req_id);
     while let Some(item) = events.next().await {
-        let payload = match item {
-            Ok(event) => match serde_json::to_vec(&event) {
-                Ok(b) => bytes::Bytes::from(b),
-                Err(e) => {
-                    warn!(error = %e, "failed to serialize task event; ending stream");
-                    return;
-                }
-            },
+        let event = match item {
+            Ok(event) => event,
             Err(e) => {
                 warn!(error = %e, "task event stream yielded error; ending stream");
                 return;
             }
         };
+        // Each event is a full JSON-RPC success response repeating the request id,
+        // which is the shape the A2A spec puts on the wire for `message/stream` and
+        // `tasks/resubscribe`. Every hop downstream (gateway pump, bridge, stdio,
+        // SSE) forwards these bytes verbatim, so encoding once here is what keeps
+        // the edges from each inventing their own envelope.
+        let encoded = match encode_success_reply(headers, &event) {
+            Ok(encoded) => encoded,
+            Err(e) => {
+                warn!(error = %e, "failed to encode task event; ending stream");
+                return;
+            }
+        };
         let subject = async_nats::Subject::from(events_subject.as_str());
-        if let Err(e) = js.publish_with_headers(subject, event_headers.clone(), payload).await {
+        let publish_headers = merge_jsonrpc_headers(event_headers.clone(), encoded.headers);
+        if let Err(e) = js.publish_with_headers(subject, publish_headers, encoded.body).await {
             warn!(error = %e, "failed to publish task event to JetStream; ending stream");
             return;
         }
@@ -119,9 +127,9 @@ pub async fn handle<H, N, J>(
 /// Correlation and caller identity for every event of one subscription.
 ///
 /// The subject only names the task, so `Trogon-Req-Id` is what tells concurrent
-/// subscribers of that task apart (ADR#0055). Caller identity rides along because
-/// the gateway's egress pump gates per caller and can no longer recover it from
-/// the subject either.
+/// subscribers of that task apart (ADR#0055) without every hop having to parse the
+/// body. Caller identity rides along because the gateway's egress pump gates per
+/// caller and can no longer recover it from the subject either.
 fn event_headers(request_headers: &async_nats::header::HeaderMap, req_id: &ReqId) -> async_nats::header::HeaderMap {
     let mut headers = async_nats::header::HeaderMap::new();
     headers.insert(REQ_ID_HEADER, req_id.as_str());
@@ -137,12 +145,12 @@ async fn prepare_bootstrap<H: A2aExecutor>(
     handler: &H,
     headers: &async_nats::header::HeaderMap,
     payload: &[u8],
-    id: &Option<JsonRpcId>,
+    id: &Option<ResponseId>,
 ) -> Result<(a2a::types::Task, crate::server::handler::TaskEventStream, ReqId), A2aError> {
     let raw = parse_request_params::<serde_json::Value>(METHOD, headers, payload)
         .map_err(|_| A2aError::new(-32700, "Parse error"))?;
     let req_id = match id {
-        Some(JsonRpcId::String(s)) => ReqId::from_header(s.clone()),
+        Some(ResponseId::String(s)) => ReqId::from_header(s.clone()),
         _ => {
             return Err(A2aError::new(
                 -32602,

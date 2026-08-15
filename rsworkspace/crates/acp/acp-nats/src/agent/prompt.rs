@@ -1,10 +1,10 @@
-use agent_client_protocol::schema::v1::{PromptRequest, PromptResponse, SessionNotification, StopReason};
+use agent_client_protocol::schema::v1::{PromptRequest, PromptResponse, StopReason};
 use agent_client_protocol::{Error, ErrorCode};
 use async_nats::jetstream::AckKind;
 use futures::StreamExt;
 use jsonrpc_nats::RequestId;
 use tokio::time::timeout;
-use tracing::{instrument, warn};
+use tracing::instrument;
 use trogon_nats::jetstream::{
     JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
     JsAckWith as _, JsMessageRef as _, JsRequestMessage,
@@ -18,9 +18,7 @@ use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, SubscribeClient, commands, responses};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
-use crate::wire::{
-    WireError, decode_notification_params, decode_response, encode_request, req_id_from_request_headers,
-};
+use crate::wire::{WireError, decode_response, encode_request, req_id_from_request_headers};
 
 #[instrument(
     name = ACP_SESSION_PROMPT,
@@ -70,29 +68,13 @@ where
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
-    // Create consumers BEFORE publishing — same principle as subscribe-before-publish.
-    // Both consumers are session-scoped and deliver only new messages, so creating
-    // them first is what guarantees the response is seen even if the runner answers
-    // before we start consuming.
-    let notifications_stream = streams::notifications_stream_name(prefix);
-    let notif_config = consumers::prompt_notifications_consumer(prefix, session_id);
-    let notif_stream = js.get_stream(&notifications_stream).await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("get notifications stream: {e}"),
-        )
-    })?;
-    let notif_consumer = notif_stream.create_consumer(notif_config).await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("create notification consumer: {e}"),
-        )
-    })?;
-    let mut notif_messages = notif_consumer
-        .messages()
-        .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("notification messages: {e}")))?;
-
+    // Create the consumer BEFORE publishing — same principle as subscribe-before-publish.
+    // It is session-scoped and delivers only new messages, so creating it first is what
+    // guarantees the response is seen even if the runner answers before we start consuming.
+    //
+    // Mid-prompt `session/update` progress is not consumed here: it is a client-directed
+    // notification and reaches the local client through the client-op proxy
+    // (`...client.session.update`), which covers every operation rather than just prompts.
     let responses_stream = streams::responses_stream_name(prefix);
     let resp_config = consumers::response_consumer(prefix, session_id);
     let resp_stream = js
@@ -139,44 +121,6 @@ where
 
     loop {
         tokio::select! {
-            notif = notif_messages.next() => {
-                match notif {
-                    None => {
-                        bridge.metrics.record_error("prompt", "notification_stream_closed");
-                        break Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            "notification stream closed unexpectedly",
-                        ));
-                    }
-                    Some(Err(e)) => {
-                        bridge.metrics.record_error("prompt", "notification_consumer_error");
-                        break Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            format!("notification consumer: {e}"),
-                        ));
-                    }
-                    Some(Ok(js_msg)) => {
-                        let message = js_msg.message();
-                        let notification_headers = message.headers.clone().unwrap_or_default();
-                        let notification: SessionNotification = match decode_notification_params(
-                            "session/update",
-                            &notification_headers,
-                            message.payload.as_ref(),
-                        ) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                warn!(error = %e, "bad notification payload; skipping");
-                                let _ = js_msg.ack().await;
-                                continue;
-                            }
-                        };
-                        let _ = js_msg.ack().await;
-                        let _ = bridge.notification_sender.send(notification).await.inspect_err(|_| {
-                            warn!("notification receiver dropped; continuing prompt");
-                        });
-                    }
-                }
-            }
             resp = timeout(op_timeout, resp_messages.next()) => {
                 match resp {
                     Ok(Some(Ok(js_msg))) => {

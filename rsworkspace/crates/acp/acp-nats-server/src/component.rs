@@ -9,16 +9,13 @@
 //! becomes upstream's problem.
 
 use acp_nats::boundary::{AbortOnDrop, BoundaryExit, ConnectionClient, connect_agent_boundary_with};
-use acp_nats::{agent::Bridge, client, spawn_notification_forwarder};
-use agent_client_protocol::schema::v1::SessionNotification;
+use acp_nats::{agent::Bridge, client};
 use agent_client_protocol::{Agent, Client, ConnectTo, Result};
 use opentelemetry::metrics::Meter;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use tracing::{error, info, warn};
 use trogon_std::time::SystemClock;
-
-use crate::constants::NOTIFICATION_CHANNEL_CAPACITY;
 
 /// Maps the client proxy's join result onto the connection's outcome.
 ///
@@ -92,18 +89,7 @@ where
             mut shutdown_rx,
         } = self;
 
-        // Per-connection by necessity: this channel feeds notifications to *this*
-        // connection's SDK handle, and the bridge owns per-connection state
-        // (pending prompt waiters, background tasks) keyed to that sender.
-        let (notification_tx, notification_rx) = mpsc::channel::<SessionNotification>(NOTIFICATION_CHANNEL_CAPACITY);
-        let bridge = Arc::new(Bridge::new(
-            nats.clone(),
-            js,
-            SystemClock,
-            &meter,
-            config,
-            notification_tx,
-        ));
+        let bridge = Arc::new(Bridge::new(nats.clone(), js, SystemClock, &meter, config));
 
         info!("ACP connection established");
 
@@ -112,11 +98,6 @@ where
             async move |cx| {
                 // Agent-to-client traffic reaches the peer through the SDK
                 // connection handle; the NATS side never addresses it directly.
-                let _forwarder_guard = AbortOnDrop::new(spawn_notification_forwarder(
-                    ConnectionClient::new(cx.clone()),
-                    notification_rx,
-                ));
-
                 let mut client_task = AbortOnDrop::new(tokio::spawn(client::run(
                     nats,
                     Arc::new(ConnectionClient::new(cx)),

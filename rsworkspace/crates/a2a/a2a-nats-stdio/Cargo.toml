@@ -20,6 +20,7 @@ a2a-nats = { workspace = true }
 async-nats = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+jsonrpc-nats = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal"] }
@@ -28,7 +29,6 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
-jsonrpc-nats = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

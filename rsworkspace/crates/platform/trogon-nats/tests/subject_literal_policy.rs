@@ -46,7 +46,7 @@ const KNOWN_SITES: [(&str, usize); 13] = [
     ("crates/a2a/a2a-nats/src/gateway_ingress.rs", 8),
     ("crates/a2a/a2a-nats/src/push/dlq.rs", 1),
     ("crates/a2a/a2a-nats/src/server/bridge.rs", 2),
-    ("crates/acp/acp-nats/src/jetstream/consumers.rs", 2),
+    ("crates/acp/acp-nats/src/jetstream/consumers.rs", 1),
 ];
 
 fn workspace_root() -> PathBuf {

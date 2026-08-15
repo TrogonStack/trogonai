@@ -12,7 +12,7 @@ use jsonrpc_nats::Encoded;
 use crate::a2a_prefix::A2aPrefix;
 use crate::agent_id::A2aAgentId;
 pub use crate::constants::GATEWAY_INGRESS_METHOD_SUFFIXES;
-use crate::jsonrpc::{JsonRpcId, extract_request_id, extract_request_id_from_body};
+use crate::jsonrpc::{extract_request_id, extract_request_id_from_body};
 use crate::wire::{WireError, encode_error, response_id_from_request_headers};
 
 /// Failure resolving a `{prefix}.v1.gateway.` subject to an agent RPC subject.
@@ -149,18 +149,9 @@ fn validate_agent_id(segment: &str) -> Result<(), GatewayIngressError> {
 }
 
 fn response_id_for_ingress(request_headers: &HeaderMap, request_payload_hint: &[u8]) -> jsonrpc_nats::ResponseId {
-    if let Some(id) = extract_request_id(request_headers) {
-        return match id {
-            JsonRpcId::Number(n) => jsonrpc_nats::ResponseId::Number(n),
-            JsonRpcId::String(s) => jsonrpc_nats::ResponseId::String(s),
-            JsonRpcId::Null => jsonrpc_nats::ResponseId::Null,
-        };
-    }
-    match extract_request_id_from_body(request_payload_hint) {
-        Some(JsonRpcId::Number(n)) => jsonrpc_nats::ResponseId::Number(n),
-        Some(JsonRpcId::String(s)) => jsonrpc_nats::ResponseId::String(s),
-        Some(JsonRpcId::Null) | None => jsonrpc_nats::ResponseId::Null,
-    }
+    extract_request_id(request_headers)
+        .or_else(|| extract_request_id_from_body(request_payload_hint))
+        .unwrap_or(jsonrpc_nats::ResponseId::Null)
 }
 
 fn ingress_error_wire(

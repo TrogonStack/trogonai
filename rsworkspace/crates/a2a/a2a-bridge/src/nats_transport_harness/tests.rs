@@ -90,7 +90,7 @@ async fn nats_transport_message_send_round_trips_caller_jwt_and_audit() {
     let audit_subject = nats
         .published_messages()
         .into_iter()
-        .find(|subject| subject.contains(".audit.ok.message.send"));
+        .find(|subject| subject.ends_with(".audit.planner.ok"));
     assert!(audit_subject.is_some(), "expected gateway audit publish");
 }
 
@@ -125,25 +125,33 @@ async fn nats_transport_tasks_resubscribe_bootstraps_sse_stream() {
     );
 
     let mut stream = response.into_body().into_data_stream();
-    let mut saw_bootstrap = false;
-    let mut saw_task_event = false;
+    let mut wire = String::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.unwrap();
-        let text = String::from_utf8_lossy(&chunk);
-        if text.contains("gateway-bootstrap") {
-            saw_bootstrap = true;
-        }
-        if text.contains("task-event") {
-            saw_task_event = true;
-        }
+        wire.push_str(&String::from_utf8_lossy(&chunk.unwrap()));
     }
-    assert!(saw_bootstrap, "expected SSE gateway bootstrap line");
-    assert!(saw_task_event, "expected SSE JetStream task event line");
+    assert!(
+        !wire.contains("event:"),
+        "A2A SSE frames are unnamed data lines, got: {wire}"
+    );
+    let frames: Vec<serde_json::Value> = wire
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(|data| serde_json::from_str(data.trim()).expect("each frame is a JSON-RPC body"))
+        .collect();
+    assert_eq!(frames.len(), 2, "bootstrap plus one task event, got: {wire}");
+    assert_eq!(frames[0]["result"]["taskId"], "task-sse-1");
+    assert_eq!(frames[1]["jsonrpc"], "2.0");
+    assert_eq!(frames[1]["result"]["statusUpdate"]["taskId"], "task-sse-1");
+    // The bootstrap arrived with a null id and the task event with the transport
+    // id `transport-9`; the caller correlates on neither.
+    for frame in &frames {
+        assert_eq!(frame["id"], "corr-1", "every SSE frame echoes the caller id: {wire}");
+    }
 
     let audit_subject = nats
         .published_messages()
         .into_iter()
-        .find(|subject| subject.contains(".audit.ok.tasks.resubscribe"));
+        .find(|subject| subject.ends_with(".audit.planner.ok"));
     assert!(audit_subject.is_some(), "expected resubscribe audit publish");
 }
 

@@ -20,7 +20,6 @@ fn mock_bridge_with_clock() -> (
         clock.clone(),
         &opentelemetry::global::meter("acp-nats-test"),
         Config::for_test("acp"),
-        tokio::sync::mpsc::channel(1).0,
     );
     (mock, clock, bridge)
 }
