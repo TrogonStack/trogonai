@@ -51,7 +51,12 @@ where
         return (StatusCode::OK, Json(body)).into_response();
     }
 
-    match envelope.method.as_str() {
+    let Some(method) = envelope.method() else {
+        let body = wire::error(&id, INVALID_REQUEST, "invalid request: missing or non-string method");
+        return (StatusCode::OK, Json(body)).into_response();
+    };
+
+    match method {
         "message/send" => {
             let req: SendMessageRequest = match serde_json::from_value(params) {
                 Ok(r) => r,

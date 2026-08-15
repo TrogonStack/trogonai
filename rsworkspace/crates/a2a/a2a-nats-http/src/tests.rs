@@ -195,6 +195,27 @@ async fn unknown_method_returns_method_not_found() {
 }
 
 #[tokio::test]
+async fn malformed_request_members_return_invalid_request_with_the_callers_id() {
+    // A member of the wrong JSON type is a JSON-RPC `-32600 Invalid Request`, not
+    // a framework-level rejection: the caller still gets an envelope it can
+    // correlate against the id it sent.
+    for body in [
+        r#"{"jsonrpc":"2.0","id":10,"params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":42,"params":{}}"#,
+        r#"{"jsonrpc":2.0,"id":10,"method":"tasks/get","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":10,"method":null,"params":{}}"#,
+    ] {
+        let app = build_app(AdvancedMockNatsClient::new());
+        let response = app.oneshot(jsonrpc_request(body)).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{body}");
+        let response_body = response_json(response).await;
+        assert_eq!(response_body["error"]["code"], -32600, "{body}");
+        assert_eq!(response_body["id"], 10, "{body}");
+    }
+}
+
+#[tokio::test]
 async fn invalid_params_returns_invalid_params_error() {
     let nats = AdvancedMockNatsClient::new();
     let app = build_app(nats);

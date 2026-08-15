@@ -10,21 +10,28 @@ use serde_json::Value;
 
 /// Inbound JSON-RPC request exactly as it arrived, before validation.
 ///
-/// Deliberately more permissive than [`Message`]: a public HTTP edge has to
-/// answer a malformed request with a JSON-RPC error that echoes what it can,
-/// where the canonical codec can only reject the whole envelope.
+/// Every member stays a [`Value`] so that deserialization of a syntactically
+/// valid JSON body always succeeds: shape is a JSON-RPC concern answered with
+/// `-32600` and the caller's id, not something to hand off to the HTTP layer's
+/// own rejection. That makes this deliberately more permissive than [`Message`],
+/// which can only accept or reject the envelope whole.
 #[derive(Debug, Deserialize)]
 pub struct InboundRequest {
-    jsonrpc: Option<String>,
+    jsonrpc: Option<Value>,
     id: Option<Value>,
-    pub method: String,
+    method: Option<Value>,
     params: Option<Value>,
 }
 
 impl InboundRequest {
     /// Whether the caller declared the one JSON-RPC version this edge speaks.
     pub fn has_supported_version(&self) -> bool {
-        self.jsonrpc.as_deref() == Some(JSONRPC_VERSION)
+        matches!(self.jsonrpc.as_ref(), Some(Value::String(version)) if version == JSONRPC_VERSION)
+    }
+
+    /// Method to dispatch on, or [`None`] when the member is absent or not a string.
+    pub fn method(&self) -> Option<&str> {
+        self.method.as_ref()?.as_str()
     }
 
     /// Id to correlate responses against, coerced to a canonical response id.

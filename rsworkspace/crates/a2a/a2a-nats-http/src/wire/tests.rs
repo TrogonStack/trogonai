@@ -52,6 +52,25 @@ fn version_gate_accepts_only_jsonrpc_2_0() {
     assert!(inbound(r#"{"jsonrpc":"2.0","id":1,"method":"tasks/get"}"#).has_supported_version());
     assert!(!inbound(r#"{"jsonrpc":"1.0","id":1,"method":"tasks/get"}"#).has_supported_version());
     assert!(!inbound(r#"{"id":1,"method":"tasks/get"}"#).has_supported_version());
+    assert!(!inbound(r#"{"jsonrpc":2.0,"id":1,"method":"tasks/get"}"#).has_supported_version());
+}
+
+#[test]
+fn malformed_members_parse_so_the_edge_can_answer_them_itself() {
+    // Rejecting these at deserialization would hand the response back to the HTTP
+    // layer, which has no id to correlate against and no JSON-RPC envelope to
+    // put the failure in.
+    assert_eq!(
+        inbound(r#"{"jsonrpc":"2.0","id":1,"method":"tasks/get"}"#).method(),
+        Some("tasks/get")
+    );
+    assert_eq!(inbound(r#"{"jsonrpc":"2.0","id":1}"#).method(), None);
+    assert_eq!(inbound(r#"{"jsonrpc":"2.0","id":1,"method":42}"#).method(), None);
+    assert_eq!(inbound(r#"{"jsonrpc":"2.0","id":1,"method":null}"#).method(), None);
+    assert_eq!(
+        inbound(r#"{"jsonrpc":2.0,"id":1,"method":"tasks/get"}"#).response_id(),
+        ResponseId::Number(1)
+    );
 }
 
 #[test]
