@@ -6,6 +6,8 @@ use axum::response::sse::Event;
 use futures::Stream;
 use futures::StreamExt;
 
+use crate::wire::{OutboundError, OutboundResult};
+
 pub fn typed_event_stream_to_sse(
     stream: TypedEventStream,
     jsonrpc_id: serde_json::Value,
@@ -17,32 +19,20 @@ pub fn typed_event_stream_to_sse(
                 // repeating the request id, terminated by the one whose result is
                 // final. The id is the caller's, not the transport's, because the
                 // caller correlates against the id they sent.
-                let envelope = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": jsonrpc_id,
-                    "result": response,
-                });
+                let envelope = OutboundResult::new(jsonrpc_id.clone(), response);
                 serde_json::to_string(&envelope).unwrap_or_else(|e| {
                     // Server-side serialization failure is `-32603` Internal,
                     // not `-32700` Parse error (that's reserved for invalid
                     // JSON on the way in). Echo the original id so the client
                     // can correlate the failure with their stream subscription.
-                    serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": jsonrpc_id,
-                        "error": { "code": -32603, "message": format!("serialize error: {e}") }
-                    })
-                    .to_string()
+                    let failure = OutboundError::new(jsonrpc_id.clone(), -32603, format!("serialize error: {e}"));
+                    serde_json::to_string(&failure).unwrap_or_default()
                 })
             }
             Err(e) => {
                 let (code, message) = client_error_to_jsonrpc_code(&e);
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": jsonrpc_id,
-                    "error": { "code": code, "message": message }
-                })
-                .to_string()
+                let failure = OutboundError::new(jsonrpc_id.clone(), code, message);
+                serde_json::to_string(&failure).unwrap_or_default()
             }
         };
         Ok(Event::default().data(data))

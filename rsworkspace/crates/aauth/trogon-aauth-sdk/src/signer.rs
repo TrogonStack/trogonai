@@ -164,15 +164,26 @@ fn random_nonce() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// The agent's public key as a JWK, in the RFC 7518 member spelling the
+/// thumbprint is computed over.
+#[derive(serde::Serialize)]
+struct EcPublicJwk {
+    kty: &'static str,
+    crv: &'static str,
+    x: String,
+    y: String,
+}
+
 fn public_jwk(signing_key: &SigningKey) -> Result<serde_json::Value, AgentSignerError> {
     let verifying = signing_key.verifying_key();
     let point = verifying.to_encoded_point(false);
     let x = point.x().ok_or(AgentSignerError::InvalidPublicKey)?;
     let y = point.y().ok_or(AgentSignerError::InvalidPublicKey)?;
-    Ok(serde_json::json!({
-        "kty": "EC",
-        "crv": "P-256",
-        "x": URL_SAFE_NO_PAD.encode(x),
-        "y": URL_SAFE_NO_PAD.encode(y),
-    }))
+    let jwk = EcPublicJwk {
+        kty: "EC",
+        crv: "P-256",
+        x: URL_SAFE_NO_PAD.encode(x),
+        y: URL_SAFE_NO_PAD.encode(y),
+    };
+    serde_json::to_value(jwk).map_err(|_| AgentSignerError::InvalidPublicKey)
 }

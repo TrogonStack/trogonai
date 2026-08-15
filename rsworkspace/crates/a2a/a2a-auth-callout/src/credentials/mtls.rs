@@ -1,3 +1,4 @@
+use serde::Serialize;
 use time::OffsetDateTime;
 use x509_parser::pem::Pem;
 use x509_parser::prelude::FromDer;
@@ -9,6 +10,14 @@ use crate::jwt::{
     AudienceAccount, ExternalSubject, UserJwtClaims, derive_caller_id, external_subject_from_der,
     spicedb_bundle_for_opaque,
 };
+
+/// Principal document minted for an mTLS-authenticated caller: the SpiceDB
+/// subject derived from the certificate, tagged with the scheme that proved it.
+#[derive(Debug, Serialize)]
+struct MtlsPrincipal<'a> {
+    spicedb_subject: &'a str,
+    mtls: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientCertPem(String);
@@ -179,10 +188,14 @@ impl X509MtlsVerifier {
 
         let sub = ExternalSubject::from_x509(leaf, &leaf_der)
             .map_err(|e| CredentialError::InvalidCredentials(format!("mTLS subject extraction failed: {e}")))?;
-        let data = spicedb_bundle_for_opaque(serde_json::json!({
-            "spicedb_subject": sub.as_str(),
-            "mtls": true,
-        }));
+        let principal = MtlsPrincipal {
+            spicedb_subject: sub.as_str(),
+            mtls: true,
+        };
+        let data =
+            spicedb_bundle_for_opaque(serde_json::to_value(principal).map_err(|e| {
+                CredentialError::InvalidCredentials(format!("mTLS principal serialization failed: {e}"))
+            })?);
         let caller_id = derive_caller_id(sub.as_str(), account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
 

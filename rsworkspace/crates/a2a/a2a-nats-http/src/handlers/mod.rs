@@ -18,7 +18,9 @@ use serde_json::Value;
 use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
+use crate::constants::JSONRPC_VERSION;
 use crate::sse::{client_error_to_jsonrpc_code, typed_event_stream_to_sse};
+use crate::wire::{OutboundError, RestError};
 
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcEnvelope {
@@ -48,12 +50,8 @@ where
     // JSON-RPC 2.0 requires the version field to be exactly "2.0". Reject
     // anything else with `-32600 Invalid Request` before dispatching, so the
     // bridge doesn't silently front another protocol's calls.
-    if envelope.jsonrpc.as_deref() != Some("2.0") {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": { "code": -32600, "message": "invalid request: missing or unsupported jsonrpc version" }
-        });
+    if envelope.jsonrpc.as_deref() != Some(JSONRPC_VERSION) {
+        let body = OutboundError::new(id, -32600, "invalid request: missing or unsupported jsonrpc version");
         return (StatusCode::OK, Json(body)).into_response();
     }
 
@@ -214,11 +212,7 @@ where
             Err(e) => jsonrpc_error_response(&id, &e),
         },
         method => {
-            let body = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32601, "message": format!("method not found: {method}") }
-            });
+            let body = OutboundError::new(id, -32601, format!("method not found: {method}"));
             (StatusCode::OK, Json(body)).into_response()
         }
     }
@@ -244,10 +238,7 @@ where
             // response → 502, etc.) instead of bucketing everything as 500.
             let (code, message) = client_error_to_jsonrpc_code(&e);
             let status = crate::rest::http_status_for_jsonrpc_code(code);
-            let body = serde_json::json!({
-                "error": { "code": code, "message": message }
-            });
-            (status, Json(body)).into_response()
+            (status, Json(RestError::new(code, message))).into_response()
         }
     }
 }
@@ -264,20 +255,12 @@ fn jsonrpc_forward<T>(id: &Value, validated: ValidatedRpc<T>) -> Response {
 
 fn jsonrpc_error_response(id: &Value, err: &ClientError) -> Response {
     let (code, message) = client_error_to_jsonrpc_code(err);
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": code, "message": message }
-    });
+    let body = OutboundError::new(id.clone(), code, message);
     (StatusCode::OK, Json(body)).into_response()
 }
 
 fn jsonrpc_parse_error(id: &Value, message: &str) -> Response {
-    let body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": -32602, "message": format!("invalid params: {message}") }
-    });
+    let body = OutboundError::new(id.clone(), -32602, format!("invalid params: {message}"));
     (StatusCode::OK, Json(body)).into_response()
 }
 

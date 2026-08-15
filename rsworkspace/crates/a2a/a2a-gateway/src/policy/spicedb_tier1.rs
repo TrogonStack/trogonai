@@ -29,6 +29,7 @@ use authzed::v1::{
     CheckBulkPermissionsRequest, CheckBulkPermissionsRequestItem, Consistency, ObjectReference, Relationship,
     RelationshipUpdate, SubjectReference, WriteRelationshipsRequest, ZedToken,
 };
+use serde::Serialize;
 use tonic::Status;
 use trogon_std::env::ReadEnv;
 
@@ -402,6 +403,15 @@ pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_accou
     a2a_nats::catalog::spicedb_permission::session_from_principal(principal, fallback_account)
 }
 
+/// Principal document materialised for a caller the gateway resolved itself,
+/// as opposed to one a verified credential carried.
+#[derive(Debug, Serialize)]
+struct Tier1CallerPrincipal {
+    spicedb_subject: String,
+    sub: String,
+    session_account: String,
+}
+
 /// Build a principal payload from a caller slug + session account.
 /// Used by the gateway runtime to materialise a principal from the caller
 /// identity dispatch resolved for this request -- the JWT-header identity by
@@ -409,11 +419,14 @@ pub fn tier1_session_from_principal(principal: &SpiceDbPrincipal, fallback_accou
 /// `gateway_caller_identity_after_aauth` (in `runtime::aauth_env`) determined
 /// one supersedes it.
 pub fn tier1_principal_from_caller(caller_slug: &str, account: &str) -> SpiceDbPrincipal {
-    SpiceDbPrincipal(serde_json::json!({
-        "spicedb_subject": format!("user/{caller_slug}"),
-        "sub": caller_slug,
-        "session_account": account,
-    }))
+    let principal = Tier1CallerPrincipal {
+        spicedb_subject: format!("user/{caller_slug}"),
+        sub: caller_slug.to_owned(),
+        session_account: account.to_owned(),
+    };
+    // The principal is three Strings; serde_json::to_value cannot fail at
+    // runtime, and an authorization path must never panic.
+    SpiceDbPrincipal(serde_json::to_value(principal).unwrap_or(serde_json::Value::Object(Default::default())))
 }
 
 pub struct Tier1SpiceDbConfig;
