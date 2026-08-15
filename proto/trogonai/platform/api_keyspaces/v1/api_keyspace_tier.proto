@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+// ApiKeyspaceTier separates the management keyspace from ordinary product
+// keyspaces.
+//
+// Three decisions branch on this and none of them can safely branch on the
+// keyspace name: users may create their own keyspaces, so matching the literal
+// string "management" would let a user mint a keyspace that inherits
+// privileged defaults. The branches are the shorter reroll grace (ADR#0061
+// section 2), fail-closed rate limiting (ADR#0060 section 8), and required
+// server nonces (ADR#0051 section 3).
+//
+// Immutable after creation, for the same reason as Environment.
+enum ApiKeyspaceTier {
+  API_KEYSPACE_TIER_UNSPECIFIED = 0;
+  // Holds root and management keys for the management API. Bearer issuance is
+  // disallowed here (ADR#0050 section 5).
+  API_KEYSPACE_TIER_MANAGEMENT = 1;
+  // Holds ordinary product API keys.
+  API_KEYSPACE_TIER_STANDARD = 2;
+}

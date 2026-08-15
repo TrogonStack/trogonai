@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+// RevokeApiKeyPublicKey retires one verification key, completing a swap.
+//
+// Revoking the last active public key on a signed key is refused. It would
+// leave a key that exists, is not revoked, and can never authenticate, which
+// reads to an operator as a platform fault rather than as the action they took.
+// Retiring the identity is what RevokeApiKey is for.
+message RevokeApiKeyPublicKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The "sha256:"-prefixed fingerprint from ADR#0058 section 4, not the key
+  // bytes. Callers identify a key to retire by the value the UI and the CLI
+  // both display.
+  string fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+}

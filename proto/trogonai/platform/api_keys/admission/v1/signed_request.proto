@@ -1,0 +1,84 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.admission.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
+
+// SignedRequestTarget is the request the signature is bound to.
+//
+// Binding the target is what stops a captured signature from being replayed
+// against a different endpoint. Without it a signature over a body alone would
+// authorize that body anywhere it is accepted, so a signed read could be
+// replayed as a signed delete.
+//
+// The two arms are the two transports and share one canonical serialization
+// (ADR#0051 section 2). The HTTP arm's component set matches RFC 9421 and the
+// covered components the shipped AAuth HTTP verifier already uses, so this is a
+// binding over the existing scheme rather than a second scheme beside it.
+message SignedRequestTarget {
+  oneof transport {
+    HttpTarget http = 1;
+    NatsTarget nats = 2;
+  }
+
+  message HttpTarget {
+    // Uppercased. RFC 9421 @method.
+    string method = 1 [features.field_presence = LEGACY_REQUIRED];
+    // Lowercased, default port elided. RFC 9421 @authority.
+    string authority = 2 [features.field_presence = LEGACY_REQUIRED];
+    // Percent-encoding normalized, no query. RFC 9421 @path.
+    string path = 3 [features.field_presence = LEGACY_REQUIRED];
+    // Covered separately and always, empty string when absent.
+    //
+    // This is a deliberate addition rather than an oversight in either
+    // direction: the management API expresses filters and pagination in the
+    // query string, so leaving it uncovered would let an intermediary rewrite
+    // which records a signed list request returned. Whether the shipped AAuth
+    // HTTP profile should also cover it is a separate question about agent
+    // traffic, and this field does not answer it.
+    string query = 4;
+  }
+
+  message NatsTarget {
+    // The concrete subject the message was published on. Subject mapping that
+    // rewrites subjects breaks signatures exactly as a rewriting HTTP proxy
+    // does, and is unsupported in front of signed subjects
+    // (ADR#0051 section 6).
+    string subject = 1 [features.field_presence = LEGACY_REQUIRED];
+    // The operation from the payload envelope. A subject alone is not the whole
+    // target when one subject carries several operations.
+    string operation = 2 [features.field_presence = LEGACY_REQUIRED];
+  }
+}
+
+// SignedRequest is one request's proof of possession. It authorizes exactly one
+// request; there is no multi-use or reduced-binding mode
+// (ADR#0051 section 1).
+message SignedRequest {
+  // The same ApiKeyId the bearer tier uses, carried as the token's kid
+  // (ADR#0058 section 4), so key lookup is one code path across both tiers.
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Which of the at-most-two active public keys signed this. Sent rather than
+  // inferred by trying each: during a rotation window both keys verify, and
+  // trying them in turn would make the failure mode of a wrong signature a
+  // doubled verification cost on every request.
+  string public_key_fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  SignedRequestTarget target = 3 [features.field_presence = LEGACY_REQUIRED];
+  // SHA-256 over the exact request body, always required. Bodyless requests use
+  // the defined constant digest rather than omitting the field, so "no body" and
+  // "body not covered" cannot look alike on the wire.
+  bytes payload_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp issued_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  // At most 2 minutes after issued_at, 1 minute by default, and further capped
+  // by the keyspace. Verifiers tolerate at most 30 seconds of clock skew.
+  google.protobuf.Timestamp expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  // Client-generated uniqueness value, checked and recorded against the replay
+  // store scoped by key id.
+  string jti = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Present when the keyspace requires server-nonce escalation, or when
+  // retrying after a nonce challenge (ADR#0051 section 3).
+  string server_nonce = 8;
+  trogonai.platform.api_keyspaces.v1.SigningAlgorithm algorithm = 9;
+  bytes signature = 10 [features.field_presence = LEGACY_REQUIRED];
+}

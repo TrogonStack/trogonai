@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "trogonai/platform/api_keys/v1/public_key.proto";
+
+// AddApiKeyPublicKey registers a second verification key so traffic can move
+// before the first is retired.
+//
+// The active set is capped at 2 (ADR#0061 section 4). That cap is what makes
+// this a rotation window rather than an accumulating set of keys nobody
+// remembers issuing: adding a third fails rather than silently widening the
+// set of private keys that can act as this identity.
+//
+// Idempotent by fingerprint. Re-registering a public key already active on
+// this record is a no-op, which is what lets the self-hosted bootstrap re-apply
+// the same deployment configuration without producing a second registration
+// (ADR#0059 section 4).
+message AddApiKeyPublicKey {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  PublicKey public_key = 2 [features.field_presence = LEGACY_REQUIRED];
+}

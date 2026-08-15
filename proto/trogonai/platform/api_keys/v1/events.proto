@@ -1,0 +1,37 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "trogonai/platform/api_keys/v1/api_key_created.proto";
+import "trogonai/platform/api_keys/v1/api_key_expired.proto";
+import "trogonai/platform/api_keys/v1/api_key_policy_changed.proto";
+import "trogonai/platform/api_keys/v1/api_key_public_key_added.proto";
+import "trogonai/platform/api_keys/v1/api_key_public_key_revoked.proto";
+import "trogonai/platform/api_keys/v1/api_key_rerolled.proto";
+import "trogonai/platform/api_keys/v1/api_key_revoked.proto";
+
+// ApiKeyEvent is the API key aggregate's event stream, keyed by api_key_id.
+//
+// Successful verification is absent on purpose. It is a metric counted by
+// keyspace and result, not an event (ADR#0061 section 6): its volume equals the
+// platform's authenticated request rate, so recording it here would make this
+// the highest-volume stream on the platform and put the event store's write
+// path in front of every authenticated request. Attribution survives anyway,
+// because the events a request goes on to produce carry provenance naming the
+// key that authorized them (ADR#0039), which is the part of a per-request
+// record that was load-bearing.
+//
+// Denials and replays are absent for a different reason: they are audit facts,
+// not state changes, and they live in the audit package. A denied request
+// changes nothing about the key.
+message ApiKeyEvent {
+  oneof event {
+    ApiKeyCreated api_key_created = 1;
+    ApiKeyRerolled api_key_rerolled = 2;
+    ApiKeyRevoked api_key_revoked = 3;
+    ApiKeyPublicKeyAdded api_key_public_key_added = 4;
+    ApiKeyPublicKeyRevoked api_key_public_key_revoked = 5;
+    ApiKeyPolicyChanged api_key_policy_changed = 6;
+    ApiKeyExpired api_key_expired = 7;
+  }
+}

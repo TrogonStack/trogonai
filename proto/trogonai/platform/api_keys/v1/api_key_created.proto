@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/bearer_verifier.proto";
+import "trogonai/platform/api_keys/v1/public_key.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
+
+// ApiKeyCreated opens a key's stream.
+//
+// The bearer arm carries the verifier digest, never the secret that produced
+// it. The secret exists in the create response and nowhere else: not in this
+// event, not in the snapshot, not in the idempotency record (ADR#0048,
+// ADR#0058 section 3). A replay of this stream can verify a presented key and
+// can never reproduce one.
+message ApiKeyCreated {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  string display_name = 4 [features.field_presence = LEGACY_REQUIRED];
+
+  oneof credential {
+    BearerVerifier bearer = 5;
+    PublicKey signed = 6;
+  }
+
+  ApiKeyAuthorization authorization = 7 [features.field_presence = LEGACY_REQUIRED];
+  RateLimitPolicy rate_limit = 8;
+  google.protobuf.Timestamp expires_at = 9;
+  google.protobuf.Timestamp created_at = 10 [features.field_presence = LEGACY_REQUIRED];
+
+  // Set when this key is a reroll successor (ADR#0061 section 3). The
+  // predecessor's stream carries the matching successor id, so a rotation is
+  // traversable from either end without a join.
+  string rerolled_from_api_key_id = 11;
+}

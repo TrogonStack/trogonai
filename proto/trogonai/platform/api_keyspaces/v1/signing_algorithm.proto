@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+// SigningAlgorithm is the accepted set for signed-key proof of possession
+// (ADR#0050 section 5, inherited by ADR#0051 section 5).
+//
+// Ed25519 is the default and ES256 is accepted for callers whose runtime lacks
+// an Ed25519 implementation. The set is deliberately closed: a keyspace names a
+// non-empty subset of these, and a request signed under anything else is
+// rejected before signature verification runs.
+enum SigningAlgorithm {
+  SIGNING_ALGORITHM_UNSPECIFIED = 0;
+  // EdDSA over Ed25519, JWK kty OKP / crv Ed25519 (ADR#0038, RFC 8037).
+  SIGNING_ALGORITHM_ED25519 = 1;
+  // ECDSA over P-256 with SHA-256.
+  SIGNING_ALGORITHM_ES256 = 2;
+}

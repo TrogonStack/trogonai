@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
+
+// ApiKeyPolicyChanged carries the before and after of one policy patch.
+//
+// This is the merge of what an earlier draft split into permission_added,
+// permission_removed, and rate_limit_changed (ADR#0061 section 7). Three event
+// types for one endpoint would mean a reader has to collect all three and
+// assume they co-occurred to reconstruct a single operator action.
+//
+// Both sides are carried because the audit fact derived from this event has to
+// answer what changed without replaying the stream.
+message ApiKeyPolicyChanged {
+  ApiKeyAuthorization previous_authorization = 1 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+  RateLimitPolicy previous_rate_limit = 3;
+  RateLimitPolicy rate_limit = 4;
+  google.protobuf.Timestamp previous_expires_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+  google.protobuf.Timestamp changed_at = 7 [features.field_presence = LEGACY_REQUIRED];
+}

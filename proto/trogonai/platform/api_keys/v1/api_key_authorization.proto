@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "trogonai/platform/api_keys/v1/resource_scope.proto";
+import "trogonai/platform/api_keys/v1/role.proto";
+
+// ApiKeyAuthorization is the whole authority of a key.
+//
+// One vocabulary: permissions (ADR#0060 section 1). The `scopes` field an
+// earlier draft carried alongside `roles` is gone, because two grant vocabularies
+// mean every future check has to decide which one wins and what happens when
+// they disagree.
+//
+//   effective_permissions =
+//     union(permissions of assigned roles) union direct_permissions
+//
+// Authority is resolved here, from stored state, rather than carried in the
+// presented credential. That is the deliberate difference from the agent-facing
+// AAuth path, where a scope claim rides inside a short-lived token: an API key
+// is long-lived and edited in a console, so a permission change has to take
+// effect at the next verification instead of at the next token expiry.
+message ApiKeyAuthorization {
+  repeated Role roles = 1;
+  // The escape hatch for the case a built-in role does not fit. Bounded by the
+  // delegation ceiling (ADR#0060 section 5) and surfaced in the UI as a
+  // distinct badge, never folded into the role display, so a key carrying one
+  // is visible to whoever audits it later.
+  repeated string direct_permissions = 2;
+  ResourceScope allowed_vaults = 3;
+  ResourceScope allowed_integrations = 4;
+  ResourceScope allowed_environments = 5;
+  // The runtime-side narrowings that already exist in the shipped credential
+  // delivery path, carried here so a key's authority is described in one place
+  // rather than split across the key record and the runtime policy.
+  ResourceScope allowed_runtime_services = 6;
+  ResourceScope allowed_hosts = 7;
+}

@@ -1,0 +1,72 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.admission.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/admission/v1/api_principal.proto";
+import "trogonai/platform/api_keys/admission/v1/denial_reason.proto";
+
+// VerificationOutcome is what admission produces.
+//
+// There is no request message here on purpose. A presented bearer key is a raw
+// secret, and a proto field would hand it a generated Debug implementation that
+// prints it, defeating the structural redaction the platform relies on
+// (ADR#0058 section 3). The presented credential is an in-process value wrapped
+// in SecretString, verified at the edge by the first service that accepts the
+// request, and it never crosses a service boundary in any encoding. What
+// crosses is this outcome.
+//
+// There is also deliberately no public verify endpoint. Verification is an
+// admission-time internal operation; exposing it would publish an
+// unauthenticated oracle for testing candidate keys.
+message VerificationOutcome {
+  oneof outcome {
+    ApiPrincipal principal = 1;
+    Denial denial = 2;
+    NonceChallenge nonce_challenge = 3;
+  }
+}
+
+// Denial carries the internal reason. The caller is told only that it was
+// denied; this message goes to the audit fact and the metric.
+message Denial {
+  DenialReason reason = 1;
+  // Present when the request identified a key that exists. Absent when the
+  // presented credential was malformed or unknown, because there is no key to
+  // name and inventing one would corrupt the per-key clustering the denial
+  // alert depends on.
+  string api_key_id = 2;
+  string api_keyspace_id = 3;
+}
+
+// NonceChallenge is the DPoP-style escalation (ADR#0051 section 3): the
+// verifier refuses and hands back a fresh nonce the client must bind into its
+// retry.
+//
+// A challenge rather than a denial because it is a protocol step, not a
+// failure. Collapsing the two would make a keyspace that requires nonces look
+// like a keyspace under attack on its first request from every new client.
+message NonceChallenge {
+  string server_nonce = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// ReplayRecord is the value stored in NATS KV under a (key id, jti) key
+// (ADR#0051 section 4).
+//
+// Written by an atomic conditional create, never a read followed by a write: a
+// key-already-exists result is the replay rejection. A read-then-write would
+// leave a window in which two concurrent presentations of the same jti both
+// observe it unspent.
+//
+// The record lives for the validity ceiling plus twice the clock-skew
+// tolerance. Skew is bidirectional, so a token admitted at the earliest
+// tolerated moment stays verifiable until expiry plus skew, and a record that
+// expired earlier would let that token be replayed in its final seconds.
+message ReplayRecord {
+  google.protobuf.Timestamp observed_at = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Retained so an operator investigating a replay can see what the original
+  // request claimed without correlating against request logs that may have
+  // aged out sooner.
+  google.protobuf.Timestamp token_expires_at = 2 [features.field_presence = LEGACY_REQUIRED];
+}

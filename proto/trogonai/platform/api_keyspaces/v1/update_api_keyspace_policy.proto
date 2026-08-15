@@ -1,0 +1,17 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_policy.proto";
+
+// UpdateApiKeyspacePolicy replaces the mutable half of a keyspace.
+//
+// The policy is replaced wholesale rather than patched field by field, so a
+// concurrent edit cannot merge two partial updates into a combination neither
+// caller asked for. Environment and tier are absent from ApiKeyspacePolicy and
+// therefore cannot be changed here, which is the structural form of the
+// immutability ADR#0059 section 2 states in prose.
+message UpdateApiKeyspacePolicy {
+  string api_keyspace_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyspacePolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+}

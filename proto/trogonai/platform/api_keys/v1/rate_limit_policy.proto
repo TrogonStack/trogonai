@@ -1,0 +1,38 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/duration.proto";
+
+// RateLimitSubjectKind names what a limit counts against.
+//
+// IDENTITY and ROUTE are declared and not enforced in the first milestone
+// (ADR#0060 section 6). They are declared anyway so adding them later is a
+// policy row rather than a schema migration, and stating the gap here keeps the
+// enum from implying coverage the limiter does not have.
+enum RateLimitSubjectKind {
+  RATE_LIMIT_SUBJECT_KIND_UNSPECIFIED = 0;
+  RATE_LIMIT_SUBJECT_KIND_KEY = 1;
+  RATE_LIMIT_SUBJECT_KIND_PROJECT = 2;
+  // Declared, not enforced. Needs a counter shared across keys, which is the
+  // one shape that turns a per-key local decision into cross-key contention on
+  // the admission path, and there is no shipped identity concept to attach one
+  // to.
+  RATE_LIMIT_SUBJECT_KIND_IDENTITY = 3;
+  // Declared, not enforced.
+  RATE_LIMIT_SUBJECT_KIND_ROUTE = 4;
+}
+
+// RateLimitPolicy is a fixed window counted in NATS KV with revision-checked
+// updates (ADR#0060 section 7), alongside the replay store.
+//
+// The ceiling is known rather than discovered later: compare-and-set on a
+// per-key record bounds write throughput per key, so this limiter is coarse.
+// The trigger for moving to a dedicated counter store is a sustained CAS retry
+// rate on the admission path, or a configured limit high enough that the
+// counter becomes the bottleneck before the limit does.
+message RateLimitPolicy {
+  RateLimitSubjectKind subject_kind = 1;
+  uint32 max_requests = 2;
+  google.protobuf.Duration window = 3 [features.field_presence = LEGACY_REQUIRED];
+}

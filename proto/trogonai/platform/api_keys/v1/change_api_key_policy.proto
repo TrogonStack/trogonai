@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.v1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/rate_limit_policy.proto";
+
+// ChangeApiKeyPolicy is the single policy-patch operation.
+//
+// Permissions and rate limits move together because there is one endpoint that
+// changes them; splitting them into separate commands would fragment one
+// operator action across events that always co-occur (ADR#0061 section 7).
+//
+// The delegation ceiling is checked here, not documented here: the resulting
+// effective permissions must be a subset of the acting principal's, and the
+// resulting resource scope must be contained in the acting principal's
+// (ADR#0060 section 5). Root keys are not exempt; a root key's ceiling is the
+// whole project, so the same check runs and passes.
+message ChangeApiKeyPolicy {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Replaced wholesale, not merged. A field-by-field patch would let two
+  // concurrent edits combine into a grant neither operator requested.
+  ApiKeyAuthorization authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+  RateLimitPolicy rate_limit = 3;
+  // Changing expiry is a policy change like any other. Absent clears it.
+  google.protobuf.Timestamp expires_at = 4;
+}

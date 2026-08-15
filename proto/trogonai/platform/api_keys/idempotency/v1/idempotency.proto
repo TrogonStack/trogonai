@@ -1,0 +1,42 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.idempotency.v1;
+
+// ApiKeyManagementIdempotencyStatus tracks a management command in flight.
+enum ApiKeyManagementIdempotencyStatus {
+  API_KEY_MANAGEMENT_IDEMPOTENCY_STATUS_UNSPECIFIED = 0;
+  API_KEY_MANAGEMENT_IDEMPOTENCY_STATUS_IN_PROGRESS = 1;
+  API_KEY_MANAGEMENT_IDEMPOTENCY_STATUS_COMPLETED = 2;
+}
+
+// ApiKeyManagementIdempotencyRecord makes a retried management command safe.
+//
+// The fingerprint is over the request, so replaying a key with a different body
+// is a conflict rather than a silent second create.
+message ApiKeyManagementIdempotencyRecord {
+  string fingerprint = 1 [features.field_presence = LEGACY_REQUIRED];
+  ApiKeyManagementIdempotencyStatus status = 2;
+  ApiKeyCommandResponse response = 3;
+}
+
+// ApiKeyCommandResponse is the replayable half of a management response.
+//
+// A bearer create returns the plaintext key exactly once and it is stored
+// nowhere, including here (ADR#0048, ADR#0058 section 3). So a replayed create
+// returns this record without the secret, and that asymmetry is the design
+// rather than a gap: the alternative is an idempotency ledger that reissues
+// plaintext to anyone who can replay a request id, which would turn a retry
+// mechanism into a second way to read a key.
+//
+// Clients must treat a create response with no plaintext as "already created,
+// secret unavailable" and reroll if they lost it. That is stated here because a
+// client author who discovers it from a nil field at runtime will assume it is
+// a bug.
+message ApiKeyCommandResponse {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The tg_{env}_{key_id} display form, which carries no secret.
+  string public_prefix = 3 [features.field_presence = LEGACY_REQUIRED];
+  string state = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_position = 5;
+}

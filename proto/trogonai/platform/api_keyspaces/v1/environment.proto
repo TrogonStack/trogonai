@@ -1,0 +1,19 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+// Environment is an attribute of the keyspace, not a level in the resource
+// hierarchy (ADR#0046 section 4).
+//
+// It is immutable after creation, which is what lets the wire-format
+// environment marker in an issued key (ADR#0058 section 1) be a rendering of
+// this attribute rather than a denormalized copy that can drift. Moving a
+// keyspace between environments is not an operation; creating a new keyspace
+// is. That immutability is enforced structurally: this field appears on
+// ApiKeyspaceCreated and never in ApiKeyspacePolicy, so UpdateApiKeyspacePolicy
+// has no way to express the change.
+enum Environment {
+  ENVIRONMENT_UNSPECIFIED = 0;
+  ENVIRONMENT_LIVE = 1;
+  ENVIRONMENT_TEST = 2;
+}

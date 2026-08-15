@@ -1,0 +1,86 @@
+edition = "2024";
+
+package trogonai.platform.api_keys.admission.v1;
+
+import "trogonai/platform/api_keys/v1/api_key_authorization.proto";
+import "trogonai/platform/api_keys/v1/resource_scope.proto";
+import "trogonai/platform/api_keys/v1/role.proto";
+import "trogonai/platform/api_keyspaces/v1/api_keyspace_tier.proto";
+import "trogonai/platform/api_keyspaces/v1/environment.proto";
+
+// AuthenticationMethod records how the caller proved itself.
+//
+// Carried on the principal because it is an authorization input, not just
+// telemetry: a surface may require proof of possession regardless of what the
+// key's permissions say, and that check needs the answer after verification
+// rather than by re-inspecting the request.
+enum AuthenticationMethod {
+  AUTHENTICATION_METHOD_UNSPECIFIED = 0;
+  // Raw key presented as a bearer token. The compatibility tier.
+  AUTHENTICATION_METHOD_BEARER = 1;
+  // Per-request signature over a fully bound target. The recommended default
+  // (ADR#0050).
+  AUTHENTICATION_METHOD_SIGNED = 2;
+}
+
+// ApiPrincipal is the result of a successful verification: who the caller is
+// and what it may do.
+//
+// Produced once, at admission, by the first service that accepts the request
+// (ADR#0051 section 6). Downstream services do not re-verify; authority travels
+// as provenance on the events the request produces (ADR#0039). An expired token
+// inside an already-admitted message is the expected state of an admitted
+// request, not an error.
+//
+// `scopes` is deliberately absent. Permissions are the one authorization
+// vocabulary (ADR#0060 section 1), so nothing downstream has to reconcile two
+// grants that can disagree.
+message ApiPrincipal {
+  string api_key_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string api_keyspace_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.platform.api_keyspaces.v1.ApiKeyspaceTier keyspace_tier = 4;
+  trogonai.platform.api_keyspaces.v1.Environment environment = 5;
+  AuthenticationMethod authentication_method = 6;
+
+  repeated trogonai.platform.api_keys.v1.Role roles = 7;
+  // The resolved union of role permissions and direct permissions, computed at
+  // verification. Carried resolved rather than as roles-plus-a-lookup so every
+  // downstream check reads one list and cannot disagree with another service
+  // about what a role contains.
+  repeated string effective_permissions = 8;
+  // Retained separately from effective_permissions so an audit can still tell
+  // which authority came from a role and which was granted directly
+  // (ADR#0060 section 3).
+  repeated string direct_permissions = 9;
+
+  trogonai.platform.api_keys.v1.ResourceScope allowed_vaults = 10;
+  trogonai.platform.api_keys.v1.ResourceScope allowed_integrations = 11;
+  trogonai.platform.api_keys.v1.ResourceScope allowed_environments = 12;
+  trogonai.platform.api_keys.v1.ResourceScope allowed_runtime_services = 13;
+  trogonai.platform.api_keys.v1.ResourceScope allowed_hosts = 14;
+}
+
+// AuthorizationCheck is one question asked of a principal.
+//
+// The shape is a deliberate match for the (resource_type, resource_id,
+// permission) tuple the shipped SpiceDB integration already uses for A2A
+// tier-1 checks. In the first milestone the check is evaluated in process
+// against ApiPrincipal.effective_permissions and the resource scopes, because
+// roles are a closed platform-defined set and an in-process check over a closed
+// set needs no relationship database (ADR#0060 section 2).
+//
+// Matching the tuple shape now means the evaluator can move behind SpiceDB
+// later without changing this contract or any call site. The thing that would
+// actually force that move is customer-authored roles, which are the deferred
+// item; a relationship database bought before then would be infrastructure
+// carrying no question the closed set cannot answer.
+message AuthorizationCheck {
+  string resource_type = 1 [features.field_presence = LEGACY_REQUIRED];
+  string resource_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Dotted, and matched with the same prefix-glob grammar the shipped AAuth
+  // scope matcher uses (`*`, `prefix.*`, or an exact name), so the two caller
+  // paths share one matcher even though they source the permission strings
+  // differently.
+  string permission = 3 [features.field_presence = LEGACY_REQUIRED];
+}

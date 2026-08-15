@@ -1,0 +1,54 @@
+edition = "2024";
+
+package trogonai.platform.api_keyspaces.v1;
+
+import "google/protobuf/duration.proto";
+import "trogonai/platform/api_keyspaces/v1/signing_algorithm.proto";
+
+// BearerIssuance controls whether a keyspace may mint raw bearer keys at all.
+// The management keyspace disallows it (ADR#0050 section 5), which is what
+// keeps the compatibility tier out of the privileged keyspace.
+enum BearerIssuance {
+  BEARER_ISSUANCE_UNSPECIFIED = 0;
+  BEARER_ISSUANCE_ALLOWED = 1;
+  BEARER_ISSUANCE_DISALLOWED = 2;
+}
+
+// ServerNonce controls DPoP-style server-issued nonce escalation
+// (ADR#0051 section 3). Required by default on management keyspaces.
+enum ServerNonce {
+  SERVER_NONCE_UNSPECIFIED = 0;
+  SERVER_NONCE_OPTIONAL = 1;
+  SERVER_NONCE_REQUIRED = 2;
+}
+
+// ApiKeyspacePolicy is the mutable half of a keyspace (ADR#0059 section 2).
+//
+// Everything immutable after creation (environment, tier) is deliberately
+// absent, so the update command cannot express a change the design forbids.
+message ApiKeyspacePolicy {
+  BearerIssuance bearer_issuance = 1;
+  // Non-empty subset of the accepted algorithms. An empty set would mean no
+  // signed key could ever verify, so it is a validation error at decide time
+  // rather than a keyspace that silently rejects every request.
+  repeated SigningAlgorithm allowed_algorithms = 2;
+  ServerNonce server_nonce = 3;
+  // Ceiling on a signed request token's validity window, at most 2 minutes
+  // (ADR#0051 section 2). A keyspace may tighten it, never widen it past the
+  // protocol ceiling.
+  google.protobuf.Duration max_token_lifetime = 4;
+  // Expiry applied to keys created without an explicit one. Absent means keys
+  // in this keyspace do not expire by default.
+  google.protobuf.Duration default_key_expiry = 5;
+  // Zero means unbounded. Enforced at create, not retroactively, so lowering
+  // it does not revoke keys that are already live.
+  uint32 max_active_keys = 6;
+  // Window during which a rerolled key's predecessor still verifies
+  // (ADR#0061 section 2). Defaults to 24 hours, 1 hour on management
+  // keyspaces, configurable from 0 to 7 days. A zero duration is legal and
+  // means the old key stops verifying the moment the new one is issued.
+  //
+  // Bearer-only. Signed keys rotate by public-key swap and never consult this
+  // (ADR#0061 section 4).
+  google.protobuf.Duration reroll_grace = 7;
+}
