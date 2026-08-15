@@ -196,7 +196,7 @@ fn req_id_from_payload_when_header_absent() {
     let headers = async_nats::HeaderMap::new();
     let payload = br#"{"jsonrpc":"2.0","id":"req-from-payload","method":"x"}"#;
     let req_id = req_id_from_headers_or_payload(&headers, payload).expect("payload extract");
-    assert_eq!(req_id.as_str(), "req-from-payload");
+    assert_eq!(req_id.as_str(), r#""req-from-payload""#);
 }
 
 #[test]
@@ -205,6 +205,16 @@ fn req_id_from_a_numeric_payload_id_uses_its_decimal_text() {
     let payload = br#"{"jsonrpc":"2.0","id":7,"method":"x"}"#;
     let req_id = req_id_from_headers_or_payload(&headers, payload).expect("payload extract");
     assert_eq!(req_id.as_str(), "7");
+}
+
+#[test]
+fn a_numeric_and_a_string_payload_id_pump_separate_streams() {
+    let headers = async_nats::HeaderMap::new();
+    let numeric =
+        req_id_from_headers_or_payload(&headers, br#"{"jsonrpc":"2.0","id":7,"method":"x"}"#).expect("payload extract");
+    let text = req_id_from_headers_or_payload(&headers, br#"{"jsonrpc":"2.0","id":"7","method":"x"}"#)
+        .expect("payload extract");
+    assert_ne!(numeric.as_str(), text.as_str());
 }
 
 #[test]

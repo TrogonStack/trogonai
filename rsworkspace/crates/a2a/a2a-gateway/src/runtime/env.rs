@@ -138,18 +138,11 @@ pub fn json_rpc_params(payload: &[u8]) -> serde_json::Value {
     }
 }
 
-/// Audit-side correlation id derived from the JSON-RPC request id.
-/// Returns `None` when the payload doesn't carry an id (a
-/// notification or malformed envelope) AND when the id is the
-/// JSON-RPC `null` variant -- both shapes mean "no caller
-/// correlation possible", so synthesizing a string would alias
-/// unrelated envelopes onto the same audit row.
+/// Audit-side correlation id derived from the JSON-RPC request id, sharing
+/// [`a2a_nats::jsonrpc::correlation_key_from_body`] with the streaming pump so
+/// an audit row and the stream it describes join on the same key.
 pub fn json_rpc_audit_req_id(payload: &[u8]) -> Option<String> {
-    match a2a_nats::jsonrpc::extract_request_id_from_body(payload)? {
-        a2a_nats::ResponseId::Null => None,
-        a2a_nats::ResponseId::Number(n) => Some(n.to_string()),
-        a2a_nats::ResponseId::String(s) => Some(s),
-    }
+    a2a_nats::jsonrpc::correlation_key_from_body(payload)
 }
 
 fn parse_bool_flag<E: ReadEnv>(env: &E, key: &str) -> bool {

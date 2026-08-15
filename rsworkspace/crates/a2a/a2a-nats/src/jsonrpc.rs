@@ -31,5 +31,16 @@ pub fn extract_request_id_from_body(raw: &[u8]) -> Option<ResponseId> {
     }
 }
 
+/// Canonical correlation key for the id in a request body: the id's JSON
+/// literal, the same form the `Jsonrpc-Id` header carries.
+///
+/// The literal keeps the id's type in the key, so a numeric `7` and a string
+/// `"7"` cannot collapse onto one stream pump or one audit row. A missing id
+/// and a `null` id both yield `None`: neither can correlate anything, and a
+/// synthesized token would alias unrelated envelopes together.
+pub fn correlation_key_from_body(raw: &[u8]) -> Option<String> {
+    jsonrpc_nats::encode_response_id_literal(&extract_request_id_from_body(raw)?)
+}
+
 #[cfg(test)]
 mod tests;
