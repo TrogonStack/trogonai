@@ -291,7 +291,8 @@ fn runtime_credential_error_to_status(error: &RuntimeCredentialError) -> StatusC
         | RuntimeCredentialError::IntegrationNotFound { .. }
         | RuntimeCredentialError::IntegrationNotResolvable { .. }
         | RuntimeCredentialError::CredentialMissing { .. }
-        | RuntimeCredentialError::VerifierOnly { .. } => StatusCode::UNAUTHORIZED,
+        | RuntimeCredentialError::VerifierOnly { .. }
+        | RuntimeCredentialError::DeliveryDenied { .. } => StatusCode::UNAUTHORIZED,
     }
 }
 

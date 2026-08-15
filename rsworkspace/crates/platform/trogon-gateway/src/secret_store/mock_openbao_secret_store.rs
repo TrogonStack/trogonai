@@ -9,8 +9,8 @@ use super::{
     SecretStorePut, SecretStoreRevoke, SecretStoreRotate,
 };
 use crate::credential::commands::domain::{
-    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialRef, CredentialScope, CredentialStatus,
-    CredentialVersion, StorageBackend,
+    CredentialFingerprint, CredentialKind, CredentialMetadata, CredentialPath, CredentialRef, CredentialScope,
+    CredentialStatus, CredentialVersion, StorageBackend,
 };
 use crate::secret_store::openbao_secret_store::openbao_credential_id;
 
@@ -33,19 +33,11 @@ struct MockOpenBaoVersion {
 
 impl MockOpenBaoSecretStore {
     pub fn data_path(credential: &CredentialRef) -> String {
-        format!(
-            "secret/data/trogonai/{}/credentials/{}",
-            credential.owner_id(),
-            credential.id()
-        )
+        format!("secret/data/{}", CredentialPath::from(credential))
     }
 
     pub fn metadata_path(credential: &CredentialRef) -> String {
-        format!(
-            "secret/metadata/trogonai/{}/credentials/{}",
-            credential.owner_id(),
-            credential.id()
-        )
+        format!("secret/metadata/{}", CredentialPath::from(credential))
     }
 }
 

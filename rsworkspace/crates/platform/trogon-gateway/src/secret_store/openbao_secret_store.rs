@@ -17,8 +17,8 @@ use super::{
 };
 use crate::credential::commands::domain::{
     CredentialFingerprint, CredentialId, CredentialIdError, CredentialKind, CredentialMetadata, CredentialOwnerId,
-    CredentialOwnerIdError, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion, SourceKind,
-    StorageBackend,
+    CredentialOwnerIdError, CredentialPath, CredentialRef, CredentialScope, CredentialStatus, CredentialVersion,
+    SourceKind, StorageBackend,
 };
 use crate::source_integration_id::SourceIntegrationId;
 
@@ -158,11 +158,10 @@ impl OpenBaoSecretStore {
     }
 
     fn credential_path(&self, credential: &CredentialRef) -> String {
-        format!(
-            "trogonai/{}/credentials/{}",
-            encode_path_segment(credential.owner_id().as_str()),
-            encode_path_segment(credential.id().as_str())
-        )
+        CredentialPath::from(credential)
+            .segments()
+            .map(encode_path_segment)
+            .join("/")
     }
 
     fn endpoint(&self, kind: OpenBaoEndpoint, credential: &CredentialRef) -> Result<Url, SecretStoreError> {

@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::fmt;
+use std::sync::OnceLock;
 
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Counter;
 use trogon_decider_runtime::{
     CommandError, CommandExecution, EventDecodeOutcome, ReadFrom, ReadStreamRequest, SnapshotRead, SnapshotWrite,
     StreamAppend, StreamPosition, StreamRead, TokioSnapshotTaskScheduler,
@@ -54,6 +57,65 @@ type RuntimeHandlerResult<EventStore, SecretError> = Result<
         AppendError<EventStore>,
     >,
 >;
+
+const CREDENTIAL_WRITE_METER_NAME: &str = "trogon-gateway";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CredentialWriteOperation {
+    Put,
+    Rotate,
+    Revoke,
+    Destroy,
+}
+
+impl CredentialWriteOperation {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Put => "put",
+            Self::Rotate => "rotate",
+            Self::Revoke => "revoke",
+            Self::Destroy => "destroy",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct CredentialWriteMetrics {
+    write_failures: Counter<u64>,
+}
+
+impl CredentialWriteMetrics {
+    fn new() -> Self {
+        let meter = trogon_telemetry::meter(CREDENTIAL_WRITE_METER_NAME);
+        Self {
+            write_failures: meter
+                .u64_counter("gateway.credential.store.write.failures")
+                .with_description("Credential secret-store writes that failed, by lifecycle operation.")
+                .build(),
+        }
+    }
+
+    /// The store error's message is deliberately not a label. It is derived
+    /// from whatever the backend returned, so it is unbounded, and the
+    /// responder gets it from the failure event and the logs instead.
+    fn record_write_failure(&self, operation: CredentialWriteOperation, source: SourceKind) {
+        self.write_failures.add(
+            1,
+            &[
+                KeyValue::new("operation", operation.as_str()),
+                KeyValue::new("source", source.as_str()),
+            ],
+        );
+    }
+}
+
+static CREDENTIAL_WRITE_METRICS: OnceLock<CredentialWriteMetrics> = OnceLock::new();
+
+fn record_write_failure(operation: CredentialWriteOperation, source: SourceKind) {
+    CREDENTIAL_WRITE_METRICS
+        .get_or_init(CredentialWriteMetrics::new)
+        .record_write_failure(operation, source);
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct PutCredential {
@@ -520,9 +582,11 @@ where
         );
         self.ensure_write_requested(&request).await?;
 
+        let source_kind = command.scope.source_kind();
         let credential_ref = match self.secrets.put(command.scope, command.kind, command.value).await {
             Ok(credential_ref) => credential_ref,
             Err(source) => {
+                record_write_failure(CredentialWriteOperation::Put, source_kind);
                 let reason = failure_reason(&source);
                 self.record_write_failure(command.credential_id, reason).await?;
                 return Err(CredentialHandlerError::SecretWrite { source });
@@ -624,6 +688,7 @@ where
         let rotated_ref = match self.secrets.rotate(&command.credential_ref, command.value).await {
             Ok(rotated_ref) => rotated_ref,
             Err(source) => {
+                record_write_failure(CredentialWriteOperation::Rotate, command.credential_ref.source());
                 let reason = failure_reason(&source);
                 self.record_rotation_failure(command.credential_ref, reason).await?;
                 return Err(CredentialHandlerError::SecretRotate { source });
@@ -725,10 +790,10 @@ where
         &self,
         command: RevokeStoredCredential,
     ) -> HandlerResult<EventStore, <Secrets as SecretStoreRevoke>::Error> {
-        self.secrets
-            .revoke(&command.credential_ref)
-            .await
-            .map_err(|source| CredentialHandlerError::SecretRevoke { source })?;
+        self.secrets.revoke(&command.credential_ref).await.map_err(|source| {
+            record_write_failure(CredentialWriteOperation::Revoke, command.credential_ref.source());
+            CredentialHandlerError::SecretRevoke { source }
+        })?;
 
         let result = CommandExecution::new(&self.event_store, &RevokeCredential::new(command.credential_ref))
             .with_snapshot(&self.event_store)
@@ -769,6 +834,7 @@ where
         match self.secrets.destroy(&command.credential_ref, &command.reason).await {
             Ok(()) => {}
             Err(source) => {
+                record_write_failure(CredentialWriteOperation::Destroy, command.credential_ref.source());
                 let reason = failure_reason(&source);
                 self.record_destroy_failure(command.credential_ref, reason).await?;
                 return Err(CredentialHandlerError::SecretDestroy { source });
