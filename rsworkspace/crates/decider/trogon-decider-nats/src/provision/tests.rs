@@ -239,6 +239,19 @@ fn duplicate_window_accepts_values_above_the_minimum() {
 }
 
 #[test]
+fn duplicate_window_round_trips_through_duration_conversions() {
+    let value = Duration::from_secs(90);
+
+    let window = DuplicateWindow::try_from(value).expect("a valid window converts from a duration");
+
+    assert_eq!(Duration::from(window), value);
+    assert_eq!(
+        DuplicateWindow::try_from(Duration::ZERO).expect_err("zero should be rejected"),
+        InvalidDuplicateWindowError::Zero
+    );
+}
+
+#[test]
 fn apply_duplicate_window_sets_the_field_when_max_age_is_unset() {
     let config = stream_config("DUP_STREAM", "dup.stream.>");
     let window = DuplicateWindow::try_new(Duration::from_secs(30)).expect("valid window");

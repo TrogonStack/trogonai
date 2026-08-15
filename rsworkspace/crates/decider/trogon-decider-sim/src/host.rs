@@ -181,3 +181,6 @@ impl<T: 'static> SimInstance<T> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
