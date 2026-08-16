@@ -5,17 +5,22 @@
 //! independently of the body it summarizes is a discriminant that can disagree
 //! with it, and middleware that meters on the header would then be metering
 //! something the caller never saw.
+//!
+//! This module decides which arm an error belongs in. What that arm's
+//! `google.rpc.Status` looks like belongs to [`crate::status`].
 
 use buffa::{Message as _, MessageField};
 use buffa_types::google::protobuf::Any;
 use std::error::Error as StdError;
 use trogon_decider_nats::OptimisticConcurrencyConflictError;
-use trogon_decider_runtime::{Event, OverloadedError, UnauthorizedError};
-use trogon_decider_wasm_runtime::{GuestDomainError, WasmCommandError, WasmExecutionResult};
+use trogon_decider_runtime::Event;
+use trogon_decider_wasm_runtime::{GuestDomainError, ModuleName, WasmCommandError, WasmExecutionResult};
 use trogon_semconv::attribute::DecisionOutcome;
-use trogonai_proto::decider::{CommandFaultedKind, CommandOutcomeCase, v1};
+use trogonai_proto::decider::{CommandOutcomeCase, v1};
+use trogonai_proto::google::rpc::Status;
 
 use crate::constants::TYPE_URL_PREFIX;
+use crate::status::{self, FaultClass};
 
 /// One command's outcome, in both forms the reply carries it.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,55 +42,37 @@ impl CommandReply {
     }
 
     /// The module answered no.
-    pub fn rejected(error: &GuestDomainError) -> Self {
-        Self {
-            outcome: outcome(CommandOutcomeCase::Rejected(Box::new(v1::CommandRejected {
-                code: error.code.clone(),
-                message: error.message.clone(),
-                details: guest_details(&error.details),
-            }))),
-            decision: DecisionOutcome::Rejected,
-        }
-    }
-
-    /// The host was already at its admission limit.
-    pub fn shed(overloaded: OverloadedError) -> Self {
-        Self {
-            outcome: outcome(CommandOutcomeCase::Shed(Box::new(v1::CommandShed {
-                limit: u64::try_from(overloaded.limit().as_usize()).unwrap_or(u64::MAX),
-            }))),
-            decision: DecisionOutcome::Shed,
-        }
-    }
-
-    /// The configured authorizer refused the submitting principal.
-    pub fn denied(unauthorized: &UnauthorizedError) -> Self {
-        Self {
-            outcome: outcome(CommandOutcomeCase::Denied(Box::new(v1::CommandDenied {
-                reason: unauthorized.to_string(),
-            }))),
-            decision: DecisionOutcome::Denied,
-        }
+    pub fn rejected(module: &ModuleName, error: &GuestDomainError) -> Self {
+        Self::from_status(
+            CommandOutcomeCase::Rejected,
+            DecisionOutcome::Rejected,
+            status::rejected(module.as_str(), &error.code, error.message.clone(), &error.details),
+        )
     }
 
     /// No activated module claims the command type the subject named.
     pub fn unroutable(error: &dyn StdError) -> Self {
-        Self::faulted(v1::command_faulted::Unroutable {}.into(), error)
+        Self::faulted(FaultClass::Unroutable, error)
     }
 
     /// The subject or the headers could not be read as a command at all.
     pub fn invalid_request(error: &dyn StdError) -> Self {
-        Self::faulted(v1::command_faulted::InvalidRequest {}.into(), error)
+        Self::faulted(FaultClass::InvalidRequest, error)
     }
 
     /// The host broke one of its own invariants, so neither the guest nor
     /// storage is answerable for the failure.
     pub fn internal(error: &dyn StdError) -> Self {
-        Self::faulted(v1::command_faulted::Internal {}.into(), error)
+        Self::faulted(FaultClass::Internal, error)
     }
 
     /// Maps the runtime's error taxonomy onto the reply, per ADR#0057 section 5.
+    ///
+    /// The module is named because a rejection's code space belongs to it: the
+    /// host reports that code under the module's domain rather than under its
+    /// own, so two modules choosing the same code stay distinguishable.
     pub fn from_command_error<ReadSnapshotError, ReadStreamError, AppendStreamError>(
+        module: &ModuleName,
         error: &WasmCommandError<ReadSnapshotError, ReadStreamError, AppendStreamError>,
     ) -> Self
     where
@@ -94,37 +81,43 @@ impl CommandReply {
         AppendStreamError: StdError + 'static,
     {
         match error {
-            WasmCommandError::Rejected(domain) => Self::rejected(domain),
-            WasmCommandError::Overloaded(overloaded) => Self::shed(*overloaded),
-            WasmCommandError::Unauthorized(unauthorized) => Self::denied(unauthorized),
-            WasmCommandError::PreconditionConflict(_) => Self::faulted(v1::command_faulted::Conflict {}.into(), error),
+            WasmCommandError::Rejected(domain) => Self::rejected(module, domain),
+            WasmCommandError::Overloaded(overloaded) => Self::from_status(
+                CommandOutcomeCase::Shed,
+                DecisionOutcome::Shed,
+                status::shed(*overloaded),
+            ),
+            WasmCommandError::Unauthorized(unauthorized) => Self::from_status(
+                CommandOutcomeCase::Denied,
+                DecisionOutcome::Denied,
+                status::denied(unauthorized),
+            ),
+            WasmCommandError::PreconditionConflict(_) => Self::faulted(FaultClass::Conflict, error),
             // A concurrent writer won the race. Reaching for it through the
             // append error's chain rather than the variant, because the store
             // reports it as one storage failure among many and only the cause
             // tells a retryable conflict apart from a broken JetStream.
             WasmCommandError::Append(append) if carries_write_conflict(append) => {
-                Self::faulted(v1::command_faulted::Conflict {}.into(), error)
+                Self::faulted(FaultClass::Conflict, error)
             }
             WasmCommandError::Faulted(domain)
             | WasmCommandError::Evolve(domain)
-            | WasmCommandError::StreamId(domain) => Self::faulted_with_details(
-                v1::command_faulted::Guest {}.into(),
-                error.to_string(),
-                guest_details(&domain.details),
+            | WasmCommandError::StreamId(domain) => Self::from_status(
+                CommandOutcomeCase::Faulted,
+                DecisionOutcome::Faulted,
+                status::guest_faulted(error.to_string(), &domain.details),
             ),
             WasmCommandError::Trap(_) | WasmCommandError::EmptyDecision | WasmCommandError::Instantiate(_) => {
-                Self::faulted(v1::command_faulted::Guest {}.into(), error)
+                Self::faulted(FaultClass::Guest, error)
             }
-            WasmCommandError::DeadlineExceeded(_) => {
-                Self::faulted(v1::command_faulted::DeadlineExceeded {}.into(), error)
-            }
+            WasmCommandError::DeadlineExceeded(_) => Self::faulted(FaultClass::DeadlineExceeded, error),
             WasmCommandError::ReadSnapshot(_) | WasmCommandError::ReadStream(_) | WasmCommandError::Append(_) => {
-                Self::faulted(v1::command_faulted::Storage {}.into(), error)
+                Self::faulted(FaultClass::Storage, error)
             }
             WasmCommandError::ReplayLimitExceeded(_)
             | WasmCommandError::SnapshotAheadOfStream(_)
             | WasmCommandError::ReadAfterOverflow(_)
-            | WasmCommandError::Blocking(_) => Self::faulted(v1::command_faulted::Internal {}.into(), error),
+            | WasmCommandError::Blocking(_) => Self::faulted(FaultClass::Internal, error),
         }
     }
 
@@ -148,18 +141,18 @@ impl CommandReply {
         self.outcome.encode_to_vec()
     }
 
-    fn faulted(kind: CommandFaultedKind, error: &dyn StdError) -> Self {
-        Self::faulted_with_details(kind, error.to_string(), causal_chain(error.source()))
+    fn faulted(class: FaultClass, error: &dyn StdError) -> Self {
+        Self::from_status(
+            CommandOutcomeCase::Faulted,
+            DecisionOutcome::Faulted,
+            status::faulted(class, error),
+        )
     }
 
-    fn faulted_with_details(kind: CommandFaultedKind, message: String, details: Vec<v1::DomainErrorDetail>) -> Self {
+    fn from_status(arm: fn(Box<Status>) -> CommandOutcomeCase, decision: DecisionOutcome, status: Status) -> Self {
         Self {
-            outcome: outcome(CommandOutcomeCase::Faulted(Box::new(v1::CommandFaulted {
-                message,
-                details,
-                kind: Some(kind),
-            }))),
-            decision: DecisionOutcome::Faulted,
+            outcome: outcome(arm(Box::new(status))),
+            decision,
         }
     }
 }
@@ -182,33 +175,6 @@ fn decided_event(event: &Event) -> v1::DecidedEvent {
             ..Any::default()
         }),
     }
-}
-
-fn guest_details(details: &[(String, String)]) -> Vec<v1::DomainErrorDetail> {
-    details
-        .iter()
-        .map(|(key, value)| v1::DomainErrorDetail {
-            key: key.clone(),
-            value: value.clone(),
-        })
-        .collect()
-}
-
-/// Flattens a `#[source]` chain into ordered `cause.N` pairs, the same shape the
-/// guest bridge produces, so a caller reads one detail vocabulary whether the
-/// chain was built in the guest or in the host.
-fn causal_chain(mut source: Option<&(dyn StdError + 'static)>) -> Vec<v1::DomainErrorDetail> {
-    let mut details = Vec::new();
-    let mut depth = 0usize;
-    while let Some(error) = source {
-        details.push(v1::DomainErrorDetail {
-            key: format!("cause.{depth}"),
-            value: error.to_string(),
-        });
-        source = error.source();
-        depth += 1;
-    }
-    details
 }
 
 fn carries_write_conflict(error: &(dyn StdError + 'static)) -> bool {

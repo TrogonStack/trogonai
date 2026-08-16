@@ -181,10 +181,7 @@ fn a_shared_authorizer_keeps_the_fail_closed_default() {
         authorize_anonymously(Arc::clone(&shared)),
         Err(UnauthorizedError::MissingPrincipal)
     );
-    assert_eq!(
-        authorize_anonymously(&shared),
-        Err(UnauthorizedError::MissingPrincipal)
-    );
+    assert_eq!(authorize_anonymously(&shared), Err(UnauthorizedError::MissingPrincipal));
 }
 
 #[test]

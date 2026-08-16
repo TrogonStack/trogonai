@@ -1,11 +1,14 @@
 use trogon_decider_nats::JetStreamStoreError;
 use trogon_decider_runtime::{
-    AdmissionLimit, AuthorizationDenied, EventId, Headers, StreamPosition, StreamWritePrecondition, UnauthorizedError,
+    AdmissionLimit, AuthorizationDenied, EventId, Headers, OverloadedError, SnapshotAheadOfStream, StreamPosition,
+    StreamWritePrecondition, UnauthorizedError,
 };
+use trogonai_proto::google::rpc::{Code, DebugInfo, ErrorInfo};
 use uuid::Uuid;
 
 use super::*;
 use crate::request::CommandRequestError;
+use crate::status::find_detail;
 
 #[derive(Debug, thiserror::Error)]
 #[error("jetstream is unreachable")]
@@ -13,6 +16,10 @@ struct StorageDownError;
 
 type StoreError = JetStreamStoreError<StorageDownError>;
 type TestCommandError = WasmCommandError<StorageDownError, StorageDownError, StoreError>;
+
+fn module() -> ModuleName {
+    ModuleName::new("schedules").expect("a valid module name")
+}
 
 fn position(value: u64) -> StreamPosition {
     StreamPosition::try_new(value).expect("test positions are non-zero")
@@ -40,15 +47,19 @@ fn case(reply: &CommandReply) -> &CommandOutcomeCase {
     reply.outcome().outcome.as_ref().expect("every reply sets an arm")
 }
 
-fn faulted(reply: &CommandReply) -> &v1::CommandFaulted {
+fn faulted(reply: &CommandReply) -> &Status {
     match case(reply) {
-        CommandOutcomeCase::Faulted(faulted) => faulted,
+        CommandOutcomeCase::Faulted(status) => status,
         other => panic!("expected a faulted reply, got {other:?}"),
     }
 }
 
-fn kind(reply: &CommandReply) -> &CommandFaultedKind {
-    faulted(reply).kind.as_ref().expect("a fault always names its class")
+/// The reason a fault reports, which is what tells two classes sharing one code
+/// apart.
+fn fault_reason(reply: &CommandReply) -> String {
+    find_detail::<ErrorInfo>(faulted(reply))
+        .expect("every decider status names its reason")
+        .reason
 }
 
 fn write_conflict() -> StoreError {
@@ -171,14 +182,16 @@ fn a_decided_reply_strips_nothing_but_adds_the_any_type_url_prefix() {
 
 #[test]
 fn a_rejection_keeps_the_guest_code_message_and_details() {
-    let reply = CommandReply::rejected(&guest_error());
+    let reply = CommandReply::rejected(&module(), &guest_error());
 
     match case(&reply) {
-        CommandOutcomeCase::Rejected(rejected) => {
-            assert_eq!(rejected.code, "schedule_already_exists");
-            assert_eq!(rejected.message, "schedule 'nightly' already exists");
-            assert_eq!(rejected.details.len(), 1);
-            assert_eq!(rejected.details[0].key, "cause.0");
+        CommandOutcomeCase::Rejected(status) => {
+            let info = find_detail::<ErrorInfo>(status).expect("every decider status names its reason");
+            assert_eq!(info.reason, "schedule_already_exists");
+            assert_eq!(info.domain, "schedules");
+            assert_eq!(status.message, "schedule 'nightly' already exists");
+            let debug = find_detail::<DebugInfo>(status).expect("the guest attached a chain");
+            assert_eq!(debug.stack_entries, vec!["cause.0: duplicate key".to_owned()]);
         }
         other => panic!("expected a rejected reply, got {other:?}"),
     }
@@ -186,7 +199,7 @@ fn a_rejection_keeps_the_guest_code_message_and_details() {
 
 #[test]
 fn a_rejection_is_not_a_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::Rejected(guest_error()));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::Rejected(guest_error()));
 
     assert_eq!(
         reply.header_value(),
@@ -196,30 +209,28 @@ fn a_rejection_is_not_a_fault() {
 }
 
 #[test]
-fn a_shed_command_carries_the_limit_it_contended_for() {
+fn a_shed_command_lands_in_its_own_arm() {
     let limit = AdmissionLimit::try_new(32).expect("a positive limit");
-    let reply = CommandReply::from_command_error(&TestCommandError::Overloaded(OverloadedError::new(limit)));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::Overloaded(OverloadedError::new(limit)));
 
     assert_eq!(reply.header_value(), "shed");
     match case(&reply) {
-        CommandOutcomeCase::Shed(shed) => assert_eq!(
-            shed.limit, 32,
-            "a caller that knows the limit can size its backoff instead of guessing"
-        ),
+        CommandOutcomeCase::Shed(status) => assert_eq!(status.code, Code::RESOURCE_EXHAUSTED as i32),
         other => panic!("expected a shed reply, got {other:?}"),
     }
 }
 
 #[test]
-fn a_denied_command_carries_the_reason_the_authorizer_gave() {
+fn a_denied_command_lands_in_its_own_arm() {
     let denied = UnauthorizedError::Denied(AuthorizationDenied::new("missing claim orders.write"));
-    let reply = CommandReply::from_command_error(&TestCommandError::Unauthorized(denied));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::Unauthorized(denied));
 
     assert_eq!(reply.header_value(), "denied");
     match case(&reply) {
-        CommandOutcomeCase::Denied(denied) => assert_eq!(
-            denied.reason, "command denied for this principal: missing claim orders.write",
-            "the caller is told why it was refused, since the host defines no denial codes to branch on"
+        CommandOutcomeCase::Denied(status) => assert_eq!(
+            status.code,
+            Code::PERMISSION_DENIED as i32,
+            "the principal was identified and refused, which is not the same as not being identified"
         ),
         other => panic!("expected a denied reply, got {other:?}"),
     }
@@ -227,79 +238,115 @@ fn a_denied_command_carries_the_reason_the_authorizer_gave() {
 
 #[test]
 fn a_command_with_no_principal_is_denied_rather_than_faulted() {
-    let reply = CommandReply::from_command_error(&TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal));
+    let reply = CommandReply::from_command_error(
+        &module(),
+        &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
+    );
 
     assert_eq!(
         reply.header_value(),
         "denied",
         "an authorizer configured without a principal is a caller problem, not a broken host"
     );
+    match case(&reply) {
+        CommandOutcomeCase::Denied(status) => assert_eq!(status.code, Code::UNAUTHENTICATED as i32),
+        other => panic!("expected a denied reply, got {other:?}"),
+    }
 }
 
 #[test]
 fn an_unroutable_command_type_is_a_fault_of_its_own_class() {
     let reply = CommandReply::unroutable(&StorageDownError);
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::Unroutable(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::Unroutable.reason());
+    assert_eq!(faulted(&reply).code, Code::UNIMPLEMENTED as i32);
 }
 
 #[test]
 fn an_unreadable_envelope_is_an_invalid_request() {
     let reply = CommandReply::invalid_request(&CommandRequestError::ExpectedRevisionZero);
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::InvalidRequest(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
+    assert_eq!(faulted(&reply).code, Code::INVALID_ARGUMENT as i32);
 }
 
 #[test]
 fn a_write_conflict_under_an_append_is_a_conflict_not_a_storage_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::Append(write_conflict()));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::Append(write_conflict()));
 
-    assert!(
-        matches!(kind(&reply), CommandFaultedKind::Conflict(_)),
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::Conflict.reason(),
         "a retry replays the stream as it now stands, which is not the advice a storage fault gives"
     );
+    assert_eq!(faulted(&reply).code, Code::ABORTED as i32);
 }
 
 #[test]
 fn an_append_that_is_not_a_conflict_stays_a_storage_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::Append(StoreError::Codec(StorageDownError)));
+    let reply = CommandReply::from_command_error(
+        &module(),
+        &TestCommandError::Append(StoreError::Codec(StorageDownError)),
+    );
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::Storage(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::Storage.reason());
 }
 
 #[test]
 fn a_stream_read_failure_is_a_storage_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::ReadStream(StorageDownError));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::ReadStream(StorageDownError));
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::Storage(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::Storage.reason());
+    assert_eq!(faulted(&reply).code, Code::UNAVAILABLE as i32);
 }
 
 #[test]
 fn a_snapshot_read_failure_is_a_storage_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::ReadSnapshot(StorageDownError));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::ReadSnapshot(StorageDownError));
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::Storage(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::Storage.reason());
 }
 
 #[test]
 fn a_decision_with_no_events_is_a_guest_fault() {
-    let reply = CommandReply::from_command_error(&TestCommandError::EmptyDecision);
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::EmptyDecision);
 
-    assert!(
-        matches!(kind(&reply), CommandFaultedKind::Guest(_)),
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::Guest.reason(),
         "the guest broke the WIT contract, so retrying repeats the same call"
     );
 }
 
 #[test]
 fn a_guest_fault_keeps_the_details_the_guest_attached() {
-    let reply = CommandReply::from_command_error(&TestCommandError::Faulted(guest_error()));
+    let reply = CommandReply::from_command_error(&module(), &TestCommandError::Faulted(guest_error()));
 
-    assert!(matches!(kind(&reply), CommandFaultedKind::Guest(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::Guest.reason());
+    let debug = find_detail::<DebugInfo>(faulted(&reply)).expect("the guest attached a chain");
     assert_eq!(
-        faulted(&reply).details.len(),
+        debug.stack_entries.len(),
         1,
         "the guest's chain is all that survived the WIT boundary; dropping it here loses it for good"
+    );
+}
+
+#[test]
+fn a_host_fault_and_a_guest_fault_are_both_internal_but_not_the_same_reason() {
+    let host = CommandReply::from_command_error(
+        &module(),
+        &TestCommandError::SnapshotAheadOfStream(SnapshotAheadOfStream {
+            snapshot_position: position(9),
+            stream_position: Some(position(4)),
+        }),
+    );
+    let guest = CommandReply::from_command_error(&module(), &TestCommandError::EmptyDecision);
+
+    assert_eq!(faulted(&host).code, faulted(&guest).code);
+    assert_ne!(
+        fault_reason(&host),
+        fault_reason(&guest),
+        "an operator paging on host faults must not be paged by a module's own bug"
     );
 }
 
@@ -307,12 +354,18 @@ fn a_guest_fault_keeps_the_details_the_guest_attached() {
 fn every_reply_header_agrees_with_the_arm_it_summarizes() {
     let replies = [
         CommandReply::decided(&result(vec![event(1, "test.v1.Created", vec![1])])),
-        CommandReply::rejected(&guest_error()),
-        CommandReply::from_command_error(&TestCommandError::Overloaded(OverloadedError::new(
-            AdmissionLimit::try_new(1).expect("a positive limit"),
-        ))),
-        CommandReply::from_command_error(&TestCommandError::EmptyDecision),
-        CommandReply::from_command_error(&TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal)),
+        CommandReply::rejected(&module(), &guest_error()),
+        CommandReply::from_command_error(
+            &module(),
+            &TestCommandError::Overloaded(OverloadedError::new(
+                AdmissionLimit::try_new(1).expect("a positive limit"),
+            )),
+        ),
+        CommandReply::from_command_error(&module(), &TestCommandError::EmptyDecision),
+        CommandReply::from_command_error(
+            &module(),
+            &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
+        ),
     ];
 
     for reply in &replies {
@@ -333,11 +386,34 @@ fn every_reply_header_agrees_with_the_arm_it_summarizes() {
 }
 
 #[test]
-fn a_host_fault_flattens_its_source_chain_into_ordered_details() {
-    let reply = CommandReply::from_command_error(&TestCommandError::ReadStream(StorageDownError));
+fn no_arm_but_decided_reports_ok() {
+    let statuses = [
+        CommandReply::rejected(&module(), &guest_error()),
+        CommandReply::from_command_error(
+            &module(),
+            &TestCommandError::Overloaded(OverloadedError::new(
+                AdmissionLimit::try_new(1).expect("a positive limit"),
+            )),
+        ),
+        CommandReply::from_command_error(
+            &module(),
+            &TestCommandError::Unauthorized(UnauthorizedError::MissingPrincipal),
+        ),
+        CommandReply::internal(&StorageDownError),
+    ];
 
-    let details = &faulted(&reply).details;
-    assert_eq!(details.len(), 1);
-    assert_eq!(details[0].key, "cause.0");
-    assert_eq!(details[0].value, "jetstream is unreachable");
+    for reply in &statuses {
+        let status = match case(reply) {
+            CommandOutcomeCase::Rejected(status)
+            | CommandOutcomeCase::Faulted(status)
+            | CommandOutcomeCase::Shed(status)
+            | CommandOutcomeCase::Denied(status) => status,
+            CommandOutcomeCase::Decided(_) => panic!("none of these arms is a success"),
+        };
+        assert_ne!(
+            status.code,
+            Code::OK as i32,
+            "`OK` on a status a caller reached by matching a non-decided arm would contradict the arm"
+        );
+    }
 }

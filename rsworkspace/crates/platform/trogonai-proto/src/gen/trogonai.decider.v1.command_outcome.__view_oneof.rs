@@ -13,22 +13,30 @@ pub mod command_outcome {
         ),
         Rejected(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::CommandRejectedView<'a>,
+                super::super::super::super::super::super::super::google::rpc::__buffa::view::StatusView<
+                    'a,
+                >,
             >,
         ),
         Faulted(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::CommandFaultedView<'a>,
+                super::super::super::super::super::super::super::google::rpc::__buffa::view::StatusView<
+                    'a,
+                >,
             >,
         ),
         Shed(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::CommandShedView<'a>,
+                super::super::super::super::super::super::super::google::rpc::__buffa::view::StatusView<
+                    'a,
+                >,
             >,
         ),
         Denied(
             ::buffa::alloc::boxed::Box<
-                super::super::super::super::__buffa::view::CommandDeniedView<'a>,
+                super::super::super::super::super::super::super::google::rpc::__buffa::view::StatusView<
+                    'a,
+                >,
             >,
         ),
     }

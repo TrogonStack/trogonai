@@ -50,6 +50,21 @@ pub mod google {
         clippy::doc_lazy_continuation,
         clippy::module_inception
     )]
+    pub mod rpc {
+        use super::*;
+        include!("google.rpc.mod.rs");
+    }
+    #[allow(
+        non_camel_case_types,
+        dead_code,
+        unused_imports,
+        unused_qualifications,
+        clippy::derivable_impls,
+        clippy::match_single_binding,
+        clippy::uninlined_format_args,
+        clippy::doc_lazy_continuation,
+        clippy::module_inception
+    )]
     pub mod r#type {
         use super::*;
         include!("google.type.mod.rs");

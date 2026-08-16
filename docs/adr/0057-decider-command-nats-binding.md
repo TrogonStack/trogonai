@@ -165,6 +165,25 @@ vocabulary and cannot drift. On disagreement between header and body the body is
 the inverse of 0016's rule, because here the body is the typed contract and the
 header is the derived summary.
 
+**Every arm but `decided` is a `google.rpc.Status`**, per
+[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) section 3: a canonical
+`google.rpc.Code`, a human-readable message, and standard `google.rpc` detail
+messages in `details`. What this binding adds is the arm, not the shape. 0016
+fixes what an error body looks like platform-wide and keeps defined business
+outcomes off the micro error channel so `num_errors` stays a health signal; the
+`oneof` is how they stay off it here. A rejection is still a `Status`, and it is
+still not a service error.
+
+Every status carries a `google.rpc.ErrorInfo`. Its `reason` is the stable,
+machine-readable identifier a caller branches on, and its `domain` says who owns
+that reason's namespace: `trogonai.decider.v1` for anything the host decided, and
+the **module's own name** for a rejection, whose code space belongs to the module
+rather than to the host. Without that split, two modules choosing the same
+rejection code would be indistinguishable on the wire.
+
+`details` is a `repeated google.protobuf.Any` with no ordering guarantee. A
+reader locates a detail by unpacking on its type URL, never by indexing.
+
 `decided` carries the appended events themselves, as `google.protobuf.Any`
 payloads in append order, each with the event id it was appended under. A caller
 that must act on what it just decided, such as one warming a cache from its own
@@ -194,14 +213,19 @@ command is the decider pattern working: the host executed correctly and the doma
 answered no. Counting that as a service error would turn a health signal into a
 business-outcome counter, which is the failure
 [ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) section 3 warns about.
+Its code is `FAILED_PRECONDITION` rather than `INVALID_ARGUMENT`, which is the
+distinction `google.rpc.Code` already draws: the command is well-formed and would
+succeed against a different stream state.
 
 `shed` is its own arm rather than a fault for the same reason in the opposite
 direction: per
 [ADR#0028](./0028-decider-admission-control-and-backpressure.md) a shed command
 was refused before anything was read, decided, or appended. The host is full, not
 broken, and the caller's correct response is backoff rather than escalation. It
-carries the limit it contended for so the backoff can be sized rather than
-guessed.
+is `RESOURCE_EXHAUSTED` and carries a `google.rpc.QuotaFailure` naming the limit
+it contended for as a number, so the backoff can be sized rather than guessed.
+The violation's `subject` is empty: the limit is the host's, so nothing about who
+asked determined that the answer was no.
 
 `denied` is likewise its own arm rather than a fault. Per
 [ADR#0026](./0026-command-authorization-principal.md) a denied command was
@@ -209,27 +233,42 @@ refused before anything was read, decided, or appended, because the submitting
 principal was absent or the host's authorizer refused it. Nothing is broken and
 no retry of the same command by the same principal will fare differently, so the
 caller's correct response is different credentials rather than backoff, and an
-operator counting it is counting attempted access rather than service health. It
-carries only the reason the authorizer gave, written for a caller to read and not
-to branch on: a denial that named the rule that refused it would be telling an
-unauthorized caller how to become an authorized one.
+operator counting it is counting attempted access rather than service health. The
+two refusals are separate codes because the caller's next move differs:
+`UNAUTHENTICATED` says present credentials, `PERMISSION_DENIED` says present
+different ones. The message is only what the authorizer gave, written for a caller
+to read and not to branch on: a denial that named the rule that refused it would
+be telling an unauthorized caller how to become an authorized one.
 
-`faulted` carries a `oneof kind` rather than an enum, following the repository's
-existing convention for growable state discriminants, so a fault class can gain
-the fields only it needs. The mapping from the runtime's error taxonomy is total:
+`faulted` is a single `Status` whose class is read off `ErrorInfo.reason`. A
+reason rather than a nested `oneof`, because a code space is what a caller
+branches on and `google.rpc` already publishes the convention for one; a
+per-class message would also be a second discriminant alongside the code, free to
+disagree with it. Two classes share `INTERNAL` on purpose: to a caller they are
+one thing, and the reason is what tells an operator which party is answerable.
 
-| `WasmCommandError` | Outcome | Retry |
-| --- | --- | --- |
-| `Rejected` | `rejected` | No; the command is wrong, not the moment |
-| `Overloaded` | `shed` | Yes, after backoff |
-| `Unauthorized` | `denied` | No; not by this principal |
-| unrouted command type | `faulted.unroutable` | Only after a module claiming it activates |
-| undecodable subject, unparseable header | `faulted.invalid_request` | No |
-| `PreconditionConflict`, optimistic concurrency conflict | `faulted.conflict` | Yes; a retry replays the stream as it now stands |
-| `Faulted`, `Trap`, `EmptyDecision`, `Evolve`, `StreamId`, `Instantiate` | `faulted.guest` | No; a retry repeats the same guest call |
-| `DeadlineExceeded` | `faulted.deadline_exceeded` | Only once the load that slowed the guest has passed |
-| `ReadSnapshot`, `ReadStream`, `Append` | `faulted.storage` | Yes, once storage recovers |
-| `ReplayLimitExceeded`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `Blocking` | `faulted.internal` | No |
+The mapping from the runtime's error taxonomy is total:
+
+| `WasmCommandError` | Arm | `google.rpc.Code` | `ErrorInfo.reason` | Retry |
+| --- | --- | --- | --- | --- |
+| `Rejected` | `rejected` | `FAILED_PRECONDITION` | the module's own code | No; the command is wrong, not the moment |
+| `Overloaded` | `shed` | `RESOURCE_EXHAUSTED` | `ADMISSION_LIMIT_REACHED` | Yes, after backoff |
+| `Unauthorized::MissingPrincipal` | `denied` | `UNAUTHENTICATED` | `PRINCIPAL_MISSING` | No; not without credentials |
+| `Unauthorized::Denied` | `denied` | `PERMISSION_DENIED` | `PRINCIPAL_UNAUTHORIZED` | No; not by this principal |
+| unrouted command type | `faulted` | `UNIMPLEMENTED` | `COMMAND_TYPE_UNROUTABLE` | Only after a module claiming it activates |
+| undecodable subject, unparseable header | `faulted` | `INVALID_ARGUMENT` | `COMMAND_REQUEST_MALFORMED` | No |
+| `PreconditionConflict`, optimistic concurrency conflict | `faulted` | `ABORTED` | `STREAM_WRITE_CONFLICT` | Yes; a retry replays the stream as it now stands |
+| `Faulted`, `Trap`, `EmptyDecision`, `Evolve`, `StreamId`, `Instantiate` | `faulted` | `INTERNAL` | `GUEST_FAULT` | No; a retry repeats the same guest call |
+| `DeadlineExceeded` | `faulted` | `DEADLINE_EXCEEDED` | `GUEST_DEADLINE_EXCEEDED` | Only once the load that slowed the guest has passed |
+| `ReadSnapshot`, `ReadStream`, `Append` | `faulted` | `UNAVAILABLE` | `STORAGE_UNAVAILABLE` | Yes, once storage recovers |
+| `ReplayLimitExceeded`, `SnapshotAheadOfStream`, `ReadAfterOverflow`, `Blocking` | `faulted` | `INTERNAL` | `HOST_INTERNAL` | No |
+
+Where an error has a cause chain, it travels as `google.rpc.DebugInfo`, whose
+`stack_entries` is ordered outermost cause first. A guest's chain crossed the WIT
+boundary already flattened into pairs and keeps the guest's own labels, because
+the host cannot recover the chain they came from to re-derive them. `DebugInfo`
+is omitted rather than sent empty: an empty detail says what an absent one says
+and costs a caller a decode to find out.
 
 A command that produced no reply at all (the caller timed out) is not an outcome:
 its events may or may not have been appended, which is exactly what section 6
@@ -278,6 +317,14 @@ same fact twice.
   and in `CommandOutcome`.
 - A domain rejection is `rejected`, never a fault. A shed is `shed`, never a
   fault.
+- Every arm but `decided` is a `google.rpc.Status` carrying a canonical
+  `google.rpc.Code` and a `google.rpc.ErrorInfo`. The host defines no error
+  message of its own and no `Status` in a non-`decided` arm reports `OK`.
+- `ErrorInfo.domain` is `trogonai.decider.v1` for everything the host decided and
+  the module's name for a rejection. A host never reports a module's rejection
+  code under its own domain.
+- A caller reads `Status.details` by unpacking on a type URL. Nothing about the
+  order or the count of that list is promised.
 - A present-but-unparseable `Trogon-Command-Id` or `Trogon-Expected-Revision`
   fails the command; neither is ever ignored.
 - Commands are core NATS. A host never acknowledges, redelivers, or dead-letters
@@ -326,10 +373,40 @@ and it forces every intermediate to agree on which signal wins. The `oneof` make
 the outcome set exhaustive at the type level; the header keeps the
 decode-free metering that the split encoding was there to provide.
 
+### Define per-outcome error messages instead of `google.rpc.Status`
+
+Rejected, and this is where the binding follows
+[ADR#0016](./0016-protobuf-rpc-over-nats-micro-binding.md) rather than departing
+from it. Section 1 departs from 0016 on the registration model because a decider
+host cannot satisfy 0016's endpoint invariant. Nothing about that argument
+reaches the error body, and the two questions are independent: 0016 fixes the
+shape of an error, and this binding fixes which arm it arrives in.
+
+A hand-rolled `CommandFaulted` / `CommandRejected` / `CommandShed` /
+`CommandDenied` family is what a first pass produced, and it cost three things.
+It re-invented the canonical code space, so a caller with a generic protobuf
+error handler had to special-case the decider. It re-invented the detail types,
+including a `DomainErrorDetail` key/value pair whose keys were only an index into
+an ordered chain, which is what `google.rpc.DebugInfo.stack_entries` already is.
+And it lost information: a single `CommandDenied.reason` string flattened two
+refusals whose correct caller responses differ, which the `UNAUTHENTICATED` /
+`PERMISSION_DENIED` split now keeps apart.
+
+The residual cost is that `google/rpc/status.proto`, `code.proto`, and
+`error_details.proto` enter this schema's transitive closure. That is the price
+of a caller being able to read a reply with types it already has.
+
 ## Consequences
 
 - A caller needs the `trogonai.decider.v1` messages to talk to a decider host.
-  That is one small package, versioned independently of any domain's commands.
+  That is one small package, versioned independently of any domain's commands,
+  and its only additional dependency is `google.rpc`, which a caller that speaks
+  any other Google-API-shaped service already has.
+- A generic protobuf error handler works on a decider reply without knowing what
+  a decider is. The arm is the only decider-specific thing a caller has to learn.
+- Adding a fault class is now a new `ErrorInfo.reason` under an existing code,
+  not a new message and not a `oneof` arm. Callers that branch on the code keep
+  working; only the ones that branch on the reason see it.
 - Callers that want at-least-once submission must build it. This binding gives
   them the idempotency key that makes it safe; it does not give them the queue.
 - `Trogon-Decider-Outcome` and the semconv `decision_outcome` member list are now

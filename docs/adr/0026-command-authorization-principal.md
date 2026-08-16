@@ -264,7 +264,7 @@ path to an append goes through the gate.
 2. **Error surface.** Resolved: on the shared enums, following the placement.
    `CommandError`/`WasmCommandError` are phase taxonomies, and authorization is
    a phase. The source-breaking cost is real and is the same cost `Overloaded`
-   already imposed when ADR#0028 was accepted; paying it twice in one release
+   already imposed when [ADR#0028](./0028-decider-admission-control-and-backpressure.md) was accepted; paying it twice in one release
    cycle is cheaper than a denial that arrives as an opaque wrapper error a
    phase-matching consumer cannot classify.
 

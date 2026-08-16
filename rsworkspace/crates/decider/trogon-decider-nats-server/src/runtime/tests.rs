@@ -1,8 +1,10 @@
 use trogon_semconv::attribute::DecisionOutcome;
-use trogonai_proto::decider::{CommandFaultedKind, CommandOutcomeCase};
+use trogonai_proto::decider::CommandOutcomeCase;
+use trogonai_proto::google::rpc::ErrorInfo;
 
 use crate::command_subject::SubjectPrefix;
 use crate::constants::{CONTENT_TYPE_HEADER, DEFAULT_SUBJECT_PREFIX, TROGON_COMMAND_ID_HEADER};
+use crate::status::{FaultClass, find_detail};
 
 use super::*;
 
@@ -13,11 +15,13 @@ fn router() -> CommandRouter {
     )
 }
 
-fn faulted_kind(reply: &CommandReply) -> CommandFaultedKind {
-    let Some(CommandOutcomeCase::Faulted(faulted)) = reply.outcome().outcome.clone() else {
+fn fault_reason(reply: &CommandReply) -> String {
+    let Some(CommandOutcomeCase::Faulted(status)) = reply.outcome().outcome.as_ref() else {
         panic!("expected a faulted reply, got {:?}", reply.outcome());
     };
-    faulted.kind.expect("a fault always names its class")
+    find_detail::<ErrorInfo>(status)
+        .expect("every decider status names its reason")
+        .reason
 }
 
 #[test]
@@ -31,8 +35,9 @@ fn a_command_no_module_claims_is_unroutable() {
         .expect_err("an empty registry claims nothing");
 
     assert_eq!(reply.decision(), DecisionOutcome::Faulted);
-    assert!(
-        matches!(faulted_kind(&reply), CommandFaultedKind::Unroutable(_)),
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::Unroutable.reason(),
         "a caller told 'internal' would retry forever; told 'unroutable' it goes and activates the module"
     );
 }
@@ -47,7 +52,7 @@ fn a_subject_outside_the_hosts_prefix_is_an_invalid_request() {
         )
         .expect_err("this host does not answer under that prefix");
 
-    assert!(matches!(faulted_kind(&reply), CommandFaultedKind::InvalidRequest(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 }
 
 #[test]
@@ -56,7 +61,7 @@ fn the_bare_prefix_names_no_command() {
         .route(DEFAULT_SUBJECT_PREFIX, Vec::new(), None)
         .expect_err("the subtree root is not a command");
 
-    assert!(matches!(faulted_kind(&reply), CommandFaultedKind::InvalidRequest(_)));
+    assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 }
 
 #[test]
@@ -72,8 +77,9 @@ fn an_encoding_the_host_does_not_speak_is_refused_before_routing() {
         )
         .expect_err("json is not a decider command encoding");
 
-    assert!(
-        matches!(faulted_kind(&reply), CommandFaultedKind::InvalidRequest(_)),
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::InvalidRequest.reason(),
         "a caller speaking the wrong encoding has a bug in its client, not in the deployment"
     );
 }
@@ -91,8 +97,9 @@ fn an_unparseable_header_outranks_an_unroutable_subject() {
         )
         .expect_err("a malformed command id is not a command");
 
-    assert!(
-        matches!(faulted_kind(&reply), CommandFaultedKind::InvalidRequest(_)),
+    assert_eq!(
+        fault_reason(&reply),
+        FaultClass::InvalidRequest.reason(),
         "reporting 'unroutable' would send the caller to inspect a deployment that is fine"
     );
 }

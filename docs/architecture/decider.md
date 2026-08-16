@@ -302,7 +302,7 @@ nothing else, never the target stream or its replayed state. That is deliberate:
 must read stream state to decide is expressing a domain rule, and a domain rule belongs in
 `decide`.
 
-Only the seam ships. The ingress half of ADR#0026, which would map a verified AAuth credential
+Only the seam ships. The ingress half of [ADR#0026](../adr/0026-command-authorization-principal.md), which would map a verified AAuth credential
 onto a `CommandPrincipal`, does not exist yet, so nothing in this crate family populates a
 principal on its own.
 

@@ -187,7 +187,7 @@ origin positions diverge by design.
    diagnostic even where it declares session streams keep-forever. The two
    documents therefore do not conflict on anything either of them currently
    specifies. The supersession claim only bites once a purge job exists, and
-   designing that job is a Non-Goal here, so ADR#0035 stays free to settle
+   designing that job is a Non-Goal here, so [ADR#0035](./0035-session-store-decider-aggregate.md) stays free to settle
    session-stream retention on its own terms.
 
 Only the watermark computation and its placement were accepted. The purge

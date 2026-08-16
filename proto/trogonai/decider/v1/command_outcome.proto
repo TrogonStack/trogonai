@@ -2,11 +2,17 @@ edition = "2024";
 
 package trogonai.decider.v1;
 
+import "google/rpc/code.proto";
+import "google/rpc/error_details.proto";
+import "google/rpc/status.proto";
 import "trogonai/decider/v1/command_accepted.proto";
-import "trogonai/decider/v1/command_denied.proto";
-import "trogonai/decider/v1/command_faulted.proto";
-import "trogonai/decider/v1/command_rejected.proto";
-import "trogonai/decider/v1/command_shed.proto";
+
+// `code.proto` and `error_details.proto` are imported for what travels inside
+// a `Status` rather than for a field reference: `Status.code` is an `int32`
+// drawn from `google.rpc.Code`, and `Status.details` is a `repeated Any` whose
+// members are the standard detail types. Importing them is what puts both in
+// this schema's transitive closure, so a generated client has the types it
+// needs to read a reply without being told out of band which ones to expect.
 
 // The reply body for every decider command, whatever became of it.
 //
@@ -16,12 +22,50 @@ import "trogonai/decider/v1/command_shed.proto";
 // the same discriminant so middleware can meter without decoding, and its
 // value space is the `decision_outcome` telemetry attribute's, so the wire and
 // the traces cannot drift apart.
+//
+// Every arm but `decided` is a `google.rpc.Status`, per
+// [ADR#0016](../../../../docs/adr/0016-protobuf-rpc-over-nats-micro-binding.md).
+// Which arm the status arrives in is what this binding adds: 0016 fixes the
+// shape of an error body, and it deliberately keeps defined business outcomes
+// off the micro error channel so `num_errors` stays a health signal. A
+// rejection, a shed, and a denial are all defined outcomes with a canonical
+// code and typed details, so they get 0016's shape without 0016's channel.
 message CommandOutcome {
   oneof outcome {
+    // The command was decided and its events appended.
     CommandAccepted decided = 1;
-    CommandRejected rejected = 2;
-    CommandFaulted faulted = 3;
-    CommandShed shed = 4;
-    CommandDenied denied = 5;
+
+    // The module understood the command and refused it on domain rules.
+    //
+    // `FAILED_PRECONDITION`, with an `ErrorInfo` whose `domain` is the module
+    // that owns the code space and whose `reason` is the code that module
+    // chose. Not a fault: the host executed correctly and the domain answered
+    // no, and a service that rejects invalid commands all day is healthy.
+    google.rpc.Status rejected = 2;
+
+    // The host could not execute the command.
+    //
+    // The canonical code for the fault class, with an `ErrorInfo` whose
+    // `reason` names the class the host assigned and a `DebugInfo` carrying
+    // the source chain. These are the outcomes that count against a host's
+    // health rather than against the caller's input.
+    google.rpc.Status faulted = 3;
+
+    // Admission control refused the command before any work began.
+    //
+    // `RESOURCE_EXHAUSTED`, with a `QuotaFailure` naming the limit that was
+    // already fully committed so a backoff can be sized against it rather
+    // than guessed. The host is full, not broken.
+    google.rpc.Status shed = 4;
+
+    // Authorization refused the command before any work began.
+    //
+    // `UNAUTHENTICATED` when the execution carried no principal at all,
+    // `PERMISSION_DENIED` when the authorizer refused the one it carried. The
+    // two are separate codes because the caller's next move differs: present
+    // credentials, versus present different ones. Neither carries the rule
+    // that refused it, which would tell an unauthorized caller how to become
+    // an authorized one.
+    google.rpc.Status denied = 5;
   }
 }

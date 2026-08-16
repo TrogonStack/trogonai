@@ -16,6 +16,7 @@ pub mod module_source;
 pub mod outcome;
 pub mod request;
 pub mod runtime;
+pub mod status;
 
 pub use command_subject::{CommandSubjectError, CommandSubjects, SubjectPrefix};
 pub use config::{Args, ConfigError, ModuleStore, ServerConfig, base_config};
@@ -28,3 +29,4 @@ pub use module_source::{
 pub use outcome::CommandReply;
 pub use request::{CommandRequest, CommandRequestError};
 pub use runtime::{CommandRouter, DeciderHost, RoutedCommand, ServeError, StartupError, serve, serve_until};
+pub use status::{CONCURRENCY_QUOTA_METRIC, DECIDER_ERROR_DOMAIN, FaultClass, find_detail};

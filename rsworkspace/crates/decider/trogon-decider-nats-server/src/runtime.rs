@@ -201,7 +201,7 @@ impl DeciderHost {
 
         match execution.execute().await {
             Ok(result) => CommandReply::decided(&result),
-            Err(error) => CommandReply::from_command_error(&error),
+            Err(error) => CommandReply::from_command_error(routed.module.name(), &error),
         }
     }
 

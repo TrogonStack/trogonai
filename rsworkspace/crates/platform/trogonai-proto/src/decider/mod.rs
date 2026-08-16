@@ -5,5 +5,4 @@ pub mod v1 {
     pub use crate::r#gen::trogonai::decider::v1::*;
 }
 
-pub use v1::__buffa::oneof::command_faulted::Kind as CommandFaultedKind;
 pub use v1::__buffa::oneof::command_outcome::Outcome as CommandOutcomeCase;

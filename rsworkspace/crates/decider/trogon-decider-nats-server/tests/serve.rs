@@ -20,12 +20,13 @@ use trogon_decider_nats_server::constants::{
     TROGON_DECIDER_OUTCOME_HEADER, TROGON_EXPECTED_REVISION_HEADER,
 };
 use trogon_decider_nats_server::{
-    CommandSubjects, DeciderHost, FileModuleSource, ModuleReference, ModuleStore, ServerConfig, SubjectPrefix,
-    serve_until,
+    CommandSubjects, DeciderHost, FaultClass, FileModuleSource, ModuleReference, ModuleStore, ServerConfig,
+    SubjectPrefix, find_detail, serve_until,
 };
 use trogon_decider_runtime::AdmissionLimit;
 use trogon_nats::test_support::JetStreamTestServer;
-use trogonai_proto::decider::{CommandFaultedKind, CommandOutcomeCase, v1 as decider_v1};
+use trogonai_proto::decider::{CommandOutcomeCase, v1 as decider_v1};
+use trogonai_proto::google::rpc::ErrorInfo;
 use trogonai_proto::scheduler::schedules::v1;
 
 const EVENTS_STREAM: &str = "SERVE_TEST_EVENTS";
@@ -214,6 +215,18 @@ fn outcome_header(message: &async_nats::Message) -> String {
         .expect("every reply carries its outcome header")
 }
 
+/// The `ErrorInfo.reason` a faulted reply carries, which is what tells apart
+/// two fault classes reporting the same canonical code.
+fn fault_reason(message: &async_nats::Message) -> String {
+    let outcome = outcome(message);
+    let Some(CommandOutcomeCase::Faulted(status)) = outcome.outcome else {
+        panic!("expected a faulted outcome, got {outcome:?}");
+    };
+    find_detail::<ErrorInfo>(&status)
+        .expect("every decider status names its reason")
+        .reason
+}
+
 #[tokio::test]
 async fn a_command_is_decided_and_its_events_land_in_jetstream() {
     let host = RunningHost::start().await;
@@ -255,13 +268,7 @@ async fn a_command_no_module_claims_answers_unroutable_rather_than_timing_out() 
         .request("decider.trogonai.nowhere.v1.Nothing", Vec::new(), protobuf_headers())
         .await;
 
-    let Some(CommandOutcomeCase::Faulted(faulted)) = outcome(&reply).outcome else {
-        panic!("expected a faulted outcome, got {:?}", outcome(&reply));
-    };
-    assert!(matches!(
-        faulted.kind.expect("a fault names its class"),
-        CommandFaultedKind::Unroutable(_)
-    ));
+    assert_eq!(fault_reason(&reply), FaultClass::Unroutable.reason());
     assert_eq!(outcome_header(&reply), "faulted");
 
     host.stop().await;
@@ -280,12 +287,10 @@ async fn recreating_a_schedule_conflicts_instead_of_forking_its_history() {
         .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), protobuf_headers())
         .await;
 
-    let Some(CommandOutcomeCase::Faulted(faulted)) = outcome(&second).outcome else {
-        panic!("expected a faulted outcome, got {:?}", outcome(&second));
-    };
-    assert!(
-        matches!(faulted.kind, Some(CommandFaultedKind::Conflict(_))),
-        "a caller told 'storage' would page an operator over a write it lost fairly: {faulted:?}"
+    assert_eq!(
+        fault_reason(&second),
+        FaultClass::Conflict.reason(),
+        "a caller told 'storage' would page an operator over a write it lost fairly"
     );
 
     host.stop().await;
@@ -302,13 +307,7 @@ async fn an_unreadable_expected_revision_is_refused_before_the_guest_runs() {
         .request(CREATE_SUBJECT, create_schedule(SCHEDULE_ID), headers)
         .await;
 
-    let Some(CommandOutcomeCase::Faulted(faulted)) = outcome(&reply).outcome else {
-        panic!("expected a faulted outcome, got {:?}", outcome(&reply));
-    };
-    assert!(matches!(
-        faulted.kind.expect("a fault names its class"),
-        CommandFaultedKind::InvalidRequest(_)
-    ));
+    assert_eq!(fault_reason(&reply), FaultClass::InvalidRequest.reason());
 
     host.stop().await;
 }

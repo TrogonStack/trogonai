@@ -7,10 +7,26 @@ pub mod command_outcome {
     #[derive(Clone, PartialEq, Debug)]
     pub enum Outcome {
         Decided(::buffa::alloc::boxed::Box<super::super::super::CommandAccepted>),
-        Rejected(::buffa::alloc::boxed::Box<super::super::super::CommandRejected>),
-        Faulted(::buffa::alloc::boxed::Box<super::super::super::CommandFaulted>),
-        Shed(::buffa::alloc::boxed::Box<super::super::super::CommandShed>),
-        Denied(::buffa::alloc::boxed::Box<super::super::super::CommandDenied>),
+        Rejected(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::super::google::rpc::Status,
+            >,
+        ),
+        Faulted(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::super::google::rpc::Status,
+            >,
+        ),
+        Shed(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::super::google::rpc::Status,
+            >,
+        ),
+        Denied(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::super::google::rpc::Status,
+            >,
+        ),
     }
     impl ::buffa::Oneof for Outcome {}
     impl From<super::super::super::CommandAccepted> for Outcome {
@@ -20,46 +36,6 @@ pub mod command_outcome {
     }
     impl From<super::super::super::CommandAccepted> for ::core::option::Option<Outcome> {
         fn from(v: super::super::super::CommandAccepted) -> Self {
-            Self::Some(Outcome::from(v))
-        }
-    }
-    impl From<super::super::super::CommandRejected> for Outcome {
-        fn from(v: super::super::super::CommandRejected) -> Self {
-            Self::Rejected(::buffa::alloc::boxed::Box::new(v))
-        }
-    }
-    impl From<super::super::super::CommandRejected> for ::core::option::Option<Outcome> {
-        fn from(v: super::super::super::CommandRejected) -> Self {
-            Self::Some(Outcome::from(v))
-        }
-    }
-    impl From<super::super::super::CommandFaulted> for Outcome {
-        fn from(v: super::super::super::CommandFaulted) -> Self {
-            Self::Faulted(::buffa::alloc::boxed::Box::new(v))
-        }
-    }
-    impl From<super::super::super::CommandFaulted> for ::core::option::Option<Outcome> {
-        fn from(v: super::super::super::CommandFaulted) -> Self {
-            Self::Some(Outcome::from(v))
-        }
-    }
-    impl From<super::super::super::CommandShed> for Outcome {
-        fn from(v: super::super::super::CommandShed) -> Self {
-            Self::Shed(::buffa::alloc::boxed::Box::new(v))
-        }
-    }
-    impl From<super::super::super::CommandShed> for ::core::option::Option<Outcome> {
-        fn from(v: super::super::super::CommandShed) -> Self {
-            Self::Some(Outcome::from(v))
-        }
-    }
-    impl From<super::super::super::CommandDenied> for Outcome {
-        fn from(v: super::super::super::CommandDenied) -> Self {
-            Self::Denied(::buffa::alloc::boxed::Box::new(v))
-        }
-    }
-    impl From<super::super::super::CommandDenied> for ::core::option::Option<Outcome> {
-        fn from(v: super::super::super::CommandDenied) -> Self {
             Self::Some(Outcome::from(v))
         }
     }

@@ -34,11 +34,17 @@ pub mod content {
     }
 }
 
-#[cfg(any(feature = "schedules", feature = "agents"))]
+#[cfg(any(feature = "schedules", feature = "agents", feature = "decider"))]
 #[cfg_attr(dylint_lib = "trogon_lints", allow(inline_module_block))]
 pub mod google {
+    #[cfg(any(feature = "schedules", feature = "agents"))]
     pub mod r#type {
         pub use crate::r#gen::google::r#type::*;
+    }
+
+    #[cfg(feature = "decider")]
+    pub mod rpc {
+        pub use crate::r#gen::google::rpc::*;
     }
 }
 
