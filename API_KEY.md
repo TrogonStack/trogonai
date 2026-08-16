@@ -6,31 +6,44 @@ This is the design of record for the API key platform. Nothing in it is
 implemented: no bearer key, signed key, keyspace, or `ApiPrincipal` code
 exists in the repository.
 
-Ten decisions that this document originally left open are now ratified and
-are stated here as decided, not as options:
+### What owns what
+
+Four artifacts describe this system. Only one of them is this file.
 
 ```text
-ADR#0046  project-anchored resource names; environment is an attribute
-ADR#0048  one-time plaintext exposure; no escrow in any form
-ADR#0050  signed-first posture; client-generated keys only; Ed25519/ES256
-ADR#0051  fully bound single-use request tokens; NATS KV replay store
-ADR#0058  key format, HMAC verifier construction, pepper custody
-ADR#0059  keyspace model, keyspace policy, root key bootstrap
-ADR#0060  permissions vocabulary, built-in roles, delegation, rate limits
-ADR#0061  rotation grace, first-release audit set
+docs/adr/  0046, 0048, 0050, 0051, 0058, 0059, 0060, 0061
+  -> the decisions. Where this file and an ADR disagree, the ADR wins.
+
+proto/trogonai/platform/api_keys/**
+proto/trogonai/platform/api_keyspaces/**
+  -> the shapes: fields, types, enums, commands, events, state, and the
+     authorization and admission contracts. Checked by buf.
+
+CREDENTIAL_PLATFORM_SPEC.md
+  -> the wire contract and the build order: endpoints, error codes,
+     idempotency namespaces, the canonical signed-request target and its
+     test vectors, UI acceptance.
+
+this file
+  -> the reasoning: why this shape and not another, what the design
+     borrows and what it refuses, the ordered create and verification
+     flows, the permission vocabulary, and the relationship to the
+     secret store.
 ```
 
-Where this document and an ADR disagree, the ADR wins and this document is
-the bug. What remains open is in [Open Questions](#open-questions) below.
+Field lists, enum members, and claim tables are deliberately absent below.
+They used to be here and they drifted. This file said `public_key_pem`
+while the proto says SPKI DER, carried a `last_used_at` the projection
+deliberately omits and explains, declared a `product_surface` no proto has,
+never mentioned the keyspace tier the events carry, and described `tgt` as
+the request target when the wire contract makes it a digest of the target.
 
-This file owns the **design**: the data model, key format, flows,
-permissions, rate limits, rerolling, idempotency, and observability. It
-deliberately does not carry the wire contract or the build plan. Endpoints,
-error codes, idempotency namespaces, the canonical signed-request target,
-UI acceptance, and the build order all live in
-[CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md), which holds
-them for the whole platform rather than for API keys alone. The full
-ownership split is in that file's Status section.
+Prose about a shape has no build step that catches it going stale. So the
+shapes live where `buf` checks them, and this file links rather than
+restates. Adding a field list here is how the next five contradictions get
+written.
+
+What remains open is in [Open Questions](#open-questions).
 
 ## Purpose
 
@@ -351,116 +364,58 @@ not be able to call the API with the stored digest.
 
 ## Data Model
 
-```text
-ApiKey
-  id                      ULID; also the wire-format lookup id and the
-                          signed-request `kid` (ADR#0058)
-  keyspace_id
-  project_id              ADR#0046 owner boundary
-  identity_id
-  kind
-  display_name
-  verifier_digest         bearer only
-  verifier_key_version    bearer only; which pepper version signed it
-  public_key_pem          signed only
-  public_key_fingerprint  signed only; sha256 over SPKI DER
-  signing_algorithm       signed only; Ed25519 or ES256
-  signed_request_policy
-  roles
-  direct_permissions
-  rate_limit_policy_refs
-  allowed_vaults          ResourceScope
-  allowed_integrations    ResourceScope
-  allowed_environments    ResourceScope
-  created_by
-  created_at
-  expires_at
-  revoked_at
-  last_used_at
-  last_used_from
-  rerolled_from
-  rerolled_to
-  grace_period_expires_at
+The model is `proto/trogonai/platform/api_keys/**` and
+`proto/trogonai/platform/api_keyspaces/**`. Start at `state/v1/state.proto`
+in each, which carries the aggregate's full retained shape, then read the
+commands and events in `v1/`.
 
-ApiKeyspace
-  id
-  project_id
-  name                    handle; appears in the resource name (ADR#0040)
-  environment             immutable after creation
-  bearer_issuance         allowed | disallowed
-  allowed_algorithms      non-empty subset of {Ed25519, ES256}
-  server_nonce            optional | required
-  max_token_lifetime      <= 2 minutes
-  default_key_expiry
-  max_active_keys
-  reroll_grace
-  product_surface
+What is worth knowing before reading it is what the model deliberately does
+not have, because each absence answers a question that would otherwise be
+reopened by habit:
 
-Identity
-  id
-  project_id
-  kind
-  external_ref
-  metadata
-```
+- **No `scopes`.** Permissions are the only authorization vocabulary
+  (ADR#0060 section 1). Two grant vocabularies mean every future check has
+  to decide which wins when they disagree.
+- **No stored `public_prefix`.** It is the derived display form
+  `tg_<env>_<key_id>`, and lookup uses the key id directly, so there is no
+  second minted value that can disagree with the first (ADR#0058 section 1).
+- **No standalone `fingerprint`.** Signed keys fingerprint their public key;
+  a bearer key has nothing to fingerprint that is not either the id or the
+  digest.
+- **No `owner_id`.** The owner boundary is `project_id` (ADR#0046).
+- **No `last_used_at`.** It would put a write on the authenticated request
+  path for the same reason `api_key.verified` is a metric rather than an
+  audit fact. If it is wanted, derive it from the verification metric at a
+  coarse granularity.
 
-Four changes from the original sketch, each ratified:
-
-- `scopes` is gone. Permissions are the only authorization vocabulary
-  (ADR#0060 section 1).
-- `public_prefix` is gone as stored state. It is the derived display form
-  `tg_<env>_<key_id>`; lookup uses `id` directly, so there is no second
-  minted value that can disagree with the first (ADR#0058 section 1).
-- `fingerprint` is gone as a separate field. Signed keys carry
-  `public_key_fingerprint`; bearer keys have nothing to fingerprint that
-  is not either the id or the digest.
-- `owner_id` becomes `project_id`, the canonical owner boundary
-  (ADR#0046).
-
-The three `allowed_*` fields are a `ResourceScope`, not a bare list, so the
+Resource boundaries are a `ResourceScope` rather than a bare list, so the
 empty-list question never has to be answered at runtime (ADR#0060 section 4):
+the scope is either the whole project or an explicit non-empty set, and an
+empty set is a validation error rather than a value with two possible
+readings.
 
-```text
-ResourceScope::All          project-wide, still subject to permissions
-ResourceScope::Only(set)    exactly these; empty is a validation error
-```
-
-`kind` separates verifier-backed bearer keys from asymmetric signed keys:
-
-```text
-ApiKeyKind::Bearer
-  -> stores verifier_digest and verifier_key_version
-  -> raw key is shown once and discarded
-  -> only issuable where keyspace policy allows it
-
-ApiKeyKind::Signed
-  -> stores public_key_pem
-  -> stores public_key_fingerprint
-  -> stores signing_algorithm
-  -> the platform never holds the private key, in any flow
-```
+The two credential tiers are distinguished structurally rather than by a
+`kind` discriminator that a caller could set inconsistently with the rest of
+the record. A bearer key carries a verifier digest and its pepper version; a
+signed key carries one or two registered public keys and never anything
+private. The create command's oneof is shaped so that "a signed key whose
+private half the platform generates" cannot be expressed at all, which is
+the request ADR#0050 section 2 exists to refuse.
 
 ## Key Format
+
+The format, its components, and the scanner-facing pattern are fixed in
+ADR#0058 section 1.
 
 ```text
 tg_<env>_<key_id>_<secret><checksum>
 ```
 
-- `tg` is the fixed product prefix.
-- `<env>` is `live` or `test`, rendered from the keyspace environment
-  attribute. It stays consistent because keyspace environment is immutable
-  (ADR#0059 section 2).
-- `<key_id>` is the `ApiKeyId`: ULID-shaped, Crockford base32, 26
-  characters, lowercased. Lookup is a primary-key read.
-- `<secret>` is 32 bytes of CSPRNG output, base62, 43 characters.
-- `<checksum>` is CRC32C over everything before it, base62, 6 characters,
-  so SDKs and secret scanners reject typos and truncations offline.
-
-Scanner-facing pattern:
-
-```text
-tg_(live|test)_[0-9a-hjkmnp-tv-z]{26}_[0-9A-Za-z]{49}
-```
+Two properties of it matter to the rest of this document. The `<env>`
+segment stays truthful because keyspace environment is immutable
+(ADR#0059 section 2), so a key minted in a test keyspace cannot come to
+display as live. And the checksum lets SDKs and secret scanners reject
+typos and truncations offline, before anything reaches verification.
 
 Do not rely on the prefix for authorization. Authorization comes from the DB
 record after verification.
@@ -472,34 +427,20 @@ one code path for both tiers.
 
 ### Signed Request Token
 
-The full binding contract is ADR#0051. Tokens are single-use; there is no
-multi-use or reduced-binding mode.
+The binding contract is ADR#0051. The claim set, its canonical
+serialization, and the canonicalization test vectors are in
+[CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md); the message
+shape is `api_keys/admission/v1/signed_request.proto`. Tokens are
+single-use; there is no multi-use or reduced-binding mode.
 
-```text
-Authorization: Bearer <signed_jwt>
-
-JWT header:
-  kid: <api_key_id>
-  alg: EdDSA          (Ed25519 default; ES256 accepted)
-
-JWT claims:
-  iss: trogonai
-  sub: <api_key_id>
-  iat: <now>
-  exp: <now + window>   default 1 minute, ceiling 2 minutes
-  jti: <client-generated unique id>
-  tgt: <canonical request target>
-  pdh: <base64url SHA-256 of the exact request body>
-  nonce: <server-issued nonce>   when keyspace policy requires it
-```
-
-`tgt` binds the token to one request target. A token signed for
+The target binding is what stops a captured signature from being replayed
+against a different endpoint. A token signed for
 `GET api.trogon.ai/v1/projects/p_123` must not authorize
 `POST api.trogon.ai/v1/projects/p_123/api-keys`. The target is transport
 mapped:
 
 ```text
-HTTP   method, host, and canonical path
+HTTP   method, authority, path, and query
 NATS   the concrete subject the message was published on, plus the
        operation in the payload envelope
 ```
@@ -508,13 +449,13 @@ One canonical serialization covers both, fixing case, default-port elision,
 and percent-encoding for HTTP targets. It ships with canonicalization test
 vectors for both transports and lands before signed verification does,
 because a target the client and server serialize differently is a
-signature that fails for reasons neither side can see. The serialization
-itself lives in the API contracts section of
-[CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md), not here.
+signature that fails for reasons neither side can see.
 
-`pdh` is always required. Without it a token authorizes any body sent to
-that target inside its window, and the `jti` only stops the second use, not
-the first substitution. Bodyless requests use a defined constant digest.
+The payload digest is always required. Without it a token authorizes any
+body sent to that target inside its window, and the `jti` only stops the
+second use, not the first substitution. Bodyless requests use a defined
+constant digest rather than omitting it, so "no body" and "body not
+covered" cannot look alike on the wire.
 
 Subject mapping that rewrites NATS subjects breaks signatures the same way
 a rewriting HTTP proxy does, and is unsupported in front of signed
@@ -548,22 +489,9 @@ Step 1 comes first on purpose. A caller who is authorized to create keys in
 a signed-only keyspace should be told the tier is unavailable, not have a
 bearer secret minted and then rejected on policy.
 
-Response includes the raw key only on the first, non-replay create or
-reroll:
-
-```text
-{
-  "id": "01k2r7wq3n8x5vd0me4a9tbhcf",
-  "public_prefix": "tg_live_01k2r7wq3n8x5vd0me4a9tbhcf",
-  "key": "tg_live_01k2r7wq3n8x5vd0me4a9tbhcf_<secret><checksum>",
-  "display_name": "CI deploy key",
-  "roles": ["reader"],
-  "created_at": "..."
-}
-```
-
-Every later response must be metadata-only, including an idempotent replay
-of this exact call by the same caller (ADR#0048).
+The raw key appears in the response only on the first, non-replay create or
+reroll. Every later response is metadata-only, including an idempotent
+replay of the same call by the same caller (ADR#0048).
 
 ### Signed Key Create Flow
 
@@ -667,34 +595,19 @@ learns only how the server serialized their own request. Every other
 failure returns a bare code. The vocabulary is in
 [CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md).
 
-Principal shape:
-
-```text
-ApiPrincipal
-  project_id
-  identity_id
-  key_id
-  keyspace_id
-  roles
-  direct_permissions
-  permissions          effective set: union(role permissions) union
-                       direct_permissions
-  allowed_vaults       ResourceScope
-  allowed_integrations ResourceScope
-  allowed_environments ResourceScope
-```
-
-Authorization checks read `permissions` and never recompute the union.
-`roles` and `direct_permissions` ride along because audit and the UI have
-to explain why a decision went the way it did, and a bare effective set
-cannot answer that.
+Verification produces an `ApiPrincipal`
+(`api_keys/admission/v1/api_principal.proto`). Authorization checks read its
+effective permission set and never recompute the union. Roles and direct
+permissions ride along because audit and the UI have to explain why a
+decision went the way it did, and a bare effective set cannot answer that.
 
 The principal can authorize a command or session. It must not directly fetch raw
 credential material.
 
 ## Permissions And Roles
 
-Use permissions for concrete capabilities:
+Permissions are strings, not an enum, so the vocabulary lives here rather
+than in the proto. Use them for concrete capabilities:
 
 ```text
 api_keys.verify
@@ -709,15 +622,8 @@ gateway.sessions.create
 ```
 
 Roles group permissions. The first milestone ships built-in roles only;
-customers assign them and do not author them (ADR#0060 section 2):
-
-```text
-owner      every permission in the project
-admin      manage vaults, credentials, integrations, and keys
-operator   rotate and revoke credentials; create runtime sessions
-reader     metadata reads only
-runtime    resolve refs it is authorized for; no management verbs
-```
+customers assign them and do not author them (ADR#0060 section 2). The set
+and what each one covers is `api_keys/v1/role.proto`.
 
 API keys may have roles and direct permissions:
 
@@ -769,7 +675,7 @@ Root keys are:
 - rare;
 - environment-specific;
 - permissioned;
-- rotated periodically, on a 1 hour default grace rather than 24 (ADR#0061);
+- rotated periodically, on the shorter management grace (ADR#0061 section 2);
 - forbidden from browser/client-side use;
 - audited aggressively;
 - signed-request keys always, not by default.
@@ -808,21 +714,10 @@ central promise is that it never holds a caller's private key.
 
 ## Rate Limits
 
-```text
-RateLimitPolicy
-  id
-  subject_kind
-  subject_id
-  limit
-  duration
-  burst
-  fallback_behavior
-```
-
-The first milestone enforces `key` and `project` subject kinds only.
-`identity` and `route` stay declared so adding them later is a policy row
-rather than a schema migration, but neither is enforced, and that is stated
-plainly rather than implied by the model's shape (ADR#0060 section 6).
+The policy shape and the enforced subject kinds are
+`api_keys/v1/rate_limit_policy.proto`. The first milestone enforces `key`
+and `project` only; `identity` and `route` are declared and not enforced
+(ADR#0060 section 6).
 
 Identity-level shared limits are deferred because they need a counter
 shared across keys, which is the one shape that turns a per-key local
@@ -890,27 +785,12 @@ Showing the old key as `rotating` rather than `active` is what makes a
 rotation somebody started and forgot to finish visible in the product
 instead of only in the data.
 
-Default grace periods:
-
-```text
-default keyspaces      24 hours
-management keyspaces    1 hour
-configurable range      0 to 7 days, per keyspace
-```
-
-24 hours covers a deploy cycle for consumers the platform has no visibility
-into. Management keys have few consumers and privileged reach, so they get
-the shorter default. A grace of 0 is legal and means the old key stops
-verifying the moment the new one is issued.
-
-Reroll metadata:
-
-```text
-rerolled_from
-rerolled_to
-grace_period_expires_at
-superseded_by            on the old key's audit facts
-```
+Grace defaults and the configurable range are ADR#0061 section 2, carried
+on keyspace policy. Ordinary keyspaces get a default long enough to cover a
+deploy cycle for consumers the platform has no visibility into; management
+keyspaces have few consumers and privileged reach, so they get a much
+shorter one. A grace of 0 is legal and means the old key stops verifying
+the moment the new one is issued.
 
 Expired or revoked keys should not be rerollable unless a recovery workflow
 explicitly allows it.
@@ -978,9 +858,10 @@ The last two already exist and are enforced in the runtime projection; the
 first three land with the API key platform. All five are ANDed, and none of
 them grants anything on its own.
 
-Avoid broad project-wide API keys that can use every vault. `ResourceScope::All`
-exists because some keys legitimately need it, not because it is a sensible
-default, and a key that holds it should be as rare as a root key.
+Avoid broad project-wide API keys that can use every vault. A project-wide
+resource scope exists because some keys legitimately need it, not because it
+is a sensible default, and a key that holds it should be as rare as a root
+key.
 
 ## Security Requirements
 
@@ -1021,31 +902,13 @@ Emit metrics and logs for operations, not values:
 - create count;
 - usage by key id or fingerprint if cardinality has been reviewed.
 
-Required audit facts for the first release, seven (ADR#0061 section 5):
-
-```text
-api_key.created
-api_key.rerolled
-api_key.revoked
-api_key.denied
-api_key.public_key_added
-api_key.public_key_revoked
-api_key.signed_request_replayed
-```
-
-Each is either a change of authority or an attack signal. Two of them,
+The required first-release audit facts are fixed at seven in ADR#0061
+section 5 and modelled in `api_keys/audit/v1/audit_fact.proto`. Each is
+either a change of authority or an attack signal. Two of them,
 `api_key.denied` and `api_key.signed_request_replayed`, are the signals the
 two unfirable alerts in `devops/openbao/runbooks/alerts.md` are waiting on.
 
-Plus one merged event, once a policy-patch surface exists:
-
-```text
-api_key.policy_changed    before/after diff; replaces the separate
-                          permission_added, permission_removed, and
-                          rate_limit_changed events
-```
-
-Not audit facts:
+Two things that look like audit facts and are not:
 
 ```text
 api_key.verified   a metric, not an audit fact. Its volume equals the
@@ -1070,10 +933,10 @@ authenticated actor exists at that moment.
 The wire contract lives in
 [CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md), section
 API_CONTRACTS, alongside every other endpoint on the platform: the
-project-anchored route list (ADR#0046 section 3), the `kind: signed` and
-`kind: bearer` create variants, the reason there is no public verify route,
-per-endpoint idempotency namespaces, the error vocabulary, and the
-canonical signed-request target serialization.
+project-anchored route list (ADR#0046 section 3), the signed and bearer
+create variants, the reason there is no public verify route, per-endpoint
+idempotency namespaces, the error vocabulary, and the canonical
+signed-request target serialization.
 
 It is there rather than here because splitting the endpoint table across
 two documents is how the two copies drift.
@@ -1085,57 +948,22 @@ revoke, and public-key registration. A client retry must not create unlimited
 dead keys.
 
 The client provides an opaque idempotency key per logical user action. The
-server scopes it after authentication:
+server scopes it after authentication. The record shape is
+`api_keys/idempotency/v1/idempotency.proto`; the per-endpoint namespaces are
+in [CREDENTIAL_PLATFORM_SPEC.md](./CREDENTIAL_PLATFORM_SPEC.md).
 
-```text
-IdempotencyRecord
-  project_id
-  command_namespace
-  target_resource_id
-  idempotency_key
-  request_fingerprint
-  operation_id
-  resource_id
-  response_snapshot
-  status
-  created_by_actor_id
-  created_at
-  expires_at
-```
-
-Recommended command namespaces:
-
-```text
-api_key.create
-api_key.reroll
-api_key.revoke
-api_key.public_key.add
-api_key.public_key.revoke
-api_key.patch_policy
-```
-
-Uniqueness:
+Uniqueness is scoped by project, so two different companies can use the same
+idempotency key safely:
 
 ```text
 unique(project_id, command_namespace, idempotency_key)
 ```
 
-For commands that target an existing key, include the target in the effective
-scope:
+For commands that target an existing key, the target joins the scope:
 
 ```text
 unique(project_id, command_namespace, target_resource_id, idempotency_key)
 ```
-
-Two different companies can use the same idempotency key safely because the
-server includes the project scope:
-
-```text
-project_a + api_key.create + abc123
-project_b + api_key.create + abc123
-```
-
-Those are unrelated operations.
 
 The contract is:
 
@@ -1155,23 +983,10 @@ authenticate and authorize normally. By default, response replay requires
 the same actor/client that created the idempotency record or an actor with
 explicit permission to view the target key.
 
-The response snapshot is metadata-only:
-
-```text
-allowed in response_snapshot
-  -> operation id
-  -> API key id
-  -> public prefix (derived)
-  -> public key fingerprint
-  -> status
-  -> validation errors
-
-forbidden in response_snapshot
-  -> raw bearer key
-  -> reusable token value
-```
-
-Generated private keys are absent from that forbidden list because they no
+The response snapshot is metadata-only. It may carry the operation id, key
+id, derived public prefix, public key fingerprint, status, and validation
+errors. It must never carry a raw bearer key or a reusable token value.
+Generated private keys are absent from that prohibition because they no
 longer exist anywhere: the platform never generates one (ADR#0050).
 
 This creates the product rule for one-time display values.
@@ -1210,8 +1025,6 @@ max active public keys per signed key    fixed at 2 (ADR#0061 section 4)
 
 ## Open Questions
 
-Still open:
-
 - Which identity kinds ship first (user, team, service, agent), and whether
   identity is required or optional on a key in the first milestone.
 - Whether the internal `/-/credentials` admin API is replaced by API-key
@@ -1224,24 +1037,9 @@ Still open:
 - Whether `api_key.policy_changed` needs its own patch endpoint in the
   first release, or whether policy is create-time only to start.
 
-Closed, recorded here so they are not reopened by habit:
-
-```text
-key prefix format             ADR#0058 section 1
-verifier construction         ADR#0058 section 2
-verifier pepper custody       ADR#0058 section 3
-first keyspaces               ADR#0059 section 3
-root key bootstrap            ADR#0059 sections 4 to 6
-RBAC scope for milestone 1    ADR#0060 sections 1 to 3
-identity-level rate limits    ADR#0060 section 6 (deferred)
-default reroll grace          ADR#0061 section 2
-first-release audit events    ADR#0061 section 5
-signed-key algorithm          ADR#0050 section 3
-JWT versus certificate mode   ADR#0051 (JWT first; certificates later)
-client-generated private keys ADR#0050 section 2 (client-generated only)
-nonce and replay store        ADR#0051 section 4 (NATS KV, key_id + jti)
-one-time display escrow       ADR#0048 (none, in any form)
-```
+Questions that are closed are closed in the ADRs, and
+[docs/adr/index.md](./docs/adr/index.md) is the list. This file does not keep
+a second one.
 
 ## Relationship To Secret Store
 
