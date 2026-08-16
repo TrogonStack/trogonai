@@ -16,6 +16,12 @@ ADR is authoritative.
 > object of any kind, so it is the sharpest available test of the working
 > definition below, and the definition did not survive intact.
 
+> [LangChain Deep Agents](./products/deep-agents.md) and
+> [LangSmith Managed Deep Agents](./products/managed-deep-agents.md) were
+> researched on 2026-08-16. Their evidence revises Convergence #4,
+> Divergences C, D, and E, and the conceptual and comparison tables. The
+> revisions are marked inline.
+
 ## Convergence
 
 **1. The behavioral definition is settled.** Every product that states one
@@ -83,9 +89,9 @@ owns them. IronClaw attaches them to the *run*, so two runs under the same
 `AgentId` can legitimately differ in model, capability surface, and loop
 driver with nothing to reconcile.
 
-**4. Sessions pin; definitions version.** Every managed platform freezes
-the definition into the execution at creation time and versions the
-definition linearly: OpenComputer ("freezes the agent's active revision...
+**4. Many managed platforms pin sessions and version definitions.** Several
+managed platforms freeze a versioned definition into the execution at
+creation time: OpenComputer ("freezes the agent's active revision...
 pinned for its whole life"), Managed Agents (optimistically-locked
 `version`, per-session overrides never write back), LangGraph (immutable
 assistant versions, full-payload updates), AgentCore (immutable runtime
@@ -106,9 +112,17 @@ stated motivation is recovery correctness, not auditability: a resumed or
 recovered run must replay under the same `loop_driver` and
 `checkpoint_schema_id` it started under, so re-resolving at resume time is a
 correctness bug rather than a convenience. That is the argument for pinning
-that every managed platform implies and none states this plainly. It also
+that the platforms above imply and none states this plainly. It also
 generalizes the convergence: what gets frozen into an execution is not
 necessarily a version number, it is whatever makes the execution replayable.
+
+*Revised after Managed Deep Agents.* The universal claim does not hold. MDA
+binds code, model, and tools to a deployment build,
+but injects instructions on every run and permits instructions and skills to
+change through Context Hub without redeployment. A durable thread can
+therefore observe different model-visible behavior across runs. Managed
+execution does not guarantee session pinning unless the platform records and
+reuses every behavior-bearing input.
 
 **5. Delegation has one output contract.** However subagents are spawned,
 the parent receives only the child's final result, never its intermediate
@@ -221,10 +235,12 @@ making it an enforcement boundary instead of an integration point, and it is
 the strongest available argument that the shell must mediate side effects
 rather than merely host the loop.
 
-**C. Binding time.** Freeze-at-session (all managed platforms),
-live-reload per invocation (Claude Code), everything-at-runtime
-(Cloudflare), per-*step* rebinding as a designed feature (Vercel's
-`prepareStep` can swap model/tools/instructions mid-loop), kickoff-time
+**C. Binding time.** Definition or deployment freeze at session or run
+creation (OpenComputer, Managed Agents, LangGraph, AgentCore, Vertex, and
+Vercel Workflows), live-reload per invocation (Claude Code),
+everything-at-runtime (Cloudflare), per-*step* rebinding as a designed
+feature (Vercel's `prepareStep` can swap model/tools/instructions mid-loop),
+kickoff-time
 string interpolation (CrewAI). Hermes adds a constraint nobody else
 surfaces: prompt-cache economics as the reason mid-run mutation must be
 rare ("per-conversation prompt caching is sacred").
@@ -238,6 +254,12 @@ is the useful one to steal, and it is neither per-session nor per-invocation:
 bind text late, bind mechanism early. Anything a recovery path must agree with
 its original run about cannot be re-resolved; anything the model merely reads
 can be.
+
+Managed Deep Agents adds a third split within one product: code, model, and
+tools bind at build and deploy time; instructions and skills bind again on
+each run; thread state persists across those runs. Its useful warning is that
+"deployed definition" and "behavior observed by this session" are not the
+same fact when control-plane content remains live.
 
 **D. Subagents, the least settled axis.** Declared roster with depth-1
 cap (Managed Agents: 20 agents/25 threads; Hermes default; OpenClaw default,
@@ -269,6 +291,14 @@ explicitly granted. Two products, one from production experience and one from
 first principles, both landing on children-are-readers-by-default is the
 strongest signal on this otherwise unsettled axis.
 
+Deep Agents makes two child lifecycles explicit under the same `subagent`
+noun. A synchronous child is an isolated, blocking, stateless nested
+invocation that returns one result. An asynchronous child is another graph or
+assistant launched into its own durable thread and run, with update and
+cancel operations. The topology label alone therefore cannot determine
+whether a child needs independent identity, state, authorization, and
+lifecycle.
+
 **E. Session semantics.** Session-as-task-run (OpenComputer, Managed
 Agents, Devin, LangGraph runs) vs session-as-conversation-lane (OpenClaw's
 routing-scoped lanes, Hermes' session keys, Cloudflare instances that may
@@ -283,6 +313,13 @@ lifecycle records hold "metadata and references only." Both halves of the
 divergence exist, and neither is asked to do the other's job. Inbound naming
 is idempotency-keyed rather than either minted or caller-named: a SHA-256 over
 `(scope, source_binding_id, external_event_id)`.
+
+Deep Agents and Managed Deep Agents sharpen the LangGraph side of this
+distinction. Their durable continuity boundary is the `thread`; a `run` is
+one invocation inside it. MDA documentation sometimes calls the thread a
+session, and thread-scoped sandboxes are reused across runs. Mapping the run
+to a session would discard the state and environment continuity that the
+product actually preserves.
 
 **F. Identity scope.** Everyone has intra-org identity; only
 [A2A](./products/adk-a2a.md) defines cross-org
@@ -312,6 +349,8 @@ from the scope plus a run profile rather than published from a definition.
 | agent-as-teammate/product | Devin |
 | agent-as-learning-identity | Hermes (memory + self-authored skills as the definition) |
 | agent-as-interface (anything that runs the loop) | Vercel AI SDK 6, Claude Code harness framing |
+| agent-as-compiled-harness-graph | LangChain Deep Agents |
+| agent-as-code-first-definition compiled into a managed assistant and deployment | LangSmith Managed Deep Agents |
 | agent-as-scope-coordinate (a validated axis in a scope tuple; no stored object, persona in files, runtime shape resolved onto each run) | IronClaw |
 
 These are not mutually exclusive; most products stack two or three.
@@ -340,6 +379,8 @@ makes it legible: the scope answers "whose," the files answer "who."
 | kagent (added post-synthesis) | namespaced K8s custom resource reconciled into an A2A service | agent-as-tool by CRD reference; DAG capped at depth 10; fresh child session, identity-only inheritance | reconcile-time resolution into a config Secret; rebinding = pod roll | platform deploys; in-pod ADK runtime owns the loop | 1:N DB sessions; delegation mints child sessions |
 | AgentCore harness (added post-synthesis) | versioned config record over an AWS-owned loop | no subagent noun; agent-as-tool via Gateway; compose above via Step Functions | auto-versioned config; per-call overrides | AWS owns the loop (managed harness on managed Runtime) | 1:N, session = microVM |
 | [IronClaw](./products/ironclaw.md) (added post-synthesis) | scope coordinate with no stored object; persona in markdown, runtime shape in a `ResolvedRunProfile` on the run | child runs, lineage on the run, empty grant sets, atomic descendant reservation, deny-filtered off in shipped profiles | persona per turn (file read); mechanism resolved once at admission and frozen on the run | userland loop above a kernel boundary owning authority and recovery; loop is not the security perimeter | 1:N threads under the scope; thread (transcript) and turn run (lifecycle) are separate resources |
+| [LangChain Deep Agents](./products/deep-agents.md) (added post-synthesis) | compiled LangGraph harness graph; no durable Agent resource | sync child = stateless nested invocation; async child = independent thread and run | construction plus per-run context; thread state via checkpointer; no definition version contract | customer process or surrounding deployment | graph serves N threads; thread is the session boundary, run is one invocation |
+| [LangSmith Managed Deep Agents](./products/managed-deep-agents.md) (added post-synthesis) | code-first pre-runtime definition compiled into an assistant and deployment | underlying Deep Agents sync and async models; no MDA-specific child resource | code/model/tools at build; instructions/skills on every run; state on thread | LangSmith managed harness and runtime | one assistant serves N threads; session maps to thread, with N runs |
 
 ## Working definition
 
@@ -386,8 +427,9 @@ exists:
    re-resolves can legally land on a different driver or checkpoint schema
    than the run it is recovering. A version pointer alone does not prevent
    that when resolution depends on anything outside the definition.
-2. **Version linearly and immutably; sessions freeze.** Allow per-session
-   overrides that never write back (Managed Agents), staging/rollback
+2. **Version linearly and immutably; our Session plans pin every
+   behavior-bearing input.** Allow per-session overrides that never write back
+   (Managed Agents), staging/rollback
    (OpenComputer, LangGraph), and exactly one live-mutation exception:
    credential rotation.
 3. **Own the shell, open the brain.** Offer a managed loop *and* a
