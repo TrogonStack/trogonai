@@ -8,6 +8,8 @@ Repos we lean on most for research. One deduplicated list across all corpora.
 - [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)
 - [google/adk-python](https://github.com/google/adk-python)
 - [a2aproject/A2A](https://github.com/a2aproject/A2A)
+- [langchain-ai/deepagentsjs](https://github.com/langchain-ai/deepagentsjs)
+- [langchain-ai/docs](https://github.com/langchain-ai/docs)
 - [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)
 - [block/goose](https://github.com/block/goose)
 - [block/buzz](https://github.com/block/buzz)
