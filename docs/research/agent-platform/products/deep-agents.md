@@ -51,8 +51,11 @@ and stream transformers.
 
 There is no OSS Agent resource, Agent ID, CRUD API, or definition version.
 The optional `name` labels a constructed graph; it does not create durable
-identity. Persistence enters only when the caller supplies a checkpointer or
-store and invokes the graph with LangGraph thread configuration.
+identity. LangGraph thread state persists when the caller supplies a
+checkpointer and stable thread configuration; cross-thread LangGraph store
+state persists when the caller supplies a store. `FilesystemBackend` and
+other external durable backends can persist backend-managed files
+independently of either mechanism.
 
 Conceptual model: **agent-as-compiled-harness-graph**. Configuration creates
 the executable object, and invocation runs it. Identity, deployment, and

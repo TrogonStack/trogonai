@@ -89,9 +89,9 @@ owns them. IronClaw attaches them to the *run*, so two runs under the same
 `AgentId` can legitimately differ in model, capability surface, and loop
 driver with nothing to reconcile.
 
-**4. Sessions pin; definitions version.** Every managed platform freezes
-the definition into the execution at creation time and versions the
-definition linearly: OpenComputer ("freezes the agent's active revision...
+**4. Many managed platforms pin sessions and version definitions.** Several
+managed platforms freeze a versioned definition into the execution at
+creation time: OpenComputer ("freezes the agent's active revision...
 pinned for its whole life"), Managed Agents (optimistically-locked
 `version`, per-session overrides never write back), LangGraph (immutable
 assistant versions, full-payload updates), AgentCore (immutable runtime
@@ -112,12 +112,12 @@ stated motivation is recovery correctness, not auditability: a resumed or
 recovered run must replay under the same `loop_driver` and
 `checkpoint_schema_id` it started under, so re-resolving at resume time is a
 correctness bug rather than a convenience. That is the argument for pinning
-that every managed platform implies and none states this plainly. It also
+that the platforms above imply and none states this plainly. It also
 generalizes the convergence: what gets frozen into an execution is not
 necessarily a version number, it is whatever makes the execution replayable.
 
-*Revised after Managed Deep Agents.* The claim is narrower than "every
-managed platform." MDA binds code, model, and tools to a deployment build,
+*Revised after Managed Deep Agents.* The universal claim does not hold. MDA
+binds code, model, and tools to a deployment build,
 but injects instructions on every run and permits instructions and skills to
 change through Context Hub without redeployment. A durable thread can
 therefore observe different model-visible behavior across runs. Managed
@@ -235,10 +235,12 @@ making it an enforcement boundary instead of an integration point, and it is
 the strongest available argument that the shell must mediate side effects
 rather than merely host the loop.
 
-**C. Binding time.** Freeze-at-session (all managed platforms),
-live-reload per invocation (Claude Code), everything-at-runtime
-(Cloudflare), per-*step* rebinding as a designed feature (Vercel's
-`prepareStep` can swap model/tools/instructions mid-loop), kickoff-time
+**C. Binding time.** Definition or deployment freeze at session or run
+creation (OpenComputer, Managed Agents, LangGraph, AgentCore, Vertex, and
+Vercel Workflows), live-reload per invocation (Claude Code),
+everything-at-runtime (Cloudflare), per-*step* rebinding as a designed
+feature (Vercel's `prepareStep` can swap model/tools/instructions mid-loop),
+kickoff-time
 string interpolation (CrewAI). Hermes adds a constraint nobody else
 surfaces: prompt-cache economics as the reason mid-run mutation must be
 rare ("per-conversation prompt caching is sacred").
@@ -425,8 +427,9 @@ exists:
    re-resolves can legally land on a different driver or checkpoint schema
    than the run it is recovering. A version pointer alone does not prevent
    that when resolution depends on anything outside the definition.
-2. **Version linearly and immutably; sessions freeze.** Allow per-session
-   overrides that never write back (Managed Agents), staging/rollback
+2. **Version linearly and immutably; our Session plans pin every
+   behavior-bearing input.** Allow per-session overrides that never write back
+   (Managed Agents), staging/rollback
    (OpenComputer, LangGraph), and exactly one live-mutation exception:
    credential rotation.
 3. **Own the shell, open the brain.** Offer a managed loop *and* a
